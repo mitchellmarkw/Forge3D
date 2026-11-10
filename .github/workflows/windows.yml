@@ -4,9 +4,10 @@
 
 name: Windows build
 
+# Push only: a pull request's checks come from its branch's push run, so a separate
+# pull_request trigger would build everything twice.
 on:
   push:
-  pull_request:
   workflow_dispatch:
 
 concurrency:
