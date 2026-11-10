@@ -31,9 +31,12 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: .vcpkg-cache
-          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}
-          # Any earlier cache still holds most libraries (vcpkg rebuilds only what changed).
-          restore-keys: vcpkg-${{ runner.os }}-
+          # Every run saves under its own key, so a cancelled or failed run can never
+          # block a later, more complete cache from being saved. Restore takes the newest.
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}-${{ github.run_id }}
+          restore-keys: |
+            vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}-
+            vcpkg-${{ runner.os }}-
 
       - name: Prepare the vcpkg cache folder
         shell: pwsh
@@ -58,11 +61,11 @@ jobs:
         run: cmake --preset windows-release
 
       - name: Save compiled libraries (vcpkg cache)
-        if: always() && steps.vcpkg-cache.outputs.cache-hit != 'true'
+        if: always()
         uses: actions/cache/save@v4
         with:
           path: .vcpkg-cache
-          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}-${{ github.run_id }}
 
       - name: Build
         run: cmake --build --preset windows-release

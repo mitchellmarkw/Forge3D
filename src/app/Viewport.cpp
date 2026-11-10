@@ -193,10 +193,10 @@ void Viewport::resizeGL(int w, int h)
 void Viewport::buildPlateGeometry()
 {
     // Interleaved: x y z r g b
-    std::vector<float> data;
-    const auto addLine = [&data](float x0, float y0, float x1, float y1, const QVector3D& color) {
+    std::vector<float> vertices;
+    const auto addLine = [&vertices](float x0, float y0, float x1, float y1, const QVector3D& color) {
         for (const auto& p : {QVector3D(x0, y0, 0.0f), QVector3D(x1, y1, 0.0f)}) {
-            data.insert(data.end(), {p.x(), p.y(), p.z(), color.x(), color.y(), color.z()});
+            vertices.insert(vertices.end(), {p.x(), p.y(), p.z(), color.x(), color.y(), color.z()});
         }
     };
 
@@ -221,13 +221,13 @@ void Viewport::buildPlateGeometry()
     addLine(0.0f, 0.0f, half, 0.0f, xAxis);  // +X in red
     addLine(0.0f, 0.0f, 0.0f, half, yAxis);  // +Y in green
 
-    m_plateVertexCount = static_cast<int>(data.size() / 6);
+    m_plateVertexCount = static_cast<int>(vertices.size() / 6);
 
     m_plateVao.create();
     QOpenGLVertexArrayObject::Binder bind(&m_plateVao);
     m_plateBuffer.create();
     m_plateBuffer.bind();
-    m_plateBuffer.allocate(data.data(), static_cast<int>(data.size() * sizeof(float)));
+    m_plateBuffer.allocate(vertices.data(), static_cast<int>(vertices.size() * sizeof(float)));
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), nullptr);
     glEnableVertexAttribArray(1);
@@ -246,12 +246,12 @@ void Viewport::uploadMeshIfNeeded()
         m_meshVao.create();
     QOpenGLVertexArrayObject::Binder bind(&m_meshVao);
 
-    const auto upload = [](QOpenGLBuffer& buffer, const void* data, std::size_t bytes) {
+    const auto upload = [](QOpenGLBuffer& buffer, const void* source, std::size_t bytes) {
         if (!buffer.isCreated())
             buffer.create();
         buffer.bind();
         buffer.setUsagePattern(QOpenGLBuffer::StaticDraw);
-        buffer.allocate(data, static_cast<int>(bytes));
+        buffer.allocate(source, static_cast<int>(bytes));
     };
 
     upload(m_meshPositions, m_mesh.positions.data(), m_mesh.positions.size() * sizeof(float));
