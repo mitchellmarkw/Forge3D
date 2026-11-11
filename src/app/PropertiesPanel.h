@@ -47,6 +47,7 @@ signals:
     void uniformChanged(bool on);
     void keepRoundChanged(bool on);
     void separateRequested();
+    void editCutRequested();
 
 private:
     QDoubleSpinBox* makeLength(const QString& tip);
@@ -66,6 +67,7 @@ private:
     QWidget* m_sizeGroup = nullptr;
     QWidget* m_sitButton = nullptr;
     QWidget* m_separateButton = nullptr;
+    QWidget* m_editCutButton = nullptr;
 
     QFormLayout* m_sizeForm = nullptr;
     std::array<QDoubleSpinBox*, 5> m_sizeFields{};  // the shape's lengths (specFields order)

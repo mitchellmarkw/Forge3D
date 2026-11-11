@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.7.0 — Slice 4a: Split (2026-11-11)
+
+- **Split** (toolbar and Edit menu): select one shape, click Split, and a see-through
+  yellow plane with an arrow appears through its middle. In the panel on the right:
+  - **Direction**: Flat, Across X, Across Y, or any tilt around X and Y.
+  - **Position**: a slider (end to end of the shape) or a typed distance.
+  - **Keep**: both halves as two shapes, or only one side.
+  - **Split** cuts; **Cancel** or Esc leaves without cutting. One Undo puts the shape back.
+- Halves are named after their side ("Box 1 (top)", "Box 1 (bottom)", left/right,
+  front/back) and stay editable: open one in Objects to change the original shape.
+- **Move the cut...** (Properties of a half) reopens the plane to change where that half
+  was cut. **Remove the cut** gives back the whole shape.
+- Splitting a combined shape works too; keeping both halves copies all its parts.
+- File format version 7. Older files still open.
+- Fixed: the "empty plate" hint still mentioned Add Box / Add Cylinder.
+- Core: `BooleanOp::Split` with a plane, `splitBody()`, `duplicateTree()`,
+  `Document::setBoolean()` (EditBodyCommand now updates a result's settings too).
+- 123 unit tests (8 new).
+
 ## 0.6.1 — Oval shapes and the pyramid (2026-11-11)
 
 - **Pyramid** in Add Shape: base width and depth, top width and depth, height. Top 0 x 0

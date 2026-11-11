@@ -15,6 +15,8 @@ add_executable(Forge3D WIN32
     MainWindow.cpp
     PropertiesPanel.h
     PropertiesPanel.cpp
+    SplitPanel.h
+    SplitPanel.cpp
     Viewport.h
     Viewport.cpp
 )

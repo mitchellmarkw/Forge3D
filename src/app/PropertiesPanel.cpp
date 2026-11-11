@@ -92,6 +92,11 @@ PropertiesPanel::PropertiesPanel(QWidget* parent) : QWidget(parent)
     connect(separate, &QPushButton::clicked, this, &PropertiesPanel::separateRequested);
     general->addRow(separate);
     m_separateButton = separate;
+    auto* editCut = new QPushButton(tr("Move the cut..."));
+    editCut->setToolTip(tr("Change where this half was cut; the shape updates"));
+    connect(editCut, &QPushButton::clicked, this, &PropertiesPanel::editCutRequested);
+    general->addRow(editCut);
+    m_editCutButton = editCut;
     layout->addLayout(general);
 
     // Size: one sub-page per primitive type
@@ -199,6 +204,13 @@ void PropertiesPanel::setBody(const Body* body, const QString& context, bool isP
     m_context->setText(context);
     m_context->setVisible(!context.isEmpty());
     m_separateButton->setVisible(body->isBoolean() && !isPart);
+    const bool split = body->isBoolean() && body->boolean->op == BooleanOp::Split;
+    m_editCutButton->setVisible(split && !isPart);
+    if (auto* button = qobject_cast<QPushButton*>(m_separateButton)) {
+        button->setText(split ? tr("Remove the cut") : tr("Separate into parts"));
+        button->setToolTip(split ? tr("Give back the whole shape, where it is")
+                                 : tr("Break this combined shape back into its parts, each left where it is"));
+    }
     m_sizeGroup->setVisible(!body->isBoolean());  // a combined shape is sized through its parts
     m_sitButton->setVisible(!isPart);
 

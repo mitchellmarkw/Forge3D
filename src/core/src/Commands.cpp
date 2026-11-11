@@ -4,6 +4,8 @@
 #include "forge/core/Document.h"
 #include "forge/core/Transform.h"
 
+#include <set>
+#include <functional>
 #include <stdexcept>
 #include <utility>
 
@@ -145,11 +147,18 @@ void EditBodyCommand::apply(Document& doc, const Body& state)
         throw std::out_of_range("Cannot edit: no body with id " + std::to_string(state.id));
     validate(state.spec);  // check before touching anything
     const PrimitiveSpec oldSpec = current->spec;
+    const std::optional<BooleanSpec> oldBoolean = current->boolean;
+    if (state.boolean.has_value() != oldBoolean.has_value())
+        throw std::invalid_argument("Cannot edit: a body can't change between primitive and combined");
     doc.setSpec(state.id, state.spec);
     try {
+        if (state.boolean)
+            doc.setBoolean(state.id, *state.boolean);
         doc.setPlacement(state.id, state.placement);
     } catch (...) {
         doc.setSpec(state.id, oldSpec);  // leave the document as it was
+        if (oldBoolean)
+            doc.setBoolean(state.id, *oldBoolean);
         throw;
     }
 }
@@ -162,6 +171,42 @@ void EditBodyCommand::redo(Document& doc)
 void EditBodyCommand::undo(Document& doc)
 {
     apply(doc, m_before);
+}
+
+// ---- duplicateTree ---------------------------------------------------------------
+
+std::vector<Body> duplicateTree(Document& doc, ObjectId id)
+{
+    std::vector<Body> out;
+    std::set<std::string> taken;
+    const std::function<ObjectId(ObjectId)> copy = [&](ObjectId original) -> ObjectId {
+        const Body* b = doc.find(original);
+        if (!b)
+            throw std::out_of_range("No body with id " + std::to_string(original));
+        Body c = *b;
+        c.id = doc.allocateId();
+        // A name not used in the document or by an earlier copy.
+        const auto used = [&](const std::string& n) {
+            if (taken.count(n))
+                return true;
+            for (const Body& other : doc.bodies())
+                if (other.name == n)
+                    return true;
+            return false;
+        };
+        std::string name = b->name + " copy";
+        for (int n = 2; used(name); ++n)
+            name = b->name + " copy " + std::to_string(n);
+        taken.insert(name);
+        c.name = name;
+        if (c.boolean)
+            for (ObjectId& part : c.boolean->operands)
+                part = copy(part);  // parts first
+        out.push_back(c);
+        return c.id;
+    };
+    copy(id);
+    return out;
 }
 
 // ---- CombineCommand -------------------------------------------------------------

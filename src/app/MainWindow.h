@@ -4,6 +4,7 @@
 #include "forge/core/Align.h"
 #include "forge/core/CommandStack.h"
 #include "forge/core/Document.h"
+#include "forge/core/Split.h"
 #include "forge/view/Gizmo.h"
 
 #include <QMainWindow>
@@ -23,10 +24,14 @@ class QTreeWidget;
 class QTreeWidgetItem;
 class QMenu;
 class QActionGroup;
+class QWidget;
+class QDockWidget;
 
 namespace forge::app {
 
 class PropertiesPanel;
+class SplitPanel;
+struct DisplayItem;
 class Viewport;
 
 class MainWindow : public QMainWindow {
@@ -83,6 +88,15 @@ private:
     void combineSelected(BooleanOp op);
     void alignSelected(AlignMode mode);
     void separateSelected();
+
+    // ---- Split tool ----
+    // target: a shape on the plate to cut, or (editing) a Split result whose cut moves.
+    void startSplit(ObjectId target, bool editing);
+    void endSplit();
+    void applySplit();
+    void updateSplitPlane();  // after the panel changed: redraw, update side names and range
+    SplitPlane currentSplitPlane() const;
+    void addSplitItems(std::vector<DisplayItem>& items) const;
     void clearPlate();
 
     // Files
@@ -153,6 +167,19 @@ private:
     QAction* m_subtract = nullptr;
     QAction* m_intersect = nullptr;
     QAction* m_separate = nullptr;
+    QAction* m_split = nullptr;
+    QWidget* m_propsStack = nullptr;
+    QDockWidget* m_propsDock = nullptr;
+    int m_propsDockWidth = 300;  // holds Properties and the Split tool's panel (one shown)
+    SplitPanel* m_splitPanel = nullptr;
+    struct SplitMode {
+        bool active = false;
+        bool editing = false;
+        ObjectId target = kInvalidId;   // the shape being cut, or the result being edited
+        ObjectId measured = kInvalidId; // whose size and middle place the plane (the shape, or the result's part)
+        Vec3 centre{};                  // middle of `measured` on the plate
+    };
+    SplitMode m_splitMode;
     QMenu* m_alignMenu = nullptr;  // Align Shapes (toolbar dropdown and Edit submenu)
     QAction* m_fit = nullptr;
     QAction* m_resetView = nullptr;

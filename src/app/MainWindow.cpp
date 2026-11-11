@@ -4,10 +4,13 @@
 #include "BuildInfo.h"
 #include "Log.h"
 #include "PropertiesPanel.h"
+#include "SplitPanel.h"
 #include "Viewport.h"
 
 #include "forge/core/FileFormat.h"
 #include "forge/core/Picking.h"
+#include "forge/core/Primitives.h"
+#include "forge/core/Tessellator.h"
 #include "forge/core/Transform.h"
 
 #include <QAction>
@@ -30,6 +33,7 @@
 #include <QStatusBar>
 #include <QTimer>
 #include <QToolBar>
+#include <QVBoxLayout>
 #include <QToolButton>
 #include <QMenu>
 #include <QUrl>
@@ -195,6 +199,8 @@ void MainWindow::createActions()
     connect(m_deselect, &QAction::triggered, this, [this] {
         if (m_dragState.kind != Drag::Kind::None)
             cancelDrag();  // Esc during a drag puts the body back
+        else if (m_splitMode.active)
+            endSplit();  // Esc leaves the Split tool without cutting
         else
             setSelection(std::vector<ObjectId>{});
     });
@@ -273,6 +279,17 @@ void MainWindow::createActions()
     m_separate->setToolTip(tr("Separate: break a combined shape back into its parts, where they are"));
     connect(m_separate, &QAction::triggered, this, &MainWindow::separateSelected);
 
+    m_split = new QAction(tr("Split"), this);
+    m_split->setToolTip(tr("Split: cut the selected shape in two with a plane, keeping one or both halves"));
+    connect(m_split, &QAction::triggered, this, [this] {
+        const ObjectId id = selectedOne();
+        if (id == kInvalidId || m_selection.size() != 1 || !m_doc.isTopLevel(id)) {
+            statusBar()->showMessage(tr("Split: select one shape on the plate first."), 6000);
+            return;
+        }
+        startSplit(id, false);
+    });
+
     // Align Shapes: the first shape selected stays put; the others move to it.
     m_alignMenu = new QMenu(tr("Align Shapes"), this);
     m_alignMenu->setToolTipsVisible(true);
@@ -336,6 +353,7 @@ void MainWindow::createMenus()
     edit->addAction(m_subtract);
     edit->addAction(m_intersect);
     edit->addAction(m_separate);
+    edit->addAction(m_split);
     edit->addMenu(m_alignMenu);
 
     QMenu* add = menuBar()->addMenu(tr("&Add"));
@@ -388,6 +406,7 @@ void MainWindow::createToolBar()
     bar->addAction(m_subtract);
     bar->addAction(m_intersect);
     bar->addAction(m_separate);
+    bar->addAction(m_split);
     bar->addSeparator();
     {
         auto* alignButton = new QToolButton(bar);
@@ -429,7 +448,20 @@ void MainWindow::createDocks()
     m_properties = new PropertiesPanel;
     auto* propsDock = new QDockWidget(tr("Properties"), this);
     propsDock->setObjectName(QStringLiteral("PropertiesDock"));
-    propsDock->setWidget(m_properties);
+    m_splitPanel = new SplitPanel;
+    // Properties and the Split panel share the dock; only one is shown. (Hidden
+    // widgets don't count towards the dock's size, unlike pages of a stacked widget.)
+    m_propsStack = new QWidget;
+    auto* stackLayout = new QVBoxLayout(m_propsStack);
+    stackLayout->setContentsMargins(0, 0, 0, 0);
+    stackLayout->addWidget(m_properties);
+    stackLayout->addWidget(m_splitPanel);
+    m_splitPanel->hide();
+    propsDock->setWidget(m_propsStack);
+    m_propsDock = propsDock;
+    connect(m_splitPanel, &SplitPanel::planeChanged, this, &MainWindow::updateSplitPlane);
+    connect(m_splitPanel, &SplitPanel::applyRequested, this, &MainWindow::applySplit);
+    connect(m_splitPanel, &SplitPanel::cancelRequested, this, &MainWindow::endSplit);
     propsDock->setMinimumWidth(280);
     addDockWidget(Qt::RightDockWidgetArea, propsDock);
 
@@ -441,6 +473,7 @@ void MainWindow::createDocks()
     });
     connect(m_properties, &PropertiesPanel::uniformChanged, m_uniformAction, &QAction::setChecked);
     connect(m_properties, &PropertiesPanel::separateRequested, this, &MainWindow::separateSelected);
+    connect(m_properties, &PropertiesPanel::editCutRequested, this, [this] { startSplit(selectedOne(), true); });
     connect(m_properties, &PropertiesPanel::keepRoundChanged, this, [this](bool on) { m_keepRound = on; });
     connect(m_properties, &PropertiesPanel::sitOnPlateRequested, this, [this](ObjectId id) {
         try {
@@ -514,6 +547,8 @@ void MainWindow::setSelection(std::vector<ObjectId> ids)
     std::erase_if(ids, [this](ObjectId id) { return !m_doc.find(id); });
     if (ids == m_selection)
         return;
+    if (m_splitMode.active)
+        endSplit();  // picking something else leaves the Split tool
     const ObjectId previousOne = selectedOne();
     m_selection = std::move(ids);
     if (const Body* body = m_doc.find(selectedOne()); body && body->id != previousOne) {
@@ -609,6 +644,8 @@ void MainWindow::onLeftPressed(const QVector3D& origin, const QVector3D& directi
 {
     m_dragState = Drag{};
     m_pressOnHandle = false;
+    if (m_splitMode.active)
+        return;  // the Split tool is open: shapes stay put
 
     const Body* selected = m_doc.find(selectedOne());
     const auto frame = gizmoTargetFor(selectedOne());
@@ -946,6 +983,208 @@ void MainWindow::alignSelected(AlignMode mode)
                              5000);
 }
 
+// ---- Split tool -------------------------------------------------------------------
+
+namespace {
+
+constexpr std::uint64_t kSplitPlaneItem = ~std::uint64_t{0} - 1;  // ids no body will reach
+constexpr std::uint64_t kSplitShaftItem = ~std::uint64_t{0} - 2;
+constexpr std::uint64_t kSplitHeadItem = ~std::uint64_t{0} - 3;
+
+// A 2 x 2 square in the XY plane, centred, facing both ways.
+std::shared_ptr<const Mesh> splitPlaneMesh()
+{
+    static const std::shared_ptr<const Mesh> mesh = [] {
+        Mesh m;
+        const float c[4][2] = {{-1, -1}, {1, -1}, {1, 1}, {-1, 1}};
+        for (float side : {1.0f, -1.0f})
+            for (const auto& p : c) {
+                m.positions.insert(m.positions.end(), {p[0], p[1], 0.0f});
+                m.normals.insert(m.normals.end(), {0.0f, 0.0f, side});
+            }
+        m.indices = {0, 1, 2, 0, 2, 3, 4, 6, 5, 4, 7, 6};
+        return std::make_shared<const Mesh>(std::move(m));
+    }();
+    return mesh;
+}
+
+// The plane's arrow, 1 unit long along +Z: a thin shaft and a cone tip.
+std::shared_ptr<const Mesh> splitArrowMesh(bool head)
+{
+    static const std::shared_ptr<const Mesh> shaft =
+        std::make_shared<const Mesh>(tessellate(primitives::makeCylinder(0.025, 0.75)));
+    static const std::shared_ptr<const Mesh> tip = [] {
+        TessellationSettings s;
+        Mesh m = tessellate(primitives::makeCone(0.08, 0.0, 0.25), s);
+        for (std::size_t i = 2; i < m.positions.size(); i += 3)
+            m.positions[i] += 0.75f;  // sit on top of the shaft
+        return std::make_shared<const Mesh>(std::move(m));
+    }();
+    return head ? tip : shaft;
+}
+
+// Places a unit-sized model at `point`, turned so its +Z faces `normal`, scaled by s.
+QMatrix4x4 planeFrame(const Vec3& point, const Vec3& normal, float s)
+{
+    QVector3D n{static_cast<float>(normal[0]), static_cast<float>(normal[1]), static_cast<float>(normal[2])};
+    n.normalize();
+    const QVector3D helper = std::abs(n.z()) < 0.9f ? QVector3D(0, 0, 1) : QVector3D(1, 0, 0);
+    const QVector3D u = QVector3D::crossProduct(helper, n).normalized();
+    const QVector3D v = QVector3D::crossProduct(n, u);
+    QMatrix4x4 m(u.x(), v.x(), n.x(), float(point[0]),  //
+                 u.y(), v.y(), n.y(), float(point[1]),  //
+                 u.z(), v.z(), n.z(), float(point[2]),  //
+                 0.0f, 0.0f, 0.0f, 1.0f);
+    m.scale(s);
+    return m;
+}
+
+}  // namespace
+
+void MainWindow::startSplit(ObjectId target, bool editing)
+{
+    const Body* body = m_doc.find(target);
+    if (!body || !m_doc.isTopLevel(target))
+        return;
+    if (m_dragState.kind != Drag::Kind::None)
+        cancelDrag();
+
+    SplitMode mode;
+    mode.active = true;
+    mode.editing = editing;
+    mode.target = target;
+    double tiltX = 0.0, tiltY = 0.0, offset = 0.0;
+    try {
+        if (editing) {
+            if (!body->isBoolean() || body->boolean->op != BooleanOp::Split)
+                return;
+            mode.measured = body->boolean->operands.front();
+            mode.centre = m_doc.worldTransform(mode.measured).apply(m_doc.visibleCentre(mode.measured));
+            tiltsOfPlane(splitPlaneOf(m_doc, target), mode.centre, tiltX, tiltY, offset);
+        } else {
+            mode.measured = target;
+            mode.centre = m_doc.worldTransform(target).apply(m_doc.visibleCentre(target));
+        }
+    } catch (const std::exception& e) {
+        qWarning() << "Split could not start:" << e.what();
+        return;
+    }
+    m_splitMode = mode;
+    const QString name = QString::fromStdString(body->name);
+    m_splitPanel->start(editing ? tr("Move the cut of '%1'").arg(name) : tr("Split '%1'").arg(name), editing,
+                        tiltX, tiltY, offset);
+    m_propsDockWidth = m_propsDock->width();
+    m_properties->hide();
+    m_splitPanel->show();
+    statusBar()->showMessage(tr("Split: place the plane in the panel on the right, then click %1. Esc cancels.")
+                                 .arg(editing ? tr("Apply") : tr("Split")));
+    updateSplitPlane();
+    refreshCommandState();
+}
+
+void MainWindow::endSplit()
+{
+    if (!m_splitMode.active)
+        return;
+    m_splitMode = SplitMode{};
+    m_splitPanel->hide();
+    m_properties->show();
+    // Swapping the panels back makes Qt re-measure the dock and it can come back much
+    // wider; keep the width it had.
+    QTimer::singleShot(0, this, [this] { resizeDocks({m_propsDock}, {m_propsDockWidth}, Qt::Horizontal); });
+    statusBar()->clearMessage();
+    refreshScene();
+    refreshCommandState();
+}
+
+SplitPlane MainWindow::currentSplitPlane() const
+{
+    return planeFromTilts(m_splitMode.centre, m_splitPanel->tiltX(), m_splitPanel->tiltY(), m_splitPanel->offset());
+}
+
+void MainWindow::updateSplitPlane()
+{
+    if (!m_splitMode.active)
+        return;
+    const SplitPlane plane = currentSplitPlane();
+    m_splitPanel->setSideNames(QString::fromStdString(sideName(plane.normal)),
+                               QString::fromStdString(sideName({-plane.normal[0], -plane.normal[1], -plane.normal[2]})));
+    // The plane can slide from one end of the shape to the other.
+    const Bounds b = m_doc.worldBounds(m_splitMode.measured);
+    double lo = 0.0, hi = 0.0;
+    for (int corner = 0; corner < 8; ++corner) {
+        const Vec3 p{(corner & 1) ? b.max[0] : b.min[0], (corner & 2) ? b.max[1] : b.min[1],
+                     (corner & 4) ? b.max[2] : b.min[2]};
+        double d = 0.0;
+        for (int i = 0; i < 3; ++i)
+            d += (p[i] - m_splitMode.centre[i]) * plane.normal[i];
+        lo = std::min(lo, d);
+        hi = std::max(hi, d);
+    }
+    m_splitPanel->setOffsetRange(lo, hi);
+    refreshScene();
+}
+
+void MainWindow::addSplitItems(std::vector<DisplayItem>& items) const
+{
+    if (!m_splitMode.active)
+        return;
+    const SplitPlane plane = currentSplitPlane();
+    const auto size = m_doc.worldBounds(m_splitMode.measured).size();
+    const float s = std::max({size[0], size[1], size[2], 2.0f}) * 0.65f;
+
+    DisplayItem quad;
+    quad.id = kSplitPlaneItem;
+    quad.mesh = splitPlaneMesh();
+    quad.model = planeFrame(plane.point, plane.normal, s);
+    quad.color = QVector3D(1.0f, 0.82f, 0.1f);
+    quad.alpha = 0.4f;
+    items.push_back(quad);
+    for (const bool head : {false, true}) {
+        DisplayItem arrow;
+        arrow.id = head ? kSplitHeadItem : kSplitShaftItem;
+        arrow.mesh = splitArrowMesh(head);
+        arrow.model = planeFrame(plane.point, plane.normal, s * 0.6f);
+        arrow.color = QVector3D(1.0f, 0.75f, 0.0f);
+        items.push_back(arrow);
+    }
+}
+
+void MainWindow::applySplit()
+{
+    if (!m_splitMode.active)
+        return;
+    const SplitPlane plane = currentSplitPlane();
+    if (m_splitMode.editing) {
+        const Body* now = m_doc.find(m_splitMode.target);
+        if (!now)
+            return endSplit();
+        Body after;
+        try {
+            after = withSplitPlane(m_doc, m_splitMode.target, plane);
+        } catch (const std::exception& e) {
+            QMessageBox::warning(this, tr("Forge3D"), QString::fromUtf8(e.what()));
+            return;  // stay in the tool so the plane can be fixed
+        }
+        const Body before = *now;
+        const ObjectId id = before.id;
+        endSplit();
+        run(std::make_unique<EditBodyCommand>(before, after, "Move cut"));
+        setSelection(id);
+        return;
+    }
+    std::vector<ObjectId> made;
+    try {
+        made = splitBody(m_stack, m_doc, m_splitMode.target, plane, m_splitPanel->keep());
+    } catch (const std::exception& e) {
+        QMessageBox::warning(this, tr("Forge3D"), tr("Split did not work:\n%1").arg(QString::fromUtf8(e.what())));
+        return;
+    }
+    qInfo().noquote() << "Command:" << QString::fromStdString(m_stack.undoLabel());
+    endSplit();
+    setSelection(made);
+}
+
 void MainWindow::separateSelected()
 {
     const Body* body = m_doc.find(selectedOne());
@@ -1145,6 +1384,9 @@ void MainWindow::refreshScene()
         qCritical() << "Could not build geometry for display:" << e.what();
         statusBar()->showMessage(tr("A shape could not be built: %1").arg(QString::fromUtf8(e.what())), 8000);
     }
+    if (m_splitMode.active && !m_doc.find(m_splitMode.target))
+        endSplit();  // e.g. Undo removed the shape being cut
+    addSplitItems(items);
     m_viewport->setItems(std::move(items));
 
     const Body* selected = m_doc.find(selectedOne());
@@ -1157,7 +1399,7 @@ void MainWindow::refreshScene()
             m_properties->setKeepRound(false);
         }
     }
-    m_viewport->setGizmo(gizmoTargetFor(selectedOne()), m_gizmoMode);
+    m_viewport->setGizmo(m_splitMode.active ? std::nullopt : gizmoTargetFor(selectedOne()), m_gizmoMode);
 
     // Properties: what the selected body is made of, or what it belongs to.
     QString context;
@@ -1169,7 +1411,9 @@ void MainWindow::refreshScene()
             const QString joiner = selected->boolean->op == BooleanOp::Subtract ? QStringLiteral(" − ")
                                    : selected->boolean->op == BooleanOp::Merge  ? QStringLiteral(" + ")
                                                                                 : QStringLiteral(" ∩ ");
-            context = tr("Made from: %1").arg(names.join(joiner));
+            context = selected->boolean->op == BooleanOp::Split
+                          ? tr("Made from: %1, cut by a plane").arg(names.join(QString()))
+                          : tr("Made from: %1").arg(names.join(joiner));
         } else if (const ObjectId owner = m_doc.parentOf(selected->id); owner != kInvalidId) {
             context = tr("Part of '%1'. Its position is measured inside that shape.")
                           .arg(QString::fromStdString(m_doc.find(owner)->name));
@@ -1185,7 +1429,7 @@ void MainWindow::refreshScene()
     refreshObjectList();
 
     const auto count = static_cast<int>(m_doc.topLevelIds().size());
-    m_modelInfo->setText(count == 0 ? tr("Empty plate - click Add Box or Add Cylinder")
+    m_modelInfo->setText(count == 0 ? tr("Empty plate - click Add Shape")
                                     : (count == 1 ? tr("1 shape") : tr("%1 shapes").arg(count)) +
                                           tr("  |  %1 triangles").arg(triangles));
     const bool anySelected = !m_selection.empty();
@@ -1197,6 +1441,7 @@ void MainWindow::refreshScene()
         a->setEnabled(m_selection.size() >= 2 && allTopLevel);
     m_separate->setEnabled(selected && selected->isBoolean() && m_doc.isTopLevel(selected->id));
     m_alignMenu->menuAction()->setEnabled(m_selection.size() >= 2 && allTopLevel);
+    m_split->setEnabled(m_selection.size() == 1 && allTopLevel && !m_splitMode.active);
     m_clear->setEnabled(!m_doc.empty());
 }
 
