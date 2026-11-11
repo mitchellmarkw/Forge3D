@@ -166,7 +166,7 @@ void save(const Document& doc, const std::filesystem::path& path, const std::str
     void* buffer = nullptr;
     size_t size = 0;
     const bool ok = mz_zip_writer_add_mem(&zip, kDocumentEntry, jsonText.data(), jsonText.size(),
-                                          MZ_DEFAULT_COMPRESSION) &&
+                                          static_cast<mz_uint>(MZ_DEFAULT_COMPRESSION)) &&
                     mz_zip_writer_finalize_heap_archive(&zip, &buffer, &size);
     if (!ok) {
         mz_zip_writer_end(&zip);
