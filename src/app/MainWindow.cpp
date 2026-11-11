@@ -77,9 +77,7 @@ QMatrix4x4 toQMatrix(const Transform& t)
 
 double footprintWidth(const PrimitiveSpec& spec)
 {
-    if (const auto* box = std::get_if<BoxSpec>(&spec))
-        return box->width;
-    return 2.0 * std::get<CylinderSpec>(spec).radiusX;
+    return 2.0 * halfExtents(spec)[0];
 }
 
 std::filesystem::path toPath(const QString& path)
@@ -236,13 +234,29 @@ void MainWindow::createActions()
         qInfo() << "Uniform scale" << (on ? "on" : "off");
     });
 
-    m_addBox = new QAction(tr("Add Box"), this);
-    m_addBox->setToolTip(tr("Add a 30 x 20 x 15 mm box beside the existing bodies"));
-    connect(m_addBox, &QAction::triggered, this, [this] { addBody(BoxSpec{30.0, 20.0, 15.0}); });
-
-    m_addCylinder = new QAction(tr("Add Cylinder"), this);
-    m_addCylinder->setToolTip(tr("Add a cylinder, 10 mm radius and 25 mm tall"));
-    connect(m_addCylinder, &QAction::triggered, this, [this] { addBody(CylinderSpec{10.0, 25.0}); });
+    // Add Shape: one entry per primitive, added beside what is already on the plate.
+    m_addMenu = new QMenu(tr("Add Shape"), this);
+    m_addMenu->setToolTipsVisible(true);
+    m_addMenu->menuAction()->setToolTip(tr("Add a shape beside the existing bodies. Change its size in Properties "
+                                           "or with the Resize handles (R)"));
+    const std::array<QString, kPrimitiveKindCount> tips{
+        tr("A block with flat faces"),
+        tr("A round column; untick Round in Properties for an oval one"),
+        tr("A ball"),
+        tr("A cone with a point on top; give it a top radius to cut the tip off flat"),
+        tr("A ring, like a doughnut, lying flat"),
+        tr("A pipe: a cylinder with a round hole through it"),
+        tr("A ramp: tall at its -X end, sloping down to the plate at +X"),
+    };
+    for (std::size_t kind = 0; kind < kPrimitiveKindCount; ++kind) {
+        const PrimitiveSpec spec = defaultSpec(kind);
+        QAction* a = m_addMenu->addAction(QString::fromStdString(typeName(spec)));
+        a->setToolTip(tips[kind]);
+        a->setObjectName(QStringLiteral("Add") + QString::fromStdString(typeName(spec)));
+        connect(a, &QAction::triggered, this, [this, spec] { addBody(spec); });
+        if (kind == 1)
+            m_addMenu->addSeparator();  // the familiar two first
+    }
 
     m_merge = new QAction(tr("Merge"), this);
     m_merge->setToolTip(tr("Merge: join the selected shapes into one (select two or more; Ctrl+click adds)"));
@@ -322,6 +336,9 @@ void MainWindow::createMenus()
     edit->addAction(m_separate);
     edit->addMenu(m_alignMenu);
 
+    QMenu* add = menuBar()->addMenu(tr("&Add"));
+    add->addActions(m_addMenu->actions());
+
     QMenu* view = menuBar()->addMenu(tr("&View"));
     view->addAction(m_fit);
     view->addAction(m_resetView);
@@ -350,8 +367,14 @@ void MainWindow::createToolBar()
     bar->addAction(m_undo);
     bar->addAction(m_redo);
     bar->addSeparator();
-    bar->addAction(m_addBox);
-    bar->addAction(m_addCylinder);
+    {
+        auto* addButton = new QToolButton(bar);
+        addButton->setDefaultAction(m_addMenu->menuAction());
+        addButton->setPopupMode(QToolButton::InstantPopup);
+        addButton->setToolButtonStyle(Qt::ToolButtonTextOnly);
+        addButton->setObjectName(QStringLiteral("AddShapeButton"));
+        bar->addWidget(addButton);
+    }
     bar->addSeparator();
     bar->addAction(m_modeMove);
     bar->addAction(m_modeRotate);
@@ -555,12 +578,10 @@ std::optional<view::GizmoTarget> MainWindow::gizmoTargetFor(ObjectId id) const
     target.bodyAxes = {axis(1, 0, 0), axis(0, 1, 0), axis(0, 0, 1)};
     if (body->isBoolean()) {
         target.resizable = false;  // resize a combined shape through its parts
-    } else if (const auto* box = std::get_if<BoxSpec>(&body->spec)) {
-        target.halfExtents = QVector3D(float(box->width / 2), float(box->depth / 2), float(box->height / 2));
     } else {
-        const auto& cyl = std::get<CylinderSpec>(body->spec);
-        target.halfExtents = QVector3D(float(cyl.radiusX), float(cyl.radiusY), float(cyl.height / 2));
-        target.round = true;
+        const Vec3 h = halfExtents(body->spec);
+        target.halfExtents = QVector3D(float(h[0]), float(h[1]), float(h[2]));
+        target.round = isRoundFromAbove(body->spec);
     }
     return target;
 }
@@ -703,12 +724,15 @@ void MainWindow::onLeftDragged(const QVector3D& origin, const QVector3D& directi
         options.keepRound = m_keepRound;
         next = resizedFace(d.before, d.handle.axis, d.handle.side, value, options);
 
-        const bool cylinder = std::holds_alternative<CylinderSpec>(next.spec);
         QString what;
         if (d.handle.axis == 2)
-            what = tr("Height");
-        else if (cylinder)
+            what = std::holds_alternative<SphereSpec>(next.spec) ? tr("Diameter")
+                   : std::holds_alternative<TorusSpec>(next.spec) ? tr("Thickness")
+                                                                   : tr("Height");
+        else if (std::holds_alternative<CylinderSpec>(next.spec))
             what = (m_keepRound || m_uniform) ? tr("Radius") : (d.handle.axis == 0 ? tr("Radius X") : tr("Radius Y"));
+        else if (isRoundFromAbove(next.spec))
+            what = std::holds_alternative<SphereSpec>(next.spec) ? tr("Radius") : tr("Outer radius");
         else
             what = d.handle.axis == 0 ? tr("Width") : tr("Depth");
         status = tr("Resize  %1 %2 mm").arg(what).arg(dimension(next.spec, d.handle.axis), 0, 'f', 1);

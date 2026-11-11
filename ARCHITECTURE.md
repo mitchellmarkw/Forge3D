@@ -165,6 +165,23 @@ Viewport (mouse)  --leftPressed(ray, handle)-->  MainWindow drag controller
   Delete removes a result first, then its parts (`withDescendants()`), in one macro.
 - **Selection** is an ordered list in `MainWindow` (the first picked is what Subtract keeps).
 
+## Shape library (slice 3d)
+
+- `PrimitiveSpec` is a variant of seven specs (Box, Cylinder, Sphere, Cone, Torus, Tube,
+  Wedge). All sit centred on X/Y with their lowest point at Z = 0.
+- `Body.cpp` holds one `Traits<T>` table per spec: display name, file type name and the
+  length fields (member pointer, file key, label, tooltip, whether 0 is allowed). The
+  Properties panel (three generic rows), the file format, validation and uniform scaling
+  all go through `specFields()` / `specValue()` / `setSpecValue()` / `scaled()`, so a new
+  primitive needs: its struct, a `Traits` entry, `makeX()` in Primitives, and cases in
+  `halfExtents()` and `resizeOne()` (both `static_assert` on unhandled types).
+- `halfExtents(spec)` gives the bounding box; `pivotOf()` and the gizmo handles use it.
+  `dimension()` is the full height for Z, and for X/Y the full width (box, wedge) or the
+  radius (round shapes).
+- OpenCASCADE: sphere / cone / torus from `BRepPrimAPI`; equal cone radii build a
+  cylinder (OCCT refuses that cone); the tube is a ring face extruded; the wedge is a
+  right-triangle face extruded along Y.
+
 ## Rendering
 
 `Document::mesh()` → `forge::Mesh` (positions, normals, indices) → `DisplayItem`

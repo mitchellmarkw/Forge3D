@@ -96,35 +96,23 @@ PropertiesPanel::PropertiesPanel(QWidget* parent) : QWidget(parent)
     auto* sizeGroup = new QGroupBox(tr("Size"));
     m_sizeGroup = sizeGroup;
     auto* sizeLayout = new QVBoxLayout(sizeGroup);
-    m_sizePages = new QStackedWidget;
-    sizeLayout->addWidget(m_sizePages);
-
-    auto* boxPage = new QWidget;
-    auto* boxForm = new QFormLayout(boxPage);
-    boxForm->setContentsMargins(0, 0, 0, 0);
-    m_boxWidth = makeLength(tr("Size along X"));
-    m_boxDepth = makeLength(tr("Size along Y"));
-    m_boxHeight = makeLength(tr("Size along Z (up)"));
-    boxForm->addRow(tr("Width (X):"), m_boxWidth);
-    boxForm->addRow(tr("Depth (Y):"), m_boxDepth);
-    boxForm->addRow(tr("Height (Z):"), m_boxHeight);
-    m_sizePages->addWidget(boxPage);
-
-    auto* cylPage = new QWidget;
-    auto* cylForm = new QFormLayout(cylPage);
-    cylForm->setContentsMargins(0, 0, 0, 0);
-    m_cylRadiusX = makeLength(tr("Distance from the centre line to the side, along X"));
-    m_cylRadiusY = makeLength(tr("Distance from the centre line to the side, along Y"));
-    m_cylHeight = makeLength(tr("Size along Z (up)"));
-    m_round = new QCheckBox(tr("Round (radius X = radius Y)"));
-    m_round->setToolTip(tr("Untick to give X and Y different radii, making an elliptical cylinder. "
-                           "Ticking it makes the cylinder round again, using Radius X."));
-    m_round->setChecked(true);
-    cylForm->addRow(tr("Radius X:"), m_cylRadiusX);
-    cylForm->addRow(tr("Radius Y:"), m_cylRadiusY);
-    cylForm->addRow(QString(), m_round);
-    cylForm->addRow(tr("Height (Z):"), m_cylHeight);
-    m_sizePages->addWidget(cylPage);
+    // One form for every primitive: up to three length fields whose labels change
+    // with the shape, plus the cylinder's Round checkbox after its second field.
+    auto* sizeForm = new QFormLayout;
+    sizeForm->setContentsMargins(0, 0, 0, 0);
+    m_sizeForm = sizeForm;
+    for (std::size_t i = 0; i < m_sizeFields.size(); ++i) {
+        m_sizeFields[i] = makeLength(QString());
+        m_sizeLabels[i] = new QLabel;
+        if (i == 2) {
+            m_round = new QCheckBox(tr("Round (radius X = radius Y)"));
+            m_round->setToolTip(tr("Untick to give X and Y different radii, making an elliptical cylinder. "
+                                   "Ticking it makes the cylinder round again, using Radius X."));
+            sizeForm->addRow(QString(), m_round);
+        }
+        sizeForm->addRow(m_sizeLabels[i], m_sizeFields[i]);
+    }
+    sizeLayout->addLayout(sizeForm);
 
     m_uniform = new QCheckBox(tr("Uniform scale (keep proportions)"));
     m_uniform->setToolTip(tr("Changing one size scales all the others by the same amount. "
@@ -165,11 +153,11 @@ PropertiesPanel::PropertiesPanel(QWidget* parent) : QWidget(parent)
     m_pages->addWidget(page);
 
     connect(m_name, &QLineEdit::editingFinished, this, &PropertiesPanel::commitName);
-    for (QDoubleSpinBox* spin : {m_boxWidth, m_boxDepth, m_boxHeight, m_cylRadiusX, m_cylRadiusY, m_cylHeight})
+    for (QDoubleSpinBox* spin : m_sizeFields)
         connect(spin, &QDoubleSpinBox::valueChanged, this, &PropertiesPanel::commitSpec);
     connect(m_uniform, &QCheckBox::toggled, this, &PropertiesPanel::uniformChanged);
     connect(m_round, &QCheckBox::toggled, this, [this](bool on) {
-        m_cylRadiusY->setEnabled(!on);
+        updateRadiusYEnabled();
         emit keepRoundChanged(on);
         // Ticking Round on an elliptical cylinder makes it round again.
         if (on && m_body) {
@@ -206,8 +194,8 @@ void PropertiesPanel::setBody(const Body* body, const QString& context, bool isP
     m_pages->setCurrentIndex(1);
 
     // Filling the fields must not send edit requests back.
-    const QSignalBlocker b0(m_name), b1(m_boxWidth), b2(m_boxDepth), b3(m_boxHeight), b4(m_cylRadiusX),
-        b5(m_cylHeight), b6(m_x), b7(m_y), b8(m_z), b9(m_rotX), b10(m_rotY), b11(m_rotZ), b12(m_cylRadiusY);
+    const QSignalBlocker b0(m_name), b1(m_sizeFields[0]), b2(m_sizeFields[1]), b3(m_sizeFields[2]), b6(m_x), b7(m_y),
+        b8(m_z), b9(m_rotX), b10(m_rotY), b11(m_rotZ);
 
     if (!m_name->hasFocus() || m_name->text() != QString::fromStdString(body->name))
         m_name->setText(QString::fromStdString(body->name));
@@ -218,24 +206,20 @@ void PropertiesPanel::setBody(const Body* body, const QString& context, bool isP
     m_sizeGroup->setVisible(!body->isBoolean());  // a combined shape is sized through its parts
     m_sitButton->setVisible(!isPart);
 
-    // Size the stack to the page being shown; a stacked widget otherwise reserves
-    // room for its tallest page (the cylinder's), leaving a gap under a box's fields.
-    const int sizePage = std::holds_alternative<BoxSpec>(body->spec) ? 0 : 1;
-    for (int i = 0; i < m_sizePages->count(); ++i)
-        m_sizePages->widget(i)->setSizePolicy(QSizePolicy::Preferred,
-                                              i == sizePage ? QSizePolicy::Preferred : QSizePolicy::Ignored);
-    m_sizePages->setCurrentIndex(sizePage);
-    m_sizePages->adjustSize();
-
-    if (const auto* box = std::get_if<BoxSpec>(&body->spec)) {
-        m_boxWidth->setValue(box->width);
-        m_boxDepth->setValue(box->depth);
-        m_boxHeight->setValue(box->height);
-    } else {
-        const auto& cyl = std::get<CylinderSpec>(body->spec);
-        m_cylRadiusX->setValue(cyl.radiusX);
-        m_cylRadiusY->setValue(cyl.radiusY);
-        m_cylHeight->setValue(cyl.height);
+    if (!body->isBoolean()) {
+        const auto& fields = specFields(body->spec);
+        for (std::size_t i = 0; i < m_sizeFields.size(); ++i) {
+            const bool used = i < fields.size();
+            m_sizeForm->setRowVisible(m_sizeFields[i], used);
+            if (!used)
+                continue;
+            m_sizeLabels[i]->setText(tr(fields[i].label) + QLatin1Char(':'));
+            m_sizeFields[i]->setToolTip(tr(fields[i].tip));
+            m_sizeFields[i]->setMinimum(fields[i].allowZero ? 0.0 : kMinLength);
+            m_sizeFields[i]->setValue(specValue(body->spec, i));
+        }
+        m_sizeForm->setRowVisible(m_round, std::holds_alternative<CylinderSpec>(body->spec));
+        updateRadiusYEnabled();
     }
 
     m_x->setValue(body->placement.x);
@@ -274,7 +258,7 @@ void PropertiesPanel::setKeepRound(bool on)
 {
     const QSignalBlocker block(m_round);
     m_round->setChecked(on);
-    m_cylRadiusY->setEnabled(!on);
+    updateRadiusYEnabled();
 }
 
 bool PropertiesPanel::keepRound() const
@@ -289,48 +273,32 @@ void PropertiesPanel::commitSpec()
     // Which field did the user change? Its new value decides the result.
     PrimitiveSpec spec = m_body->spec;
     const bool uniform = m_uniform->isChecked();
-    // Scale everything by `factor`, or set one value.
-    const auto apply = [uniform](double& field, double newValue, auto& all) {
-        if (uniform && field > 0.0) {
-            const double factor = newValue / field;
-            for (double* v : all)
-                *v *= factor;
-        } else {
-            field = newValue;
-        }
-    };
-
     bool changed = false;
-    if (auto* box = std::get_if<BoxSpec>(&spec)) {
-        std::array<double*, 3> all{&box->width, &box->depth, &box->height};
-        const std::array<std::pair<double*, QDoubleSpinBox*>, 3> fields{
-            {{&box->width, m_boxWidth}, {&box->depth, m_boxDepth}, {&box->height, m_boxHeight}}};
-        for (const auto& [field, spin] : fields) {
-            if (differs(*field, spin->value())) {
-                apply(*field, spin->value(), all);
-                changed = true;
-                break;  // one field changes at a time
-            }
+    const std::size_t count = specFields(spec).size();
+    for (std::size_t i = 0; i < count && i < m_sizeFields.size(); ++i) {
+        const double old = specValue(spec, i), v = m_sizeFields[i]->value();
+        if (!differs(old, v))
+            continue;
+        if (uniform && old > 0.0) {
+            spec = scaled(spec, v / old);
+        } else {
+            setSpecValue(spec, i, v);
+            // A round cylinder: Radius X sets both radii.
+            if (auto* cyl = std::get_if<CylinderSpec>(&spec); cyl && i == 0 && m_round->isChecked())
+                cyl->radiusY = v;
         }
-    } else {
-        auto& cyl = std::get<CylinderSpec>(spec);
-        std::array<double*, 3> all{&cyl.radiusX, &cyl.radiusY, &cyl.height};
-        if (differs(cyl.radiusX, m_cylRadiusX->value())) {
-            const double v = m_cylRadiusX->value();
-            apply(cyl.radiusX, v, all);
-            if (!uniform && m_round->isChecked())
-                cyl.radiusY = v;
-            changed = true;
-        } else if (differs(cyl.radiusY, m_cylRadiusY->value())) {
-            apply(cyl.radiusY, m_cylRadiusY->value(), all);
-            changed = true;
-        } else if (differs(cyl.height, m_cylHeight->value())) {
-            apply(cyl.height, m_cylHeight->value(), all);
-            changed = true;
-        }
+        changed = true;
+        break;  // one field changes at a time
     }
     if (changed)
         emit specRequested(m_body->id, spec);
+}
+
+void PropertiesPanel::updateRadiusYEnabled()
+{
+    // Radius Y (the cylinder's second field) follows Radius X while Round is ticked.
+    const bool cylinder = m_body && std::holds_alternative<CylinderSpec>(m_body->spec);
+    m_sizeFields[1]->setEnabled(!(cylinder && m_round->isChecked()));
 }
 
 void PropertiesPanel::commitPlacement()

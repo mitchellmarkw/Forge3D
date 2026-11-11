@@ -22,7 +22,8 @@ namespace forge::file {
 //   2  rotationX and rotationY added (rotation about all three axes)
 //   3  cylinders store radiusX and radiusY (elliptical cylinders)
 //   4  combine results (type "combine": operation, operands, pivot)
-inline constexpr int kFormatVersion = 4;
+//   5  sphere, cone, torus, tube, wedge
+inline constexpr int kFormatVersion = 5;
 inline constexpr const char* kExtension = ".f3d";
 inline constexpr const char* kDocumentEntry = "document.json";
 

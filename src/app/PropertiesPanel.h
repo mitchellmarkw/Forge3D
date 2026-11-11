@@ -5,6 +5,7 @@
 
 #include <QWidget>
 
+#include <array>
 #include <optional>
 
 class QCheckBox;
@@ -52,6 +53,7 @@ private:
     void commitName();
     void commitSpec();
     void commitPlacement();
+    void updateRadiusYEnabled();
 
     std::optional<Body> m_body;  // copy of what is shown
 
@@ -65,13 +67,9 @@ private:
     QWidget* m_sitButton = nullptr;
     QWidget* m_separateButton = nullptr;
 
-    QStackedWidget* m_sizePages = nullptr;
-    QDoubleSpinBox* m_boxWidth = nullptr;
-    QDoubleSpinBox* m_boxDepth = nullptr;
-    QDoubleSpinBox* m_boxHeight = nullptr;
-    QDoubleSpinBox* m_cylRadiusX = nullptr;
-    QDoubleSpinBox* m_cylRadiusY = nullptr;
-    QDoubleSpinBox* m_cylHeight = nullptr;
+    QFormLayout* m_sizeForm = nullptr;
+    std::array<QDoubleSpinBox*, 3> m_sizeFields{};  // the shape's lengths (specFields order)
+    std::array<QLabel*, 3> m_sizeLabels{};
     QCheckBox* m_round = nullptr;
     QCheckBox* m_uniform = nullptr;
 
