@@ -4,6 +4,7 @@
 # so it can be unit-tested anywhere and reused by command-line tools later.
 
 add_library(forge_core STATIC
+    include/forge/core/Align.h
     include/forge/core/Body.h
     include/forge/core/CommandStack.h
     include/forge/core/Commands.h
@@ -14,6 +15,7 @@ add_library(forge_core STATIC
     include/forge/core/Primitives.h
     include/forge/core/Tessellator.h
     include/forge/core/Transform.h
+    src/Align.cpp
     src/CommandStack.cpp
     src/Commands.cpp
     src/Document.cpp

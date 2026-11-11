@@ -53,6 +53,13 @@ Vec3 eulerXYZ(const Transform& t);
 // The placement after turning the body by `degrees` about a plate axis
 // (0 = X, 1 = Y, 2 = Z) through the body's centre. The centre does not move.
 Placement rotatedAboutPlateAxis(const Body& body, int axis, double degrees);
+// The same, turning about `centre` (a point in the body's own coordinates) instead
+// of the body's pivot. That point stays where it is on the plate. Combined shapes
+// use the centre of their visible solid (Document::visibleCentre).
+Placement rotatedAboutPlateAxis(const Body& body, int axis, double degrees, const Vec3& centre);
+// The placement with these X / Y / Z angles (degrees), chosen so that `centre`
+// (body coordinates) stays where it is on the plate. Used for typed angles.
+Placement withRotation(const Body& body, const Vec3& anglesDeg, const Vec3& centre);
 
 // The value a face handle changes: box width / depth / height for axis 0 / 1 / 2;
 // cylinder radius X / radius Y / height.

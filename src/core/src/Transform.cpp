@@ -152,6 +152,37 @@ Placement rotatedAboutPlateAxis(const Body& body, int axis, double degrees)
     return result;
 }
 
+Placement rotatedAboutPlateAxis(const Body& body, int axis, double degrees, const Vec3& centre)
+{
+    if (axis < 0 || axis > 2)
+        throw std::invalid_argument("axis must be 0, 1 or 2");
+    const Vec3 pivot = pivotOf(body);
+    const Transform current = placementTransform(body.placement, pivot);
+    const Vec3 w = current.apply(centre);  // where the centre is now
+    const Transform turn = Transform::rotationXYZ(axis == 0 ? degrees : 0.0, axis == 1 ? degrees : 0.0,
+                                                  axis == 2 ? degrees : 0.0);
+    // Turn about the fixed plate axis through w.
+    const Transform next =
+        Transform::translation(w) * turn * Transform::translation({-w[0], -w[1], -w[2]}) * current;
+    return placementFromTransform(next, pivot);
+}
+
+Placement withRotation(const Body& body, const Vec3& anglesDeg, const Vec3& centre)
+{
+    const Vec3 pivot = pivotOf(body);
+    const Vec3 w = placementTransform(body.placement, pivot).apply(centre);
+    // New rotation, with `centre` mapped back onto w.
+    const Transform next = Transform::translation(w) *
+                           Transform::rotationXYZ(anglesDeg[0], anglesDeg[1], anglesDeg[2]) *
+                           Transform::translation({-centre[0], -centre[1], -centre[2]});
+    Placement p = placementFromTransform(next, pivot);
+    // Keep the angles exactly as typed (eulerXYZ may pick an equivalent set).
+    p.rotationX = anglesDeg[0];
+    p.rotationY = anglesDeg[1];
+    p.rotationZ = anglesDeg[2];
+    return p;
+}
+
 double dimension(const PrimitiveSpec& spec, int axis)
 {
     if (const auto* box = std::get_if<BoxSpec>(&spec))
