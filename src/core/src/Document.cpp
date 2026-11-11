@@ -127,6 +127,37 @@ Body Document::removeBody(ObjectId id)
     return removed;
 }
 
+void Document::replaceAll(std::vector<Body> bodies)
+{
+    std::set<ObjectId> ids;
+    ObjectId highest = 0;
+    for (const Body& b : bodies) {
+        if (b.id == kInvalidId)
+            throw std::invalid_argument("Body id must be non-zero");
+        if (!ids.insert(b.id).second)
+            throw std::invalid_argument("Body id " + std::to_string(b.id) + " appears twice");
+        validate(b.spec);
+        for (double v : {b.placement.x, b.placement.y, b.placement.z, b.placement.rotationZ})
+            if (!std::isfinite(v))
+                throw std::invalid_argument("Body '" + b.name + "' has an invalid placement");
+        highest = std::max(highest, b.id);
+    }
+
+    // All checked: now change things.
+    std::vector<ObjectId> oldIds;
+    for (const Body& b : m_bodies)
+        oldIds.push_back(b.id);
+    m_bodies.clear();
+    m_meshCache.clear();
+    for (ObjectId id : oldIds)
+        notify(ChangeKind::Removed, id);
+
+    m_bodies = std::move(bodies);
+    m_nextId = std::max<ObjectId>(1, highest + 1);
+    for (const Body& b : m_bodies)
+        notify(ChangeKind::Added, b.id);
+}
+
 void Document::setPlacement(ObjectId id, const Placement& placement)
 {
     for (double v : {placement.x, placement.y, placement.z, placement.rotationZ})

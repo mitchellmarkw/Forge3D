@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# forge_core: geometry and document logic. Depends on OpenCASCADE only (no Qt),
+# forge_core: geometry and document logic. No Qt: OpenCASCADE, plus miniz and
+# nlohmann-json for the file format,
 # so it can be unit-tested anywhere and reused by command-line tools later.
 
 add_library(forge_core STATIC
@@ -7,13 +8,17 @@ add_library(forge_core STATIC
     include/forge/core/CommandStack.h
     include/forge/core/Commands.h
     include/forge/core/Document.h
+    include/forge/core/FileFormat.h
     include/forge/core/Mesh.h
+    include/forge/core/Picking.h
     include/forge/core/Primitives.h
     include/forge/core/Tessellator.h
     src/CommandStack.cpp
     src/Commands.cpp
     src/Document.cpp
+    src/FileFormat.cpp
     src/Mesh.cpp
+    src/Picking.cpp
     src/Primitives.cpp
     src/Tessellator.cpp
 )
@@ -27,3 +32,6 @@ target_link_libraries(forge_core PUBLIC
     TKernel TKMath TKG2d TKG3d TKGeomBase TKBRep
     TKGeomAlgo TKTopAlgo TKPrim TKMesh
 )
+
+# File format libraries are an implementation detail of FileFormat.cpp.
+target_link_libraries(forge_core PRIVATE miniz::miniz nlohmann_json::nlohmann_json)

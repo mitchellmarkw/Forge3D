@@ -54,8 +54,8 @@ void RemoveBodyCommand::undo(Document& doc)
 
 // ---- SetPlacementCommand --------------------------------------------------------
 
-SetPlacementCommand::SetPlacementCommand(ObjectId id, const Placement& placement)
-    : m_id(id), m_new(placement)
+SetPlacementCommand::SetPlacementCommand(ObjectId id, const Placement& placement, bool mergeable)
+    : m_id(id), m_new(placement), m_mergeable(mergeable)
 {
 }
 
@@ -77,7 +77,7 @@ void SetPlacementCommand::undo(Document& doc)
 bool SetPlacementCommand::mergeWith(const Command& next)
 {
     const auto* other = dynamic_cast<const SetPlacementCommand*>(&next);
-    if (!other || other->m_id != m_id)
+    if (!other || other->m_id != m_id || !m_mergeable || !other->m_mergeable)
         return false;
     m_new = other->m_new;  // keep our original "before", take their "after"
     return true;

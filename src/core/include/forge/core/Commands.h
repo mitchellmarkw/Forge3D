@@ -71,17 +71,20 @@ private:
 
 class SetPlacementCommand final : public Command {
 public:
-    SetPlacementCommand(ObjectId id, const Placement& placement);
+    // mergeable: true for drags (every mouse move joins one undo step);
+    // false for typed values, where each edit should be its own step.
+    SetPlacementCommand(ObjectId id, const Placement& placement, bool mergeable = true);
     std::string label() const override { return "Move"; }
     void redo(Document& doc) override;
     void undo(Document& doc) override;
-    int mergeId() const override { return kMergeSetPlacement; }
+    int mergeId() const override { return m_mergeable ? kMergeSetPlacement : -1; }
     bool mergeWith(const Command& next) override;
 
 private:
     ObjectId m_id;
     Placement m_new;
     std::optional<Placement> m_old;
+    bool m_mergeable;
 };
 
 class SetSpecCommand final : public Command {

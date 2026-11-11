@@ -38,6 +38,7 @@ const char* kMeshFragmentShader = R"(#version 330 core
 in vec3 vNormal;
 in vec3 vViewPos;
 uniform vec3 uColor;
+uniform float uSelected;  // 0 or 1
 out vec4 fragColor;
 void main() {
     vec3 n = normalize(vNormal);
@@ -48,6 +49,12 @@ void main() {
     float head = max(dot(n, toEye), 0.0);
     float spec = pow(max(dot(n, normalize(key + toEye)), 0.0), 48.0) * 0.20;
     vec3 color = uColor * (0.28 + 0.62 * diffuse + 0.15 * head) + vec3(spec);
+    // Selection: lighten the body and add a bright cyan glow toward its silhouette.
+    // Cyan is not in the body palette, so it reads as "selected" on any colour.
+    float rim = pow(1.0 - max(dot(n, toEye), 0.0), 1.5);
+    vec3 glow = vec3(0.25, 0.85, 1.0);
+    vec3 selectedColor = mix(mix(color, vec3(1.0), 0.30), glow, clamp(0.25 + 0.9 * rim, 0.0, 1.0));
+    color = mix(color, selectedColor, uSelected);
     fragColor = vec4(color, 1.0);
 }
 )";
@@ -347,6 +354,7 @@ void Viewport::paintGL()
         m_meshShader->setUniformValue("uModelView", modelView);
         m_meshShader->setUniformValue("uNormalMatrix", modelView.normalMatrix());
         m_meshShader->setUniformValue("uColor", item.color);
+        m_meshShader->setUniformValue("uSelected", item.selected ? 1.0f : 0.0f);
         QOpenGLVertexArrayObject::Binder bind(found->second->vao.get());
         glDrawElements(GL_TRIANGLES, found->second->indexCount, GL_UNSIGNED_INT, nullptr);
     }
@@ -364,6 +372,11 @@ void Viewport::mousePressEvent(QMouseEvent* event)
 {
     m_lastMouse = event->position();
     const bool shift = event->modifiers().testFlag(Qt::ShiftModifier);
+    if (event->button() == Qt::LeftButton) {
+        m_leftPressed = true;
+        m_leftPressAt = event->position();
+        return;
+    }
     if (event->button() == Qt::MiddleButton || (event->button() == Qt::RightButton && shift))
         m_drag = DragMode::Pan;
     else if (event->button() == Qt::RightButton)
@@ -394,6 +407,20 @@ void Viewport::mouseMoveEvent(QMouseEvent* event)
 
 void Viewport::mouseReleaseEvent(QMouseEvent* event)
 {
+    if (event->button() == Qt::LeftButton && m_leftPressed) {
+        m_leftPressed = false;
+        // Only a click selects; a left-drag will move things once the gizmo exists.
+        const QPointF moved = event->position() - m_leftPressAt;
+        if (moved.manhattanLength() <= 4.0) {
+            QVector3D origin, direction;
+            m_camera.rayThroughPixel(static_cast<float>(event->position().x()),
+                                     static_cast<float>(event->position().y()),
+                                     static_cast<float>(width()), static_cast<float>(height()), origin,
+                                     direction);
+            emit clicked(origin, direction);
+        }
+        return;
+    }
     if (m_drag != DragMode::None && !(event->buttons() & (Qt::RightButton | Qt::MiddleButton)))
         m_drag = DragMode::None;
     QOpenGLWidget::mouseReleaseEvent(event);

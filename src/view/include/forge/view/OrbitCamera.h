@@ -25,6 +25,11 @@ public:
     QVector3D eyePosition() const;
     QVector3D forward() const;  // unit vector from eye towards target
 
+    // The ray under a viewport pixel (device-independent pixels, origin top-left),
+    // for picking. Returns the start point (on the near plane) and a unit direction.
+    void rayThroughPixel(float px, float py, float viewportWidth, float viewportHeight,
+                         QVector3D& origin, QVector3D& direction) const;
+
     // State (exposed for tests and for saving the view later)
     QVector3D target() const { return m_target; }
     float distance() const { return m_distance; }

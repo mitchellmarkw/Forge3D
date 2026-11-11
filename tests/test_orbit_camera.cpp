@@ -76,3 +76,29 @@ TEST_CASE("the view matrix puts the target straight ahead", "[camera]")
     CHECK_THAT(inView.y(), WithinAbs(0.0, 1e-3));
     CHECK_THAT(inView.z(), WithinAbs(-cam.distance(), 1e-2));
 }
+
+TEST_CASE("the ray through the centre pixel points at the target", "[camera]")
+{
+    OrbitCamera cam;
+    cam.orbit(40.0f, -15.0f);
+    QVector3D origin, direction;
+    cam.rayThroughPixel(400.0f, 300.0f, 800.0f, 600.0f, origin, direction);
+    CHECK_THAT(direction.length(), WithinAbs(1.0, 1e-5));
+    CHECK_THAT(QVector3D::dotProduct(direction, cam.forward()), WithinAbs(1.0, 1e-4));
+
+    // Points along the ray pass through the target.
+    const QVector3D toTarget = cam.target() - origin;
+    const QVector3D closest = origin + direction * QVector3D::dotProduct(toTarget, direction);
+    CHECK((closest - cam.target()).length() < 1e-2f);
+}
+
+TEST_CASE("a ray through the top-left pixel leans up and to the left", "[camera]")
+{
+    OrbitCamera cam;
+    QVector3D origin, direction;
+    cam.rayThroughPixel(0.0f, 0.0f, 800.0f, 600.0f, origin, direction);
+    const QVector3D right = QVector3D::crossProduct(cam.forward(), QVector3D(0, 0, 1)).normalized();
+    const QVector3D up = QVector3D::crossProduct(right, cam.forward()).normalized();
+    CHECK(QVector3D::dotProduct(direction, right) < 0.0f);
+    CHECK(QVector3D::dotProduct(direction, up) > 0.0f);
+}
