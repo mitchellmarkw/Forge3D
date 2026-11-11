@@ -97,6 +97,9 @@ private:
     void updateSplitPlane();  // after the panel changed: redraw, update side names and range
     SplitPlane currentSplitPlane() const;
     void addSplitItems(std::vector<DisplayItem>& items) const;
+    float splitPlaneHalfSize() const;  // half the drawn plane's width (mm)
+    // Starts dragging the Split plane if the ray hits it or its arrow.
+    bool grabSplitPlane(const QVector3D& origin, const QVector3D& direction);
     void clearPlate();
 
     // Files
@@ -124,7 +127,7 @@ private:
     bool m_syncingList = false;
 
     struct Drag {
-        enum class Kind { None, Plate, Arrow, Ring, Face };
+        enum class Kind { None, Plate, Arrow, Ring, Face, SplitPlane };
         Kind kind = Kind::None;
         Body before;                  // the body when the drag started
         view::GizmoHandle handle;
@@ -134,6 +137,8 @@ private:
         QPointF lastPixel;            // Ring: for accumulating the turn
         QPointF centrePixel;
         double turned = 0.0;          // Ring: degrees so far (unsnapped)
+        double startOffset = 0.0;     // SplitPlane: the plane's offset when grabbed
+        QVector3D axis;               // SplitPlane: the plane's direction
         Vec3 turnCentre{};            // Ring: the point it turns about (body coordinates)
         bool moved = false;
     };

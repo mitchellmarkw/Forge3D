@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.7.1 — Drag the Split plane (2026-11-11)
+
+- In the Split tool, **drag the yellow plane** (or its arrow) to slide it along its
+  direction. Snaps to 1 mm; hold Alt to move freely; Esc during the drag puts it back.
+  The slider and the "From the middle" field follow.
+- While the Split tool is open, clicking in the view no longer changes the selection
+  (and so no longer closes the tool by accident). Cancel or Esc leaves.
+- After a split, the arrow-side half is selected on its own, so the Move / Rotate /
+  Resize handles (and W / E / R) work on it straight away, as after Merge.
+
 ## 0.7.0 — Slice 4a: Split (2026-11-11)
 
 - **Split** (toolbar and Edit menu): select one shape, click Split, and a see-through

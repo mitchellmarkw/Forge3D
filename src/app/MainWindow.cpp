@@ -580,6 +580,8 @@ void MainWindow::onViewportClicked(const QVector3D& origin, const QVector3D& dir
         m_pressOnHandle = false;
         return;
     }
+    if (m_splitMode.active)
+        return;  // while splitting, clicks don't change what is selected (Cancel or Esc leaves)
     Ray ray;
     ray.origin = {origin.x(), origin.y(), origin.z()};
     ray.direction = {direction.x(), direction.y(), direction.z()};
@@ -644,8 +646,12 @@ void MainWindow::onLeftPressed(const QVector3D& origin, const QVector3D& directi
 {
     m_dragState = Drag{};
     m_pressOnHandle = false;
-    if (m_splitMode.active)
-        return;  // the Split tool is open: shapes stay put
+    if (m_splitMode.active) {
+        // The Split tool is open: shapes stay put, but the plane can be dragged.
+        if (grabSplitPlane(origin, direction))
+            m_pressOnHandle = true;
+        return;
+    }
 
     const Body* selected = m_doc.find(selectedOne());
     const auto frame = gizmoTargetFor(selectedOne());
@@ -737,6 +743,16 @@ void MainWindow::onLeftDragged(const QVector3D& origin, const QVector3D& directi
         status = tr("Move  %1 %2 mm").arg(QChar("XYZ"[d.handle.axis])).arg(delta, 0, 'f', 1);
         break;
     }
+    case Drag::Kind::SplitPlane: {
+        const auto s = view::closestOnLine(origin, direction, d.grabPoint, d.axis);
+        if (!s)
+            return;
+        const double offset = d.startOffset + step(*s - d.startParam, kMoveStep);
+        m_splitPanel->setOffset(offset);
+        statusBar()->showMessage(tr("Cut position %1 mm from the middle").arg(offset, 0, 'f', 1) + freeHint);
+        d.moved = true;
+        return;  // the panel redraws the plane; no shape changes
+    }
     case Drag::Kind::Ring: {
         d.turned += view::screenAngle(d.centrePixel, d.lastPixel, pixel);
         d.lastPixel = pixel;
@@ -799,6 +815,8 @@ void MainWindow::onLeftReleased(bool wasDrag)
     if (d.kind == Drag::Kind::None || !wasDrag || !d.moved)
         return;
     statusBar()->clearMessage();
+    if (d.kind == Drag::Kind::SplitPlane)
+        return;  // the plane moved; nothing is cut until Split is clicked
 
     const Body* now = m_doc.find(d.before.id);
     if (!now || *now == d.before)
@@ -815,7 +833,9 @@ void MainWindow::cancelDrag()
     const Drag d = m_dragState;
     m_dragState = Drag{};
     m_viewport->setActiveHandle({});
-    if (d.kind != Drag::Kind::None && d.moved)
+    if (d.kind == Drag::Kind::SplitPlane)
+        m_splitPanel->setOffset(d.startOffset);
+    else if (d.kind != Drag::Kind::None && d.moved)
         preview(d.before);
     statusBar()->showMessage(tr("Drag cancelled"), 2000);
     qInfo() << "Drag cancelled";
@@ -1076,7 +1096,8 @@ void MainWindow::startSplit(ObjectId target, bool editing)
     m_propsDockWidth = m_propsDock->width();
     m_properties->hide();
     m_splitPanel->show();
-    statusBar()->showMessage(tr("Split: place the plane in the panel on the right, then click %1. Esc cancels.")
+    statusBar()->showMessage(tr("Split: drag the yellow plane (or use the panel on the right), then click %1. "
+                                "Esc cancels.")
                                  .arg(editing ? tr("Apply") : tr("Split")));
     updateSplitPlane();
     refreshCommandState();
@@ -1125,13 +1146,67 @@ void MainWindow::updateSplitPlane()
     refreshScene();
 }
 
+float MainWindow::splitPlaneHalfSize() const
+{
+    const auto size = m_doc.worldBounds(m_splitMode.measured).size();
+    return std::max({size[0], size[1], size[2], 2.0f}) * 0.65f;
+}
+
+bool MainWindow::grabSplitPlane(const QVector3D& origin, const QVector3D& direction)
+{
+    const SplitPlane plane = currentSplitPlane();
+    const QVector3D p(float(plane.point[0]), float(plane.point[1]), float(plane.point[2]));
+    QVector3D n(float(plane.normal[0]), float(plane.normal[1]), float(plane.normal[2]));
+    n.normalize();
+    const float s = splitPlaneHalfSize();
+
+    // On the yellow square?
+    bool hit = false;
+    QVector3D grab = p;
+    if (const auto at = view::intersectPlane(origin, direction, p, n)) {
+        const QMatrix4x4 frame = planeFrame(plane.point, plane.normal, 1.0f);
+        const QVector3D u = frame.column(0).toVector3D(), v = frame.column(1).toVector3D();
+        const QVector3D d = *at - p;
+        if (std::abs(QVector3D::dotProduct(d, u)) <= s && std::abs(QVector3D::dotProduct(d, v)) <= s) {
+            hit = true;
+            grab = *at;
+        }
+    }
+    // Or close to the arrow (useful when the plane is seen edge-on)?
+    if (!hit) {
+        const float length = s * 0.6f;
+        const QVector3D dir = direction.normalized();
+        for (int i = 0; i <= 20 && !hit; ++i) {
+            const QVector3D q = p + n * (length * float(i) / 20.0f);
+            const QVector3D toQ = q - origin;
+            const float along = QVector3D::dotProduct(toQ, dir);
+            if (along > 0.0f && (toQ - dir * along).length() < s * 0.08f) {
+                hit = true;
+                grab = q;
+            }
+        }
+    }
+    if (!hit)
+        return false;
+    const auto startParam = view::closestOnLine(origin, direction, grab, n);
+    if (!startParam) {
+        statusBar()->showMessage(tr("Looking straight along the arrow: orbit a little to drag the plane."), 4000);
+        return true;  // still a press on the plane: don't change the selection
+    }
+    m_dragState.kind = Drag::Kind::SplitPlane;
+    m_dragState.grabPoint = grab;
+    m_dragState.axis = n;
+    m_dragState.startParam = *startParam;
+    m_dragState.startOffset = m_splitPanel->offset();
+    return true;
+}
+
 void MainWindow::addSplitItems(std::vector<DisplayItem>& items) const
 {
     if (!m_splitMode.active)
         return;
     const SplitPlane plane = currentSplitPlane();
-    const auto size = m_doc.worldBounds(m_splitMode.measured).size();
-    const float s = std::max({size[0], size[1], size[2], 2.0f}) * 0.65f;
+    const float s = splitPlaneHalfSize();
 
     DisplayItem quad;
     quad.id = kSplitPlaneItem;
@@ -1182,7 +1257,9 @@ void MainWindow::applySplit()
     }
     qInfo().noquote() << "Command:" << QString::fromStdString(m_stack.undoLabel());
     endSplit();
-    setSelection(made);
+    // Select the arrow-side half on its own, so the move and rotate handles show
+    // straight away (as after Merge); click the other half to work on it.
+    setSelection(made.front());
 }
 
 void MainWindow::separateSelected()

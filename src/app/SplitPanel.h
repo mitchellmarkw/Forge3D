@@ -34,6 +34,8 @@ public:
     double tiltY() const;
     double offset() const;
     SplitKeep keep() const;
+    // Moves the plane (as if typed); emits planeChanged.
+    void setOffset(double offset);
 
 signals:
     void planeChanged();
