@@ -5,6 +5,9 @@
 #include "forge/core/Tessellator.h"
 
 #include <BRepAlgoAPI_Common.hxx>
+#include <BRepBndLib.hxx>
+#include <Bnd_Box.hxx>
+#include <TopLoc_Location.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
@@ -486,21 +489,40 @@ Transform Document::worldTransform(ObjectId id) const
     return t;
 }
 
+Bounds shapeBounds(const TopoDS_Shape& shape, const Transform& t)
+{
+    Bounds out;
+    if (shape.IsNull())
+        return out;
+    Bnd_Box box;
+    BRepBndLib::AddOptimal(shape.Moved(TopLoc_Location(toTrsf(t))), box, /*useTriangulation=*/false,
+                           /*useShapeTolerance=*/false);
+    if (box.IsVoid())
+        return out;
+    double x0, y0, z0, x1, y1, z1;
+    box.Get(x0, y0, z0, x1, y1, z1);
+    out.expand(static_cast<float>(x0), static_cast<float>(y0), static_cast<float>(z0));
+    out.expand(static_cast<float>(x1), static_cast<float>(y1), static_cast<float>(z1));
+    return out;
+}
+
 Bounds Document::worldBounds(ObjectId id) const
 {
-    const Bounds local = mesh(id)->bounds();
-    Bounds world;
-    if (!local.valid)
-        return world;
+    return shapeBounds(shape(id), worldTransform(id));
+}
 
-    const Transform toWorld = worldTransform(id);
-    for (int corner = 0; corner < 8; ++corner) {
-        const Vec3 p = toWorld.apply({(corner & 1) ? local.max[0] : local.min[0],
-                                      (corner & 2) ? local.max[1] : local.min[1],
-                                      (corner & 4) ? local.max[2] : local.min[2]});
-        world.expand(static_cast<float>(p[0]), static_cast<float>(p[1]), static_cast<float>(p[2]));
-    }
-    return world;
+Vec3 Document::visibleCentre(ObjectId id) const
+{
+    const Body* body = find(id);
+    if (!body)
+        throw std::out_of_range("No body with id " + std::to_string(id));
+    if (!body->isBoolean())
+        return pivotOf(body->spec);
+    const Bounds b = shapeBounds(shape(id), Transform::identity());
+    if (!b.valid)
+        return pivotOf(*body);
+    const auto c = b.center();
+    return {c[0], c[1], c[2]};
 }
 
 Bounds Document::worldBounds() const

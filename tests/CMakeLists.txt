@@ -13,6 +13,7 @@ add_executable(forge_tests
     test_gizmo_edits.cpp
     test_gizmo_view.cpp
     test_combine.cpp
+    test_align.cpp
 )
 target_link_libraries(forge_tests PRIVATE
     Forge3D::core

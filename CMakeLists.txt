@@ -2,7 +2,7 @@
 cmake_minimum_required(VERSION 3.21)
 
 project(Forge3D
-    VERSION 0.5.0
+    VERSION 0.5.1
     DESCRIPTION "Parametric 3D modeling with sculpting"
     LANGUAGES CXX)
 

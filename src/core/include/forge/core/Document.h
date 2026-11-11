@@ -100,10 +100,16 @@ public:
     Transform localTransform(ObjectId id) const;
     // Body coordinates -> plate coordinates, through every parent.
     Transform worldTransform(ObjectId id) const;
-    // Bounding box of the placed body, in plate coordinates.
+    // Bounding box of the placed body, in plate coordinates. Tight even when the
+    // body is tilted (built from the mesh points, not the corners of a box).
     Bounds worldBounds(ObjectId id) const;
     // Bounding box of everything on the plate; invalid if nothing is.
     Bounds worldBounds() const;
+    // The middle of what you can see of the body, in its own coordinates: the
+    // centre of its solid's bounding box. For a primitive this is its pivot; for a
+    // combined shape it ignores cut-away parts (a cylinder subtracted from a cube
+    // does not count). Rotation turns about this point.
+    Vec3 visibleCentre(ObjectId id) const;
 
     // Builds what a combine would produce from these (top-level) bodies, without
     // changing the document. Throws GeometryError if OpenCASCADE fails.
@@ -137,6 +143,9 @@ private:
 void validate(const PrimitiveSpec& spec);
 
 // True if the shape has no solid in it (e.g. Intersect of shapes that don't touch).
+// Exact bounding box of a solid (from its true surfaces, not its mesh), after
+// moving it by t.
+Bounds shapeBounds(const TopoDS_Shape& shape, const Transform& t = Transform::identity());
 bool isEmptySolid(const TopoDS_Shape& shape);
 
 // Where to put a new body of the given footprint so it does not overlap the

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "forge/core/Align.h"
 #include "forge/core/CommandStack.h"
 #include "forge/core/Document.h"
 #include "forge/view/Gizmo.h"
@@ -80,6 +81,7 @@ private:
     void addBody(const PrimitiveSpec& spec);
     void deleteSelected();
     void combineSelected(BooleanOp op);
+    void alignSelected(AlignMode mode);
     void separateSelected();
     void clearPlate();
 
@@ -118,6 +120,7 @@ private:
         QPointF lastPixel;            // Ring: for accumulating the turn
         QPointF centrePixel;
         double turned = 0.0;          // Ring: degrees so far (unsnapped)
+        Vec3 turnCentre{};            // Ring: the point it turns about (body coordinates)
         bool moved = false;
     };
     Drag m_dragState;
@@ -151,6 +154,7 @@ private:
     QAction* m_subtract = nullptr;
     QAction* m_intersect = nullptr;
     QAction* m_separate = nullptr;
+    QMenu* m_alignMenu = nullptr;  // Align Shapes (toolbar dropdown and Edit submenu)
     QAction* m_fit = nullptr;
     QAction* m_resetView = nullptr;
     QAction* m_modeMove = nullptr;
