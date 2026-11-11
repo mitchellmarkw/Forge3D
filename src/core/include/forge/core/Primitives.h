@@ -16,6 +16,15 @@ TopoDS_Shape makeCylinder(double radius, double height);
 // Elliptical when the radii differ (exact elliptic surface); round when equal.
 TopoDS_Shape makeCylinder(double radiusX, double radiusY, double height);
 
+TopoDS_Shape makeSphere(double radius);
+// Either radius may be 0 (a point), not both; equal radii give a cylinder.
+TopoDS_Shape makeCone(double radiusBottom, double radiusTop, double height);
+// Lying flat, resting on the plate. minorRadius < majorRadius.
+TopoDS_Shape makeTorus(double majorRadius, double minorRadius);
+TopoDS_Shape makeTube(double outerRadius, double innerRadius, double height);
+// Tall end at -X, sloping down to the plate at +X.
+TopoDS_Shape makeWedge(double width, double depth, double height);
+
 // Builds whichever primitive the spec describes.
 TopoDS_Shape buildShape(const PrimitiveSpec& spec);
 

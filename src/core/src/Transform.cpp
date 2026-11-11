@@ -75,9 +75,34 @@ Transform Transform::operator*(const Transform& rhs) const
     return r;
 }
 
+Vec3 halfExtents(const PrimitiveSpec& spec)
+{
+    return std::visit(
+        [](const auto& p) -> Vec3 {
+            using T = std::decay_t<decltype(p)>;
+            if constexpr (std::is_same_v<T, BoxSpec> || std::is_same_v<T, WedgeSpec>)
+                return {p.width / 2.0, p.depth / 2.0, p.height / 2.0};
+            else if constexpr (std::is_same_v<T, CylinderSpec>)
+                return {p.radiusX, p.radiusY, p.height / 2.0};
+            else if constexpr (std::is_same_v<T, SphereSpec>)
+                return {p.radius, p.radius, p.radius};
+            else if constexpr (std::is_same_v<T, ConeSpec>) {
+                const double r = std::max(p.radiusBottom, p.radiusTop);
+                return {r, r, p.height / 2.0};
+            } else if constexpr (std::is_same_v<T, TorusSpec>) {
+                const double r = p.majorRadius + p.minorRadius;
+                return {r, r, p.minorRadius};
+            } else {
+                static_assert(std::is_same_v<T, TubeSpec>, "halfExtents: unhandled primitive");
+                return {p.outerRadius, p.outerRadius, p.height / 2.0};
+            }
+        },
+        spec);
+}
+
 Vec3 pivotOf(const PrimitiveSpec& spec)
 {
-    return std::visit([](const auto& p) { return Vec3{0.0, 0.0, p.height / 2.0}; }, spec);
+    return {0.0, 0.0, halfExtents(spec)[2]};
 }
 
 Vec3 pivotOf(const Body& body)
@@ -185,10 +210,13 @@ Placement withRotation(const Body& body, const Vec3& anglesDeg, const Vec3& cent
 
 double dimension(const PrimitiveSpec& spec, int axis)
 {
-    if (const auto* box = std::get_if<BoxSpec>(&spec))
-        return axis == 0 ? box->width : axis == 1 ? box->depth : box->height;
-    const auto& cyl = std::get<CylinderSpec>(spec);
-    return axis == 0 ? cyl.radiusX : axis == 1 ? cyl.radiusY : cyl.height;
+    if (axis < 0 || axis > 2)
+        throw std::invalid_argument("axis must be 0, 1 or 2");
+    const Vec3 h = halfExtents(spec);
+    if (axis == 2)
+        return 2.0 * h[2];  // full height
+    // Sides: full width / depth for boxes and wedges, the radius for round shapes.
+    return isRoundFromAbove(spec) ? h[static_cast<std::size_t>(axis)] : 2.0 * h[static_cast<std::size_t>(axis)];
 }
 
 namespace {
@@ -198,7 +226,7 @@ Vec3 anchorFor(const PrimitiveSpec& spec, int axis, int side)
 {
     if (axis == 2)
         return side > 0 ? Vec3{0.0, 0.0, 0.0} : Vec3{0.0, 0.0, dimension(spec, 2)};  // the other end
-    if (std::holds_alternative<CylinderSpec>(spec))
+    if (isRoundFromAbove(spec))
         return {0.0, 0.0, 0.0};  // centre line, at the base
     Vec3 a{0.0, 0.0, 0.0};       // centre of the opposite side, at base level
     a[static_cast<std::size_t>(axis)] = -side * dimension(spec, axis) / 2.0;
@@ -207,25 +235,67 @@ Vec3 anchorFor(const PrimitiveSpec& spec, int axis, int side)
 
 void scaleAll(PrimitiveSpec& spec, double factor)
 {
-    std::visit(
-        [factor](auto& p) {
-            using T = std::decay_t<decltype(p)>;
-            if constexpr (std::is_same_v<T, BoxSpec>) {
-                p.width *= factor;
-                p.depth *= factor;
-                p.height *= factor;
-            } else {
-                p.radiusX *= factor;
-                p.radiusY *= factor;
-                p.height *= factor;
-            }
-        },
-        spec);
+    spec = scaled(spec, factor);
 }
 
 double smallestDimension(const PrimitiveSpec& spec)
 {
     return std::min({dimension(spec, 0), dimension(spec, 1), dimension(spec, 2)});
+}
+
+// Sets dimension(axis) to value, keeping the shape valid.
+void resizeOne(PrimitiveSpec& spec, int axis, double value, const ResizeOptions& options)
+{
+    const double minV = options.minValue;
+    std::visit(
+        [&](auto& p) {
+            using T = std::decay_t<decltype(p)>;
+            if constexpr (std::is_same_v<T, BoxSpec> || std::is_same_v<T, WedgeSpec>) {
+                (axis == 0 ? p.width : axis == 1 ? p.depth : p.height) = value;
+            } else if constexpr (std::is_same_v<T, CylinderSpec>) {
+                if (axis == 2) {
+                    p.height = value;
+                } else if (options.keepRound) {
+                    p.radiusX = value;
+                    p.radiusY = value;
+                } else {
+                    (axis == 0 ? p.radiusX : p.radiusY) = value;
+                }
+            } else if constexpr (std::is_same_v<T, SphereSpec>) {
+                p.radius = axis == 2 ? value / 2.0 : value;  // stays a sphere
+            } else if constexpr (std::is_same_v<T, ConeSpec>) {
+                if (axis == 2) {
+                    p.height = value;
+                } else {
+                    // The wider end gets the new radius; the other keeps its proportion.
+                    const double factor = value / std::max(p.radiusBottom, p.radiusTop);
+                    p.radiusBottom *= factor;
+                    p.radiusTop *= factor;
+                }
+            } else if constexpr (std::is_same_v<T, TorusSpec>) {
+                if (axis == 2) {
+                    // Thicker ring; the ring grows if needed to keep its hole.
+                    p.minorRadius = value / 2.0;
+                    p.majorRadius = std::max(p.majorRadius, p.minorRadius + minV);
+                } else {
+                    // Whole ring wider, same proportions.
+                    const double factor = value / (p.majorRadius + p.minorRadius);
+                    p.majorRadius *= factor;
+                    p.minorRadius *= factor;
+                }
+            } else {
+                static_assert(std::is_same_v<T, TubeSpec>, "resizeOne: unhandled primitive");
+                if (axis == 2) {
+                    p.height = value;
+                } else {
+                    // Same wall thickness; never thinner than the wall plus a hole.
+                    const double wall = p.outerRadius - p.innerRadius;
+                    p.outerRadius = std::max(value, wall + minV);
+                    p.innerRadius = p.outerRadius - wall;
+                }
+            }
+        },
+        spec);
 }
 
 }  // namespace
@@ -242,18 +312,8 @@ Body resizedFace(const Body& body, int axis, int side, double newValue, const Re
         double factor = value / dimension(body.spec, axis);
         factor = std::max(factor, options.minValue / smallestDimension(body.spec));
         scaleAll(result.spec, factor);
-    } else if (auto* box = std::get_if<BoxSpec>(&result.spec)) {
-        (axis == 0 ? box->width : axis == 1 ? box->depth : box->height) = value;
     } else {
-        auto& cyl = std::get<CylinderSpec>(result.spec);
-        if (axis == 2) {
-            cyl.height = value;
-        } else if (options.keepRound) {
-            cyl.radiusX = value;
-            cyl.radiusY = value;
-        } else {
-            (axis == 0 ? cyl.radiusX : cyl.radiusY) = value;
-        }
+        resizeOne(result.spec, axis, value, options);
     }
 
     // Keep the anchor fixed in the plate:

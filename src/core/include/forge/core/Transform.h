@@ -26,6 +26,9 @@ struct Transform {
     Transform operator*(const Transform& rhs) const;  // (this * rhs)(p) = this(rhs(p))
 };
 
+// Half the size of a primitive's bounding box along X, Y and Z (body coordinates).
+Vec3 halfExtents(const PrimitiveSpec& spec);
+
 // The point a body turns around, in its own coordinates: the centre of its
 // bounding box (every primitive is centred on X/Y with its base at Z = 0).
 Vec3 pivotOf(const PrimitiveSpec& spec);
@@ -61,8 +64,10 @@ Placement rotatedAboutPlateAxis(const Body& body, int axis, double degrees, cons
 // (body coordinates) stays where it is on the plate. Used for typed angles.
 Placement withRotation(const Body& body, const Vec3& anglesDeg, const Vec3& centre);
 
-// The value a face handle changes: box width / depth / height for axis 0 / 1 / 2;
-// cylinder radius X / radius Y / height.
+// The value a face handle changes. Axis 2: the full height. Axes 0 / 1: the full
+// width / depth of a box or wedge; the radius (along that axis) of a round shape
+// (cylinder radius X / Y, sphere radius, a cone's wider radius, a torus's outer
+// radius, a tube's outer radius).
 double dimension(const PrimitiveSpec& spec, int axis);
 
 struct ResizeOptions {

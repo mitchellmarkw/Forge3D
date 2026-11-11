@@ -54,18 +54,12 @@ json bodyToJson(const Body& b)
         j["pivot"] = b.boolean->pivot;
         return j;
     }
-    std::visit(
-        [&j](const auto& spec) {
-            using T = std::decay_t<decltype(spec)>;
-            if constexpr (std::is_same_v<T, BoxSpec>) {
-                j["type"] = "box";
-                j["parameters"] = {{"width", spec.width}, {"depth", spec.depth}, {"height", spec.height}};
-            } else {
-                j["type"] = "cylinder";
-                j["parameters"] = {{"radiusX", spec.radiusX}, {"radiusY", spec.radiusY}, {"height", spec.height}};
-            }
-        },
-        b.spec);
+    j["type"] = fileTypeName(b.spec);
+    json params = json::object();
+    const auto& fields = specFields(b.spec);
+    for (std::size_t i = 0; i < fields.size(); ++i)
+        params[fields[i].key] = specValue(b.spec, i);
+    j["parameters"] = std::move(params);
     return j;
 }
 
@@ -145,17 +139,25 @@ Body bodyFromJson(const json& j, std::size_t index, int version)
     const auto params = j.find("parameters");
     if (params == j.end() || !params->is_object())
         damaged(where + ": missing parameters");
-    if (t == "box")
-        b.spec = BoxSpec{number(*params, "width", where), number(*params, "depth", where),
-                         number(*params, "height", where)};
-    else if (t == "cylinder")
-        b.spec = version >= 3 ? CylinderSpec{number(*params, "radiusX", where), number(*params, "radiusY", where),
-                                             number(*params, "height", where)}
-                              : CylinderSpec{number(*params, "radius", where),  // round, before v3
-                                             number(*params, "height", where)};
-    else
-        throw FileError("This file contains a shape type this version of Forge3D does not know (\"" + t +
-                        "\").\nIt may have been made by a newer version.");
+    if (t == "cylinder" && version < 3) {
+        b.spec = CylinderSpec{number(*params, "radius", where), number(*params, "height", where)};  // round
+    } else {
+        // Find the primitive kind with this file name, then read its fields.
+        bool known = false;
+        for (std::size_t kind = 0; kind < kPrimitiveKindCount && !known; ++kind) {
+            PrimitiveSpec spec = defaultSpec(kind);
+            if (fileTypeName(spec) != t)
+                continue;
+            const auto& fields = specFields(spec);
+            for (std::size_t i = 0; i < fields.size(); ++i)
+                setSpecValue(spec, i, number(*params, fields[i].key, where));
+            b.spec = spec;
+            known = true;
+        }
+        if (!known)
+            throw FileError("This file contains a shape type this version of Forge3D does not know (\"" + t +
+                            "\").\nIt may have been made by a newer version.");
+    }
 
     if (b.name.empty())
         b.name = typeName(b.spec) + " " + std::to_string(b.id);

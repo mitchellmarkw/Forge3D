@@ -30,54 +30,21 @@ namespace forge {
 
 // ---- Free helpers ---------------------------------------------------------------
 
-std::string typeName(const PrimitiveSpec& spec)
-{
-    return std::visit(
-        [](const auto& p) -> std::string {
-            using T = std::decay_t<decltype(p)>;
-            if constexpr (std::is_same_v<T, BoxSpec>)
-                return "Box";
-            else
-                return "Cylinder";
-        },
-        spec);
-}
-
-std::string toString(BooleanOp op)
-{
-    switch (op) {
-    case BooleanOp::Merge: return "Merge";
-    case BooleanOp::Subtract: return "Subtract";
-    case BooleanOp::Intersect: return "Intersect";
-    }
-    return "Combine";
-}
-
-std::string typeName(const Body& body)
-{
-    return body.isBoolean() ? toString(body.boolean->op) : typeName(body.spec);
-}
-
 void validate(const PrimitiveSpec& spec)
 {
-    const auto positive = [](double v, const char* what) {
-        if (!(v > 0.0) || !std::isfinite(v))
-            throw std::invalid_argument(std::string(what) + " must be a positive number");
-    };
-    std::visit(
-        [&](const auto& p) {
-            using T = std::decay_t<decltype(p)>;
-            if constexpr (std::is_same_v<T, BoxSpec>) {
-                positive(p.width, "Width");
-                positive(p.depth, "Depth");
-                positive(p.height, "Height");
-            } else {
-                positive(p.radiusX, "Radius X");
-                positive(p.radiusY, "Radius Y");
-                positive(p.height, "Height");
-            }
-        },
-        spec);
+    const auto& fields = specFields(spec);
+    for (std::size_t i = 0; i < fields.size(); ++i) {
+        const double v = specValue(spec, i);
+        if (!std::isfinite(v) || v < 0.0 || (v == 0.0 && !fields[i].allowZero))
+            throw std::invalid_argument(std::string(fields[i].label) +
+                                        (fields[i].allowZero ? " must not be negative" : " must be a positive number"));
+    }
+    if (const auto* cone = std::get_if<ConeSpec>(&spec); cone && cone->radiusBottom == 0.0 && cone->radiusTop == 0.0)
+        throw std::invalid_argument("A cone needs at least one radius above 0");
+    if (const auto* torus = std::get_if<TorusSpec>(&spec); torus && !(torus->minorRadius < torus->majorRadius))
+        throw std::invalid_argument("Tube radius must be less than the ring radius");
+    if (const auto* tube = std::get_if<TubeSpec>(&spec); tube && !(tube->innerRadius < tube->outerRadius))
+        throw std::invalid_argument("Inner radius must be less than the outer radius");
 }
 
 bool isEmptySolid(const TopoDS_Shape& shape)
