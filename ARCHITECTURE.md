@@ -191,6 +191,23 @@ Viewport (mouse)  --leftPressed(ray, handle)-->  MainWindow drag controller
   cylinder (OCCT refuses that cone); the tube is a ring face extruded; the wedge is a
   right-triangle face extruded along Y.
 
+## Split (slice 4a)
+
+- A **Split result** is a combine result with `op = Split`, one operand and a plane
+  (`planePoint`, `planeNormal`, in the result's coordinates; the kept side is the one
+  the normal points to). Geometry: the part, placed, `BRepAlgoAPI_Common` with a huge
+  box on the kept side, then UnifySameDomain.
+- `splitBody()` (Split.h) previews both halves first and refuses, changing nothing, if
+  either is empty; then, in one macro, it either wraps the shape in one result or, for
+  both halves, adds a `duplicateTree()` copy and wraps each in a result.
+- Moving a cut later is `withSplitPlane()` + `EditBodyCommand`; the plane is given on
+  the plate and converted into the result's coordinates. `Document::setBoolean()`
+  changes a result's pivot / plane but never its parts.
+- The UI keeps the plane as tilts around X and Y plus an offset from the shape's
+  visible centre (`planeFromTilts()` / `tiltsOfPlane()`). The plane and arrow are extra
+  display items; `DisplayItem::alpha < 1` draws see-through items after the solids,
+  depth-tested but not depth-writing.
+
 ## Rendering
 
 `Document::mesh()` → `forge::Mesh` (positions, normals, indices) → `DisplayItem`

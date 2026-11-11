@@ -30,6 +30,9 @@ struct DisplayItem {
     QVector3D color{0.28f, 0.55f, 0.85f};
     bool selected = false;
     bool ghost = false;  // drawn see-through on top (a part inside a combined shape)
+    // Below 1: drawn see-through after the solids, still hidden behind them (the
+    // Split tool's plane). Not counted by Fit.
+    float alpha = 1.0f;
 };
 
 // The 3D view: draws the build plate and the scene, and handles navigation.

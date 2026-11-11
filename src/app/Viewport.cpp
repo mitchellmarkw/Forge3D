@@ -148,7 +148,7 @@ void Viewport::fitView()
 {
     Bounds all;
     for (const DisplayItem& item : m_items) {
-        if (!item.mesh || item.ghost)
+        if (!item.mesh || item.ghost || item.alpha < 1.0f)
             continue;
         const Bounds local = item.mesh->bounds();
         if (!local.valid)
@@ -425,9 +425,11 @@ void Viewport::paintGL()
 
     // Bodies: solid ones first, then see-through parts on top of them.
     m_meshShader->bind();
-    const auto drawItems = [&](bool ghosts) {
+    enum class Pass { Solid, Translucent, Ghost };
+    const auto drawItems = [&](Pass pass) {
         for (const DisplayItem& item : m_items) {
-            if (item.ghost != ghosts)
+            const Pass mine = item.ghost ? Pass::Ghost : item.alpha < 1.0f ? Pass::Translucent : Pass::Solid;
+            if (mine != pass)
                 continue;
             const auto found = m_gpu.find(item.id);
             if (found == m_gpu.end() || found->second->indexCount == 0)
@@ -438,17 +440,21 @@ void Viewport::paintGL()
             m_meshShader->setUniformValue("uNormalMatrix", modelView.normalMatrix());
             m_meshShader->setUniformValue("uColor", item.color);
             m_meshShader->setUniformValue("uSelected", item.selected ? 1.0f : 0.0f);
-            m_meshShader->setUniformValue("uAlpha", ghosts ? 0.45f : 1.0f);
+            m_meshShader->setUniformValue("uAlpha", pass == Pass::Ghost ? 0.45f : item.alpha);
             QOpenGLVertexArrayObject::Binder bind(found->second->vao.get());
             glDrawElements(GL_TRIANGLES, found->second->indexCount, GL_UNSIGNED_INT, nullptr);
         }
     };
-    drawItems(false);
-    // Ghosts are drawn over everything so a part hidden inside a result can be seen.
+    drawItems(Pass::Solid);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    // See-through items: hidden behind solids, but don't hide each other.
+    glDepthMask(GL_FALSE);
+    drawItems(Pass::Translucent);
+    glDepthMask(GL_TRUE);
+    // Ghosts are drawn over everything so a part hidden inside a result can be seen.
     glDisable(GL_DEPTH_TEST);
-    drawItems(true);
+    drawItems(Pass::Ghost);
     glEnable(GL_DEPTH_TEST);
     glDisable(GL_BLEND);
     m_meshShader->release();
