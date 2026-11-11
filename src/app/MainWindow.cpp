@@ -603,8 +603,8 @@ void MainWindow::onViewportClicked(const QVector3D& origin, const QVector3D& dir
 std::optional<view::GizmoTarget> MainWindow::gizmoTargetFor(ObjectId id) const
 {
     const Body* body = m_doc.find(id);
-    if (!body || !m_doc.isTopLevel(id))
-        return std::nullopt;  // parts inside a result are edited in Properties for now
+    if (!body)
+        return std::nullopt;
     const Transform t = m_doc.worldTransform(id);
     const Vec3 c = t.apply(m_doc.visibleCentre(id));  // combined shapes: the middle of what you see
     const auto axis = [&t](double x, double y, double z) {
@@ -615,7 +615,11 @@ std::optional<view::GizmoTarget> MainWindow::gizmoTargetFor(ObjectId id) const
     target.centre = QVector3D(static_cast<float>(c[0]), static_cast<float>(c[1]), static_cast<float>(c[2]));
     target.bodyAxes = {axis(1, 0, 0), axis(0, 1, 0), axis(0, 0, 1)};
     if (body->isBoolean()) {
-        target.resizable = false;  // resize a combined shape through its parts
+        // The box around what you see; resizing scales everything inside.
+        const Bounds b = shapeBounds(m_doc.shape(id));
+        const auto size = b.size();
+        target.halfExtents = QVector3D(size[0] / 2.0f, size[1] / 2.0f, size[2] / 2.0f);
+        target.resizable = b.valid;
     } else {
         const Vec3 h = halfExtents(body->spec);
         target.halfExtents = QVector3D(float(h[0]), float(h[1]), float(h[2]));
@@ -641,6 +645,20 @@ void MainWindow::preview(const Body& state)
     }
 }
 
+void MainWindow::previewAll(const std::vector<Body>& states)
+{
+    try {
+        for (const Body& b : states) {
+            m_doc.setSpec(b.id, b.spec);
+            if (b.boolean)
+                m_doc.setBoolean(b.id, *b.boolean);
+            m_doc.setPlacement(b.id, b.placement);
+        }
+    } catch (const std::exception& e) {
+        qWarning() << "Resize preview rejected:" << e.what();
+    }
+}
+
 void MainWindow::onLeftPressed(const QVector3D& origin, const QVector3D& direction,
                                const view::GizmoHandle& handle, const QPointF& pixel, Qt::KeyboardModifiers modifiers)
 {
@@ -660,6 +678,15 @@ void MainWindow::onLeftPressed(const QVector3D& origin, const QVector3D& directi
         m_dragState.before = *selected;
         m_dragState.handle = handle;
         m_dragState.frame = *frame;
+        if (const ObjectId parent = m_doc.parentOf(selected->id); parent != kInvalidId)
+            m_dragState.parentWorld = m_doc.worldTransform(parent);
+        if (handle.kind == view::GizmoHandle::Kind::Face && selected->isBoolean()) {
+            for (ObjectId id : m_doc.withDescendants(selected->id))
+                m_dragState.beforeAll.push_back(*m_doc.find(id));
+            m_dragState.snapshot = std::make_shared<Document>();
+            m_dragState.snapshot->replaceAll(m_doc.bodies());
+            m_dragState.localBounds = shapeBounds(m_doc.shape(selected->id));
+        }
         const view::Gizmo gizmo(m_viewport->camera(), QSizeF(m_viewport->width(), m_viewport->height()),
                                 m_dragState.frame, m_gizmoMode);
         const QVector3D dir = gizmo.direction(handle);
@@ -737,9 +764,9 @@ void MainWindow::onLeftDragged(const QVector3D& origin, const QVector3D& directi
         if (!s)
             return;
         const double delta = step(*s - d.startParam, kMoveStep);
-        double* coord = d.handle.axis == 0 ? &next.placement.x : d.handle.axis == 1 ? &next.placement.y
-                                                                                  : &next.placement.z;
-        *coord += delta;
+        Vec3 move{0.0, 0.0, 0.0};
+        move[static_cast<std::size_t>(d.handle.axis)] = delta;
+        next.placement = movedOnPlate(d.before, move, d.parentWorld);  // a part moves inside its shape
         status = tr("Move  %1 %2 mm").arg(QChar("XYZ"[d.handle.axis])).arg(delta, 0, 'f', 1);
         break;
     }
@@ -760,7 +787,7 @@ void MainWindow::onLeftDragged(const QVector3D& origin, const QVector3D& directi
         // Anticlockwise on screen is a positive turn when the axis points at the viewer.
         const float facing = QVector3D::dotProduct(axis, m_viewport->camera().eyePosition() - d.frame.centre);
         const double degrees = step(d.turned * (facing >= 0.0f ? 1.0 : -1.0), kTurnStep);
-        next.placement = rotatedAboutPlateAxis(d.before, d.handle.axis, degrees, d.turnCentre);
+        next.placement = rotatedAboutPlateAxis(d.before, d.handle.axis, degrees, d.turnCentre, d.parentWorld);
         status = tr("Rotate around %1  %2°").arg(QChar("XYZ"[d.handle.axis])).arg(degrees, 0, 'f', 1);
         break;
     }
@@ -770,6 +797,42 @@ void MainWindow::onLeftDragged(const QVector3D& origin, const QVector3D& directi
         const auto s = view::closestOnLine(origin, direction, d.frame.centre, dir);
         if (!s)
             return;
+        if (d.before.isBoolean()) {
+            // A combined shape: stretch everything inside, keeping the opposite side still.
+            const std::size_t axis = static_cast<std::size_t>(d.handle.axis);
+            const auto size = d.localBounds.size();
+            const double was = size[axis];
+            double value = was + (*s - d.startParam);
+            if (snap)
+                value = view::snapTo(value, kSizeStep);
+            value = std::max(value, kSizeStep);
+            const double factor = value / was;
+            const auto c = d.localBounds.center();
+            Vec3 anchor{c[0], c[1], c[2]};
+            anchor[axis] -= d.handle.side * was / 2.0;
+            Vec3 factors{1.0, 1.0, 1.0};
+            factors[axis] = factor;
+            QString note;
+            std::vector<Body> after;
+            try {
+                after = scaledTree(*d.snapshot, d.before.id, m_uniform ? Vec3{factor, factor, factor} : factors, anchor);
+            } catch (const NotScalable& e) {
+                // Can't stretch one way only: scale evenly instead, and say why.
+                after = scaledTree(*d.snapshot, d.before.id, {factor, factor, factor}, anchor);
+                note = tr("   (scaled evenly: %1)").arg(QString::fromUtf8(e.what()));
+            } catch (const std::exception& e) {
+                statusBar()->showMessage(QString::fromUtf8(e.what()));
+                return;
+            }
+            d.moved = true;
+            previewAll(after);
+            statusBar()->showMessage(tr("Resize  %1 %2 mm   (x%3)")
+                                         .arg(QChar("XYZ"[axis]))
+                                         .arg(value, 0, 'f', 1)
+                                         .arg(factor, 0, 'f', 2) +
+                                     (m_uniform ? tr("   (uniform)") : QString()) + note + freeHint);
+            return;
+        }
         double value = dimension(d.before.spec, d.handle.axis) + (*s - d.startParam);
         if (snap)
             value = std::max(kSizeStep, view::snapTo(value, kSizeStep));
@@ -818,6 +881,23 @@ void MainWindow::onLeftReleased(bool wasDrag)
     if (d.kind == Drag::Kind::SplitPlane)
         return;  // the plane moved; nothing is cut until Split is clicked
 
+    if (!d.beforeAll.empty()) {
+        // Resized a combined shape: one undo step for every body that changed.
+        std::vector<Body> before, after;
+        for (const Body& b : d.beforeAll) {
+            const Body* now = m_doc.find(b.id);
+            if (now && !(*now == b)) {
+                before.push_back(b);
+                after.push_back(*now);
+            }
+        }
+        if (before.empty())
+            return;
+        if (!run(std::make_unique<EditBodiesCommand>(before, after, "Resize")))
+            previewAll(d.beforeAll);
+        return;
+    }
+
     const Body* now = m_doc.find(d.before.id);
     if (!now || *now == d.before)
         return;  // dragged back to where it started
@@ -835,6 +915,8 @@ void MainWindow::cancelDrag()
     m_viewport->setActiveHandle({});
     if (d.kind == Drag::Kind::SplitPlane)
         m_splitPanel->setOffset(d.startOffset);
+    else if (!d.beforeAll.empty() && d.moved)
+        previewAll(d.beforeAll);
     else if (d.kind != Drag::Kind::None && d.moved)
         preview(d.before);
     statusBar()->showMessage(tr("Drag cancelled"), 2000);

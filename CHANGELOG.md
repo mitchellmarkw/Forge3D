@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.8.0 — Slice 4b: handles everywhere (2026-11-11)
+
+- **Parts inside combined shapes get handles.** Select a part in Objects (e.g. the
+  cylinder inside "Merge 1"): Move, Rotate and Resize (W / E / R) work on it in place,
+  along the plate's directions, and the combined shape rebuilds as you drag. Esc during
+  a drag puts it back; one Undo per drag.
+- **Combined shapes get Resize handles.** Drag a face handle to stretch the whole shape;
+  the opposite side stays still. Everything inside stretches with it (a round peg on a
+  block stretched along X becomes oval). With **Uniform** on, it scales evenly.
+- Stretching one way only isn't possible when a part inside is turned at an odd angle
+  (or for a torus across its ring): the shape then scales evenly and the status bar
+  says why.
+- Split halves stretch with their cut.
+- Core: `scaledTree()` / `scaledSpec()` (Scale.h), `EditBodiesCommand`,
+  `movedOnPlate()` and `rotatedAboutPlateAxis()` for parts inside a shape.
+- 129 unit tests (6 new).
+
 ## 0.7.1 — Drag the Split plane (2026-11-11)
 
 - In the Split tool, **drag the yellow plane** (or its arrow) to slide it along its
