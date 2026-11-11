@@ -141,8 +141,24 @@ Viewport (mouse)  --leftPressed(ray, handle)-->  MainWindow drag controller
   cached. A result's shape = its parts' shapes, each moved by its `localTransform`, then
   Fuse / Cut / Common (BRepAlgoAPI), then `ShapeUpgrade_UnifySameDomain`. Changing a part's
   spec or placement clears the caches of every result above it (`invalidate()`).
-- **Pivot:** a result turns around the pivot stored when it was made (the centre of its
-  parts then), so editing a part never makes a tilted result jump.
+- **Pivot (stored):** the placement of a result is defined about the pivot stored when it
+  was made, so editing a part never makes a tilted result jump.
+- **Turning centre (slice 3c2):** rotation (gizmo rings, typed angles) turns a result
+  about `Document::visibleCentre(id)`, the centre of the exact bounding box of its solid,
+  so cut-away parts don't count. `rotatedAboutPlateAxis(body, axis, deg, centre)` and
+  `withRotation(body, angles, centre)` build the new transform with that point fixed and
+  convert back with `placementFromTransform(t, pivotOf(body))`, so the stored pivot never
+  has to change. New results store their visible centre as the pivot. The gizmo is drawn
+  at the visible centre.
+- **Bounds:** `worldBounds(id)` is exact (`BRepBndLib::AddOptimal` on the moved solid,
+  not the mesh), so a tilted cylinder's box hugs it. `shapeBounds()` does the same for any
+  shape.
+- **Align Shapes** (`Align.h`): `alignedPlacement(doc, fixed, moving, mode)` moves only the
+  position of `moving`, using both world bounding boxes. The facing axis is the one with
+  the largest centre gap relative to the combined half sizes (ties: Z, then Y). Meet At
+  Face slides along it until the boxes touch; Face Center modes put the moving centre on
+  the fixed box's face on the side it is already on (halfway in); Center modes line up
+  centres. The app applies all moves in one macro (one Undo).
 - **Commands:** `CombineCommand` inserts the result (its parts leave the plate);
   undo removes it (they come back). `SeparateCommand` removes a top-level result and gives
   each part the placement that keeps it where it was (`placementFromTransform()`).

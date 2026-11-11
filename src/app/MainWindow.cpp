@@ -30,6 +30,8 @@
 #include <QStatusBar>
 #include <QTimer>
 #include <QToolBar>
+#include <QToolButton>
+#include <QMenu>
 #include <QUrl>
 #include <QtDebug>
 
@@ -255,6 +257,28 @@ void MainWindow::createActions()
     m_separate->setToolTip(tr("Separate: break a combined shape back into its parts, where they are"));
     connect(m_separate, &QAction::triggered, this, &MainWindow::separateSelected);
 
+    // Align Shapes: the first shape selected stays put; the others move to it.
+    m_alignMenu = new QMenu(tr("Align Shapes"), this);
+    m_alignMenu->setToolTipsVisible(true);
+    m_alignMenu->menuAction()->setToolTip(
+        tr("Align Shapes: select shape 1, Ctrl+click shape 2, then pick how shape 2 lines up with shape 1"));
+    const auto addAlign = [this](AlignMode mode, const QString& tip) {
+        QAction* a = m_alignMenu->addAction(QString::fromStdString(toString(mode)));
+        a->setToolTip(tip);
+        connect(a, &QAction::triggered, this, [this, mode] { alignSelected(mode); });
+    };
+    addAlign(AlignMode::MeetAtFace, tr("Slide shape 2 until its facing side touches shape 1"));
+    m_alignMenu->addSeparator();
+    addAlign(AlignMode::FaceCentreXYZ, tr("Put shape 2's centre on the middle of shape 1's facing face"));
+    addAlign(AlignMode::FaceCentreX, tr("Along X: put shape 2's centre on shape 1's facing side (halfway in)"));
+    addAlign(AlignMode::FaceCentreY, tr("Along Y: put shape 2's centre on shape 1's facing side (halfway in)"));
+    addAlign(AlignMode::FaceCentreZ, tr("Along Z: put shape 2's centre on shape 1's top or bottom (halfway in)"));
+    m_alignMenu->addSeparator();
+    addAlign(AlignMode::CentreXYZ, tr("Put shape 2's centre on shape 1's centre"));
+    addAlign(AlignMode::CentreX, tr("Line up the centres along X"));
+    addAlign(AlignMode::CentreY, tr("Line up the centres along Y"));
+    addAlign(AlignMode::CentreZ, tr("Line up the centres along Z (height)"));
+
     m_clear = new QAction(tr("Clear Plate"), this);
     m_clear->setToolTip(tr("Delete every body (one Undo brings them all back)"));
     connect(m_clear, &QAction::triggered, this, &MainWindow::clearPlate);
@@ -296,6 +320,7 @@ void MainWindow::createMenus()
     edit->addAction(m_subtract);
     edit->addAction(m_intersect);
     edit->addAction(m_separate);
+    edit->addMenu(m_alignMenu);
 
     QMenu* view = menuBar()->addMenu(tr("&View"));
     view->addAction(m_fit);
@@ -338,6 +363,15 @@ void MainWindow::createToolBar()
     bar->addAction(m_subtract);
     bar->addAction(m_intersect);
     bar->addAction(m_separate);
+    bar->addSeparator();
+    {
+        auto* alignButton = new QToolButton(bar);
+        alignButton->setDefaultAction(m_alignMenu->menuAction());
+        alignButton->setPopupMode(QToolButton::InstantPopup);
+        alignButton->setToolButtonStyle(Qt::ToolButtonTextOnly);
+        alignButton->setObjectName(QStringLiteral("AlignShapesButton"));
+        bar->addWidget(alignButton);
+    }
     bar->addSeparator();
     bar->addAction(m_delete);
     bar->addAction(m_clear);
@@ -394,7 +428,21 @@ void MainWindow::createDocks()
     });
     connect(m_properties, &PropertiesPanel::placementRequested, this,
             [this](ObjectId id, const Placement& placement) {
-                run(std::make_unique<SetPlacementCommand>(id, placement, /*mergeable=*/false));
+                Placement wanted = placement;
+                const Body* body = m_doc.find(id);
+                const bool turned = body && (placement.rotationX != body->placement.rotationX ||
+                                             placement.rotationY != body->placement.rotationY ||
+                                             placement.rotationZ != body->placement.rotationZ);
+                if (turned && body->isBoolean()) {
+                    // A combined shape turns about the middle of what you see.
+                    Body moved = *body;
+                    moved.placement.x = placement.x;
+                    moved.placement.y = placement.y;
+                    moved.placement.z = placement.z;
+                    wanted = withRotation(moved, {placement.rotationX, placement.rotationY, placement.rotationZ},
+                                          m_doc.visibleCentre(id));
+                }
+                run(std::make_unique<SetPlacementCommand>(id, wanted, /*mergeable=*/false));
             });
 
     // Let the user bring closed panels back.
@@ -497,7 +545,7 @@ std::optional<view::GizmoTarget> MainWindow::gizmoTargetFor(ObjectId id) const
     if (!body || !m_doc.isTopLevel(id))
         return std::nullopt;  // parts inside a result are edited in Properties for now
     const Transform t = m_doc.worldTransform(id);
-    const Vec3 c = t.apply(pivotOf(*body));
+    const Vec3 c = t.apply(m_doc.visibleCentre(id));  // combined shapes: the middle of what you see
     const auto axis = [&t](double x, double y, double z) {
         const Vec3 d = t.applyDirection({x, y, z});
         return QVector3D(static_cast<float>(d[0]), static_cast<float>(d[1]), static_cast<float>(d[2]));
@@ -567,6 +615,7 @@ void MainWindow::onLeftPressed(const QVector3D& origin, const QVector3D& directi
             m_dragState.kind = Drag::Kind::Ring;
             m_dragState.centrePixel = *centre;
             m_dragState.lastPixel = pixel;
+            m_dragState.turnCentre = m_doc.visibleCentre(m_dragState.before.id);
             break;
         }
         case view::GizmoHandle::Kind::None:
@@ -636,7 +685,7 @@ void MainWindow::onLeftDragged(const QVector3D& origin, const QVector3D& directi
         // Anticlockwise on screen is a positive turn when the axis points at the viewer.
         const float facing = QVector3D::dotProduct(axis, m_viewport->camera().eyePosition() - d.frame.centre);
         const double degrees = step(d.turned * (facing >= 0.0f ? 1.0 : -1.0), kTurnStep);
-        next.placement = rotatedAboutPlateAxis(d.before, d.handle.axis, degrees);
+        next.placement = rotatedAboutPlateAxis(d.before, d.handle.axis, degrees, d.turnCentre);
         status = tr("Rotate around %1  %2°").arg(QChar("XYZ"[d.handle.axis])).arg(degrees, 0, 'f', 1);
         break;
     }
@@ -784,8 +833,10 @@ void MainWindow::combineSelected(BooleanOp op)
 
     // Check the result first: an empty result (e.g. Intersect of shapes that don't
     // touch) would vanish from the plate, which looks like a bug.
+    TopoDS_Shape previewShape;
     try {
-        if (isEmptySolid(m_doc.previewCombine(op, m_selection))) {
+        previewShape = m_doc.previewCombine(op, m_selection);
+        if (isEmptySolid(previewShape)) {
             QMessageBox::information(this, tr("Forge3D"),
                                      op == BooleanOp::Intersect
                                          ? tr("These shapes don't overlap, so Intersect would leave nothing.")
@@ -804,21 +855,68 @@ void MainWindow::combineSelected(BooleanOp op)
     BooleanSpec spec;
     spec.op = op;
     spec.operands = m_selection;
-    // Turn around the middle of everything being combined.
-    Bounds all;
-    for (ObjectId id : m_selection) {
-        const Bounds b = m_doc.worldBounds(id);
-        if (b.valid) {
-            all.expand(b.min[0], b.min[1], b.min[2]);
-            all.expand(b.max[0], b.max[1], b.max[2]);
-        }
-    }
-    const auto centre = all.center();
+    // Turn around the middle of what you will see (cut-away parts don't count).
+    // Rotation always uses the visible centre; this keeps the stored pivot the same.
+    const Bounds visible = shapeBounds(previewShape);
+    const auto centre = visible.center();
     spec.pivot = {centre[0], centre[1], centre[2]};
     result.boolean = spec;
     const ObjectId id = result.id;
     if (run(std::make_unique<CombineCommand>(std::move(result))))
         setSelection(id);
+}
+
+void MainWindow::alignSelected(AlignMode mode)
+{
+    const QString name = QString::fromStdString(toString(mode));
+    if (m_selection.size() < 2) {
+        statusBar()->showMessage(tr("%1: select shape 1, then Ctrl+click the shape to move.").arg(name), 6000);
+        return;
+    }
+    for (ObjectId id : m_selection) {
+        if (!m_doc.isTopLevel(id)) {
+            statusBar()->showMessage(tr("Only shapes on the plate can be aligned; '%1' is a part of another "
+                                        "shape.").arg(QString::fromStdString(m_doc.find(id)->name)), 6000);
+            return;
+        }
+    }
+
+    // Work out every move first, against shape 1 where it is now.
+    const ObjectId fixed = m_selection.front();
+    std::vector<std::pair<ObjectId, Placement>> moves;
+    try {
+        for (std::size_t i = 1; i < m_selection.size(); ++i) {
+            const ObjectId id = m_selection[i];
+            const Placement p = alignedPlacement(m_doc, fixed, id, mode);
+            if (!(p == m_doc.find(id)->placement))
+                moves.emplace_back(id, p);
+        }
+    } catch (const std::exception& e) {
+        QMessageBox::warning(this, tr("Forge3D"), tr("%1 did not work:\n%2").arg(name, QString::fromUtf8(e.what())));
+        return;
+    }
+    if (moves.empty()) {
+        statusBar()->showMessage(tr("%1: already lined up.").arg(name), 4000);
+        return;
+    }
+
+    // One Undo step for the lot.
+    m_stack.beginMacro(name.toStdString());
+    try {
+        for (const auto& [id, p] : moves)
+            m_stack.execute(std::make_unique<SetPlacementCommand>(id, p, /*mergeable=*/false));
+    } catch (const std::exception& e) {
+        qWarning() << "Align stopped early:" << e.what();
+    }
+    m_stack.endMacro();
+    qInfo().noquote() << "Command:" << QString::fromStdString(m_stack.undoLabel());
+    statusBar()->showMessage(tr("%1: moved %2 to '%3'.")
+                                 .arg(name)
+                                 .arg(moves.size() == 1
+                                          ? QStringLiteral("'%1'").arg(QString::fromStdString(m_doc.find(moves.front().first)->name))
+                                          : tr("%1 shapes").arg(moves.size()))
+                                 .arg(QString::fromStdString(m_doc.find(fixed)->name)),
+                             5000);
 }
 
 void MainWindow::separateSelected()
@@ -1052,7 +1150,8 @@ void MainWindow::refreshScene()
         }
     } else if (m_selection.size() > 1) {
         context = tr("%1 shapes selected. Use Merge, Subtract or Intersect to combine them; for Subtract, "
-                     "the first one you picked ('%2') is kept.")
+                     "the first one you picked ('%2') is kept.\n\nAlign Shapes moves the others to line up "
+                     "with '%2', which stays put.")
                       .arg(m_selection.size())
                       .arg(QString::fromStdString(m_doc.find(m_selection.front())->name));
     }
@@ -1071,6 +1170,7 @@ void MainWindow::refreshScene()
     for (QAction* a : {m_merge, m_subtract, m_intersect})
         a->setEnabled(m_selection.size() >= 2 && allTopLevel);
     m_separate->setEnabled(selected && selected->isBoolean() && m_doc.isTopLevel(selected->id));
+    m_alignMenu->menuAction()->setEnabled(m_selection.size() >= 2 && allTopLevel);
     m_clear->setEnabled(!m_doc.empty());
 }
 

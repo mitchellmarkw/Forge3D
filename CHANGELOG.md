@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.5.1 — Turning centre and Align Shapes (2026-11-11)
+
+- **Combined shapes turn about what you see.** Gizmo rings and typed angles turn a
+  Merge, Subtract or Intersect result about the centre of its actual solid; cut-away
+  shapes don't count. A cube with a taller cylinder subtracted turns about the cube's
+  middle. The gizmo sits there too.
+- **Align Shapes** (toolbar dropdown and Edit menu). Select shape 1, Ctrl+click shape 2
+  (or more), then pick: **Meet At Face**; **Align Face Center XYZ / X / Y / Z** (halfway
+  in); **Center XYZ / X / Y / Z**. Shape 1 stays put. One Undo step per align.
+- Shape bounds are now exact for tilted shapes, so **Sit on plate** puts a tilted cylinder
+  exactly on the plate.
+- Core: `Document::visibleCentre()`, `shapeBounds()`, `withRotation()`, a
+  `rotatedAboutPlateAxis()` overload taking a centre, and `Align.h`.
+- 104 unit tests (8 new).
+
 ## 0.5.0 — Slice 3c: combine shapes (2026-11-11)
 
 - **Multi-select**: Ctrl+click in the view or the Objects list adds or removes shapes.
