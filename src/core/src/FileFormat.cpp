@@ -123,10 +123,10 @@ Body bodyFromJson(const json& j, std::size_t index, int version)
         const auto operands = j.find("operands");
         if (operands == j.end() || !operands->is_array())
             damaged(where + ": missing operands");
-        for (const auto& id : *operands) {
-            if (!id.is_number_unsigned())
+        for (const auto& operand : *operands) {
+            if (!operand.is_number_unsigned())
                 damaged(where + ": bad operand id");
-            spec.operands.push_back(id.get<ObjectId>());
+            spec.operands.push_back(operand.get<ObjectId>());
         }
         const auto pivot = j.find("pivot");
         if (pivot == j.end() || !pivot->is_array() || pivot->size() != 3)
