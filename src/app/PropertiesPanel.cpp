@@ -6,6 +6,7 @@
 #include <QGroupBox>
 #include <QLabel>
 #include <QLineEdit>
+#include <QPushButton>
 #include <QSignalBlocker>
 #include <QStackedWidget>
 #include <QVBoxLayout>
@@ -100,23 +101,43 @@ PropertiesPanel::PropertiesPanel(QWidget* parent) : QWidget(parent)
     // Position
     auto* posGroup = new QGroupBox(tr("Position"));
     auto* posForm = new QFormLayout(posGroup);
-    m_x = makeSpin(-kMaxOffset, kMaxOffset, tr(" mm"), 2, tr("Centre position along X"));
-    m_y = makeSpin(-kMaxOffset, kMaxOffset, tr(" mm"), 2, tr("Centre position along Y"));
-    m_z = makeSpin(-kMaxOffset, kMaxOffset, tr(" mm"), 2, tr("Height of the bottom above the plate"));
-    m_rotation = makeSpin(-360.0, 360.0, tr(" °"), 1, tr("Turn around the vertical axis"));
+    m_x = makeSpin(-kMaxOffset, kMaxOffset, tr(" mm"), 2, tr("Where the centre of the base sits, along X"));
+    m_y = makeSpin(-kMaxOffset, kMaxOffset, tr(" mm"), 2, tr("Where the centre of the base sits, along Y"));
+    m_z = makeSpin(-kMaxOffset, kMaxOffset, tr(" mm"), 2,
+                   tr("Height of the base above the plate (before any tilt)"));
     posForm->addRow(tr("X:"), m_x);
     posForm->addRow(tr("Y:"), m_y);
-    posForm->addRow(tr("Lift (Z):"), m_z);
-    posForm->addRow(tr("Rotation:"), m_rotation);
+    posForm->addRow(tr("Z (up):"), m_z);
+    auto* sit = new QPushButton(tr("Sit on plate"));
+    sit->setToolTip(tr("Move the body up or down so its lowest point touches the plate"));
+    posForm->addRow(QString(), sit);
     layout->addWidget(posGroup);
+
+    // Rotation
+    auto* rotGroup = new QGroupBox(tr("Rotation"));
+    auto* rotForm = new QFormLayout(rotGroup);
+    const QString order = tr("Turns are applied X first, then Y, then Z, around the body's centre.");
+    m_rotX = makeSpin(-360.0, 360.0, tr(" °"), 1, tr("Tip forward or back (around the X axis). ") + order);
+    m_rotY = makeSpin(-360.0, 360.0, tr(" °"), 1, tr("Tip left or right (around the Y axis). ") + order);
+    m_rotZ = makeSpin(-360.0, 360.0, tr(" °"), 1, tr("Turn on the plate (around the Z axis). ") + order);
+    for (QDoubleSpinBox* spin : {m_rotX, m_rotY, m_rotZ})
+        spin->setWrapping(true);
+    rotForm->addRow(tr("Around X:"), m_rotX);
+    rotForm->addRow(tr("Around Y:"), m_rotY);
+    rotForm->addRow(tr("Around Z:"), m_rotZ);
+    layout->addWidget(rotGroup);
     layout->addStretch(1);
     m_pages->addWidget(page);
 
     connect(m_name, &QLineEdit::editingFinished, this, &PropertiesPanel::commitName);
     for (QDoubleSpinBox* spin : {m_boxWidth, m_boxDepth, m_boxHeight, m_cylRadius, m_cylHeight})
         connect(spin, &QDoubleSpinBox::valueChanged, this, &PropertiesPanel::commitSpec);
-    for (QDoubleSpinBox* spin : {m_x, m_y, m_z, m_rotation})
+    for (QDoubleSpinBox* spin : {m_x, m_y, m_z, m_rotX, m_rotY, m_rotZ})
         connect(spin, &QDoubleSpinBox::valueChanged, this, &PropertiesPanel::commitPlacement);
+    connect(sit, &QPushButton::clicked, this, [this] {
+        if (m_body)
+            emit sitOnPlateRequested(m_body->id);
+    });
 
     setBody(nullptr);
 }
@@ -138,7 +159,7 @@ void PropertiesPanel::setBody(const Body* body)
 
     // Filling the fields must not send edit requests back.
     const QSignalBlocker b0(m_name), b1(m_boxWidth), b2(m_boxDepth), b3(m_boxHeight), b4(m_cylRadius),
-        b5(m_cylHeight), b6(m_x), b7(m_y), b8(m_z), b9(m_rotation);
+        b5(m_cylHeight), b6(m_x), b7(m_y), b8(m_z), b9(m_rotX), b10(m_rotY), b11(m_rotZ);
 
     if (!m_name->hasFocus() || m_name->text() != QString::fromStdString(body->name))
         m_name->setText(QString::fromStdString(body->name));
@@ -159,7 +180,9 @@ void PropertiesPanel::setBody(const Body* body)
     m_x->setValue(body->placement.x);
     m_y->setValue(body->placement.y);
     m_z->setValue(body->placement.z);
-    m_rotation->setValue(body->placement.rotationZ);
+    m_rotX->setValue(body->placement.rotationX);
+    m_rotY->setValue(body->placement.rotationY);
+    m_rotZ->setValue(body->placement.rotationZ);
 }
 
 void PropertiesPanel::commitName()
@@ -198,7 +221,13 @@ void PropertiesPanel::commitPlacement()
 {
     if (!m_body)
         return;
-    const Placement p{m_x->value(), m_y->value(), m_z->value(), m_rotation->value()};
+    Placement p;
+    p.x = m_x->value();
+    p.y = m_y->value();
+    p.z = m_z->value();
+    p.rotationX = m_rotX->value();
+    p.rotationY = m_rotY->value();
+    p.rotationZ = m_rotZ->value();
     if (!(p == m_body->placement))
         emit placementRequested(m_body->id, p);
 }

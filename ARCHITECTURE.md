@@ -79,6 +79,12 @@ UI action ──> Command ──> CommandStack::execute() ──> Command::redo(
   characters work; it is written to `<name>.saving` and then renamed over the target.
   Readers reject newer `formatVersion`s and unknown shape types with a clear message.
   When the format changes, bump `kFormatVersion` and keep reading older versions.
+- **Placement → transform:** `placementTransform()` (`core/Transform.h`) is the single
+  definition of where a body is: translate to (x, y, z), then rotate about the body's centre
+  (`pivotOf(spec)`), X first, then Y, then Z, about fixed axes (R = Rz·Ry·Rx). The viewport's
+  model matrix, `Document::worldBounds()` and `pick()` all use it.
+- **Format history:** v1 (0.3.0) stored only rotationZ; v2 (0.3.1) adds rotationX and
+  rotationY. `fromJson` reads both.
 - Opening replaces all bodies with `Document::replaceAll()` (checks everything first) and
   clears the undo history.
 

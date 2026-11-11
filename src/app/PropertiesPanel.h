@@ -32,6 +32,7 @@ signals:
     void renameRequested(ObjectId id, const QString& name);
     void specRequested(ObjectId id, const PrimitiveSpec& spec);
     void placementRequested(ObjectId id, const Placement& placement);
+    void sitOnPlateRequested(ObjectId id);
 
 private:
     QDoubleSpinBox* makeLength(const QString& tip);
@@ -56,7 +57,9 @@ private:
     QDoubleSpinBox* m_x = nullptr;
     QDoubleSpinBox* m_y = nullptr;
     QDoubleSpinBox* m_z = nullptr;
-    QDoubleSpinBox* m_rotation = nullptr;
+    QDoubleSpinBox* m_rotX = nullptr;
+    QDoubleSpinBox* m_rotY = nullptr;
+    QDoubleSpinBox* m_rotZ = nullptr;
 };
 
 }  // namespace forge::app

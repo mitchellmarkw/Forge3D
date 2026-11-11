@@ -13,6 +13,7 @@ add_library(forge_core STATIC
     include/forge/core/Picking.h
     include/forge/core/Primitives.h
     include/forge/core/Tessellator.h
+    include/forge/core/Transform.h
     src/CommandStack.cpp
     src/Commands.cpp
     src/Document.cpp
@@ -21,6 +22,7 @@ add_library(forge_core STATIC
     src/Picking.cpp
     src/Primitives.cpp
     src/Tessellator.cpp
+    src/Transform.cpp
 )
 add_library(Forge3D::core ALIAS forge_core)
 

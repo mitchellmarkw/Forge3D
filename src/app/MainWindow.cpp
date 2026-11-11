@@ -8,6 +8,7 @@
 
 #include "forge/core/FileFormat.h"
 #include "forge/core/Picking.h"
+#include "forge/core/Transform.h"
 
 #include <QAction>
 #include <QApplication>
@@ -54,12 +55,16 @@ const std::array<QVector3D, 6> kPalette{
 const QString kFileFilter = QObject::tr("Forge3D model (*.f3d)");
 const QString kLastFolderKey = QStringLiteral("files/lastFolder");
 
-QMatrix4x4 modelMatrix(const Placement& p)
+// The same transform the core uses for bounds and picking, so what you see is
+// exactly what you click.
+QMatrix4x4 modelMatrix(const Body& body)
 {
-    QMatrix4x4 m;
-    m.translate(static_cast<float>(p.x), static_cast<float>(p.y), static_cast<float>(p.z));
-    m.rotate(static_cast<float>(p.rotationZ), 0.0f, 0.0f, 1.0f);
-    return m;
+    const Transform t = placementTransform(body.placement, body.spec);
+    const auto f = [&t](int r, int c) { return static_cast<float>(t.m[r][c]); };
+    return QMatrix4x4(f(0, 0), f(0, 1), f(0, 2), f(0, 3),  //
+                      f(1, 0), f(1, 1), f(1, 2), f(1, 3),  //
+                      f(2, 0), f(2, 1), f(2, 2), f(2, 3),  //
+                      0.0f, 0.0f, 0.0f, 1.0f);
 }
 
 double footprintWidth(const PrimitiveSpec& spec)
@@ -284,6 +289,15 @@ void MainWindow::createDocks()
     });
     connect(m_properties, &PropertiesPanel::specRequested, this, [this](ObjectId id, const PrimitiveSpec& spec) {
         run(std::make_unique<SetSpecCommand>(id, spec));
+    });
+    connect(m_properties, &PropertiesPanel::sitOnPlateRequested, this, [this](ObjectId id) {
+        try {
+            const Placement resting = sitOnPlate(m_doc, id);
+            if (!(resting == m_doc.find(id)->placement))
+                run(std::make_unique<SetPlacementCommand>(id, resting, /*mergeable=*/false));
+        } catch (const std::exception& e) {
+            qWarning() << "Sit on plate failed:" << e.what();
+        }
     });
     connect(m_properties, &PropertiesPanel::placementRequested, this,
             [this](ObjectId id, const Placement& placement) {
@@ -535,7 +549,7 @@ void MainWindow::refreshScene()
             DisplayItem item;
             item.id = body.id;
             item.mesh = m_doc.mesh(body.id);  // tessellates only if the shape changed
-            item.model = modelMatrix(body.placement);
+            item.model = modelMatrix(body);
             item.color = kPalette.at(static_cast<std::size_t>((body.id - 1) % kPalette.size()));
             item.selected = body.id == m_selected;
             triangles += item.mesh->triangleCount();

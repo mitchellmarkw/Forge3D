@@ -3,6 +3,7 @@
 
 #include "forge/core/Primitives.h"
 #include "forge/core/Tessellator.h"
+#include "forge/core/Transform.h"
 
 #include <algorithm>
 #include <cmath>
@@ -56,6 +57,18 @@ Placement suggestPlacement(const Document& doc, double footprintWidth, double ga
         return {};
     Placement p;
     p.x = static_cast<double>(all.max[0]) + gap + footprintWidth / 2.0;
+    return p;
+}
+
+Placement sitOnPlate(const Document& doc, ObjectId id)
+{
+    const Body* body = doc.find(id);
+    if (!body)
+        throw std::out_of_range("No body with id " + std::to_string(id));
+    Placement p = body->placement;
+    const Bounds wb = doc.worldBounds(id);
+    if (wb.valid)
+        p.z -= static_cast<double>(wb.min[2]);
     return p;
 }
 
@@ -137,7 +150,8 @@ void Document::replaceAll(std::vector<Body> bodies)
         if (!ids.insert(b.id).second)
             throw std::invalid_argument("Body id " + std::to_string(b.id) + " appears twice");
         validate(b.spec);
-        for (double v : {b.placement.x, b.placement.y, b.placement.z, b.placement.rotationZ})
+        for (double v : {b.placement.x, b.placement.y, b.placement.z, b.placement.rotationX,
+                         b.placement.rotationY, b.placement.rotationZ})
             if (!std::isfinite(v))
                 throw std::invalid_argument("Body '" + b.name + "' has an invalid placement");
         highest = std::max(highest, b.id);
@@ -160,7 +174,8 @@ void Document::replaceAll(std::vector<Body> bodies)
 
 void Document::setPlacement(ObjectId id, const Placement& placement)
 {
-    for (double v : {placement.x, placement.y, placement.z, placement.rotationZ})
+    for (double v : {placement.x, placement.y, placement.z, placement.rotationX, placement.rotationY,
+                     placement.rotationZ})
         if (!std::isfinite(v))
             throw std::invalid_argument("Placement values must be finite numbers");
     Body& body = require(id);
@@ -218,16 +233,12 @@ Bounds Document::worldBounds(ObjectId id) const
     if (!local.valid)
         return world;
 
-    const Placement& p = body->placement;
-    const double a = p.rotationZ * std::numbers::pi / 180.0;
-    const double c = std::cos(a), s = std::sin(a);
+    const Transform toWorld = placementTransform(body->placement, body->spec);
     for (int corner = 0; corner < 8; ++corner) {
-        const double x = (corner & 1) ? local.max[0] : local.min[0];
-        const double y = (corner & 2) ? local.max[1] : local.min[1];
-        const double z = (corner & 4) ? local.max[2] : local.min[2];
-        world.expand(static_cast<float>(c * x - s * y + p.x),
-                     static_cast<float>(s * x + c * y + p.y),
-                     static_cast<float>(z + p.z));
+        const Vec3 p = toWorld.apply({(corner & 1) ? local.max[0] : local.min[0],
+                                      (corner & 2) ? local.max[1] : local.min[1],
+                                      (corner & 4) ? local.max[2] : local.min[2]});
+        world.expand(static_cast<float>(p[0]), static_cast<float>(p[1]), static_cast<float>(p[2]));
     }
     return world;
 }

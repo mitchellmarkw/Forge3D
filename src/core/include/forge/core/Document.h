@@ -97,4 +97,7 @@ void validate(const PrimitiveSpec& spec);
 // existing ones: to the right of everything, with a gap. Empty plate: the centre.
 Placement suggestPlacement(const Document& doc, double footprintWidth, double gap = 10.0);
 
+// The body's placement moved up or down so its lowest point touches the plate (Z = 0).
+Placement sitOnPlate(const Document& doc, ObjectId id);
+
 }  // namespace forge

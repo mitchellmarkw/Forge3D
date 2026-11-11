@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.1 — Slice 3a revision (2026-11-11)
+
+- Rotation about all three axes: Properties has a Rotation group (Around X, Y, Z). Turns
+  are applied X, then Y, then Z, about the plate's fixed axes, around the body's centre.
+- **Sit on plate** button: moves the selected body so its lowest point touches the plate.
+- One transform (`core/Transform.h`, `placementTransform`) now drives drawing, picking and
+  bounds, so what you see is exactly what you click.
+- File format version 2: placements store rotationX, rotationY and rotationZ. Version 1
+  files still open (no tilt).
+- A file passed on the command line opens after the main window appears, so error
+  messages have a window behind them.
+- 59 unit tests (10 new: transforms, tilted bounds and picking, sit on plate, format v1/v2).
+
 ## 0.3.0 — Slice 3a (2026-11-11)
 
 - Selection: left-click a body to select it (cyan glow); click empty space or press Esc to

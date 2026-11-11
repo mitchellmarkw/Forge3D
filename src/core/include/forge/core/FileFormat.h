@@ -17,7 +17,10 @@ class Document;
 // parts without breaking older files.
 namespace forge::file {
 
-inline constexpr int kFormatVersion = 1;
+// Version history (readers must keep accepting every older version):
+//   1  slice 3a: box and cylinder, placement x/y/z + rotationZ
+//   2  rotationX and rotationY added (rotation about all three axes)
+inline constexpr int kFormatVersion = 2;
 inline constexpr const char* kExtension = ".f3d";
 inline constexpr const char* kDocumentEntry = "document.json";
 
