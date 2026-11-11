@@ -11,6 +11,7 @@
 #include "forge/core/Transform.h"
 
 #include <QAction>
+#include <QActionGroup>
 #include <QApplication>
 #include <QCloseEvent>
 #include <QDesktopServices>
@@ -51,6 +52,11 @@ const std::array<QVector3D, 6> kPalette{
     QVector3D(0.20f, 0.68f, 0.70f),  // teal
     QVector3D(0.88f, 0.42f, 0.52f),  // rose
 };
+
+// Snapping steps (hold Alt while dragging to turn snapping off).
+constexpr double kMoveStep = 1.0;   // mm
+constexpr double kTurnStep = 15.0;  // degrees
+constexpr double kSizeStep = 1.0;   // mm
 
 const QString kFileFilter = QObject::tr("Forge3D model (*.f3d)");
 const QString kLastFolderKey = QStringLiteral("files/lastFolder");
@@ -112,6 +118,9 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
     setCentralWidget(m_viewport);
     connect(m_viewport, &Viewport::firstFrameRendered, this, &MainWindow::firstFrameRendered);
     connect(m_viewport, &Viewport::clicked, this, &MainWindow::onViewportClicked);
+    connect(m_viewport, &Viewport::leftPressed, this, &MainWindow::onLeftPressed);
+    connect(m_viewport, &Viewport::leftDragged, this, &MainWindow::onLeftDragged);
+    connect(m_viewport, &Viewport::leftReleased, this, &MainWindow::onLeftReleased);
 
     createActions();
     createMenus();
@@ -183,7 +192,36 @@ void MainWindow::createActions()
 
     m_deselect = new QAction(tr("Select &None"), this);
     m_deselect->setShortcut(Qt::Key_Escape);
-    connect(m_deselect, &QAction::triggered, this, [this] { setSelection(kInvalidId); });
+    connect(m_deselect, &QAction::triggered, this, [this] {
+        if (m_dragState.kind != Drag::Kind::None)
+            cancelDrag();  // Esc during a drag puts the body back
+        else
+            setSelection(kInvalidId);
+    });
+
+    auto* modes = new QActionGroup(this);
+    m_modeMove = new QAction(tr("Move"), modes);
+    m_modeMove->setShortcut(Qt::Key_W);
+    m_modeMove->setToolTip(tr("Move tool (W): drag the arrows to move along X, Y or Z"));
+    m_modeRotate = new QAction(tr("Rotate"), modes);
+    m_modeRotate->setShortcut(Qt::Key_E);
+    m_modeRotate->setToolTip(tr("Rotate tool (E): drag a ring to turn around X, Y or Z"));
+    m_modeResize = new QAction(tr("Resize"), modes);
+    m_modeResize->setShortcut(Qt::Key_R);
+    m_modeResize->setToolTip(tr("Resize tool (R): drag a face handle; the opposite face stays put"));
+    for (QAction* a : {m_modeMove, m_modeRotate, m_modeResize})
+        a->setCheckable(true);
+    m_modeMove->setChecked(true);
+    connect(m_modeMove, &QAction::triggered, this, [this] { setGizmoMode(view::GizmoMode::Move); });
+    connect(m_modeRotate, &QAction::triggered, this, [this] { setGizmoMode(view::GizmoMode::Rotate); });
+    connect(m_modeResize, &QAction::triggered, this, [this] { setGizmoMode(view::GizmoMode::Resize); });
+
+    m_snapAction = new QAction(tr("Snap"), this);
+    m_snapAction->setCheckable(true);
+    m_snapAction->setChecked(true);
+    m_snapAction->setToolTip(tr("Snap drags to 1 mm steps and 15° turns. Hold Alt while dragging to "
+                                "move freely."));
+    connect(m_snapAction, &QAction::toggled, this, [this](bool on) { m_snap = on; });
 
     m_addBox = new QAction(tr("Add Box"), this);
     m_addBox->setToolTip(tr("Add a 30 x 20 x 15 mm box beside the existing bodies"));
@@ -223,6 +261,11 @@ void MainWindow::createMenus()
     edit->addSeparator();
     edit->addAction(m_delete);
     edit->addAction(m_deselect);
+    edit->addSeparator();
+    edit->addAction(m_modeMove);
+    edit->addAction(m_modeRotate);
+    edit->addAction(m_modeResize);
+    edit->addAction(m_snapAction);
 
     QMenu* view = menuBar()->addMenu(tr("&View"));
     view->addAction(m_fit);
@@ -254,6 +297,11 @@ void MainWindow::createToolBar()
     bar->addSeparator();
     bar->addAction(m_addBox);
     bar->addAction(m_addCylinder);
+    bar->addSeparator();
+    bar->addAction(m_modeMove);
+    bar->addAction(m_modeRotate);
+    bar->addAction(m_modeResize);
+    bar->addAction(m_snapAction);
     bar->addSeparator();
     bar->addAction(m_delete);
     bar->addAction(m_clear);
@@ -311,8 +359,9 @@ void MainWindow::createDocks()
 
 void MainWindow::createStatusBar()
 {
-    statusBar()->showMessage(tr("Left-click: select   |   Right-drag: orbit   |   Middle-drag or "
-                                "Shift+right-drag: pan   |   Wheel: zoom   |   F: fit   |   Home: reset view"));
+    statusBar()->showMessage(tr("Left-click: select   |   Left-drag: move on the plate or drag a handle   |   "
+                                "Right-drag: orbit   |   Middle-drag: pan   |   Wheel: zoom   |   W / E / R: "
+                                "move / rotate / resize   |   F: fit"));
 
     m_modelInfo = new QLabel(this);
     m_glInfo = new QLabel(this);
@@ -339,6 +388,10 @@ void MainWindow::setSelection(ObjectId id)
 
 void MainWindow::onViewportClicked(const QVector3D& origin, const QVector3D& direction)
 {
+    if (m_pressOnHandle) {  // a click on a handle keeps the current selection
+        m_pressOnHandle = false;
+        return;
+    }
     Ray ray;
     ray.origin = {origin.x(), origin.y(), origin.z()};
     ray.direction = {direction.x(), direction.y(), direction.z()};
@@ -348,6 +401,203 @@ void MainWindow::onViewportClicked(const QVector3D& origin, const QVector3D& dir
     } catch (const std::exception& e) {
         qWarning() << "Picking failed:" << e.what();
     }
+}
+
+// ---- Dragging ------------------------------------------------------------------
+
+std::optional<view::GizmoTarget> MainWindow::gizmoTargetFor(const Body& body) const
+{
+    const Transform t = placementTransform(body.placement, body.spec);
+    const Vec3 c = t.apply(pivotOf(body.spec));
+    const auto axis = [&t](double x, double y, double z) {
+        const Vec3 d = t.applyDirection({x, y, z});
+        return QVector3D(static_cast<float>(d[0]), static_cast<float>(d[1]), static_cast<float>(d[2]));
+    };
+    view::GizmoTarget target;
+    target.centre = QVector3D(static_cast<float>(c[0]), static_cast<float>(c[1]), static_cast<float>(c[2]));
+    target.bodyAxes = {axis(1, 0, 0), axis(0, 1, 0), axis(0, 0, 1)};
+    if (const auto* box = std::get_if<BoxSpec>(&body.spec)) {
+        target.halfExtents = QVector3D(float(box->width / 2), float(box->depth / 2), float(box->height / 2));
+    } else {
+        const auto& cyl = std::get<CylinderSpec>(body.spec);
+        target.halfExtents = QVector3D(float(cyl.radius), float(cyl.radius), float(cyl.height / 2));
+        target.round = true;
+    }
+    return target;
+}
+
+void MainWindow::setGizmoMode(view::GizmoMode mode)
+{
+    m_gizmoMode = mode;
+    refreshScene();
+}
+
+void MainWindow::preview(const Body& state)
+{
+    // Live preview straight on the document; the undo step is recorded on release.
+    try {
+        m_doc.setSpec(state.id, state.spec);
+        m_doc.setPlacement(state.id, state.placement);
+    } catch (const std::exception& e) {
+        qWarning() << "Drag preview rejected:" << e.what();
+    }
+}
+
+void MainWindow::onLeftPressed(const QVector3D& origin, const QVector3D& direction,
+                               const view::GizmoHandle& handle, const QPointF& pixel)
+{
+    m_dragState = Drag{};
+    m_pressOnHandle = false;
+
+    const Body* selected = m_doc.find(m_selected);
+    if (handle.valid() && selected) {
+        m_pressOnHandle = true;
+        m_dragState.before = *selected;
+        m_dragState.handle = handle;
+        m_dragState.frame = *gizmoTargetFor(*selected);
+        const view::Gizmo gizmo(m_viewport->camera(), QSizeF(m_viewport->width(), m_viewport->height()),
+                                m_dragState.frame, m_gizmoMode);
+        const QVector3D dir = gizmo.direction(handle);
+        switch (handle.kind) {
+        case view::GizmoHandle::Kind::Arrow:
+        case view::GizmoHandle::Kind::Face: {
+            const auto s = view::closestOnLine(origin, direction, m_dragState.frame.centre, dir);
+            if (!s)
+                return;  // looking straight down that axis: nothing sensible to drag
+            m_dragState.kind = handle.kind == view::GizmoHandle::Kind::Arrow ? Drag::Kind::Arrow : Drag::Kind::Face;
+            m_dragState.startParam = *s;
+            break;
+        }
+        case view::GizmoHandle::Kind::Ring: {
+            const auto centre = m_viewport->projectToScreen(m_dragState.frame.centre);
+            if (!centre)
+                return;
+            m_dragState.kind = Drag::Kind::Ring;
+            m_dragState.centrePixel = *centre;
+            m_dragState.lastPixel = pixel;
+            break;
+        }
+        case view::GizmoHandle::Kind::None:
+            return;
+        }
+        m_viewport->setActiveHandle(handle);
+        return;
+    }
+
+    // Not on a handle: grab whatever body is under the cursor and slide it on the plate.
+    Ray ray;
+    ray.origin = {origin.x(), origin.y(), origin.z()};
+    ray.direction = {direction.x(), direction.y(), direction.z()};
+    const auto hit = pick(m_doc, ray);
+    if (!hit)
+        return;  // empty space: the click (on release) clears the selection
+    setSelection(hit->id);
+    m_dragState.kind = Drag::Kind::Plate;
+    m_dragState.before = *m_doc.find(hit->id);
+    m_dragState.grabPoint = QVector3D(float(hit->point[0]), float(hit->point[1]), float(hit->point[2]));
+}
+
+void MainWindow::onLeftDragged(const QVector3D& origin, const QVector3D& direction, const QPointF& pixel,
+                               Qt::KeyboardModifiers modifiers)
+{
+    Drag& d = m_dragState;
+    if (d.kind == Drag::Kind::None)
+        return;
+    const bool snap = m_snap && !modifiers.testFlag(Qt::AltModifier);
+    const auto step = [snap](double value, double size) { return snap ? view::snapTo(value, size) : value; };
+    const QString freeHint = snap ? tr("   (hold Alt to move freely)") : QString();
+
+    Body next = d.before;
+    QString status;
+    switch (d.kind) {
+    case Drag::Kind::Plate: {
+        const auto hit = view::intersectPlane(origin, direction, d.grabPoint, QVector3D(0, 0, 1));
+        if (!hit)
+            return;
+        const double dx = step(hit->x() - d.grabPoint.x(), kMoveStep);
+        const double dy = step(hit->y() - d.grabPoint.y(), kMoveStep);
+        next.placement.x += dx;
+        next.placement.y += dy;
+        status = tr("Move  X %1 mm   Y %2 mm").arg(dx, 0, 'f', 1).arg(dy, 0, 'f', 1);
+        break;
+    }
+    case Drag::Kind::Arrow: {
+        const QVector3D dir(d.handle.axis == 0, d.handle.axis == 1, d.handle.axis == 2);
+        const auto s = view::closestOnLine(origin, direction, d.frame.centre, dir);
+        if (!s)
+            return;
+        const double delta = step(*s - d.startParam, kMoveStep);
+        double* coord = d.handle.axis == 0 ? &next.placement.x : d.handle.axis == 1 ? &next.placement.y
+                                                                                  : &next.placement.z;
+        *coord += delta;
+        status = tr("Move  %1 %2 mm").arg(QChar("XYZ"[d.handle.axis])).arg(delta, 0, 'f', 1);
+        break;
+    }
+    case Drag::Kind::Ring: {
+        d.turned += view::screenAngle(d.centrePixel, d.lastPixel, pixel);
+        d.lastPixel = pixel;
+        const QVector3D axis(d.handle.axis == 0, d.handle.axis == 1, d.handle.axis == 2);
+        // Anticlockwise on screen is a positive turn when the axis points at the viewer.
+        const float facing = QVector3D::dotProduct(axis, m_viewport->camera().eyePosition() - d.frame.centre);
+        const double degrees = step(d.turned * (facing >= 0.0f ? 1.0 : -1.0), kTurnStep);
+        next.placement = rotatedAboutPlateAxis(d.before, d.handle.axis, degrees);
+        status = tr("Rotate around %1  %2°").arg(QChar("XYZ"[d.handle.axis])).arg(degrees, 0, 'f', 1);
+        break;
+    }
+    case Drag::Kind::Face: {
+        const QVector3D dir = d.frame.bodyAxes.at(static_cast<std::size_t>(d.handle.axis)) *
+                              static_cast<float>(d.handle.side);
+        const auto s = view::closestOnLine(origin, direction, d.frame.centre, dir);
+        if (!s)
+            return;
+        double value = dimension(d.before.spec, d.handle.axis) + (*s - d.startParam);
+        if (snap)
+            value = std::max(kSizeStep, view::snapTo(value, kSizeStep));
+        next = resizedFace(d.before, d.handle.axis, d.handle.side, value);
+        const bool radius = std::holds_alternative<CylinderSpec>(next.spec) && d.handle.axis != 2;
+        const QString what = radius ? tr("Radius")
+                                    : d.handle.axis == 0 ? tr("Width") : d.handle.axis == 1 ? tr("Depth")
+                                                                                            : tr("Height");
+        status = tr("Resize  %1 %2 mm").arg(what).arg(dimension(next.spec, d.handle.axis), 0, 'f', 1);
+        break;
+    }
+    case Drag::Kind::None:
+        return;
+    }
+
+    d.moved = true;
+    preview(next);
+    statusBar()->showMessage(status + freeHint);
+}
+
+void MainWindow::onLeftReleased(bool wasDrag)
+{
+    Drag d = m_dragState;
+    m_dragState = Drag{};
+    m_viewport->setActiveHandle({});
+    if (d.kind == Drag::Kind::None || !wasDrag || !d.moved)
+        return;
+    statusBar()->clearMessage();
+
+    const Body* now = m_doc.find(d.before.id);
+    if (!now || *now == d.before)
+        return;  // dragged back to where it started
+    const QString label = d.kind == Drag::Kind::Ring   ? tr("Rotate")
+                          : d.kind == Drag::Kind::Face ? tr("Resize")
+                                                       : tr("Move");
+    if (!run(std::make_unique<EditBodyCommand>(d.before, *now, label.toStdString())))
+        preview(d.before);
+}
+
+void MainWindow::cancelDrag()
+{
+    const Drag d = m_dragState;
+    m_dragState = Drag{};
+    m_viewport->setActiveHandle({});
+    if (d.kind != Drag::Kind::None && d.moved)
+        preview(d.before);
+    statusBar()->showMessage(tr("Drag cancelled"), 2000);
+    qInfo() << "Drag cancelled";
 }
 
 // ---- Editing --------------------------------------------------------------------
@@ -559,7 +809,9 @@ void MainWindow::refreshScene()
         qCritical() << "Could not build geometry for display:" << e.what();
     }
     m_viewport->setItems(std::move(items));
-    m_properties->setBody(m_doc.find(m_selected));
+    const Body* selected = m_doc.find(m_selected);
+    m_viewport->setGizmo(selected ? gizmoTargetFor(*selected) : std::nullopt, m_gizmoMode);
+    m_properties->setBody(selected);
     refreshObjectList();
 
     const auto count = static_cast<int>(m_doc.bodyCount());

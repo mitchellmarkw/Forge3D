@@ -113,6 +113,22 @@ private:
     std::optional<std::string> m_old;
 };
 
+// Sets a body's size and placement in one step, with both states given up front.
+// Used by gizmo drags: the drag previews changes live, then records one of these.
+class EditBodyCommand final : public Command {
+public:
+    EditBodyCommand(Body before, Body after, std::string label);
+    std::string label() const override { return m_label; }
+    void redo(Document& doc) override;
+    void undo(Document& doc) override;
+
+private:
+    static void apply(Document& doc, const Body& state);
+    Body m_before;
+    Body m_after;
+    std::string m_label;
+};
+
 // Several commands that undo and redo as one step ("Clear Plate").
 class MacroCommand final : public Command {
 public:

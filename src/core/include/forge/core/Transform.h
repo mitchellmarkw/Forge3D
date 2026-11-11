@@ -36,4 +36,25 @@ Vec3 pivotOf(const PrimitiveSpec& spec);
 // of the body's base sits.
 Transform placementTransform(const Placement& placement, const PrimitiveSpec& spec);
 
+// The X, Y and Z angles (degrees) that rebuild the rotation part of t with
+// rotationXYZ(). When Y is exactly +/-90 degrees the split between X and Z is
+// ambiguous; Z is then reported as 0.
+Vec3 eulerXYZ(const Transform& t);
+
+// ---- Gizmo edits ----------------------------------------------------------------
+
+// The placement after turning the body by `degrees` about a plate axis
+// (0 = X, 1 = Y, 2 = Z) through the body's centre. The centre does not move.
+Placement rotatedAboutPlateAxis(const Body& body, int axis, double degrees);
+
+// The value a face handle changes: box width / depth / height for axis 0 / 1 / 2;
+// cylinder radius for axis 0 or 1, height for axis 2.
+double dimension(const PrimitiveSpec& spec, int axis);
+
+// The body after its face handle (axis 0..2 in the body's own frame, side +1 or -1)
+// is dragged so that dimension() becomes newValue (never below minValue).
+// The opposite face stays exactly where it was in the plate; for a cylinder's
+// radius, the centre line stays put.
+Body resizedFace(const Body& body, int axis, int side, double newValue, double minValue = 0.1);
+
 }  // namespace forge

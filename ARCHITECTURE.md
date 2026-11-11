@@ -91,6 +91,33 @@ UI action ──> Command ──> CommandStack::execute() ──> Command::redo(
 Linux development builds need miniz from outside the system packages: install it to a
 prefix and configure with `FORGE3D_EXTRA_PREFIX=<prefix> cmake --preset linux-dev`.
 
+## Gizmo and dragging (slice 3b)
+
+```
+Viewport (mouse)  --leftPressed(ray, handle)-->  MainWindow drag controller
+                  --leftDragged(ray, pixel, mods)-->   computes the new Body from the
+                  --leftReleased(wasDrag)-->           state at drag start, previews it
+                                                       on the Document, then records ONE
+                                                       EditBodyCommand(before, after)
+```
+
+- **`view::Gizmo`** is rebuilt from the camera each frame, so it is a constant size on
+  screen. It produces camera-facing triangles (no wide-line support needed in OpenGL core)
+  and does hit testing in pixels. Arrows and rings use the **plate** axes; face handles use
+  the **body's** axes (they follow a tilted body).
+- **Drags always start from the body as it was at mouse-down** (`Drag::before`), never
+  from the previous preview, so snapping is exact and nothing accumulates rounding.
+- **Preview edits the Document directly** (not undoable); on release one
+  `EditBodyCommand(before, after)` goes on the stack, and Esc restores `before`.
+  `EditBodyCommand` carries both states, so recording it after the preview is a no-op redo.
+- **Rotation drags** sum on-screen angle changes around the projected centre (so turns past
+  180° keep going) and flip the sign when the axis points away from the viewer, so the
+  grabbed part of the ring follows the mouse. The result goes through
+  `rotatedAboutPlateAxis()`, which composes the turn with the current rotation and
+  converts back to X/Y/Z angles (`eulerXYZ()`; at exactly ±90° about Y, Z is reported as 0).
+- **Resizing** keeps the opposite face fixed in the plate (`resizedFace()` solves for the new
+  placement), so it works on tilted bodies too.
+
 ## Rendering
 
 `Document::mesh()` → `forge::Mesh` (positions, normals, indices) → `DisplayItem`

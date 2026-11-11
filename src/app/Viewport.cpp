@@ -99,6 +99,7 @@ std::unique_ptr<QOpenGLShaderProgram> buildProgram(const char* vs, const char* f
 Viewport::Viewport(QWidget* parent) : QOpenGLWidget(parent)
 {
     setFocusPolicy(Qt::StrongFocus);  // receive key presses (F, Home)
+    setMouseTracking(true);           // hover highlight on gizmo handles
     setMinimumSize(320, 240);
 }
 
@@ -117,6 +118,8 @@ void Viewport::releaseGL()
     m_itemsDirty = true;  // re-upload if a new context arrives
     m_plateVao.destroy();
     m_plateBuffer.destroy();
+    m_gizmoVao.destroy();
+    m_gizmoBuffer.destroy();
     m_meshShader.reset();
     m_lineShader.reset();
     m_glReady = false;
@@ -169,6 +172,82 @@ void Viewport::resetView()
 {
     m_camera.reset();
     fitView();
+}
+
+// ---- Gizmo ----------------------------------------------------------------------
+
+void Viewport::setGizmo(const std::optional<view::GizmoTarget>& target, view::GizmoMode mode)
+{
+    m_gizmoTarget = target;
+    m_gizmoMode = mode;
+    if (!target)
+        m_hover = {};
+    update();
+}
+
+void Viewport::setActiveHandle(const view::GizmoHandle& handle)
+{
+    m_active = handle;
+    update();
+}
+
+std::optional<view::Gizmo> Viewport::makeGizmo() const
+{
+    if (!m_gizmoTarget)
+        return std::nullopt;
+    return view::Gizmo(m_camera, QSizeF(width(), height()), *m_gizmoTarget, m_gizmoMode);
+}
+
+std::optional<QPointF> Viewport::projectToScreen(const QVector3D& point) const
+{
+    const view::Gizmo g(m_camera, QSizeF(width(), height()), view::GizmoTarget{}, view::GizmoMode::Move);
+    return g.project(point);
+}
+
+void Viewport::updateHover(const QPointF& pixel)
+{
+    view::GizmoHandle hover;
+    if (const auto gizmo = makeGizmo())
+        hover = gizmo->hitTest(pixel);
+    if (hover != m_hover) {
+        m_hover = hover;
+        setCursor(hover.valid() ? Qt::PointingHandCursor : Qt::ArrowCursor);
+        update();
+    }
+}
+
+void Viewport::drawGizmo(const QMatrix4x4& viewProj)
+{
+    const auto gizmo = makeGizmo();
+    if (!gizmo)
+        return;
+    const std::vector<float> tris = gizmo->triangles(m_active.valid() ? m_active : m_hover, m_active);
+    if (tris.empty())
+        return;
+
+    if (!m_gizmoVao.isCreated()) {
+        m_gizmoVao.create();
+        QOpenGLVertexArrayObject::Binder bind(&m_gizmoVao);
+        m_gizmoBuffer.create();
+        m_gizmoBuffer.setUsagePattern(QOpenGLBuffer::StreamDraw);
+        m_gizmoBuffer.bind();
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), nullptr);
+        glEnableVertexAttribArray(1);
+        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float),
+                              reinterpret_cast<const void*>(3 * sizeof(float)));
+    }
+    QOpenGLVertexArrayObject::Binder bind(&m_gizmoVao);
+    m_gizmoBuffer.bind();
+    m_gizmoBuffer.allocate(tris.data(), static_cast<int>(tris.size() * sizeof(float)));
+
+    // Always on top, two-sided.
+    glDisable(GL_DEPTH_TEST);
+    m_lineShader->bind();
+    m_lineShader->setUniformValue("uMvp", viewProj);
+    glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(tris.size() / 6));
+    m_lineShader->release();
+    glEnable(GL_DEPTH_TEST);
 }
 
 // ---- OpenGL lifecycle -----------------------------------------------------------
@@ -360,6 +439,8 @@ void Viewport::paintGL()
     }
     m_meshShader->release();
 
+    drawGizmo(viewProj);
+
     if (!m_firstFrameDone) {
         m_firstFrameDone = true;
         emit firstFrameRendered();
@@ -374,7 +455,15 @@ void Viewport::mousePressEvent(QMouseEvent* event)
     const bool shift = event->modifiers().testFlag(Qt::ShiftModifier);
     if (event->button() == Qt::LeftButton) {
         m_leftPressed = true;
+        m_leftDragging = false;
         m_leftPressAt = event->position();
+        QVector3D origin, direction;
+        m_camera.rayThroughPixel(static_cast<float>(event->position().x()), static_cast<float>(event->position().y()),
+                                 static_cast<float>(width()), static_cast<float>(height()), origin, direction);
+        view::GizmoHandle handle;
+        if (const auto gizmo = makeGizmo())
+            handle = gizmo->hitTest(event->position());
+        emit leftPressed(origin, direction, handle, event->position());
         return;
     }
     if (event->button() == Qt::MiddleButton || (event->button() == Qt::RightButton && shift))
@@ -389,17 +478,31 @@ void Viewport::mouseMoveEvent(QMouseEvent* event)
 {
     const QPointF delta = event->position() - m_lastMouse;
     m_lastMouse = event->position();
+
+    if (m_leftPressed) {
+        if (!m_leftDragging && (event->position() - m_leftPressAt).manhattanLength() > 3.0)
+            m_leftDragging = true;
+        if (m_leftDragging) {
+            QVector3D origin, direction;
+            m_camera.rayThroughPixel(static_cast<float>(event->position().x()),
+                                     static_cast<float>(event->position().y()), static_cast<float>(width()),
+                                     static_cast<float>(height()), origin, direction);
+            emit leftDragged(origin, direction, event->position(), event->modifiers());
+        }
+        return;
+    }
+
     switch (m_drag) {
     case DragMode::Orbit:
         m_camera.orbit(static_cast<float>(delta.x()), static_cast<float>(delta.y()));
         update();
         break;
     case DragMode::Pan:
-        m_camera.pan(static_cast<float>(delta.x()), static_cast<float>(delta.y()),
-                     static_cast<float>(height()));
+        m_camera.pan(static_cast<float>(delta.x()), static_cast<float>(delta.y()), static_cast<float>(height()));
         update();
         break;
     case DragMode::None:
+        updateHover(event->position());
         QOpenGLWidget::mouseMoveEvent(event);
         break;
     }
@@ -409,16 +512,17 @@ void Viewport::mouseReleaseEvent(QMouseEvent* event)
 {
     if (event->button() == Qt::LeftButton && m_leftPressed) {
         m_leftPressed = false;
-        // Only a click selects; a left-drag will move things once the gizmo exists.
-        const QPointF moved = event->position() - m_leftPressAt;
-        if (moved.manhattanLength() <= 4.0) {
+        const bool wasDrag = m_leftDragging;
+        m_leftDragging = false;
+        emit leftReleased(wasDrag);
+        if (!wasDrag) {
             QVector3D origin, direction;
             m_camera.rayThroughPixel(static_cast<float>(event->position().x()),
-                                     static_cast<float>(event->position().y()),
-                                     static_cast<float>(width()), static_cast<float>(height()), origin,
-                                     direction);
+                                     static_cast<float>(event->position().y()), static_cast<float>(width()),
+                                     static_cast<float>(height()), origin, direction);
             emit clicked(origin, direction);
         }
+        updateHover(event->position());
         return;
     }
     if (m_drag != DragMode::None && !(event->buttons() & (Qt::RightButton | Qt::MiddleButton)))

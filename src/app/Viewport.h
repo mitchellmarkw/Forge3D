@@ -2,6 +2,7 @@
 #pragma once
 
 #include "forge/core/Mesh.h"
+#include "forge/view/Gizmo.h"
 #include "forge/view/OrbitCamera.h"
 
 #include <QMatrix4x4>
@@ -15,6 +16,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <unordered_map>
 #include <vector>
 
@@ -32,6 +34,8 @@ struct DisplayItem {
 // The 3D view: draws the build plate and the scene, and handles navigation.
 // Mouse scheme (3D Builder style):
 //   left-click          select (signal clicked; the window decides what was hit)
+//   left-drag           move a body on the plate, or drag a gizmo handle
+//                       (signals leftPressed / leftDragged / leftReleased)
 //   right-drag          orbit
 //   middle-drag         pan   (Shift + right-drag also pans, for touchpads)
 //   wheel               zoom
@@ -50,11 +54,26 @@ public:
     void fitView();
     void resetView();
 
+    // The gizmo around the selected body (empty = none shown).
+    void setGizmo(const std::optional<view::GizmoTarget>& target, view::GizmoMode mode);
+    // The handle being dragged, drawn highlighted (none = not dragging).
+    void setActiveHandle(const view::GizmoHandle& handle);
+
+    const view::OrbitCamera& camera() const { return m_camera; }
+    std::optional<QPointF> projectToScreen(const QVector3D& point) const;
+
     QString glVersionString() const { return m_glVersion; }
 
 signals:
     // A left click (not a drag). origin/direction: the ray under the cursor, in plate mm.
     void clicked(const QVector3D& origin, const QVector3D& direction);
+    // Left button pressed. `handle` is the gizmo part under the cursor, if any.
+    void leftPressed(const QVector3D& origin, const QVector3D& direction, const view::GizmoHandle& handle,
+                     const QPointF& pixel);
+    // The mouse moved with the left button held, past a small dead zone.
+    void leftDragged(const QVector3D& origin, const QVector3D& direction, const QPointF& pixel,
+                     Qt::KeyboardModifiers modifiers);
+    void leftReleased(bool wasDrag);
     void glInfoReady(const QString& summary);
     void firstFrameRendered();
 
@@ -83,6 +102,9 @@ private:
     };
 
     void buildPlateGeometry();
+    void drawGizmo(const QMatrix4x4& viewProj);
+    std::optional<view::Gizmo> makeGizmo() const;
+    void updateHover(const QPointF& pixel);
     void syncGpuMeshes();
     void upload(GpuMesh& gpu, const std::shared_ptr<const forge::Mesh>& mesh);
     void releaseGL();
@@ -101,11 +123,20 @@ private:
     QOpenGLBuffer m_plateBuffer{QOpenGLBuffer::VertexBuffer};
     std::unique_ptr<QOpenGLShaderProgram> m_lineShader;
 
+    // Gizmo overlay
+    std::optional<view::GizmoTarget> m_gizmoTarget;
+    view::GizmoMode m_gizmoMode = view::GizmoMode::Move;
+    view::GizmoHandle m_hover;
+    view::GizmoHandle m_active;
+    QOpenGLVertexArrayObject m_gizmoVao;
+    QOpenGLBuffer m_gizmoBuffer{QOpenGLBuffer::VertexBuffer};
+
     // Interaction
     DragMode m_drag = DragMode::None;
     QPointF m_lastMouse;
     QPointF m_leftPressAt;
     bool m_leftPressed = false;
+    bool m_leftDragging = false;
 
     QString m_glVersion;
     bool m_glReady = false;

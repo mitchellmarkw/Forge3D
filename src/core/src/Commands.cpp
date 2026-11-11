@@ -128,6 +128,41 @@ void RenameBodyCommand::undo(Document& doc)
     doc.rename(m_id, *m_old);
 }
 
+// ---- EditBodyCommand ------------------------------------------------------------
+
+EditBodyCommand::EditBodyCommand(Body before, Body after, std::string label)
+    : m_before(std::move(before)), m_after(std::move(after)), m_label(std::move(label))
+{
+    if (m_before.id != m_after.id)
+        throw std::invalid_argument("EditBodyCommand: before and after must be the same body");
+}
+
+void EditBodyCommand::apply(Document& doc, const Body& state)
+{
+    const Body* current = doc.find(state.id);
+    if (!current)
+        throw std::out_of_range("Cannot edit: no body with id " + std::to_string(state.id));
+    validate(state.spec);  // check before touching anything
+    const PrimitiveSpec oldSpec = current->spec;
+    doc.setSpec(state.id, state.spec);
+    try {
+        doc.setPlacement(state.id, state.placement);
+    } catch (...) {
+        doc.setSpec(state.id, oldSpec);  // leave the document as it was
+        throw;
+    }
+}
+
+void EditBodyCommand::redo(Document& doc)
+{
+    apply(doc, m_after);
+}
+
+void EditBodyCommand::undo(Document& doc)
+{
+    apply(doc, m_before);
+}
+
 // ---- MacroCommand ---------------------------------------------------------------
 
 MacroCommand::MacroCommand(std::string label) : m_label(std::move(label)) {}

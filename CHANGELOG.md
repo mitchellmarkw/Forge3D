@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.4.0 — Slice 3b (2026-11-11)
+
+- Left-drag any body to slide it across the plate (selects it too).
+- Gizmo around the selected body, with three tools in the toolbar and Edit menu:
+  **Move (W)** arrows along X / Y / Z, **Rotate (E)** rings around X / Y / Z (about the
+  plate's axes, through the body's centre), **Resize (R)** a handle on each face; the
+  opposite face stays put (cylinders: radius grows around the centre line).
+- Hover highlight on handles; the dragged handle turns yellow and the others fade.
+- Snapping (toolbar **Snap**, on by default): 1 mm moves, 15° turns, whole-mm sizes.
+  Hold **Alt** while dragging to move freely.
+- Every drag is one undo step (`EditBodyCommand`); **Esc** during a drag cancels it.
+- Live status while dragging ("Move X 12.0 mm", "Rotate around Z 45°", "Resize Height 37 mm").
+- Core: `eulerXYZ()`, `rotatedAboutPlateAxis()`, `resizedFace()`, `dimension()`.
+- View: `Gizmo` (screen-constant geometry, hit testing) and drag maths
+  (`closestOnLine`, `intersectPlane`, `screenAngle`, `snapTo`).
+- 77 unit tests (18 new).
+
 ## 0.3.1 — Slice 3a revision (2026-11-11)
 
 - Rotation about all three axes: Properties has a Rotation group (Around X, Y, Z). Turns

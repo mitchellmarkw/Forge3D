@@ -10,6 +10,8 @@ add_executable(forge_tests
     test_picking.cpp
     test_file_format.cpp
     test_transform.cpp
+    test_gizmo_edits.cpp
+    test_gizmo_view.cpp
 )
 target_link_libraries(forge_tests PRIVATE
     Forge3D::core
