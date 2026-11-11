@@ -4,19 +4,32 @@
 #include "forge/core/Mesh.h"
 #include "forge/view/OrbitCamera.h"
 
+#include <QMatrix4x4>
 #include <QOpenGLBuffer>
 #include <QOpenGLExtraFunctions>
 #include <QOpenGLShaderProgram>
 #include <QOpenGLVertexArrayObject>
 #include <QOpenGLWidget>
 #include <QPointF>
+#include <QVector3D>
 
+#include <cstdint>
 #include <memory>
+#include <unordered_map>
+#include <vector>
 
 namespace forge::app {
 
-// The 3D view: draws the build plate and the current model, and handles
-// navigation. Mouse scheme (3D Builder style):
+// One thing to draw: a mesh in its own coordinates, plus where it sits.
+struct DisplayItem {
+    std::uint64_t id = 0;
+    std::shared_ptr<const forge::Mesh> mesh;  // a new pointer = new geometry, re-uploaded
+    QMatrix4x4 model;                          // placement on the plate
+    QVector3D color{0.28f, 0.55f, 0.85f};
+};
+
+// The 3D view: draws the build plate and the scene, and handles navigation.
+// Mouse scheme (3D Builder style):
 //   right-drag          orbit
 //   middle-drag         pan   (Shift + right-drag also pans, for touchpads)
 //   wheel               zoom
@@ -29,7 +42,9 @@ public:
     explicit Viewport(QWidget* parent = nullptr);
     ~Viewport() override;
 
-    void setMesh(const forge::Mesh& mesh);
+    // Replaces what is drawn. GPU buffers are kept for meshes that did not change.
+    void setItems(std::vector<DisplayItem> items);
+
     void fitView();
     void resetView();
 
@@ -37,10 +52,10 @@ public:
 
 signals:
     void glInfoReady(const QString& summary);
+    void firstFrameRendered();
 
 protected:
     void initializeGL() override;
-    void resizeGL(int w, int h) override;
     void paintGL() override;
 
     void mousePressEvent(QMouseEvent* event) override;
@@ -52,20 +67,28 @@ protected:
 private:
     enum class DragMode { None, Orbit, Pan };
 
+    // GPU copy of one mesh.
+    struct GpuMesh {
+        std::shared_ptr<const forge::Mesh> source;
+        std::unique_ptr<QOpenGLVertexArrayObject> vao;
+        QOpenGLBuffer positions{QOpenGLBuffer::VertexBuffer};
+        QOpenGLBuffer normals{QOpenGLBuffer::VertexBuffer};
+        QOpenGLBuffer indices{QOpenGLBuffer::IndexBuffer};
+        int indexCount = 0;
+        void destroy();
+    };
+
     void buildPlateGeometry();
-    void uploadMeshIfNeeded();
+    void syncGpuMeshes();
+    void upload(GpuMesh& gpu, const std::shared_ptr<const forge::Mesh>& mesh);
     void releaseGL();
 
     view::OrbitCamera m_camera;
 
-    // Model
-    forge::Mesh m_mesh;
-    bool m_meshDirty = false;
-    int m_meshIndexCount = 0;
-    QOpenGLVertexArrayObject m_meshVao;
-    QOpenGLBuffer m_meshPositions{QOpenGLBuffer::VertexBuffer};
-    QOpenGLBuffer m_meshNormals{QOpenGLBuffer::VertexBuffer};
-    QOpenGLBuffer m_meshIndices{QOpenGLBuffer::IndexBuffer};
+    // Scene
+    std::vector<DisplayItem> m_items;
+    bool m_itemsDirty = false;
+    std::unordered_map<std::uint64_t, std::unique_ptr<GpuMesh>> m_gpu;
     std::unique_ptr<QOpenGLShaderProgram> m_meshShader;
 
     // Build plate grid
@@ -80,6 +103,7 @@ private:
 
     QString m_glVersion;
     bool m_glReady = false;
+    bool m_firstFrameDone = false;
 };
 
 }  // namespace forge::app

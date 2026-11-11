@@ -9,9 +9,9 @@ Gate to Phase 2: a new user prints a customised part within 10 minutes.
 
 | Slice | Content | Status |
 | --- | --- | --- |
-| 1 | Project skeleton, Windows CI, OpenGL viewport, box with orbit / pan / zoom | **Delivered for testing** |
-| 2 | Document model, command stack, undo/redo, unit tests | Next |
-| 3 | Primitive library + gizmo + Subtract boolean, save and reopen (`.f3d`) | Planned |
+| 1 | Project skeleton, Windows CI, OpenGL viewport, box with orbit / pan / zoom | Done (0.1.0) |
+| 2 | Document model, command stack, undo/redo, unit tests | **Delivered for testing** |
+| 3 | Primitive library + gizmo + Subtract boolean, save and reopen (`.f3d`) | Next |
 | 4 | Merge, Intersect, Split by plane | Planned |
 | 5 | STL / 3MF import with auto-repair; export; "Send to slicer" | Planned |
 | 6 | Feature tree panel with rollback bar | Planned |

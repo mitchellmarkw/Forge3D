@@ -8,6 +8,7 @@
 #include <QWheelEvent>
 #include <QtDebug>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <vector>
@@ -74,7 +75,6 @@ constexpr float kPlateSize = 220.0f;  // mm; a common printer bed. Configurable 
 constexpr float kMinorStep = 10.0f;
 constexpr float kMajorStep = 50.0f;
 const QVector3D kBackground(0.93f, 0.94f, 0.96f);
-const QVector3D kModelColor(0.28f, 0.55f, 0.85f);
 
 std::unique_ptr<QOpenGLShaderProgram> buildProgram(const char* vs, const char* fs, const char* name)
 {
@@ -104,10 +104,10 @@ Viewport::~Viewport()
 
 void Viewport::releaseGL()
 {
-    m_meshVao.destroy();
-    m_meshPositions.destroy();
-    m_meshNormals.destroy();
-    m_meshIndices.destroy();
+    for (auto& [id, gpu] : m_gpu)
+        gpu->destroy();
+    m_gpu.clear();
+    m_itemsDirty = true;  // re-upload if a new context arrives
     m_plateVao.destroy();
     m_plateBuffer.destroy();
     m_meshShader.reset();
@@ -115,19 +115,43 @@ void Viewport::releaseGL()
     m_glReady = false;
 }
 
-void Viewport::setMesh(const forge::Mesh& mesh)
+void Viewport::GpuMesh::destroy()
 {
-    m_mesh = mesh;
-    m_meshDirty = true;
+    if (vao)
+        vao->destroy();
+    positions.destroy();
+    normals.destroy();
+    indices.destroy();
+    indexCount = 0;
+    source.reset();
+}
+
+void Viewport::setItems(std::vector<DisplayItem> items)
+{
+    m_items = std::move(items);
+    m_itemsDirty = true;
     update();
 }
 
 void Viewport::fitView()
 {
-    const Bounds b = m_mesh.bounds();
-    if (b.valid) {
-        const auto c = b.center();
-        m_camera.fitSphere(QVector3D(c[0], c[1], c[2]), b.radius());
+    Bounds all;
+    for (const DisplayItem& item : m_items) {
+        if (!item.mesh)
+            continue;
+        const Bounds local = item.mesh->bounds();
+        if (!local.valid)
+            continue;
+        for (int corner = 0; corner < 8; ++corner) {
+            const QVector3D p = item.model.map(QVector3D((corner & 1) ? local.max[0] : local.min[0],
+                                                         (corner & 2) ? local.max[1] : local.min[1],
+                                                         (corner & 4) ? local.max[2] : local.min[2]));
+            all.expand(p.x(), p.y(), p.z());
+        }
+    }
+    if (all.valid) {
+        const auto c = all.center();
+        m_camera.fitSphere(QVector3D(c[0], c[1], c[2]), all.radius());
     } else {
         m_camera.fitSphere(QVector3D(0, 0, 0), kPlateSize * 0.5f);
     }
@@ -178,16 +202,9 @@ void Viewport::initializeGL()
     glEnable(GL_MULTISAMPLE);
 
     buildPlateGeometry();
-    m_meshDirty = true;
+    m_itemsDirty = true;
     m_glReady = true;
     emit glInfoReady(summary);
-}
-
-void Viewport::resizeGL(int w, int h)
-{
-    // QOpenGLWidget already sets the viewport to the framebuffer size.
-    Q_UNUSED(w);
-    Q_UNUSED(h);
 }
 
 void Viewport::buildPlateGeometry()
@@ -236,17 +253,15 @@ void Viewport::buildPlateGeometry()
     m_plateBuffer.release();
 }
 
-void Viewport::uploadMeshIfNeeded()
+void Viewport::upload(GpuMesh& gpu, const std::shared_ptr<const forge::Mesh>& mesh)
 {
-    if (!m_meshDirty)
-        return;
-    m_meshDirty = false;
+    if (!gpu.vao) {
+        gpu.vao = std::make_unique<QOpenGLVertexArrayObject>();
+        gpu.vao->create();
+    }
+    QOpenGLVertexArrayObject::Binder bind(gpu.vao.get());
 
-    if (!m_meshVao.isCreated())
-        m_meshVao.create();
-    QOpenGLVertexArrayObject::Binder bind(&m_meshVao);
-
-    const auto upload = [](QOpenGLBuffer& buffer, const void* source, std::size_t bytes) {
+    const auto fill = [](QOpenGLBuffer& buffer, const void* source, std::size_t bytes) {
         if (!buffer.isCreated())
             buffer.create();
         buffer.bind();
@@ -254,18 +269,49 @@ void Viewport::uploadMeshIfNeeded()
         buffer.allocate(source, static_cast<int>(bytes));
     };
 
-    upload(m_meshPositions, m_mesh.positions.data(), m_mesh.positions.size() * sizeof(float));
+    fill(gpu.positions, mesh->positions.data(), mesh->positions.size() * sizeof(float));
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, nullptr);
 
-    upload(m_meshNormals, m_mesh.normals.data(), m_mesh.normals.size() * sizeof(float));
+    fill(gpu.normals, mesh->normals.data(), mesh->normals.size() * sizeof(float));
     glEnableVertexAttribArray(1);
     glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 0, nullptr);
 
     // The index buffer binding is stored in the VAO, so bind it while the VAO is bound.
-    upload(m_meshIndices, m_mesh.indices.data(), m_mesh.indices.size() * sizeof(std::uint32_t));
+    fill(gpu.indices, mesh->indices.data(), mesh->indices.size() * sizeof(std::uint32_t));
 
-    m_meshIndexCount = static_cast<int>(m_mesh.indices.size());
+    gpu.indexCount = static_cast<int>(mesh->indices.size());
+    gpu.source = mesh;
+}
+
+void Viewport::syncGpuMeshes()
+{
+    if (!m_itemsDirty)
+        return;
+    m_itemsDirty = false;
+
+    // Drop GPU copies of items that are gone.
+    for (auto it = m_gpu.begin(); it != m_gpu.end();) {
+        const bool stillShown = std::any_of(m_items.begin(), m_items.end(),
+                                            [&](const DisplayItem& item) { return item.id == it->first; });
+        if (stillShown) {
+            ++it;
+        } else {
+            it->second->destroy();
+            it = m_gpu.erase(it);
+        }
+    }
+
+    // Upload new or changed meshes; unchanged ones keep their buffers.
+    for (const DisplayItem& item : m_items) {
+        if (!item.mesh)
+            continue;
+        auto& slot = m_gpu[item.id];
+        if (!slot)
+            slot = std::make_unique<GpuMesh>();
+        if (slot->source != item.mesh)
+            upload(*slot, item.mesh);
+    }
 }
 
 void Viewport::paintGL()
@@ -275,31 +321,40 @@ void Viewport::paintGL()
     if (!m_glReady)
         return;
 
-    uploadMeshIfNeeded();
+    syncGpuMeshes();
 
     const float aspect = height() > 0 ? static_cast<float>(width()) / static_cast<float>(height()) : 1.0f;
     const QMatrix4x4 view = m_camera.viewMatrix();
-    const QMatrix4x4 mvp = m_camera.projectionMatrix(aspect) * view;
+    const QMatrix4x4 viewProj = m_camera.projectionMatrix(aspect) * view;
 
     // Build plate
     m_lineShader->bind();
-    m_lineShader->setUniformValue("uMvp", mvp);
+    m_lineShader->setUniformValue("uMvp", viewProj);
     {
         QOpenGLVertexArrayObject::Binder bind(&m_plateVao);
         glDrawArrays(GL_LINES, 0, m_plateVertexCount);
     }
     m_lineShader->release();
 
-    // Model
-    if (m_meshIndexCount > 0) {
-        m_meshShader->bind();
-        m_meshShader->setUniformValue("uMvp", mvp);
-        m_meshShader->setUniformValue("uModelView", view);
-        m_meshShader->setUniformValue("uNormalMatrix", view.normalMatrix());
-        m_meshShader->setUniformValue("uColor", kModelColor);
-        QOpenGLVertexArrayObject::Binder bind(&m_meshVao);
-        glDrawElements(GL_TRIANGLES, m_meshIndexCount, GL_UNSIGNED_INT, nullptr);
-        m_meshShader->release();
+    // Bodies
+    m_meshShader->bind();
+    for (const DisplayItem& item : m_items) {
+        const auto found = m_gpu.find(item.id);
+        if (found == m_gpu.end() || found->second->indexCount == 0)
+            continue;
+        const QMatrix4x4 modelView = view * item.model;
+        m_meshShader->setUniformValue("uMvp", viewProj * item.model);
+        m_meshShader->setUniformValue("uModelView", modelView);
+        m_meshShader->setUniformValue("uNormalMatrix", modelView.normalMatrix());
+        m_meshShader->setUniformValue("uColor", item.color);
+        QOpenGLVertexArrayObject::Binder bind(found->second->vao.get());
+        glDrawElements(GL_TRIANGLES, found->second->indexCount, GL_UNSIGNED_INT, nullptr);
+    }
+    m_meshShader->release();
+
+    if (!m_firstFrameDone) {
+        m_firstFrameDone = true;
+        emit firstFrameRendered();
     }
 }
 
