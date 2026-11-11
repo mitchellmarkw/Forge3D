@@ -112,6 +112,8 @@ private:
     bool m_pressOnHandle = false;  // a click on a gizmo handle must not change the selection
     view::GizmoMode m_gizmoMode = view::GizmoMode::Move;
     bool m_snap = true;
+    bool m_uniform = false;    // resize keeps proportions
+    bool m_keepRound = true;   // cylinder side handles change both radii
 
     Viewport* m_viewport = nullptr;
     PropertiesPanel* m_properties = nullptr;
@@ -138,6 +140,7 @@ private:
     QAction* m_modeRotate = nullptr;
     QAction* m_modeResize = nullptr;
     QAction* m_snapAction = nullptr;
+    QAction* m_uniformAction = nullptr;
 };
 
 }  // namespace forge::app

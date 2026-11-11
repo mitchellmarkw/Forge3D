@@ -7,6 +7,7 @@
 
 #include <optional>
 
+class QCheckBox;
 class QDoubleSpinBox;
 class QFormLayout;
 class QGroupBox;
@@ -28,11 +29,20 @@ public:
     // nullptr = nothing selected.
     void setBody(const Body* body);
 
+    // "Uniform scale": changing one size scales the others by the same factor.
+    void setUniform(bool on);
+    bool uniform() const;
+    // "Round" (cylinders): Radius X and Radius Y change together.
+    void setKeepRound(bool on);
+    bool keepRound() const;
+
 signals:
     void renameRequested(ObjectId id, const QString& name);
     void specRequested(ObjectId id, const PrimitiveSpec& spec);
     void placementRequested(ObjectId id, const Placement& placement);
     void sitOnPlateRequested(ObjectId id);
+    void uniformChanged(bool on);
+    void keepRoundChanged(bool on);
 
 private:
     QDoubleSpinBox* makeLength(const QString& tip);
@@ -51,8 +61,11 @@ private:
     QDoubleSpinBox* m_boxWidth = nullptr;
     QDoubleSpinBox* m_boxDepth = nullptr;
     QDoubleSpinBox* m_boxHeight = nullptr;
-    QDoubleSpinBox* m_cylRadius = nullptr;
+    QDoubleSpinBox* m_cylRadiusX = nullptr;
+    QDoubleSpinBox* m_cylRadiusY = nullptr;
     QDoubleSpinBox* m_cylHeight = nullptr;
+    QCheckBox* m_round = nullptr;
+    QCheckBox* m_uniform = nullptr;
 
     QDoubleSpinBox* m_x = nullptr;
     QDoubleSpinBox* m_y = nullptr;

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "PropertiesPanel.h"
 
+#include <QCheckBox>
 #include <QDoubleSpinBox>
 #include <QFormLayout>
 #include <QGroupBox>
@@ -11,7 +12,9 @@
 #include <QStackedWidget>
 #include <QVBoxLayout>
 
+#include <array>
 #include <cmath>
+#include <utility>
 #include <variant>
 
 namespace forge::app {
@@ -91,11 +94,23 @@ PropertiesPanel::PropertiesPanel(QWidget* parent) : QWidget(parent)
     auto* cylPage = new QWidget;
     auto* cylForm = new QFormLayout(cylPage);
     cylForm->setContentsMargins(0, 0, 0, 0);
-    m_cylRadius = makeLength(tr("Distance from the centre to the side"));
+    m_cylRadiusX = makeLength(tr("Distance from the centre line to the side, along X"));
+    m_cylRadiusY = makeLength(tr("Distance from the centre line to the side, along Y"));
     m_cylHeight = makeLength(tr("Size along Z (up)"));
-    cylForm->addRow(tr("Radius:"), m_cylRadius);
+    m_round = new QCheckBox(tr("Round (radius X = radius Y)"));
+    m_round->setToolTip(tr("Untick to give X and Y different radii, making an elliptical cylinder. "
+                           "Ticking it makes the cylinder round again, using Radius X."));
+    m_round->setChecked(true);
+    cylForm->addRow(tr("Radius X:"), m_cylRadiusX);
+    cylForm->addRow(tr("Radius Y:"), m_cylRadiusY);
+    cylForm->addRow(QString(), m_round);
     cylForm->addRow(tr("Height (Z):"), m_cylHeight);
     m_sizePages->addWidget(cylPage);
+
+    m_uniform = new QCheckBox(tr("Uniform scale (keep proportions)"));
+    m_uniform->setToolTip(tr("Changing one size scales all the others by the same amount. "
+                             "Also applies to the Resize handles (toolbar: Uniform, key U)."));
+    sizeLayout->addWidget(m_uniform);
     layout->addWidget(sizeGroup);
 
     // Position
@@ -130,8 +145,18 @@ PropertiesPanel::PropertiesPanel(QWidget* parent) : QWidget(parent)
     m_pages->addWidget(page);
 
     connect(m_name, &QLineEdit::editingFinished, this, &PropertiesPanel::commitName);
-    for (QDoubleSpinBox* spin : {m_boxWidth, m_boxDepth, m_boxHeight, m_cylRadius, m_cylHeight})
+    for (QDoubleSpinBox* spin : {m_boxWidth, m_boxDepth, m_boxHeight, m_cylRadiusX, m_cylRadiusY, m_cylHeight})
         connect(spin, &QDoubleSpinBox::valueChanged, this, &PropertiesPanel::commitSpec);
+    connect(m_uniform, &QCheckBox::toggled, this, &PropertiesPanel::uniformChanged);
+    connect(m_round, &QCheckBox::toggled, this, [this](bool on) {
+        m_cylRadiusY->setEnabled(!on);
+        emit keepRoundChanged(on);
+        // Ticking Round on an elliptical cylinder makes it round again.
+        if (on && m_body) {
+            if (const auto* cyl = std::get_if<CylinderSpec>(&m_body->spec); cyl && !cyl->isRound())
+                emit specRequested(m_body->id, CylinderSpec{cyl->radiusX, cyl->height});
+        }
+    });
     for (QDoubleSpinBox* spin : {m_x, m_y, m_z, m_rotX, m_rotY, m_rotZ})
         connect(spin, &QDoubleSpinBox::valueChanged, this, &PropertiesPanel::commitPlacement);
     connect(sit, &QPushButton::clicked, this, [this] {
@@ -158,22 +183,30 @@ void PropertiesPanel::setBody(const Body* body)
     m_pages->setCurrentIndex(1);
 
     // Filling the fields must not send edit requests back.
-    const QSignalBlocker b0(m_name), b1(m_boxWidth), b2(m_boxDepth), b3(m_boxHeight), b4(m_cylRadius),
-        b5(m_cylHeight), b6(m_x), b7(m_y), b8(m_z), b9(m_rotX), b10(m_rotY), b11(m_rotZ);
+    const QSignalBlocker b0(m_name), b1(m_boxWidth), b2(m_boxDepth), b3(m_boxHeight), b4(m_cylRadiusX),
+        b5(m_cylHeight), b6(m_x), b7(m_y), b8(m_z), b9(m_rotX), b10(m_rotY), b11(m_rotZ), b12(m_cylRadiusY);
 
     if (!m_name->hasFocus() || m_name->text() != QString::fromStdString(body->name))
         m_name->setText(QString::fromStdString(body->name));
     m_type->setText(QString::fromStdString(typeName(body->spec)));
 
+    // Size the stack to the page being shown; a stacked widget otherwise reserves
+    // room for its tallest page (the cylinder's), leaving a gap under a box's fields.
+    const int sizePage = std::holds_alternative<BoxSpec>(body->spec) ? 0 : 1;
+    for (int i = 0; i < m_sizePages->count(); ++i)
+        m_sizePages->widget(i)->setSizePolicy(QSizePolicy::Preferred,
+                                              i == sizePage ? QSizePolicy::Preferred : QSizePolicy::Ignored);
+    m_sizePages->setCurrentIndex(sizePage);
+    m_sizePages->adjustSize();
+
     if (const auto* box = std::get_if<BoxSpec>(&body->spec)) {
-        m_sizePages->setCurrentIndex(0);
         m_boxWidth->setValue(box->width);
         m_boxDepth->setValue(box->depth);
         m_boxHeight->setValue(box->height);
     } else {
         const auto& cyl = std::get<CylinderSpec>(body->spec);
-        m_sizePages->setCurrentIndex(1);
-        m_cylRadius->setValue(cyl.radius);
+        m_cylRadiusX->setValue(cyl.radiusX);
+        m_cylRadiusY->setValue(cyl.radiusY);
         m_cylHeight->setValue(cyl.height);
     }
 
@@ -198,20 +231,75 @@ void PropertiesPanel::commitName()
         emit renameRequested(m_body->id, name);
 }
 
+void PropertiesPanel::setUniform(bool on)
+{
+    const QSignalBlocker block(m_uniform);
+    m_uniform->setChecked(on);
+}
+
+bool PropertiesPanel::uniform() const
+{
+    return m_uniform->isChecked();
+}
+
+void PropertiesPanel::setKeepRound(bool on)
+{
+    const QSignalBlocker block(m_round);
+    m_round->setChecked(on);
+    m_cylRadiusY->setEnabled(!on);
+}
+
+bool PropertiesPanel::keepRound() const
+{
+    return m_round->isChecked();
+}
+
 void PropertiesPanel::commitSpec()
 {
     if (!m_body)
         return;
+    // Which field did the user change? Its new value decides the result.
     PrimitiveSpec spec = m_body->spec;
+    const bool uniform = m_uniform->isChecked();
+    // Scale everything by `factor`, or set one value.
+    const auto apply = [uniform](double& field, double newValue, auto& all) {
+        if (uniform && field > 0.0) {
+            const double factor = newValue / field;
+            for (double* v : all)
+                *v *= factor;
+        } else {
+            field = newValue;
+        }
+    };
+
     bool changed = false;
     if (auto* box = std::get_if<BoxSpec>(&spec)) {
-        changed = differs(box->width, m_boxWidth->value()) || differs(box->depth, m_boxDepth->value()) ||
-                  differs(box->height, m_boxHeight->value());
-        *box = BoxSpec{m_boxWidth->value(), m_boxDepth->value(), m_boxHeight->value()};
+        std::array<double*, 3> all{&box->width, &box->depth, &box->height};
+        const std::array<std::pair<double*, QDoubleSpinBox*>, 3> fields{
+            {{&box->width, m_boxWidth}, {&box->depth, m_boxDepth}, {&box->height, m_boxHeight}}};
+        for (const auto& [field, spin] : fields) {
+            if (differs(*field, spin->value())) {
+                apply(*field, spin->value(), all);
+                changed = true;
+                break;  // one field changes at a time
+            }
+        }
     } else {
         auto& cyl = std::get<CylinderSpec>(spec);
-        changed = differs(cyl.radius, m_cylRadius->value()) || differs(cyl.height, m_cylHeight->value());
-        cyl = CylinderSpec{m_cylRadius->value(), m_cylHeight->value()};
+        std::array<double*, 3> all{&cyl.radiusX, &cyl.radiusY, &cyl.height};
+        if (differs(cyl.radiusX, m_cylRadiusX->value())) {
+            const double v = m_cylRadiusX->value();
+            apply(cyl.radiusX, v, all);
+            if (!uniform && m_round->isChecked())
+                cyl.radiusY = v;
+            changed = true;
+        } else if (differs(cyl.radiusY, m_cylRadiusY->value())) {
+            apply(cyl.radiusY, m_cylRadiusY->value(), all);
+            changed = true;
+        } else if (differs(cyl.height, m_cylHeight->value())) {
+            apply(cyl.height, m_cylHeight->value(), all);
+            changed = true;
+        }
     }
     if (changed)
         emit specRequested(m_body->id, spec);

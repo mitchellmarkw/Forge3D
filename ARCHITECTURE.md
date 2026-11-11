@@ -84,7 +84,8 @@ UI action ──> Command ──> CommandStack::execute() ──> Command::redo(
   (`pivotOf(spec)`), X first, then Y, then Z, about fixed axes (R = Rz·Ry·Rx). The viewport's
   model matrix, `Document::worldBounds()` and `pick()` all use it.
 - **Format history:** v1 (0.3.0) stored only rotationZ; v2 (0.3.1) adds rotationX and
-  rotationY. `fromJson` reads both.
+  rotationY; v3 (0.4.1) stores cylinder radiusX / radiusY instead of radius. `fromJson`
+  reads all three.
 - Opening replaces all bodies with `Document::replaceAll()` (checks everything first) and
   clears the undo history.
 
@@ -115,8 +116,16 @@ Viewport (mouse)  --leftPressed(ray, handle)-->  MainWindow drag controller
   grabbed part of the ring follows the mouse. The result goes through
   `rotatedAboutPlateAxis()`, which composes the turn with the current rotation and
   converts back to X/Y/Z angles (`eulerXYZ()`; at exactly ±90° about Y, Z is reported as 0).
-- **Resizing** keeps the opposite face fixed in the plate (`resizedFace()` solves for the new
-  placement), so it works on tilted bodies too.
+- **Resizing** keeps an anchor fixed in the plate (`resizedFace()` solves for the new
+  placement), so it works on tilted bodies too. Anchors: the opposite end for top/bottom
+  handles; the opposite side at base level for box side handles; the centre line at the base
+  for cylinder side handles. `ResizeOptions` adds `uniform` (scale everything by one factor,
+  never below `minValue`) and `keepRound` (cylinder side handles change both radii).
+- **Cylinders** have `radiusX` / `radiusY`. `CylinderSpec{r, h}` is round and
+  `CylinderSpec{rx, ry, h}` elliptical (constructors, so old two-value call sites keep their
+  meaning). Unequal radii are built as an elliptic face extruded with `BRepPrimAPI_MakePrism`.
+- **"Round" is UI state**, not stored: when a cylinder is selected it starts ticked if the
+  radii are equal. "Uniform" is a window-wide setting shared by the toolbar and Properties.
 
 ## Rendering
 

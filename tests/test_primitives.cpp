@@ -11,6 +11,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include <numbers>
+#include <utility>
 #include <stdexcept>
 
 using Catch::Matchers::WithinAbs;
@@ -59,4 +60,22 @@ TEST_CASE("primitives reject zero and negative sizes", "[primitives]")
     CHECK_THROWS_AS(forge::primitives::makeBox(1.0, -2.0, 1.0), std::invalid_argument);
     CHECK_THROWS_AS(forge::primitives::makeCylinder(-1.0, 1.0), std::invalid_argument);
     CHECK_THROWS_AS(forge::primitives::makeCylinder(1.0, 0.0), std::invalid_argument);
+}
+
+TEST_CASE("an elliptical cylinder has the right volume and outline", "[primitives][ellipse]")
+{
+    for (const auto& [rx, ry] : {std::pair{20.0, 8.0}, std::pair{6.0, 15.0}}) {
+        const TopoDS_Shape e = forge::primitives::makeCylinder(rx, ry, 10.0);
+        REQUIRE_FALSE(e.IsNull());
+        CHECK(BRepCheck_Analyzer(e).IsValid());
+        CHECK(countFaces(e) == 3);
+        CHECK_THAT(volumeOf(e), WithinRel(std::numbers::pi * rx * ry * 10.0, 1e-6));
+    }
+}
+
+TEST_CASE("equal radii still make a true round cylinder", "[primitives][ellipse]")
+{
+    const TopoDS_Shape c = forge::primitives::makeCylinder(7.0, 7.0, 10.0);
+    CHECK_THAT(volumeOf(c), WithinRel(std::numbers::pi * 49.0 * 10.0, 1e-9));
+    CHECK_THROWS_AS(forge::primitives::makeCylinder(5.0, 0.0, 10.0), std::invalid_argument);
 }

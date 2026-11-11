@@ -45,7 +45,7 @@ json bodyToJson(const Body& b)
                 j["parameters"] = {{"width", spec.width}, {"depth", spec.depth}, {"height", spec.height}};
             } else {
                 j["type"] = "cylinder";
-                j["parameters"] = {{"radius", spec.radius}, {"height", spec.height}};
+                j["parameters"] = {{"radiusX", spec.radiusX}, {"radiusY", spec.radiusY}, {"height", spec.height}};
             }
         },
         b.spec);
@@ -97,7 +97,10 @@ Body bodyFromJson(const json& j, std::size_t index, int version)
         b.spec = BoxSpec{number(*params, "width", where), number(*params, "depth", where),
                          number(*params, "height", where)};
     else if (t == "cylinder")
-        b.spec = CylinderSpec{number(*params, "radius", where), number(*params, "height", where)};
+        b.spec = version >= 3 ? CylinderSpec{number(*params, "radiusX", where), number(*params, "radiusY", where),
+                                             number(*params, "height", where)}
+                              : CylinderSpec{number(*params, "radius", where),  // round, before v3
+                                             number(*params, "height", where)};
     else
         throw FileError("This file contains a shape type this version of Forge3D does not know (\"" + t +
                         "\").\nIt may have been made by a newer version.");

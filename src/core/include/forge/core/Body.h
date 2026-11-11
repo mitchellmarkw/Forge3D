@@ -39,9 +39,20 @@ struct BoxSpec {
     bool operator==(const BoxSpec&) const = default;
 };
 
+// A cylinder standing on the plate. radiusX == radiusY gives a round cylinder;
+// different radii give an elliptical one (an ellipse extruded straight up).
 struct CylinderSpec {
-    double radius = 10.0;
+    double radiusX = 10.0;
+    double radiusY = 10.0;
     double height = 20.0;
+
+    CylinderSpec() = default;
+    // Round: CylinderSpec{radius, height}
+    CylinderSpec(double radius, double h) : radiusX(radius), radiusY(radius), height(h) {}
+    // Elliptical: CylinderSpec{radiusX, radiusY, height}
+    CylinderSpec(double rx, double ry, double h) : radiusX(rx), radiusY(ry), height(h) {}
+
+    bool isRound() const { return radiusX == radiusY; }
     bool operator==(const CylinderSpec&) const = default;
 };
 

@@ -77,7 +77,7 @@ double footprintWidth(const PrimitiveSpec& spec)
 {
     if (const auto* box = std::get_if<BoxSpec>(&spec))
         return box->width;
-    return 2.0 * std::get<CylinderSpec>(spec).radius;
+    return 2.0 * std::get<CylinderSpec>(spec).radiusX;
 }
 
 std::filesystem::path toPath(const QString& path)
@@ -223,6 +223,17 @@ void MainWindow::createActions()
                                 "move freely."));
     connect(m_snapAction, &QAction::toggled, this, [this](bool on) { m_snap = on; });
 
+    m_uniformAction = new QAction(tr("Uniform"), this);
+    m_uniformAction->setCheckable(true);
+    m_uniformAction->setShortcut(Qt::Key_U);
+    m_uniformAction->setToolTip(tr("Uniform scale (U): resizing changes every size by the same factor, "
+                                   "keeping the shape's proportions"));
+    connect(m_uniformAction, &QAction::toggled, this, [this](bool on) {
+        m_uniform = on;
+        m_properties->setUniform(on);
+        qInfo() << "Uniform scale" << (on ? "on" : "off");
+    });
+
     m_addBox = new QAction(tr("Add Box"), this);
     m_addBox->setToolTip(tr("Add a 30 x 20 x 15 mm box beside the existing bodies"));
     connect(m_addBox, &QAction::triggered, this, [this] { addBody(BoxSpec{30.0, 20.0, 15.0}); });
@@ -266,6 +277,7 @@ void MainWindow::createMenus()
     edit->addAction(m_modeRotate);
     edit->addAction(m_modeResize);
     edit->addAction(m_snapAction);
+    edit->addAction(m_uniformAction);
 
     QMenu* view = menuBar()->addMenu(tr("&View"));
     view->addAction(m_fit);
@@ -302,6 +314,7 @@ void MainWindow::createToolBar()
     bar->addAction(m_modeRotate);
     bar->addAction(m_modeResize);
     bar->addAction(m_snapAction);
+    bar->addAction(m_uniformAction);
     bar->addSeparator();
     bar->addAction(m_delete);
     bar->addAction(m_clear);
@@ -338,6 +351,8 @@ void MainWindow::createDocks()
     connect(m_properties, &PropertiesPanel::specRequested, this, [this](ObjectId id, const PrimitiveSpec& spec) {
         run(std::make_unique<SetSpecCommand>(id, spec));
     });
+    connect(m_properties, &PropertiesPanel::uniformChanged, m_uniformAction, &QAction::setChecked);
+    connect(m_properties, &PropertiesPanel::keepRoundChanged, this, [this](bool on) { m_keepRound = on; });
     connect(m_properties, &PropertiesPanel::sitOnPlateRequested, this, [this](ObjectId id) {
         try {
             const Placement resting = sitOnPlate(m_doc, id);
@@ -383,6 +398,12 @@ void MainWindow::setSelection(ObjectId id)
     if (id == m_selected)
         return;
     m_selected = id;
+    if (const Body* body = m_doc.find(id)) {
+        // A newly selected cylinder starts in "Round" mode only if it is round.
+        const auto* cyl = std::get_if<CylinderSpec>(&body->spec);
+        m_keepRound = !cyl || cyl->isRound();
+        m_properties->setKeepRound(m_keepRound);
+    }
     refreshScene();  // highlight, list, properties
 }
 
@@ -420,7 +441,7 @@ std::optional<view::GizmoTarget> MainWindow::gizmoTargetFor(const Body& body) co
         target.halfExtents = QVector3D(float(box->width / 2), float(box->depth / 2), float(box->height / 2));
     } else {
         const auto& cyl = std::get<CylinderSpec>(body.spec);
-        target.halfExtents = QVector3D(float(cyl.radius), float(cyl.radius), float(cyl.height / 2));
+        target.halfExtents = QVector3D(float(cyl.radiusX), float(cyl.radiusY), float(cyl.height / 2));
         target.round = true;
     }
     return target;
@@ -553,12 +574,24 @@ void MainWindow::onLeftDragged(const QVector3D& origin, const QVector3D& directi
         double value = dimension(d.before.spec, d.handle.axis) + (*s - d.startParam);
         if (snap)
             value = std::max(kSizeStep, view::snapTo(value, kSizeStep));
-        next = resizedFace(d.before, d.handle.axis, d.handle.side, value);
-        const bool radius = std::holds_alternative<CylinderSpec>(next.spec) && d.handle.axis != 2;
-        const QString what = radius ? tr("Radius")
-                                    : d.handle.axis == 0 ? tr("Width") : d.handle.axis == 1 ? tr("Depth")
-                                                                                            : tr("Height");
+        ResizeOptions options;
+        options.uniform = m_uniform;
+        options.keepRound = m_keepRound;
+        next = resizedFace(d.before, d.handle.axis, d.handle.side, value, options);
+
+        const bool cylinder = std::holds_alternative<CylinderSpec>(next.spec);
+        QString what;
+        if (d.handle.axis == 2)
+            what = tr("Height");
+        else if (cylinder)
+            what = (m_keepRound || m_uniform) ? tr("Radius") : (d.handle.axis == 0 ? tr("Radius X") : tr("Radius Y"));
+        else
+            what = d.handle.axis == 0 ? tr("Width") : tr("Depth");
         status = tr("Resize  %1 %2 mm").arg(what).arg(dimension(next.spec, d.handle.axis), 0, 'f', 1);
+        if (m_uniform) {
+            const double factor = dimension(next.spec, d.handle.axis) / dimension(d.before.spec, d.handle.axis);
+            status += tr("   (uniform x%1)").arg(factor, 0, 'f', 2);
+        }
         break;
     }
     case Drag::Kind::None:
