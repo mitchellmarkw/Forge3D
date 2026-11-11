@@ -1,0 +1,117 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Builds Forge3D on Windows, runs the unit tests, and uploads a ready-to-run zip.
+# Download it from the run's "Artifacts" section, unzip, and run Forge3D.exe.
+
+name: Windows build
+
+# Push only: a pull request's checks come from its branch's push run, so a separate
+# pull_request trigger would build everything twice.
+on:
+  push:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}\.vcpkg-cache
+  VCPKG_DISABLE_METRICS: "1"
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 300   # the first run builds Qt and OpenCASCADE from source; later runs reuse the cache
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore compiled libraries (vcpkg cache)
+        id: vcpkg-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .vcpkg-cache
+          # Every run saves under its own key, so a cancelled or failed run can never
+          # block a later, more complete cache from being saved. Restore takes the newest.
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}-${{ github.run_id }}
+          restore-keys: |
+            vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}-
+            vcpkg-${{ runner.os }}-
+
+      - name: Prepare the vcpkg cache folder
+        shell: pwsh
+        run: New-Item -ItemType Directory -Force -Path "$env:VCPKG_DEFAULT_BINARY_CACHE" | Out-Null
+
+      # Also sets VCPKG_ROOT to the copy of vcpkg that ships with Visual Studio.
+      # Package versions are still pinned by "builtin-baseline" in vcpkg.json.
+      - name: Set up the MSVC compiler and vcpkg
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Make sure Ninja is available
+        shell: pwsh
+        run: |
+          if (-not (Get-Command ninja -ErrorAction SilentlyContinue)) { pip install ninja }
+          ninja --version
+          cmake --version
+          Write-Host "VCPKG_ROOT=$env:VCPKG_ROOT"
+
+      - name: Configure (installs Qt, OpenCASCADE, Catch2 through vcpkg)
+        run: cmake --preset windows-release
+
+      - name: Save compiled libraries (vcpkg cache)
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .vcpkg-cache
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}-${{ github.run_id }}
+
+      - name: Build
+        run: cmake --build --preset windows-release
+
+      - name: Unit tests
+        run: ctest --preset windows-release
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $build = 'build\windows-release'
+          $installed = "$build\vcpkg_installed\x64-windows"
+          $dist = 'dist\Forge3D'
+          New-Item -ItemType Directory -Force -Path $dist | Out-Null
+
+          Copy-Item "$build\bin\Forge3D.exe", "$build\bin\Forge3D.pdb" $dist -ErrorAction SilentlyContinue
+          Copy-Item "$build\bin\*.dll" $dist
+          Copy-Item "$installed\bin\*.dll" $dist -Force
+
+          # Qt plugins (platform integration, styles, image formats)
+          $windeployqt = "$installed\tools\Qt6\bin\windeployqt.exe"
+          if (Test-Path $windeployqt) {
+            & $windeployqt --release --no-translations --no-system-d3d-compiler --no-compiler-runtime "$dist\Forge3D.exe"
+          }
+          if (-not (Test-Path "$dist\platforms\qwindows.dll")) {
+            Write-Host 'windeployqt did not deploy plugins; copying them directly'
+            foreach ($p in 'platforms', 'styles', 'imageformats') {
+              if (Test-Path "$installed\Qt6\plugins\$p") {
+                Copy-Item -Recurse -Force "$installed\Qt6\plugins\$p" $dist
+              }
+            }
+          }
+          if (-not (Test-Path "$dist\platforms\qwindows.dll")) { throw 'qwindows.dll missing from package' }
+
+          # The Visual C++ runtime, so the app runs on PCs without the redistributable installed
+          $crt = Get-ChildItem -Directory "$env:VCToolsRedistDir\x64" -Filter 'Microsoft.VC*.CRT' | Select-Object -First 1
+          if ($crt) { Copy-Item "$($crt.FullName)\*.dll" $dist -Force }
+
+          Copy-Item README.md, LICENSE $dist -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path "$dist\test-sheets" | Out-Null
+          Copy-Item docs\test-sheets\*.md "$dist\test-sheets"
+          Get-ChildItem -Recurse $dist | Select-Object -ExpandProperty FullName
+
+      - name: Upload Forge3D for testing
+        uses: actions/upload-artifact@v4
+        with:
+          name: Forge3D-windows-x64-${{ github.sha }}
+          path: dist/Forge3D
+          retention-days: 30

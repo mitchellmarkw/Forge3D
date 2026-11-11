@@ -1,0 +1,36 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "forge3d",
+  "version": "0.1.0",
+  "description": "Parametric 3D modeling with sculpting",
+  "license": "GPL-3.0-or-later",
+  "builtin-baseline": "5cad485d1ddb649c8fa1022bf0b3908555e6e6ba",
+  "$note-pcre2": "No JIT: the pcre2 port's JIT download is checksum-pinned to a GitHub API response that changed, which breaks the build. Qt does not need it.",
+  "dependencies": [
+    {
+      "name": "qtbase",
+      "default-features": false,
+      "features": [
+        "gui",
+        "widgets",
+        "opengl",
+        "freetype",
+        "harfbuzz",
+        "png",
+        "jpeg",
+        "pcre2",
+        "doubleconversion",
+        "zstd",
+        "concurrent",
+        "thread",
+        "windeployqt"
+      ]
+    },
+    {
+      "name": "pcre2",
+      "default-features": false
+    },
+    "opencascade",
+    "catch2"
+  ]
+}
