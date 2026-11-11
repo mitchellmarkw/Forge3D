@@ -16,6 +16,7 @@ add_executable(forge_tests
     test_align.cpp
     test_shape_library.cpp
     test_split.cpp
+    test_handles.cpp
 )
 target_link_libraries(forge_tests PRIVATE
     Forge3D::core

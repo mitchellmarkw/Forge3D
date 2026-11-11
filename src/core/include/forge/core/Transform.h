@@ -60,6 +60,14 @@ Placement rotatedAboutPlateAxis(const Body& body, int axis, double degrees);
 // of the body's pivot. That point stays where it is on the plate. Combined shapes
 // use the centre of their visible solid (Document::visibleCentre).
 Placement rotatedAboutPlateAxis(const Body& body, int axis, double degrees, const Vec3& centre);
+// For a part inside a combined shape: `parentWorld` maps the parent's coordinates
+// to the plate (Document::worldTransform of the parent). The turn is still about a
+// plate axis; the result is the part's placement inside its parent.
+Placement rotatedAboutPlateAxis(const Body& body, int axis, double degrees, const Vec3& centre,
+                                const Transform& parentWorld);
+// The placement after moving the body by `plateDelta` (plate coordinates); for a
+// part, parentWorld turns that into its parent's coordinates.
+Placement movedOnPlate(const Body& body, const Vec3& plateDelta, const Transform& parentWorld = Transform::identity());
 // The placement with these X / Y / Z angles (degrees), chosen so that `centre`
 // (body coordinates) stays where it is on the plate. Used for typed angles.
 Placement withRotation(const Body& body, const Vec3& anglesDeg, const Vec3& centre);

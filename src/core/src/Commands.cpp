@@ -173,6 +173,34 @@ void EditBodyCommand::undo(Document& doc)
     apply(doc, m_before);
 }
 
+// ---- EditBodiesCommand ---------------------------------------------------------------
+
+EditBodiesCommand::EditBodiesCommand(std::vector<Body> before, std::vector<Body> after, std::string label)
+    : m_before(std::move(before)), m_after(std::move(after)), m_label(std::move(label))
+{
+    if (m_before.size() != m_after.size())
+        throw std::invalid_argument("EditBodiesCommand: before and after must list the same bodies");
+}
+
+void EditBodiesCommand::redo(Document& doc)
+{
+    std::size_t done = 0;
+    try {
+        for (; done < m_after.size(); ++done)
+            EditBodyCommand(m_before[done], m_after[done], m_label).redo(doc);
+    } catch (...) {
+        for (std::size_t i = done; i-- > 0;)  // put back what already changed
+            EditBodyCommand(m_before[i], m_after[i], m_label).undo(doc);
+        throw;
+    }
+}
+
+void EditBodiesCommand::undo(Document& doc)
+{
+    for (std::size_t i = m_before.size(); i-- > 0;)
+        EditBodyCommand(m_before[i], m_after[i], m_label).undo(doc);
+}
+
 // ---- duplicateTree ---------------------------------------------------------------
 
 std::vector<Body> duplicateTree(Document& doc, ObjectId id)

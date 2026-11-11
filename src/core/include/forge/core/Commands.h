@@ -129,6 +129,20 @@ private:
     std::string m_label;
 };
 
+// Changes several bodies in one step (e.g. resizing a combined shape changes all its
+// parts). `before` and `after` hold the same bodies, in the same order.
+class EditBodiesCommand final : public Command {
+public:
+    EditBodiesCommand(std::vector<Body> before, std::vector<Body> after, std::string label);
+    std::string label() const override { return m_label; }
+    void redo(Document& doc) override;
+    void undo(Document& doc) override;
+
+private:
+    std::vector<Body> m_before, m_after;
+    std::string m_label;
+};
+
 // Copies of a body and everything inside it, with new ids and names ("Box 1" ->
 // "Box 1 copy"), in the order they can be inserted (parts before the results that
 // hold them; the copy of `id` itself last). Nothing is added to the document.

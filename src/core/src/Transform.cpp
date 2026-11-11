@@ -180,17 +180,34 @@ Placement rotatedAboutPlateAxis(const Body& body, int axis, double degrees)
 
 Placement rotatedAboutPlateAxis(const Body& body, int axis, double degrees, const Vec3& centre)
 {
+    return rotatedAboutPlateAxis(body, axis, degrees, centre, Transform::identity());
+}
+
+Placement movedOnPlate(const Body& body, const Vec3& plateDelta, const Transform& parentWorld)
+{
+    const Vec3 d = parentWorld.inverse().applyDirection(plateDelta);
+    Placement p = body.placement;
+    p.x += d[0];
+    p.y += d[1];
+    p.z += d[2];
+    return p;
+}
+
+Placement rotatedAboutPlateAxis(const Body& body, int axis, double degrees, const Vec3& centre,
+                                const Transform& parentWorld)
+{
     if (axis < 0 || axis > 2)
         throw std::invalid_argument("axis must be 0, 1 or 2");
     const Vec3 pivot = pivotOf(body);
-    const Transform current = placementTransform(body.placement, pivot);
-    const Vec3 w = current.apply(centre);  // where the centre is now
+    const Transform local = placementTransform(body.placement, pivot);
+    const Transform world = parentWorld * local;
+    const Vec3 w = world.apply(centre);  // where the centre is now, on the plate
     const Transform turn = Transform::rotationXYZ(axis == 0 ? degrees : 0.0, axis == 1 ? degrees : 0.0,
                                                   axis == 2 ? degrees : 0.0);
-    // Turn about the fixed plate axis through w.
-    const Transform next =
-        Transform::translation(w) * turn * Transform::translation({-w[0], -w[1], -w[2]}) * current;
-    return placementFromTransform(next, pivot);
+    // Turn about the fixed plate axis through w, then express it inside the parent.
+    const Transform nextWorld =
+        Transform::translation(w) * turn * Transform::translation({-w[0], -w[1], -w[2]}) * world;
+    return placementFromTransform(parentWorld.inverse() * nextWorld, pivot);
 }
 
 Placement withRotation(const Body& body, const Vec3& anglesDeg, const Vec3& centre)
