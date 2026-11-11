@@ -13,6 +13,7 @@ add_library(forge_core STATIC
     include/forge/core/Mesh.h
     include/forge/core/Picking.h
     include/forge/core/Primitives.h
+    include/forge/core/Split.h
     include/forge/core/Tessellator.h
     include/forge/core/Transform.h
     src/Align.cpp
@@ -24,6 +25,7 @@ add_library(forge_core STATIC
     src/Mesh.cpp
     src/Picking.cpp
     src/Primitives.cpp
+    src/Split.cpp
     src/Tessellator.cpp
     src/Transform.cpp
 )

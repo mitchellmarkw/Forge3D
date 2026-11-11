@@ -24,7 +24,8 @@ namespace forge::file {
 //   4  combine results (type "combine": operation, operands, pivot)
 //   5  sphere, cone, torus, tube, wedge
 //   6  oval sphere / cone / torus / tube (X / Y radii), pyramid
-inline constexpr int kFormatVersion = 6;
+//   7  split results (operation "split", planePoint, planeNormal)
+inline constexpr int kFormatVersion = 7;
 inline constexpr const char* kExtension = ".f3d";
 inline constexpr const char* kDocumentEntry = "document.json";
 

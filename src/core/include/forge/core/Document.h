@@ -85,6 +85,9 @@ public:
 
     void setPlacement(ObjectId id, const Placement& placement);
     void setSpec(ObjectId id, const PrimitiveSpec& spec);
+    // Changes a combine result's settings that don't change which parts it holds
+    // (its pivot, and a Split's plane). Throws if the operation or parts differ.
+    void setBoolean(ObjectId id, const BooleanSpec& spec);
     void rename(ObjectId id, const std::string& name);
 
     // ---- Geometry ----
@@ -114,6 +117,9 @@ public:
     // Builds what a combine would produce from these (top-level) bodies, without
     // changing the document. Throws GeometryError if OpenCASCADE fails.
     TopoDS_Shape previewCombine(BooleanOp op, const std::vector<ObjectId>& operands) const;
+    // The same for any combine, including Split (its plane in plate coordinates,
+    // since a new result starts with no placement).
+    TopoDS_Shape previewCombine(const BooleanSpec& spec) const;
 
     // ---- Change notification ----
     int addListener(Listener listener);
@@ -125,7 +131,7 @@ private:
                          const std::vector<Body>& all) const;
     void rebuildParents();
     void invalidate(ObjectId id, bool includeSelf);
-    TopoDS_Shape combine(BooleanOp op, const std::vector<ObjectId>& operands) const;
+    TopoDS_Shape combine(const BooleanSpec& spec) const;
     void notify(ChangeKind kind, ObjectId id);
 
     std::vector<Body> m_bodies;

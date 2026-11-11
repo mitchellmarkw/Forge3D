@@ -16,6 +16,11 @@
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
+#include <BRepPrimAPI_MakeBox.hxx>
+#include <gp_Ax2.hxx>
+#include <gp_Dir.hxx>
+#include <gp_Pnt.hxx>
+#include <gp_Vec.hxx>
 #include <ShapeUpgrade_UnifySameDomain.hxx>
 #include <Standard_Failure.hxx>
 #include <Standard_Version.hxx>
@@ -182,8 +187,19 @@ void Document::validateBoolean(const Body& body, const std::map<ObjectId, Object
                                const std::vector<Body>& all) const
 {
     const auto& ops = body.boolean->operands;
-    if (ops.size() < 2)
+    if (body.boolean->op == BooleanOp::Split) {
+        if (ops.size() != 1)
+            throw std::invalid_argument("Split works on exactly one shape");
+        const auto& n = body.boolean->planeNormal;
+        const double len = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+        if (!(len > 1e-9) || !std::isfinite(len))
+            throw std::invalid_argument("Split needs a plane direction");
+        for (double v : body.boolean->planePoint)
+            if (!std::isfinite(v))
+                throw std::invalid_argument("Split has an invalid plane");
+    } else if (ops.size() < 2) {
         throw std::invalid_argument(toString(body.boolean->op) + " needs at least two shapes");
+    }
     std::set<ObjectId> seen;
     for (ObjectId part : ops) {
         if (part == body.id)
@@ -326,6 +342,23 @@ void Document::setPlacement(ObjectId id, const Placement& placement)
     notify(ChangeKind::Modified, id);
 }
 
+void Document::setBoolean(ObjectId id, const BooleanSpec& spec)
+{
+    Body& body = require(id);
+    if (!body.isBoolean())
+        throw std::invalid_argument("'" + body.name + "' is not a combined shape");
+    if (*body.boolean == spec)
+        return;
+    if (body.boolean->op != spec.op || body.boolean->operands != spec.operands)
+        throw std::invalid_argument("Changing which parts a combined shape holds needs Separate and Combine");
+    Body check = body;
+    check.boolean = spec;
+    validateBoolean(check, m_parentOf, m_bodies);
+    body.boolean = spec;
+    invalidate(id, true);
+    notify(ChangeKind::Modified, id);
+}
+
 void Document::setSpec(ObjectId id, const PrimitiveSpec& spec)
 {
     validate(spec);
@@ -367,10 +400,36 @@ void Document::invalidate(ObjectId id, bool includeSelf)
 
 // ---- Document: geometry ---------------------------------------------------------
 
-TopoDS_Shape Document::combine(BooleanOp op, const std::vector<ObjectId>& operands) const
+TopoDS_Shape Document::combine(const BooleanSpec& spec) const
 {
+    const BooleanOp op = spec.op;
+    const std::vector<ObjectId>& operands = spec.operands;
     TopoDS_Shape result;
     try {
+        if (op == BooleanOp::Split) {
+            const ObjectId part = operands.at(0);
+            const TopoDS_Shape placed =
+                BRepBuilderAPI_Transform(shape(part), toTrsf(localTransform(part)), /*copy=*/true).Shape();
+            // A huge box on the kept side of the plane; keep what the part shares with it.
+            const gp_Pnt p(spec.planePoint[0], spec.planePoint[1], spec.planePoint[2]);
+            const gp_Dir n(spec.planeNormal[0], spec.planeNormal[1], spec.planeNormal[2]);
+            const Bounds b = shapeBounds(placed);
+            const auto size = b.size();
+            const double extent =
+                std::max({double(size[0]), double(size[1]), double(size[2]), 1.0}) * 10.0 +
+                p.Distance(gp_Pnt(b.center()[0], b.center()[1], b.center()[2])) * 2.0;
+            const gp_Ax2 frame(p, n);
+            const gp_Pnt corner = p.Translated(gp_Vec(frame.XDirection()) * -extent + gp_Vec(frame.YDirection()) * -extent);
+            const TopoDS_Shape keep =
+                BRepPrimAPI_MakeBox(gp_Ax2(corner, n, frame.XDirection()), 2 * extent, 2 * extent, extent).Shape();
+            BRepAlgoAPI_Common common(placed, keep);
+            if (!common.IsDone() || common.HasErrors())
+                throw GeometryError("Split failed");
+            result = common.Shape();
+            ShapeUpgrade_UnifySameDomain unify(result, true, true, false);
+            unify.Build();
+            return unify.Shape();
+        }
         bool first = true;
         for (ObjectId part : operands) {
             // Each part in the result's coordinates: its own shape, moved by its placement.
@@ -403,6 +462,8 @@ TopoDS_Shape Document::combine(BooleanOp op, const std::vector<ObjectId>& operan
                 result = common.Shape();
                 break;
             }
+            case BooleanOp::Split:
+                break;  // handled above
             }
         }
         // Merge faces that ended up on the same surface, so the result has clean
@@ -433,8 +494,7 @@ TopoDS_Shape Document::shape(ObjectId id) const
     if (!body)
         throw std::out_of_range("No body with id " + std::to_string(id));
 
-    TopoDS_Shape built = body->isBoolean() ? combine(body->boolean->op, body->boolean->operands)
-                                           : primitives::buildShape(body->spec);
+    TopoDS_Shape built = body->isBoolean() ? combine(*body->boolean) : primitives::buildShape(body->spec);
     m_shapeCache[id] = built;
     return built;
 }
@@ -451,10 +511,20 @@ std::shared_ptr<const Mesh> Document::mesh(ObjectId id) const
 
 TopoDS_Shape Document::previewCombine(BooleanOp op, const std::vector<ObjectId>& operands) const
 {
-    for (ObjectId part : operands)
+    BooleanSpec spec;
+    spec.op = op;
+    spec.operands = operands;
+    return previewCombine(spec);
+}
+
+TopoDS_Shape Document::previewCombine(const BooleanSpec& spec) const
+{
+    for (ObjectId part : spec.operands)
         if (!find(part))
             throw std::out_of_range("No body with id " + std::to_string(part));
-    return combine(op, operands);
+    if (spec.op == BooleanOp::Split && spec.operands.size() != 1)
+        throw std::invalid_argument("Split works on exactly one shape");
+    return combine(spec);
 }
 
 Transform Document::localTransform(ObjectId id) const

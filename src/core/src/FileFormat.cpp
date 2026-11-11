@@ -40,6 +40,7 @@ const char* opName(BooleanOp op)
     case BooleanOp::Merge: return "merge";
     case BooleanOp::Subtract: return "subtract";
     case BooleanOp::Intersect: return "intersect";
+    case BooleanOp::Split: return "split";
     }
     return "merge";
 }
@@ -52,6 +53,10 @@ json bodyToJson(const Body& b)
         j["operation"] = opName(b.boolean->op);
         j["operands"] = b.boolean->operands;
         j["pivot"] = b.boolean->pivot;
+        if (b.boolean->op == BooleanOp::Split) {
+            j["planePoint"] = b.boolean->planePoint;
+            j["planeNormal"] = b.boolean->planeNormal;
+        }
         return j;
     }
     j["type"] = fileTypeName(b.spec);
@@ -112,6 +117,8 @@ Body bodyFromJson(const json& j, std::size_t index, int version)
             spec.op = BooleanOp::Subtract;
         else if (op == "intersect")
             spec.op = BooleanOp::Intersect;
+        else if (op == "split" && version >= 7)
+            spec.op = BooleanOp::Split;
         else
             damaged(where + ": unknown combine operation '" + op + "'");
         const auto operands = j.find("operands");
@@ -129,6 +136,20 @@ Body bodyFromJson(const json& j, std::size_t index, int version)
             if (!(*pivot)[i].is_number())
                 damaged(where + ": bad pivot");
             spec.pivot[i] = (*pivot)[i].get<double>();
+        }
+        if (spec.op == BooleanOp::Split) {
+            const auto readVec = [&](const char* key, std::array<double, 3>& out) {
+                const auto v = j.find(key);
+                if (v == j.end() || !v->is_array() || v->size() != 3)
+                    damaged(where + ": missing " + key);
+                for (std::size_t i = 0; i < 3; ++i) {
+                    if (!(*v)[i].is_number())
+                        damaged(where + ": bad " + key);
+                    out[i] = (*v)[i].get<double>();
+                }
+            };
+            readVec("planePoint", spec.planePoint);
+            readVec("planeNormal", spec.planeNormal);
         }
         b.boolean = std::move(spec);
         if (b.name.empty())

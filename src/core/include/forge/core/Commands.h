@@ -129,6 +129,11 @@ private:
     std::string m_label;
 };
 
+// Copies of a body and everything inside it, with new ids and names ("Box 1" ->
+// "Box 1 copy"), in the order they can be inserted (parts before the results that
+// hold them; the copy of `id` itself last). Nothing is added to the document.
+std::vector<Body> duplicateTree(Document& doc, ObjectId id);
+
 // Makes a combine result from top-level bodies (Merge / Subtract / Intersect).
 // `result` must have boolean set; its parts disappear from the plate into it.
 class CombineCommand final : public Command {
