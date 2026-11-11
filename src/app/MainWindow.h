@@ -3,18 +3,22 @@
 
 #include "forge/core/CommandStack.h"
 #include "forge/core/Document.h"
+#include "forge/view/Gizmo.h"
 
 #include <QMainWindow>
+#include <QPointF>
 #include <QString>
+#include <QVector3D>
 
 #include <memory>
+#include <optional>
 
 class QAction;
 class QCloseEvent;
 class QLabel;
 class QListWidget;
 class QMenu;
-class QVector3D;
+class QActionGroup;
 
 namespace forge::app {
 
@@ -53,6 +57,17 @@ private:
     void setSelection(ObjectId id);
     void onViewportClicked(const QVector3D& origin, const QVector3D& direction);
 
+    // Dragging (gizmo handles, or a body across the plate)
+    void onLeftPressed(const QVector3D& origin, const QVector3D& direction, const view::GizmoHandle& handle,
+                       const QPointF& pixel);
+    void onLeftDragged(const QVector3D& origin, const QVector3D& direction, const QPointF& pixel,
+                       Qt::KeyboardModifiers modifiers);
+    void onLeftReleased(bool wasDrag);
+    void cancelDrag();
+    void preview(const Body& state);
+    std::optional<view::GizmoTarget> gizmoTargetFor(const Body& body) const;
+    void setGizmoMode(view::GizmoMode mode);
+
     // Editing
     void addBody(const PrimitiveSpec& spec);
     void deleteSelected();
@@ -80,6 +95,24 @@ private:
     bool m_refreshQueued = false;
     bool m_syncingList = false;
 
+    struct Drag {
+        enum class Kind { None, Plate, Arrow, Ring, Face };
+        Kind kind = Kind::None;
+        Body before;                  // the body when the drag started
+        view::GizmoHandle handle;
+        view::GizmoTarget frame;      // gizmo frame when the drag started
+        QVector3D grabPoint;          // Plate: where the body was grabbed
+        float startParam = 0.0f;      // Arrow / Face: position along the handle's line
+        QPointF lastPixel;            // Ring: for accumulating the turn
+        QPointF centrePixel;
+        double turned = 0.0;          // Ring: degrees so far (unsnapped)
+        bool moved = false;
+    };
+    Drag m_dragState;
+    bool m_pressOnHandle = false;  // a click on a gizmo handle must not change the selection
+    view::GizmoMode m_gizmoMode = view::GizmoMode::Move;
+    bool m_snap = true;
+
     Viewport* m_viewport = nullptr;
     PropertiesPanel* m_properties = nullptr;
     QListWidget* m_objects = nullptr;
@@ -101,6 +134,10 @@ private:
     QAction* m_clear = nullptr;
     QAction* m_fit = nullptr;
     QAction* m_resetView = nullptr;
+    QAction* m_modeMove = nullptr;
+    QAction* m_modeRotate = nullptr;
+    QAction* m_modeResize = nullptr;
+    QAction* m_snapAction = nullptr;
 };
 
 }  // namespace forge::app

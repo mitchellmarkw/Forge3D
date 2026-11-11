@@ -3,7 +3,9 @@
 # so it can be unit-tested without a display.
 
 add_library(forge_view STATIC
+    include/forge/view/Gizmo.h
     include/forge/view/OrbitCamera.h
+    src/Gizmo.cpp
     src/OrbitCamera.cpp
 )
 add_library(Forge3D::view ALIAS forge_view)
