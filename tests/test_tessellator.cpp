@@ -89,3 +89,14 @@ TEST_CASE("a null shape gives an empty mesh", "[tessellator]")
     CHECK(mesh.empty());
     CHECK_FALSE(mesh.bounds().valid);
 }
+
+TEST_CASE("an elliptical cylinder tessellates to its outline", "[tessellator][ellipse]")
+{
+    const forge::Mesh mesh = forge::tessellate(forge::primitives::makeCylinder(20.0, 8.0, 10.0));
+    const forge::Bounds b = mesh.bounds();
+    REQUIRE(b.valid);
+    CHECK_THAT(b.max[0], WithinAbs(20.0, 0.05));
+    CHECK_THAT(b.max[1], WithinAbs(8.0, 0.05));
+    CHECK_THAT(b.max[2], WithinAbs(10.0, 1e-4));
+    requireOutwardWinding(mesh, {0.0f, 0.0f, 5.0f});
+}

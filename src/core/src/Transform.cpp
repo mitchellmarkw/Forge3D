@@ -133,7 +133,7 @@ double dimension(const PrimitiveSpec& spec, int axis)
     if (const auto* box = std::get_if<BoxSpec>(&spec))
         return axis == 0 ? box->width : axis == 1 ? box->depth : box->height;
     const auto& cyl = std::get<CylinderSpec>(spec);
-    return axis == 2 ? cyl.height : cyl.radius;
+    return axis == 0 ? cyl.radiusX : axis == 1 ? cyl.radiusY : cyl.height;
 }
 
 namespace {
@@ -141,33 +141,64 @@ namespace {
 // The point (body coordinates) that must not move when a face is dragged.
 Vec3 anchorFor(const PrimitiveSpec& spec, int axis, int side)
 {
-    if (axis == 2) {
-        const double h = dimension(spec, 2);
-        return side > 0 ? Vec3{0.0, 0.0, 0.0} : Vec3{0.0, 0.0, h};  // the other end
-    }
+    if (axis == 2)
+        return side > 0 ? Vec3{0.0, 0.0, 0.0} : Vec3{0.0, 0.0, dimension(spec, 2)};  // the other end
     if (std::holds_alternative<CylinderSpec>(spec))
-        return pivotOf(spec);  // radius grows evenly around the centre line
-    const double half = dimension(spec, axis) / 2.0;
-    const double h = dimension(spec, 2);
-    Vec3 a{0.0, 0.0, h / 2.0};
-    a[static_cast<std::size_t>(axis)] = -side * half;  // centre of the opposite face
+        return {0.0, 0.0, 0.0};  // centre line, at the base
+    Vec3 a{0.0, 0.0, 0.0};       // centre of the opposite side, at base level
+    a[static_cast<std::size_t>(axis)] = -side * dimension(spec, axis) / 2.0;
     return a;
+}
+
+void scaleAll(PrimitiveSpec& spec, double factor)
+{
+    std::visit(
+        [factor](auto& p) {
+            using T = std::decay_t<decltype(p)>;
+            if constexpr (std::is_same_v<T, BoxSpec>) {
+                p.width *= factor;
+                p.depth *= factor;
+                p.height *= factor;
+            } else {
+                p.radiusX *= factor;
+                p.radiusY *= factor;
+                p.height *= factor;
+            }
+        },
+        spec);
+}
+
+double smallestDimension(const PrimitiveSpec& spec)
+{
+    return std::min({dimension(spec, 0), dimension(spec, 1), dimension(spec, 2)});
 }
 
 }  // namespace
 
-Body resizedFace(const Body& body, int axis, int side, double newValue, double minValue)
+Body resizedFace(const Body& body, int axis, int side, double newValue, const ResizeOptions& options)
 {
     if (axis < 0 || axis > 2 || (side != 1 && side != -1))
         throw std::invalid_argument("resizedFace: axis must be 0..2 and side +1 or -1");
 
     Body result = body;
-    const double value = std::max(newValue, minValue);
-    if (auto* box = std::get_if<BoxSpec>(&result.spec)) {
+    const double value = std::max(newValue, options.minValue);
+    if (options.uniform) {
+        // The same factor everywhere, but never shrink any size below the minimum.
+        double factor = value / dimension(body.spec, axis);
+        factor = std::max(factor, options.minValue / smallestDimension(body.spec));
+        scaleAll(result.spec, factor);
+    } else if (auto* box = std::get_if<BoxSpec>(&result.spec)) {
         (axis == 0 ? box->width : axis == 1 ? box->depth : box->height) = value;
     } else {
         auto& cyl = std::get<CylinderSpec>(result.spec);
-        (axis == 2 ? cyl.height : cyl.radius) = value;
+        if (axis == 2) {
+            cyl.height = value;
+        } else if (options.keepRound) {
+            cyl.radiusX = value;
+            cyl.radiusY = value;
+        } else {
+            (axis == 0 ? cyl.radiusX : cyl.radiusY) = value;
+        }
     }
 
     // Keep the anchor fixed in the plate:

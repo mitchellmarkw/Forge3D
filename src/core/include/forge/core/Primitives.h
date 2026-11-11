@@ -13,6 +13,8 @@ namespace forge::primitives {
 
 TopoDS_Shape makeBox(double width, double depth, double height);
 TopoDS_Shape makeCylinder(double radius, double height);
+// Elliptical when the radii differ (exact elliptic surface); round when equal.
+TopoDS_Shape makeCylinder(double radiusX, double radiusY, double height);
 
 // Builds whichever primitive the spec describes.
 TopoDS_Shape buildShape(const PrimitiveSpec& spec);

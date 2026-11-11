@@ -136,7 +136,8 @@ TEST_CASE("cylinder handles change radius around the centre line, or the height"
 {
     const Body b = makeBody(CylinderSpec{10, 30}, tilted(5, 5, 0, 30, 0, 45));
     const Body wider = resizedFace(b, 0, +1, 14);
-    CHECK(std::get<CylinderSpec>(wider.spec).radius == 14.0);
+    CHECK(std::get<CylinderSpec>(wider.spec).radiusX == 14.0);
+    CHECK(std::get<CylinderSpec>(wider.spec).radiusY == 14.0);  // stays round by default
     requireNear(world(wider, {0, 0, 0}), world(b, {0, 0, 0}), 1e-9);    // base centre fixed
     requireNear(world(wider, {0, 0, 30}), world(b, {0, 0, 30}), 1e-9);  // top centre fixed
 
@@ -148,7 +149,9 @@ TEST_CASE("sizes never go below the minimum", "[gizmo]")
 {
     const Body b = makeBody(BoxSpec{10, 10, 10}, {});
     CHECK(std::get<BoxSpec>(resizedFace(b, 0, 1, -50).spec).width == 0.1);
-    CHECK(dimension(resizedFace(b, 2, -1, 0.0, 1.0).spec, 2) == 1.0);
+    ResizeOptions atLeastOne;
+    atLeastOne.minValue = 1.0;
+    CHECK(dimension(resizedFace(b, 2, -1, 0.0, atLeastOne).spec, 2) == 1.0);
 }
 
 TEST_CASE("an edit command records a whole drag as one undo step", "[gizmo][commands]")
@@ -188,4 +191,51 @@ TEST_CASE("an edit command with a bad size changes nothing", "[gizmo][commands]"
     CHECK_THROWS(stack.execute(std::make_unique<EditBodyCommand>(b, bad, "Resize")));
     CHECK(*doc.find(b.id) == b);
     CHECK(stack.count() == 1);
+}
+
+TEST_CASE("uniform scaling keeps proportions and the base on the plate", "[gizmo][uniform]")
+{
+    const Body b = makeBody(BoxSpec{40, 20, 10}, tilted(5, 5, 0, 0, 0, 0));
+    ResizeOptions uniform;
+    uniform.uniform = true;
+
+    SECTION("from a side handle")
+    {
+        const Body r = resizedFace(b, 0, +1, 60, uniform);  // width 40 -> 60: x1.5
+        CHECK(std::get<BoxSpec>(r.spec) == BoxSpec{60, 30, 15});
+        CHECK_THAT(r.placement.z, WithinAbs(0.0, 1e-9));                      // still on the plate
+        requireNear(world(r, {-30, 0, 0}), world(b, {-20, 0, 0}), 1e-9);      // opposite side, base level
+    }
+    SECTION("from the top handle")
+    {
+        const Body r = resizedFace(b, 2, +1, 5, uniform);  // height 10 -> 5: x0.5
+        CHECK(std::get<BoxSpec>(r.spec) == BoxSpec{20, 10, 5});
+        requireNear(world(r, {0, 0, 0}), world(b, {0, 0, 0}), 1e-9);
+    }
+    SECTION("cylinders scale every size")
+    {
+        const Body c = makeBody(CylinderSpec{10, 6, 30}, {});
+        const Body r = resizedFace(c, 1, +1, 9, uniform);  // radius Y 6 -> 9: x1.5
+        CHECK(std::get<CylinderSpec>(r.spec) == CylinderSpec{15, 9, 45});
+        CHECK_THAT(r.placement.z, WithinAbs(0.0, 1e-9));
+    }
+    SECTION("never shrinks any size below the minimum")
+    {
+        const Body r = resizedFace(b, 0, +1, 0.5, uniform);  // would make height 0.125
+        CHECK(dimension(r.spec, 2) >= uniform.minValue - 1e-12);
+        CHECK_THAT(dimension(r.spec, 0) / dimension(r.spec, 2), WithinAbs(4.0, 1e-9));  // proportions kept
+    }
+}
+
+TEST_CASE("turning off keep-round makes an elliptical cylinder", "[gizmo][ellipse]")
+{
+    const Body b = makeBody(CylinderSpec{10, 30}, tilted(3, 4, 0, 0, 0, 20));
+    ResizeOptions oneAxis;
+    oneAxis.keepRound = false;
+    const Body r = resizedFace(b, 1, -1, 4, oneAxis);
+    const auto& cyl = std::get<CylinderSpec>(r.spec);
+    CHECK(cyl.radiusX == 10.0);
+    CHECK(cyl.radiusY == 4.0);
+    CHECK_FALSE(cyl.isRound());
+    requireNear(world(r, {0, 0, 0}), world(b, {0, 0, 0}), 1e-9);  // centre line stays
 }

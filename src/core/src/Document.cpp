@@ -43,7 +43,8 @@ void validate(const PrimitiveSpec& spec)
                 positive(p.depth, "Depth");
                 positive(p.height, "Height");
             } else {
-                positive(p.radius, "Radius");
+                positive(p.radiusX, "Radius X");
+                positive(p.radiusY, "Radius Y");
                 positive(p.height, "Height");
             }
         },

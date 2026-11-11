@@ -48,13 +48,26 @@ Vec3 eulerXYZ(const Transform& t);
 Placement rotatedAboutPlateAxis(const Body& body, int axis, double degrees);
 
 // The value a face handle changes: box width / depth / height for axis 0 / 1 / 2;
-// cylinder radius for axis 0 or 1, height for axis 2.
+// cylinder radius X / radius Y / height.
 double dimension(const PrimitiveSpec& spec, int axis);
 
+struct ResizeOptions {
+    // Scale every size by the same factor (keeps proportions).
+    bool uniform = false;
+    // Cylinders: a side handle changes both radii, so the cylinder stays round.
+    // Off: it changes only that axis's radius (elliptical cylinder).
+    bool keepRound = true;
+    // No size goes below this (mm).
+    double minValue = 0.1;
+};
+
 // The body after its face handle (axis 0..2 in the body's own frame, side +1 or -1)
-// is dragged so that dimension() becomes newValue (never below minValue).
-// The opposite face stays exactly where it was in the plate; for a cylinder's
-// radius, the centre line stays put.
-Body resizedFace(const Body& body, int axis, int side, double newValue, double minValue = 0.1);
+// is dragged so that dimension(axis) becomes newValue.
+// What stays still on the plate:
+//   - top / bottom handle: the opposite end;
+//   - box side handle: the opposite side, at base level;
+//   - cylinder side handle: the centre line at the base (radii grow evenly).
+// So an untilted body keeps its base on the plate, even with uniform scaling.
+Body resizedFace(const Body& body, int axis, int side, double newValue, const ResizeOptions& options = {});
 
 }  // namespace forge

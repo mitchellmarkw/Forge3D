@@ -46,7 +46,7 @@ void fill(Document& doc)
     Body cyl;
     cyl.id = doc.allocateId();
     cyl.name = "Peg";
-    cyl.spec = CylinderSpec{3.0, 12.0};
+    cyl.spec = CylinderSpec{3.0, 5.5, 12.0};  // elliptical
     cyl.placement = Placement{30.0, 0.0, 2.0, 0.0};
     doc.insertBody(cyl);
 }
@@ -118,7 +118,8 @@ TEST_CASE("the JSON names its format and version", "[file]")
     fill(doc);
     const std::string json = file::toJson(doc, "Forge3D 9.9");
     CHECK_THAT(json, ContainsSubstring("\"format\": \"forge3d-document\""));
-    CHECK_THAT(json, ContainsSubstring("\"formatVersion\": 2"));
+    CHECK_THAT(json, ContainsSubstring("\"formatVersion\": 3"));
+    CHECK_THAT(json, ContainsSubstring("\"radiusY\""));
     CHECK_THAT(json, ContainsSubstring("\"rotationX\""));
     CHECK_THAT(json, ContainsSubstring("\"createdBy\": \"Forge3D 9.9\""));
     CHECK_THAT(json, ContainsSubstring("\"type\": \"cylinder\""));
@@ -149,6 +150,14 @@ TEST_CASE("bad files give clear errors", "[file]")
                 {"id":1,"name":"x","type":"teapot","parameters":{},
                  "placement":{"x":0,"y":0,"z":0,"rotationZ":0}}]})"),
             ContainsSubstring("teapot"));
+    }
+    SECTION("version 3 cylinder without radiusY")
+    {
+        CHECK_THROWS_WITH(
+            file::fromJson(R"({"format":"forge3d-document","formatVersion":3,"bodies":[
+                {"id":1,"name":"x","type":"cylinder","parameters":{"radius":5,"height":1},
+                 "placement":{"x":0,"y":0,"z":0,"rotationX":0,"rotationY":0,"rotationZ":0}}]})"),
+            ContainsSubstring("radiusX"));
     }
     SECTION("missing parameter")
     {
@@ -205,4 +214,15 @@ TEST_CASE("version 2 files must have all three angles", "[file]")
         {"id":1,"name":"x","type":"box","parameters":{"width":1,"depth":1,"height":1},
          "placement":{"x":0,"y":0,"z":0,"rotationZ":0}}]})"),
                       ContainsSubstring("rotationX"));
+}
+
+TEST_CASE("version 2 cylinders open as round cylinders", "[file]")
+{
+    const auto bodies = file::fromJson(R"({"format":"forge3d-document","formatVersion":2,"units":"mm","bodies":[
+        {"id":1,"name":"Peg","type":"cylinder","parameters":{"radius":4,"height":9},
+         "placement":{"x":0,"y":0,"z":0,"rotationX":0,"rotationY":0,"rotationZ":0}}]})");
+    REQUIRE(bodies.size() == 1);
+    const auto& cyl = std::get<CylinderSpec>(bodies[0].spec);
+    CHECK(cyl == CylinderSpec{4, 9});
+    CHECK(cyl.isRound());
 }

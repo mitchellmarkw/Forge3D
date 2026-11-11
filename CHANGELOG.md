@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.4.1 — Uniform scale and elliptical cylinders (2026-11-11)
+
+- **Uniform scale**: toolbar / Edit menu toggle (key **U**) and a matching checkbox in
+  Properties → Size. Resize handles and typed sizes then scale every dimension by the same
+  factor. The opposite side stays put and the base stays on the plate.
+- **Elliptical cylinders**: cylinders have **Radius X** and **Radius Y**. With **Round**
+  ticked (the default for round cylinders), both change together; untick it to change
+  each on its own. Ticking Round again makes the cylinder round using Radius X. Built as an
+  exact elliptic extrusion in OpenCASCADE (a true circular cylinder when the radii match).
+- Resize handles on a box's sides now keep the opposite side fixed at base level, so
+  uniform scaling from a side handle does not push the body into the plate.
+- File format version 3: cylinders store radiusX and radiusY. Older files open with round
+  cylinders.
+- Properties: no blank gap under a box's sizes after showing a cylinder.
+- 83 unit tests (6 new).
+
 ## 0.4.0 — Slice 3b (2026-11-11)
 
 - Left-drag any body to slide it across the plate (selects it too).
