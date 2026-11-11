@@ -43,8 +43,8 @@ SplitPanel::SplitPanel(QWidget* parent) : QWidget(parent)
     bold.setBold(true);
     m_title->setFont(bold);
     layout->addWidget(m_title);
-    auto* hint = new QLabel(tr("The yellow plane shows where the cut goes; the arrow points to the first side. "
-                               "Orbit the view to check it."));
+    auto* hint = new QLabel(tr("The yellow plane shows where the cut goes; drag it (or its arrow) to move it. "
+                               "The arrow points to the first side. Orbit the view to check it."));
     hint->setWordWrap(true);
     layout->addWidget(hint);
 
@@ -150,6 +150,11 @@ void SplitPanel::setSideNames(const QString& front, const QString& back)
 double SplitPanel::tiltX() const { return m_tiltX->value(); }
 double SplitPanel::tiltY() const { return m_tiltY->value(); }
 double SplitPanel::offset() const { return m_offset->value(); }
+
+void SplitPanel::setOffset(double offset)
+{
+    m_offset->setValue(std::round(offset * 100.0) / 100.0);  // emits valueChanged -> planeChanged
+}
 
 SplitKeep SplitPanel::keep() const
 {

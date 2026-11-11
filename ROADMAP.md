@@ -18,7 +18,8 @@ Gate to Phase 2: a new user prints a customised part within 10 minutes.
 | 3c+ | Results turn about their visible centre; Align Shapes | Done (0.5.1) |
 | 3d | Primitive library (sphere, cone, torus, tube, wedge) replaces the test buttons | Done (0.6.0) |
 | 3d+ | Oval sphere / cone / torus / tube; pyramid | Done (0.6.1) |
-| 4a | Split by plane (keep one or both halves; move the cut later) | **Delivered for testing** |
+| 4a | Split by plane (keep one or both halves; move the cut later) | Done (0.7.0) |
+| 4a+ | Drag the Split plane in the view; handles right after a split | **Delivered for testing** |
 | 4b | Gizmo on parts inside results; resize handles for results | Next |
 | 5 | STL / 3MF import with auto-repair; export; "Send to slicer" | Planned |
 | 6 | Feature tree panel with rollback bar | Planned |
