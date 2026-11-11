@@ -94,4 +94,19 @@ QMatrix4x4 OrbitCamera::projectionMatrix(float aspect) const
     return proj;
 }
 
+void OrbitCamera::rayThroughPixel(float px, float py, float viewportWidth, float viewportHeight,
+                                  QVector3D& origin, QVector3D& direction) const
+{
+    const float w = viewportWidth > 0.0f ? viewportWidth : 1.0f;
+    const float h = viewportHeight > 0.0f ? viewportHeight : 1.0f;
+    // Pixel -> normalised device coordinates (-1..1, y up).
+    const float ndcX = 2.0f * px / w - 1.0f;
+    const float ndcY = 1.0f - 2.0f * py / h;
+    const QMatrix4x4 inverse = (projectionMatrix(w / h) * viewMatrix()).inverted();
+    const QVector3D nearPoint = inverse.map(QVector3D(ndcX, ndcY, -1.0f));
+    const QVector3D farPoint = inverse.map(QVector3D(ndcX, ndcY, 1.0f));
+    origin = nearPoint;
+    direction = (farPoint - nearPoint).normalized();
+}
+
 }  // namespace forge::view

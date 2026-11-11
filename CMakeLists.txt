@@ -2,7 +2,7 @@
 cmake_minimum_required(VERSION 3.21)
 
 project(Forge3D
-    VERSION 0.2.0
+    VERSION 0.3.0
     DESCRIPTION "Parametric 3D modeling with sculpting"
     LANGUAGES CXX)
 
@@ -28,6 +28,8 @@ endif()
 # ---- Dependencies ---------------------------------------------------------------
 find_package(OpenCASCADE CONFIG REQUIRED)
 message(STATUS "OpenCASCADE ${OpenCASCADE_VERSION} headers: ${OpenCASCADE_INCLUDE_DIR}")
+find_package(miniz CONFIG REQUIRED)
+find_package(nlohmann_json 3 CONFIG REQUIRED)
 
 if(FORGE3D_BUILD_APP OR FORGE3D_BUILD_TESTS)
     find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets OpenGLWidgets)

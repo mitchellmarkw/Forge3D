@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.3.0 — Slice 3a (2026-11-11)
+
+- Selection: left-click a body to select it (cyan glow); click empty space or press Esc to
+  clear. New bodies are selected as they are added. Selection is not part of undo.
+- Objects panel (left): every body by name; click to select.
+- Properties panel (right): name, size (box width/depth/height, cylinder radius/height) and
+  position (X, Y, lift, rotation). Each typed change is its own undo step.
+- Delete key / Delete button removes the selected body.
+- `.f3d` files: a zip holding `document.json` (format version 1, units mm). File → New, Open,
+  Save, Save As; Save / Discard / Cancel before losing changes; file name in the title;
+  last folder remembered. Saving writes a temporary file first, so a failed save never
+  damages the previous file. Damaged, foreign or newer-format files give a clear message.
+- Opening a `.f3d` passed on the command line (drag a file onto Forge3D.exe).
+- Ray picking in core (`Picking.h`); `Document::replaceAll()`; `SetPlacementCommand` can be
+  non-merging for typed values.
+- Log records Undo, Redo, Saved and Opened.
+- New dependencies: miniz (zip) and nlohmann-json.
+- 49 unit tests (15 new: picking, file format, camera rays, typed moves).
+
 ## 0.2.0 — Slice 2 (2026-11-10)
 
 - `Document`: an ordered list of bodies (box or cylinder parameters, placement, name),

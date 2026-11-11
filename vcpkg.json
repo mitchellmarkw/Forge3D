@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
   "name": "forge3d",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Parametric 3D modeling with sculpting",
   "license": "GPL-3.0-or-later",
   "builtin-baseline": "5cad485d1ddb649c8fa1022bf0b3908555e6e6ba",
@@ -30,6 +30,8 @@
       "name": "pcre2",
       "default-features": false
     },
+    "miniz",
+    "nlohmann-json",
     "opencascade",
     "catch2"
   ]

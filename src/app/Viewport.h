@@ -26,10 +26,12 @@ struct DisplayItem {
     std::shared_ptr<const forge::Mesh> mesh;  // a new pointer = new geometry, re-uploaded
     QMatrix4x4 model;                          // placement on the plate
     QVector3D color{0.28f, 0.55f, 0.85f};
+    bool selected = false;
 };
 
 // The 3D view: draws the build plate and the scene, and handles navigation.
 // Mouse scheme (3D Builder style):
+//   left-click          select (signal clicked; the window decides what was hit)
 //   right-drag          orbit
 //   middle-drag         pan   (Shift + right-drag also pans, for touchpads)
 //   wheel               zoom
@@ -51,6 +53,8 @@ public:
     QString glVersionString() const { return m_glVersion; }
 
 signals:
+    // A left click (not a drag). origin/direction: the ray under the cursor, in plate mm.
+    void clicked(const QVector3D& origin, const QVector3D& direction);
     void glInfoReady(const QString& summary);
     void firstFrameRendered();
 
@@ -100,6 +104,8 @@ private:
     // Interaction
     DragMode m_drag = DragMode::None;
     QPointF m_lastMouse;
+    QPointF m_leftPressAt;
+    bool m_leftPressed = false;
 
     QString m_glVersion;
     bool m_glReady = false;

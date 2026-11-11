@@ -62,8 +62,28 @@ UI action ──> Command ──> CommandStack::execute() ──> Command::redo(
 - **`CommandStack`** is the only undo history, shared by all modes. It tracks the saved
   ("clean") index for the `*` in the title, and refuses to merge into the saved step so
   that state stays reachable.
-- **The UI never calls Document mutators directly** (File → New is the one exception,
-  because it also clears the history).
+- **The UI never calls Document mutators directly**, except File → New and File → Open,
+  which replace everything and clear the history.
+
+## Selection, panels and files (slice 3a)
+
+- **Selection lives in `MainWindow`**, not in the document, and is not undoable. A left click
+  in the viewport emits the ray under the cursor; `forge::pick()` (core) finds the nearest
+  body by testing triangles in each body's own coordinates.
+- **`PropertiesPanel` never edits the document.** It emits requests; `MainWindow` turns each
+  into a command (typed moves use `SetPlacementCommand(..., mergeable=false)` so each edit is
+  one undo step) and then refreshes the panel from the document.
+- **`.f3d` format** (`core/FileFormat.h`): a zip (miniz) holding `document.json`
+  (nlohmann-json) with `format`, `formatVersion` (now 1), `createdBy`, `units` and `bodies`.
+  The zip is built in memory and written with C++ streams so Windows paths with any
+  characters work; it is written to `<name>.saving` and then renamed over the target.
+  Readers reject newer `formatVersion`s and unknown shape types with a clear message.
+  When the format changes, bump `kFormatVersion` and keep reading older versions.
+- Opening replaces all bodies with `Document::replaceAll()` (checks everything first) and
+  clears the undo history.
+
+Linux development builds need miniz from outside the system packages: install it to a
+prefix and configure with `FORGE3D_EXTRA_PREFIX=<prefix> cmake --preset linux-dev`.
 
 ## Rendering
 

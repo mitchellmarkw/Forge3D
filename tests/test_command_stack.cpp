@@ -250,3 +250,15 @@ TEST_CASE("clean state tracks undo and redo", "[commands]")
     stack.redo();
     CHECK_FALSE(stack.isClean());
 }
+
+TEST_CASE("typed moves are separate undo steps", "[commands]")
+{
+    Document doc;
+    CommandStack stack(doc);
+    const ObjectId id = add(stack, doc);
+    stack.execute(std::make_unique<SetPlacementCommand>(id, Placement{5, 0, 0, 0}, false));
+    stack.execute(std::make_unique<SetPlacementCommand>(id, Placement{5, 8, 0, 0}, false));
+    CHECK(stack.count() == 3);
+    stack.undo();
+    CHECK(doc.find(id)->placement == Placement{5, 0, 0, 0});
+}

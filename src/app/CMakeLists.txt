@@ -13,6 +13,8 @@ add_executable(Forge3D WIN32
     CrashHandler.cpp
     MainWindow.h
     MainWindow.cpp
+    PropertiesPanel.h
+    PropertiesPanel.cpp
     Viewport.h
     Viewport.cpp
 )

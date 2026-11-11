@@ -53,6 +53,10 @@ public:
     void insertBody(Body body, std::size_t index = npos);
     // Removes and returns the body. Throws std::out_of_range if absent.
     Body removeBody(ObjectId id);
+    // Swaps in a whole new set of bodies (File > Open, File > New). Every body is
+    // checked first; on any problem it throws and the document is unchanged.
+    // Not undoable: callers clear the undo history afterwards.
+    void replaceAll(std::vector<Body> bodies);
 
     void setPlacement(ObjectId id, const Placement& placement);
     void setSpec(ObjectId id, const PrimitiveSpec& spec);

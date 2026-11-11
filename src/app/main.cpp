@@ -55,6 +55,8 @@ int main(int argc, char* argv[])
     QCommandLineOption demo(QStringLiteral("demo-scene"),
                             QStringLiteral("Start with a few sample bodies on the plate."));
     parser.addOption(demo);
+    parser.addPositionalArgument(QStringLiteral("file"), QStringLiteral("A .f3d model to open."),
+                                 QStringLiteral("[file]"));
     parser.process(app);
 
     forge::app::MainWindow window;
@@ -62,7 +64,9 @@ int main(int argc, char* argv[])
     QObject::connect(&window, &forge::app::MainWindow::firstFrameRendered, [&startup] {
         qInfo() << "Startup: first frame drawn after" << startup.elapsed() << "ms";
     });
-    if (parser.isSet(demo))
+    if (!parser.positionalArguments().isEmpty())
+        window.openFile(parser.positionalArguments().constFirst());
+    else if (parser.isSet(demo))
         window.loadDemoScene();
     window.show();
 
