@@ -57,6 +57,24 @@ Mark each one Pass or Fail. For a Fail, add a sentence or a screenshot.
 | 25 | Make a copy of `test1.f3d`, rename it to `broken.zip`, open it with Windows' zip viewer, and look inside | One file, `document.json`, readable in Notepad | |
 | 26 | Create an empty text file, rename it `junk.f3d`, and open it in Forge3D | A clear message: "This file is damaged or is not a Forge3D file." The current model is untouched | |
 
+### Rotation on all three axes (added in 0.3.1)
+
+If you already passed checks 1–26 on 0.3.0, only this section needs testing.
+
+| # | Do this | You should see | Result |
+| --- | --- | --- | --- |
+| 27 | Open `test1.f3d`, saved with 0.3.0 | It opens exactly as before. Properties shows a **Rotation** group with **Around X / Y / Z**; X and Y are 0, Z keeps your earlier value | |
+| 28 | Add a box (30 x 20 x 15). Set **Around X** to `90` | The box tips onto its side around its own centre, so part of it dips below the plate | |
+| 29 | Click **Sit on plate** | The box moves up so its lowest edge rests exactly on the plate. **Z (up)** changes; the rotation stays 90. Undo reads **Undo Move** | |
+| 30 | Set **Around Y** to `90` on a fresh box, then **Sit on plate** | It tips sideways (around the front-to-back axis) and comes to rest on the plate | |
+| 31 | Add a cylinder, set **Around X** to `90`, then **Sit on plate** | The cylinder lies on its side, resting on the plate | |
+| 32 | With the lying cylinder selected, set **Around Z** to `45` | It turns on the plate, still lying down | |
+| 33 | Click the tilted bodies in the view | Each one selects when you click anywhere on it, including the tipped-up parts | |
+| 34 | Click the up arrow on **Around X** at 360 | It wraps round to -360 instead of stopping | |
+| 35 | Press **Ctrl+Z** a few times | The turns and the Sit on plate move undo one at a time | |
+| 36 | Save as `test2.f3d`, close, and reopen it | Every tilt comes back exactly | |
+| 37 | Drag `junk.f3d` (from check 26) onto `Forge3D.exe` | The main window appears first, then the "damaged" message over it | |
+
 ## Send back
 
 - The results table (or "all pass" plus any failures).

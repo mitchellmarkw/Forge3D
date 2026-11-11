@@ -26,7 +26,12 @@ constexpr const char* kFormatName = "forge3d-document";
 
 json placementToJson(const Placement& p)
 {
-    return json{{"x", p.x}, {"y", p.y}, {"z", p.z}, {"rotationZ", p.rotationZ}};
+    return json{{"x", p.x},
+                {"y", p.y},
+                {"z", p.z},
+                {"rotationX", p.rotationX},
+                {"rotationY", p.rotationY},
+                {"rotationZ", p.rotationZ}};
 }
 
 json bodyToJson(const Body& b)
@@ -55,7 +60,7 @@ double number(const json& obj, const char* key, const std::string& where)
     return it->get<double>();
 }
 
-Body bodyFromJson(const json& j, std::size_t index)
+Body bodyFromJson(const json& j, std::size_t index, int version)
 {
     const std::string where = "body " + std::to_string(index + 1);
     if (!j.is_object())
@@ -73,8 +78,14 @@ Body bodyFromJson(const json& j, std::size_t index)
     const auto placement = j.find("placement");
     if (placement == j.end() || !placement->is_object())
         damaged(where + ": missing placement");
-    b.placement = Placement{number(*placement, "x", where), number(*placement, "y", where),
-                            number(*placement, "z", where), number(*placement, "rotationZ", where)};
+    b.placement.x = number(*placement, "x", where);
+    b.placement.y = number(*placement, "y", where);
+    b.placement.z = number(*placement, "z", where);
+    b.placement.rotationZ = number(*placement, "rotationZ", where);
+    if (version >= 2) {
+        b.placement.rotationX = number(*placement, "rotationX", where);
+        b.placement.rotationY = number(*placement, "rotationY", where);
+    }  // version 1 files only turned about Z; X and Y stay 0
 
     const auto type = j.find("type");
     const auto params = j.find("parameters");
@@ -135,7 +146,10 @@ std::vector<Body> fromJson(const std::string& text)
     const auto version = root.find("formatVersion");
     if (version == root.end() || !version->is_number_integer())
         damaged("missing format version");
-    if (version->get<int>() > kFormatVersion)
+    const int fileVersion = version->get<int>();
+    if (fileVersion < 1)
+        damaged("invalid format version");
+    if (fileVersion > kFormatVersion)
         throw FileError("This file was made by a newer version of Forge3D (file format " +
                         std::to_string(version->get<int>()) + ").\nPlease update Forge3D to open it.");
 
@@ -149,7 +163,7 @@ std::vector<Body> fromJson(const std::string& text)
     std::vector<Body> result;
     result.reserve(bodies->size());
     for (std::size_t i = 0; i < bodies->size(); ++i)
-        result.push_back(bodyFromJson((*bodies)[i], i));
+        result.push_back(bodyFromJson((*bodies)[i], i, fileVersion));
     return result;
 }
 

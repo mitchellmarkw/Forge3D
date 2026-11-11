@@ -11,12 +11,19 @@ using ObjectId = std::uint64_t;
 inline constexpr ObjectId kInvalidId = 0;
 
 // Where a body sits on the build plate. Millimetres and degrees.
-// Applied as: rotate about the body's own Z axis, then translate.
+// (x, y, z) is where the centre of the body's base goes; the body is then
+// turned about its own centre: first about X, then Y, then Z (fixed axes).
+// See placementTransform() in Transform.h.
+//
+// rotationZ comes before rotationX/Y only for historical reasons: existing
+// code writes Placement{x, y, z, rotationZ}. Prefer named fields for new code.
 struct Placement {
     double x = 0.0;
     double y = 0.0;
     double z = 0.0;
     double rotationZ = 0.0;
+    double rotationX = 0.0;
+    double rotationY = 0.0;
 
     bool operator==(const Placement&) const = default;
 };

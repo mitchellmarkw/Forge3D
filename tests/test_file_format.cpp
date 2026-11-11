@@ -39,6 +39,8 @@ void fill(Document& doc)
     box.name = "Lid";
     box.spec = BoxSpec{40.5, 30.25, 2.0};
     box.placement = Placement{-12.5, 7.0, 0.0, 45.0};
+    box.placement.rotationX = 90.0;
+    box.placement.rotationY = -30.0;
     doc.insertBody(box);
 
     Body cyl;
@@ -116,7 +118,8 @@ TEST_CASE("the JSON names its format and version", "[file]")
     fill(doc);
     const std::string json = file::toJson(doc, "Forge3D 9.9");
     CHECK_THAT(json, ContainsSubstring("\"format\": \"forge3d-document\""));
-    CHECK_THAT(json, ContainsSubstring("\"formatVersion\": 1"));
+    CHECK_THAT(json, ContainsSubstring("\"formatVersion\": 2"));
+    CHECK_THAT(json, ContainsSubstring("\"rotationX\""));
     CHECK_THAT(json, ContainsSubstring("\"createdBy\": \"Forge3D 9.9\""));
     CHECK_THAT(json, ContainsSubstring("\"type\": \"cylinder\""));
 }
@@ -183,4 +186,23 @@ TEST_CASE("replaceAll rejects bad bodies and leaves the document alone", "[file]
     CHECK_THROWS(doc.replaceAll(bad));
     CHECK(doc.bodyCount() == 2);
     CHECK(doc.bodies()[0].name == "Lid");
+}
+
+TEST_CASE("version 1 files still open, with no tilt", "[file]")
+{
+    const auto bodies = file::fromJson(R"({"format":"forge3d-document","formatVersion":1,"units":"mm","bodies":[
+        {"id":3,"name":"Old box","type":"box","parameters":{"width":10,"depth":20,"height":30},
+         "placement":{"x":1,"y":2,"z":3,"rotationZ":45}}]})");
+    REQUIRE(bodies.size() == 1);
+    CHECK(bodies[0].placement.rotationZ == 45.0);
+    CHECK(bodies[0].placement.rotationX == 0.0);
+    CHECK(bodies[0].placement.rotationY == 0.0);
+}
+
+TEST_CASE("version 2 files must have all three angles", "[file]")
+{
+    CHECK_THROWS_WITH(file::fromJson(R"({"format":"forge3d-document","formatVersion":2,"bodies":[
+        {"id":1,"name":"x","type":"box","parameters":{"width":1,"depth":1,"height":1},
+         "placement":{"x":0,"y":0,"z":0,"rotationZ":0}}]})"),
+                      ContainsSubstring("rotationX"));
 }

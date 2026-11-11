@@ -64,11 +64,14 @@ int main(int argc, char* argv[])
     QObject::connect(&window, &forge::app::MainWindow::firstFrameRendered, [&startup] {
         qInfo() << "Startup: first frame drawn after" << startup.elapsed() << "ms";
     });
-    if (!parser.positionalArguments().isEmpty())
-        window.openFile(parser.positionalArguments().constFirst());
-    else if (parser.isSet(demo))
-        window.loadDemoScene();
     window.show();
+    if (!parser.positionalArguments().isEmpty()) {
+        // Open once the window is on screen, so any error message has a window behind it.
+        const QString path = parser.positionalArguments().constFirst();
+        QTimer::singleShot(0, &window, [&window, path] { window.openFile(path); });
+    } else if (parser.isSet(demo)) {
+        window.loadDemoScene();
+    }
 
     if (parser.isSet(screenshot)) {
         const QString path = parser.value(screenshot);

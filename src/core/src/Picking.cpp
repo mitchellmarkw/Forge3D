@@ -2,11 +2,11 @@
 #include "forge/core/Picking.h"
 
 #include "forge/core/Document.h"
+#include "forge/core/Transform.h"
 
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <numbers>
 
 namespace forge {
 
@@ -55,12 +55,12 @@ std::optional<PickHit> pick(const Document& doc, const Ray& ray)
     std::optional<PickHit> best;
     for (const Body& body : doc.bodies()) {
         // Move the ray into the body's own coordinates instead of moving every vertex.
-        const Placement& pl = body.placement;
-        const double a = -pl.rotationZ * std::numbers::pi / 180.0;
-        const double c = std::cos(a), s = std::sin(a);
-        const double ox = ray.origin[0] - pl.x, oy = ray.origin[1] - pl.y, oz = ray.origin[2] - pl.z;
-        const V3 o{c * ox - s * oy, s * ox + c * oy, oz};
-        const V3 d{c * worldDir.x - s * worldDir.y, s * worldDir.x + c * worldDir.y, worldDir.z};
+        // Rigid transforms keep lengths, so t along the local ray = distance in mm.
+        const Transform toLocal = placementTransform(body.placement, body.spec).inverse();
+        const Vec3 lo = toLocal.apply(ray.origin);
+        const Vec3 ld = toLocal.applyDirection({worldDir.x, worldDir.y, worldDir.z});
+        const V3 o{lo[0], lo[1], lo[2]};
+        const V3 d{ld[0], ld[1], ld[2]};
 
         const auto mesh = doc.mesh(body.id);
         const auto& P = mesh->positions;
