@@ -247,6 +247,8 @@ void MainWindow::createActions()
         tr("A ring, like a doughnut, lying flat"),
         tr("A pipe: a cylinder with a round hole through it"),
         tr("A ramp: tall at its -X end, sloping down to the plate at +X"),
+        tr("A pyramid on a rectangular base; give it a top width and depth for a flat top, or just one for a "
+           "roof-like ridge"),
     };
     for (std::size_t kind = 0; kind < kPrimitiveKindCount; ++kind) {
         const PrimitiveSpec spec = defaultSpec(kind);
@@ -515,9 +517,8 @@ void MainWindow::setSelection(std::vector<ObjectId> ids)
     const ObjectId previousOne = selectedOne();
     m_selection = std::move(ids);
     if (const Body* body = m_doc.find(selectedOne()); body && body->id != previousOne) {
-        // A newly selected cylinder starts in "Round" mode only if it is round.
-        const auto* cyl = std::get_if<CylinderSpec>(&body->spec);
-        m_keepRound = !cyl || cyl->isRound();
+        // A newly selected shape starts in "Round" mode only if it is round.
+        m_keepRound = body->isBoolean() || isRound(body->spec);
         m_properties->setKeepRound(m_keepRound);
     }
     // Show a selected part's result open in the tree.
@@ -725,14 +726,16 @@ void MainWindow::onLeftDragged(const QVector3D& origin, const QVector3D& directi
         next = resizedFace(d.before, d.handle.axis, d.handle.side, value, options);
 
         QString what;
+        const bool linked = m_keepRound || m_uniform;
+        const QString axisName = d.handle.axis == 0 ? QStringLiteral(" X") : QStringLiteral(" Y");
         if (d.handle.axis == 2)
-            what = std::holds_alternative<SphereSpec>(next.spec) ? tr("Diameter")
+            what = std::holds_alternative<SphereSpec>(next.spec) ? (linked ? tr("Diameter") : tr("Height"))
                    : std::holds_alternative<TorusSpec>(next.spec) ? tr("Thickness")
                                                                    : tr("Height");
-        else if (std::holds_alternative<CylinderSpec>(next.spec))
-            what = (m_keepRound || m_uniform) ? tr("Radius") : (d.handle.axis == 0 ? tr("Radius X") : tr("Radius Y"));
+        else if (std::holds_alternative<CylinderSpec>(next.spec) || std::holds_alternative<SphereSpec>(next.spec))
+            what = linked ? tr("Radius") : tr("Radius") + axisName;
         else if (isRoundFromAbove(next.spec))
-            what = std::holds_alternative<SphereSpec>(next.spec) ? tr("Radius") : tr("Outer radius");
+            what = linked ? tr("Outer radius") : tr("Outer radius") + axisName;
         else
             what = d.handle.axis == 0 ? tr("Width") : tr("Depth");
         status = tr("Resize  %1 %2 mm").arg(what).arg(dimension(next.spec, d.handle.axis), 0, 'f', 1);
@@ -1149,8 +1152,7 @@ void MainWindow::refreshScene()
     // the selected cylinder oval without a new selection, so check on every refresh.
     // (A round cylinder keeps the user's choice: they may untick Round before dragging.)
     if (selected) {
-        if (const auto* cyl = std::get_if<CylinderSpec>(&selected->spec);
-            !selected->isBoolean() && cyl && !cyl->isRound() && m_keepRound) {
+        if (!selected->isBoolean() && !isRound(selected->spec) && m_keepRound) {
             m_keepRound = false;
             m_properties->setKeepRound(false);
         }

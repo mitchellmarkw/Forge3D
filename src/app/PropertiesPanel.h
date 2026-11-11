@@ -35,7 +35,7 @@ public:
     // "Uniform scale": changing one size scales the others by the same factor.
     void setUniform(bool on);
     bool uniform() const;
-    // "Round" (cylinders): Radius X and Radius Y change together.
+    // "Round" (cylinder, sphere, cone, torus, tube): the X / Y radii change together.
     void setKeepRound(bool on);
     bool keepRound() const;
 
@@ -68,8 +68,8 @@ private:
     QWidget* m_separateButton = nullptr;
 
     QFormLayout* m_sizeForm = nullptr;
-    std::array<QDoubleSpinBox*, 3> m_sizeFields{};  // the shape's lengths (specFields order)
-    std::array<QLabel*, 3> m_sizeLabels{};
+    std::array<QDoubleSpinBox*, 5> m_sizeFields{};  // the shape's lengths (specFields order)
+    std::array<QLabel*, 5> m_sizeLabels{};
     QCheckBox* m_round = nullptr;
     QCheckBox* m_uniform = nullptr;
 
