@@ -5,7 +5,12 @@
 #include "forge/core/Tessellator.h"
 
 #include <BRepAlgoAPI_Common.hxx>
+#include <BRepAdaptor_Surface.hxx>
 #include <BRepBndLib.hxx>
+#include <BRepBuilderAPI_MakeVertex.hxx>
+#include <BRepExtrema_DistShapeShape.hxx>
+#include <GeomAbs_SurfaceType.hxx>
+#include <TopoDS.hxx>
 #include <Bnd_Box.hxx>
 #include <TopLoc_Location.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
@@ -19,6 +24,7 @@
 #include <gp_Trsf.hxx>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <functional>
 #include <numbers>
@@ -468,20 +474,66 @@ Transform Document::worldTransform(ObjectId id) const
     return t;
 }
 
+namespace {
+
+// True if any face is a free-form surface (B-spline, Bezier, swept...), where
+// OpenCASCADE's optimal box can come out a little too small.
+bool hasFreeFormFaces(const TopoDS_Shape& shape)
+{
+    for (TopExp_Explorer it(shape, TopAbs_FACE); it.More(); it.Next()) {
+        switch (BRepAdaptor_Surface(TopoDS::Face(it.Current()), /*restriction=*/false).GetType()) {
+        case GeomAbs_Plane:
+        case GeomAbs_Cylinder:
+        case GeomAbs_Cone:
+        case GeomAbs_Sphere:
+        case GeomAbs_Torus:
+            break;
+        default:
+            return true;
+        }
+    }
+    return false;
+}
+
+}  // namespace
+
 Bounds shapeBounds(const TopoDS_Shape& shape, const Transform& t)
 {
     Bounds out;
     if (shape.IsNull())
         return out;
+    const TopoDS_Shape moved = shape.Moved(TopLoc_Location(toTrsf(t)));
     Bnd_Box box;
-    BRepBndLib::AddOptimal(shape.Moved(TopLoc_Location(toTrsf(t))), box, /*useTriangulation=*/false,
-                           /*useShapeTolerance=*/false);
+    BRepBndLib::AddOptimal(moved, box, /*useTriangulation=*/false, /*useShapeTolerance=*/false);
     if (box.IsVoid())
         return out;
-    double x0, y0, z0, x1, y1, z1;
-    box.Get(x0, y0, z0, x1, y1, z1);
-    out.expand(static_cast<float>(x0), static_cast<float>(y0), static_cast<float>(z0));
-    out.expand(static_cast<float>(x1), static_cast<float>(y1), static_cast<float>(z1));
+    std::array<double, 3> lo{}, hi{};
+    box.Get(lo[0], lo[1], lo[2], hi[0], hi[1], hi[2]);
+
+    if (hasFreeFormFaces(moved)) {
+        // Check each side against the true surface: the point of the shape nearest
+        // to a far-away point beyond that side is (very nearly) its outermost point.
+        // It lies on the shape, so it can only push the box out to the truth.
+        const double size = std::max({hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2], 1.0});
+        const double far = size * 1000.0;
+        const gp_Pnt c((lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2);
+        for (int axis = 0; axis < 3; ++axis) {
+            for (int sign : {-1, 1}) {
+                gp_Pnt p = c;
+                p.SetCoord(axis + 1, c.Coord(axis + 1) + sign * far);
+                BRepExtrema_DistShapeShape dist(BRepBuilderAPI_MakeVertex(p).Vertex(), moved);
+                if (!dist.IsDone() || dist.NbSolution() == 0)
+                    continue;
+                for (int i = 1; i <= dist.NbSolution(); ++i) {
+                    const double v = dist.PointOnShape2(i).Coord(axis + 1);
+                    lo[static_cast<std::size_t>(axis)] = std::min(lo[static_cast<std::size_t>(axis)], v);
+                    hi[static_cast<std::size_t>(axis)] = std::max(hi[static_cast<std::size_t>(axis)], v);
+                }
+            }
+        }
+    }
+    out.expand(static_cast<float>(lo[0]), static_cast<float>(lo[1]), static_cast<float>(lo[2]));
+    out.expand(static_cast<float>(hi[0]), static_cast<float>(hi[1]), static_cast<float>(hi[2]));
     return out;
 }
 

@@ -147,8 +147,8 @@ TEST_CASE("Round groups", "[shapes]")
 
 TEST_CASE("Oval shapes", "[shapes]")
 {
-    checkShape(SphereSpec{10, 6, 4}, 1e-4, 1e-2);  // ellipsoid (B-spline surface)
-    checkShape(SphereSpec{5, 5, 12}, 1e-4, 1e-2);  // egg standing up
+    checkShape(SphereSpec{10, 6, 4}, 1e-4, 1e-3);  // ellipsoid (B-spline surface)
+    checkShape(SphereSpec{5, 5, 12}, 1e-4, 1e-3);  // egg standing up
     checkShape(ConeSpec{10, 6, 0, 0, 20});         // oval base, point
     checkShape(ConeSpec{10, 6, 4, 8, 15});         // oval to a differently oval top
     checkShape(ConeSpec{0, 0, 5, 9, 12});          // point down
