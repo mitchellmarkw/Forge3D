@@ -41,9 +41,9 @@ struct Traits<CylinderSpec> {
     static const std::vector<Field<CylinderSpec>>& fields()
     {
         static const std::vector<Field<CylinderSpec>> f{
-            {&CylinderSpec::radiusX, {"radiusX", "Radius X", "Distance from the centre line to the side, along X", false}},
-            {&CylinderSpec::radiusY, {"radiusY", "Radius Y", "Distance from the centre line to the side, along Y", false}},
-            {&CylinderSpec::height, {"height", "Height (Z)", "Size along Z (up)", false}},
+            {&CylinderSpec::radiusX, {"radiusX", "Radius X", "Distance from the centre line to the side, along X", false, 1}},
+            {&CylinderSpec::radiusY, {"radiusY", "Radius Y", "Distance from the centre line to the side, along Y", false, 1}},
+            {&CylinderSpec::height, {"height", "Height (Z)", "Size along Z (up)", false, 0}},
         };
         return f;
     }
@@ -56,7 +56,9 @@ struct Traits<SphereSpec> {
     static const std::vector<Field<SphereSpec>>& fields()
     {
         static const std::vector<Field<SphereSpec>> f{
-            {&SphereSpec::radius, {"radius", "Radius", "Distance from the centre to the surface", false}},
+            {&SphereSpec::radiusX, {"radiusX", "Radius X", "Distance from the centre to the surface, along X", false, 1}},
+            {&SphereSpec::radiusY, {"radiusY", "Radius Y", "Distance from the centre to the surface, along Y", false, 1}},
+            {&SphereSpec::radiusZ, {"radiusZ", "Radius Z (up)", "Distance from the centre to the top", false, 1}},
         };
         return f;
     }
@@ -69,9 +71,11 @@ struct Traits<ConeSpec> {
     static const std::vector<Field<ConeSpec>>& fields()
     {
         static const std::vector<Field<ConeSpec>> f{
-            {&ConeSpec::radiusBottom, {"radiusBottom", "Bottom radius", "Radius at the base. 0 makes a point at the bottom", true}},
-            {&ConeSpec::radiusTop, {"radiusTop", "Top radius", "Radius at the top. 0 makes a point; more than 0 cuts the tip off flat", true}},
-            {&ConeSpec::height, {"height", "Height (Z)", "Size along Z (up)", false}},
+            {&ConeSpec::bottomRadiusX, {"bottomRadiusX", "Bottom radius X", "Radius of the base along X. Both bottom radii 0 make a point at the bottom", true, 1}},
+            {&ConeSpec::bottomRadiusY, {"bottomRadiusY", "Bottom radius Y", "Radius of the base along Y", true, 1}},
+            {&ConeSpec::topRadiusX, {"topRadiusX", "Top radius X", "Radius of the top along X. Both top radii 0 make a point; more cuts the tip off flat", true, 2}},
+            {&ConeSpec::topRadiusY, {"topRadiusY", "Top radius Y", "Radius of the top along Y", true, 2}},
+            {&ConeSpec::height, {"height", "Height (Z)", "Size along Z (up)", false, 0}},
         };
         return f;
     }
@@ -84,8 +88,10 @@ struct Traits<TorusSpec> {
     static const std::vector<Field<TorusSpec>>& fields()
     {
         static const std::vector<Field<TorusSpec>> f{
-            {&TorusSpec::majorRadius, {"majorRadius", "Ring radius", "From the centre of the hole to the middle of the ring", false}},
-            {&TorusSpec::minorRadius, {"minorRadius", "Tube radius", "Half the thickness of the ring. Must be less than the ring radius", false}},
+            {&TorusSpec::ringRadiusX, {"ringRadiusX", "Ring radius X", "From the centre of the hole to the middle of the ring, along X", false, 1}},
+            {&TorusSpec::ringRadiusY, {"ringRadiusY", "Ring radius Y", "From the centre of the hole to the middle of the ring, along Y", false, 1}},
+            {&TorusSpec::tubeRadius, {"tubeRadius", "Tube radius", "Half the width of the ring, across it (flat)", false, 2}},
+            {&TorusSpec::tubeRadiusZ, {"tubeRadiusZ", "Tube radius Z (up)", "Half the thickness of the ring, up", false, 2}},
         };
         return f;
     }
@@ -98,9 +104,11 @@ struct Traits<TubeSpec> {
     static const std::vector<Field<TubeSpec>>& fields()
     {
         static const std::vector<Field<TubeSpec>> f{
-            {&TubeSpec::outerRadius, {"outerRadius", "Outer radius", "Radius of the outside", false}},
-            {&TubeSpec::innerRadius, {"innerRadius", "Inner radius", "Radius of the hole. Must be less than the outer radius", false}},
-            {&TubeSpec::height, {"height", "Height (Z)", "Size along Z (up)", false}},
+            {&TubeSpec::outerRadiusX, {"outerRadiusX", "Outer radius X", "Radius of the outside along X", false, 1}},
+            {&TubeSpec::outerRadiusY, {"outerRadiusY", "Outer radius Y", "Radius of the outside along Y", false, 1}},
+            {&TubeSpec::innerRadiusX, {"innerRadiusX", "Inner radius X", "Radius of the hole along X. Must be less than outer radius X", false, 2}},
+            {&TubeSpec::innerRadiusY, {"innerRadiusY", "Inner radius Y", "Radius of the hole along Y. Must be less than outer radius Y", false, 2}},
+            {&TubeSpec::height, {"height", "Height (Z)", "Size along Z (up)", false, 0}},
         };
         return f;
     }
@@ -116,6 +124,23 @@ struct Traits<WedgeSpec> {
             {&WedgeSpec::width, {"width", "Width (X)", "Length of the slope along X", false}},
             {&WedgeSpec::depth, {"depth", "Depth (Y)", "Size along Y", false}},
             {&WedgeSpec::height, {"height", "Height (Z)", "Height of the tall end (at -X)", false}},
+        };
+        return f;
+    }
+};
+
+template <>
+struct Traits<PyramidSpec> {
+    static constexpr const char* name = "Pyramid";
+    static constexpr const char* file = "pyramid";
+    static const std::vector<Field<PyramidSpec>>& fields()
+    {
+        static const std::vector<Field<PyramidSpec>> f{
+            {&PyramidSpec::baseWidth, {"baseWidth", "Base width (X)", "Size of the base along X", false, 0}},
+            {&PyramidSpec::baseDepth, {"baseDepth", "Base depth (Y)", "Size of the base along Y", false, 0}},
+            {&PyramidSpec::topWidth, {"topWidth", "Top width (X)", "Size of the top along X. Top width and depth both 0 make a point", true, 0}},
+            {&PyramidSpec::topDepth, {"topDepth", "Top depth (Y)", "Size of the top along Y. Only one of them 0 makes a ridge, like a roof", true, 0}},
+            {&PyramidSpec::height, {"height", "Height (Z)", "Size along Z (up)", false, 0}},
         };
         return f;
     }
@@ -200,7 +225,51 @@ PrimitiveSpec scaled(const PrimitiveSpec& spec, double factor)
 
 bool isRoundFromAbove(const PrimitiveSpec& spec)
 {
-    return !std::holds_alternative<BoxSpec>(spec) && !std::holds_alternative<WedgeSpec>(spec);
+    return hasRoundGroups(spec);
+}
+
+bool hasRoundGroups(const PrimitiveSpec& spec)
+{
+    for (const SpecField& f : specFields(spec))
+        if (f.roundGroup != 0)
+            return true;
+    return false;
+}
+
+namespace {
+// Index of the first field in the same round group (the leader), or npos.
+std::size_t leaderOf(const std::vector<SpecField>& fields, std::size_t i)
+{
+    if (fields[i].roundGroup == 0)
+        return static_cast<std::size_t>(-1);
+    for (std::size_t j = 0; j < fields.size(); ++j)
+        if (fields[j].roundGroup == fields[i].roundGroup)
+            return j;
+    return i;
+}
+}  // namespace
+
+bool isRound(const PrimitiveSpec& spec)
+{
+    const auto& fields = specFields(spec);
+    for (std::size_t i = 0; i < fields.size(); ++i) {
+        const std::size_t lead = leaderOf(fields, i);
+        if (lead != static_cast<std::size_t>(-1) && specValue(spec, i) != specValue(spec, lead))
+            return false;
+    }
+    return true;
+}
+
+PrimitiveSpec madeRound(const PrimitiveSpec& spec)
+{
+    PrimitiveSpec out = spec;
+    const auto& fields = specFields(spec);
+    for (std::size_t i = 0; i < fields.size(); ++i) {
+        const std::size_t lead = leaderOf(fields, i);
+        if (lead != static_cast<std::size_t>(-1))
+            setSpecValue(out, i, specValue(spec, lead));
+    }
+    return out;
 }
 
 std::string toString(BooleanOp op)

@@ -73,8 +73,9 @@ double dimension(const PrimitiveSpec& spec, int axis);
 struct ResizeOptions {
     // Scale every size by the same factor (keeps proportions).
     bool uniform = false;
-    // Cylinders: a side handle changes both radii, so the cylinder stays round.
-    // Off: it changes only that axis's radius (elliptical cylinder).
+    // Round shapes (cylinder, sphere, cone, torus, tube): a handle changes the X and
+    // Y radii together (a sphere: all three), so the shape stays round.
+    // Off: it changes only that axis's radius (oval shapes).
     bool keepRound = true;
     // No size goes below this (mm).
     double minValue = 0.1;

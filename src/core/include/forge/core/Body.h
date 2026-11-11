@@ -60,36 +60,71 @@ struct CylinderSpec {
     bool operator==(const CylinderSpec&) const = default;
 };
 
-// A ball resting on the plate.
+// A ball resting on the plate. Different radii make an ellipsoid (an egg or a
+// squashed ball); radiusZ is the up direction.
 struct SphereSpec {
-    double radius = 10.0;
+    double radiusX = 10.0;
+    double radiusY = 10.0;
+    double radiusZ = 10.0;
+
+    SphereSpec() = default;
+    explicit SphereSpec(double r) : radiusX(r), radiusY(r), radiusZ(r) {}
+    SphereSpec(double rx, double ry, double rz) : radiusX(rx), radiusY(ry), radiusZ(rz) {}
     bool operator==(const SphereSpec&) const = default;
 };
 
-// A cone (or a cut-off cone) standing on its base. Either radius may be 0 for a
-// point (radiusTop 0: point up; radiusBottom 0: point down). Equal radii make a
-// plain cylinder.
+// A cone (or a cut-off cone) standing on its base. Each end is an ellipse with
+// radii X and Y (equal: a circle). An end with both radii 0 is a point; one radius
+// 0 and the other not is not allowed. Equal round ends make a plain cylinder.
 struct ConeSpec {
-    double radiusBottom = 10.0;
-    double radiusTop = 0.0;
+    double bottomRadiusX = 10.0;
+    double bottomRadiusY = 10.0;
+    double topRadiusX = 0.0;
+    double topRadiusY = 0.0;
     double height = 20.0;
+
+    ConeSpec() = default;
+    // Round: ConeSpec{bottom, top, height}
+    ConeSpec(double bottom, double top, double h)
+        : bottomRadiusX(bottom), bottomRadiusY(bottom), topRadiusX(top), topRadiusY(top), height(h) {}
+    ConeSpec(double bx, double by, double tx, double ty, double h)
+        : bottomRadiusX(bx), bottomRadiusY(by), topRadiusX(tx), topRadiusY(ty), height(h) {}
     bool operator==(const ConeSpec&) const = default;
 };
 
-// A ring (doughnut) lying flat on the plate. majorRadius: centre of the ring to
-// the middle of the tube; minorRadius: the tube's own radius (half its thickness).
-// minorRadius must be smaller than majorRadius, so there is a hole.
+// A ring (doughnut) lying flat on the plate. The ring's centre line is an ellipse
+// with radii ringRadiusX / ringRadiusY (equal: a circle). The tube's cross-section
+// is an ellipse too: tubeRadius across the ring (in the plate's plane) and
+// tubeRadiusZ up. The tube must leave a hole: tubeRadius < (smaller ring radius)^2
+// / (larger ring radius), which for a round ring is just tubeRadius < ringRadius.
 struct TorusSpec {
-    double majorRadius = 12.0;
-    double minorRadius = 4.0;
+    double ringRadiusX = 12.0;
+    double ringRadiusY = 12.0;
+    double tubeRadius = 4.0;
+    double tubeRadiusZ = 4.0;
+
+    TorusSpec() = default;
+    // Round: TorusSpec{ring, tube}
+    TorusSpec(double ring, double tube) : ringRadiusX(ring), ringRadiusY(ring), tubeRadius(tube), tubeRadiusZ(tube) {}
+    TorusSpec(double rx, double ry, double t, double tz) : ringRadiusX(rx), ringRadiusY(ry), tubeRadius(t), tubeRadiusZ(tz) {}
     bool operator==(const TorusSpec&) const = default;
 };
 
-// A pipe standing on the plate: a cylinder with a round hole along its axis.
+// A pipe standing on the plate: outside and hole are ellipses (equal radii:
+// circles). The hole must be inside: innerRadiusX < outerRadiusX and the same for Y.
 struct TubeSpec {
-    double outerRadius = 10.0;
-    double innerRadius = 7.0;
+    double outerRadiusX = 10.0;
+    double outerRadiusY = 10.0;
+    double innerRadiusX = 7.0;
+    double innerRadiusY = 7.0;
     double height = 20.0;
+
+    TubeSpec() = default;
+    // Round: TubeSpec{outer, inner, height}
+    TubeSpec(double outer, double inner, double h)
+        : outerRadiusX(outer), outerRadiusY(outer), innerRadiusX(inner), innerRadiusY(inner), height(h) {}
+    TubeSpec(double ox, double oy, double ix, double iy, double h)
+        : outerRadiusX(ox), outerRadiusY(oy), innerRadiusX(ix), innerRadiusY(iy), height(h) {}
     bool operator==(const TubeSpec&) const = default;
 };
 
@@ -102,7 +137,20 @@ struct WedgeSpec {
     bool operator==(const WedgeSpec&) const = default;
 };
 
-using PrimitiveSpec = std::variant<BoxSpec, CylinderSpec, SphereSpec, ConeSpec, TorusSpec, TubeSpec, WedgeSpec>;
+// A pyramid on a rectangular base, centred. The top is a rectangle topWidth x
+// topDepth, centred over the base: both 0 make a point, one 0 makes a ridge (like
+// a roof), both above 0 a flat top.
+struct PyramidSpec {
+    double baseWidth = 20.0;  // X
+    double baseDepth = 20.0;  // Y
+    double topWidth = 0.0;
+    double topDepth = 0.0;
+    double height = 20.0;
+    bool operator==(const PyramidSpec&) const = default;
+};
+
+using PrimitiveSpec =
+    std::variant<BoxSpec, CylinderSpec, SphereSpec, ConeSpec, TorusSpec, TubeSpec, WedgeSpec, PyramidSpec>;
 
 // How many kinds of primitive there are, and a new one of each (Add Shape menu).
 inline constexpr std::size_t kPrimitiveKindCount = std::variant_size_v<PrimitiveSpec>;
@@ -122,6 +170,10 @@ struct SpecField {
     const char* label;  // e.g. "Radius X"
     const char* tip;    // tooltip
     bool allowZero;     // e.g. a cone's top radius may be 0 (a point)
+    // Fields with the same non-zero group are the X / Y (/ Z) radii of one round
+    // part. While "Round" is ticked they change together; the first field of the
+    // group leads, the others follow it.
+    int roundGroup = 0;
 };
 
 const std::vector<SpecField>& specFields(const PrimitiveSpec& spec);
@@ -129,8 +181,17 @@ double specValue(const PrimitiveSpec& spec, std::size_t field);
 void setSpecValue(PrimitiveSpec& spec, std::size_t field, double value);
 // Every length times factor (keeps the shape's proportions).
 PrimitiveSpec scaled(const PrimitiveSpec& spec, double factor);
-// True for shapes that are round seen from above (cylinder, sphere, cone, torus, tube).
+// True for shapes that are round seen from above (cylinder, sphere, cone, torus, tube),
+// even when oval.
 bool isRoundFromAbove(const PrimitiveSpec& spec);
+// Whether the shape has radii that "Round" can link.
+bool hasRoundGroups(const PrimitiveSpec& spec);
+// Every round group has equal values (a circle, not an oval). True for shapes with
+// no round groups.
+bool isRound(const PrimitiveSpec& spec);
+// The same shape made round: every field in a round group takes its group leader's
+// value. Can give an invalid spec (e.g. a hole no longer inside); callers validate.
+PrimitiveSpec madeRound(const PrimitiveSpec& spec);
 
 // ---- Combine results ------------------------------------------------------------
 

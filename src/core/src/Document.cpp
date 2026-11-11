@@ -39,12 +39,24 @@ void validate(const PrimitiveSpec& spec)
             throw std::invalid_argument(std::string(fields[i].label) +
                                         (fields[i].allowZero ? " must not be negative" : " must be a positive number"));
     }
-    if (const auto* cone = std::get_if<ConeSpec>(&spec); cone && cone->radiusBottom == 0.0 && cone->radiusTop == 0.0)
-        throw std::invalid_argument("A cone needs at least one radius above 0");
-    if (const auto* torus = std::get_if<TorusSpec>(&spec); torus && !(torus->minorRadius < torus->majorRadius))
-        throw std::invalid_argument("Tube radius must be less than the ring radius");
-    if (const auto* tube = std::get_if<TubeSpec>(&spec); tube && !(tube->innerRadius < tube->outerRadius))
-        throw std::invalid_argument("Inner radius must be less than the outer radius");
+    if (const auto* cone = std::get_if<ConeSpec>(&spec)) {
+        const auto endOk = [](double x, double y) { return (x == 0.0) == (y == 0.0); };
+        if (!endOk(cone->bottomRadiusX, cone->bottomRadiusY) || !endOk(cone->topRadiusX, cone->topRadiusY))
+            throw std::invalid_argument("Each end of a cone needs both radii above 0, or both 0 for a point");
+        if (cone->bottomRadiusX == 0.0 && cone->topRadiusX == 0.0)
+            throw std::invalid_argument("A cone can't be a point at both ends");
+    }
+    if (const auto* torus = std::get_if<TorusSpec>(&spec)) {
+        const double small = std::min(torus->ringRadiusX, torus->ringRadiusY);
+        const double big = std::max(torus->ringRadiusX, torus->ringRadiusY);
+        if (!(torus->tubeRadius < small * small / big))
+            throw std::invalid_argument(small == big ? "Tube radius must be less than the ring radius"
+                                                     : "Tube radius is too big for this oval ring: the hole would "
+                                                       "close up at its narrow ends");
+    }
+    if (const auto* tube = std::get_if<TubeSpec>(&spec);
+        tube && !(tube->innerRadiusX < tube->outerRadiusX && tube->innerRadiusY < tube->outerRadiusY))
+        throw std::invalid_argument("Inner radius must be less than the outer radius (X and Y)");
 }
 
 bool isEmptySolid(const TopoDS_Shape& shape)

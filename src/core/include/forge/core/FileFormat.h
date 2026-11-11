@@ -23,7 +23,8 @@ namespace forge::file {
 //   3  cylinders store radiusX and radiusY (elliptical cylinders)
 //   4  combine results (type "combine": operation, operands, pivot)
 //   5  sphere, cone, torus, tube, wedge
-inline constexpr int kFormatVersion = 5;
+//   6  oval sphere / cone / torus / tube (X / Y radii), pyramid
+inline constexpr int kFormatVersion = 6;
 inline constexpr const char* kExtension = ".f3d";
 inline constexpr const char* kDocumentEntry = "document.json";
 

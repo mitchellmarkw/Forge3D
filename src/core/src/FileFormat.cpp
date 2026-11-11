@@ -139,8 +139,17 @@ Body bodyFromJson(const json& j, std::size_t index, int version)
     const auto params = j.find("parameters");
     if (params == j.end() || !params->is_object())
         damaged(where + ": missing parameters");
+    const auto num = [&](const char* key) { return number(*params, key, where); };
     if (t == "cylinder" && version < 3) {
-        b.spec = CylinderSpec{number(*params, "radius", where), number(*params, "height", where)};  // round
+        b.spec = CylinderSpec{num("radius"), num("height")};  // round
+    } else if (version < 6 && t == "sphere") {  // 0.6.0 shapes were always round
+        b.spec = SphereSpec{num("radius")};
+    } else if (version < 6 && t == "cone") {
+        b.spec = ConeSpec{num("radiusBottom"), num("radiusTop"), num("height")};
+    } else if (version < 6 && t == "torus") {
+        b.spec = TorusSpec{num("majorRadius"), num("minorRadius")};
+    } else if (version < 6 && t == "tube") {
+        b.spec = TubeSpec{num("outerRadius"), num("innerRadius"), num("height")};
     } else {
         // Find the primitive kind with this file name, then read its fields.
         bool known = false;
