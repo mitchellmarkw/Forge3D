@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.2 — Fix (2026-11-11)
+
+- Round checkbox now unticks when Undo, Redo or a typed radius turns the selected cylinder
+  oval (found in test sheet 3b2, check 15).
+
 ## 0.4.1 — Uniform scale and elliptical cylinders (2026-11-11)
 
 - **Uniform scale**: toolbar / Edit menu toggle (key **U**) and a matching checkbox in
