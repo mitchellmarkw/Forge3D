@@ -147,8 +147,7 @@ private:
     QAction* m_redo = nullptr;
     QAction* m_delete = nullptr;
     QAction* m_deselect = nullptr;
-    QAction* m_addBox = nullptr;
-    QAction* m_addCylinder = nullptr;
+    QMenu* m_addMenu = nullptr;  // Add Shape (toolbar dropdown and Add menu)
     QAction* m_clear = nullptr;
     QAction* m_merge = nullptr;
     QAction* m_subtract = nullptr;

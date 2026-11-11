@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.6.0 — Slice 3d: shape library (2026-11-11)
+
+- **Add Shape** dropdown in the toolbar (and a new **Add** menu) replaces Add Box / Add
+  Cylinder: Box, Cylinder, **Sphere**, **Cone**, **Torus**, **Tube**, **Wedge**.
+- Every new shape has its own Size fields in Properties, works with the Resize handles
+  (a sphere stays a sphere; a cone keeps its taper; a tube keeps its wall thickness; a
+  torus side handle widens the whole ring, the top handle thickens it), Uniform scale,
+  Merge / Subtract / Intersect, Align Shapes, Save and Open.
+- A cone's top (or bottom) radius can be 0 for a point, or more for a flat cut-off top.
+- Sizes that can't work are refused with a message (e.g. a tube's hole bigger than the
+  tube, a torus with no hole).
+- File format version 5 (adds the new shape types). Older files still open.
+- Core: one table per shape (`specFields()`, `specValue()`, `setSpecValue()`, `scaled()`,
+  `defaultSpec()`), so the panel, files and scaling handle every shape the same way;
+  `halfExtents()`.
+- 111 unit tests (7 new).
+
 ## 0.5.1 — Turning centre and Align Shapes (2026-11-11)
 
 - **Combined shapes turn about what you see.** Gizmo rings and typed angles turn a
