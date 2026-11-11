@@ -175,6 +175,15 @@ Viewport (mouse)  --leftPressed(ray, handle)-->  MainWindow drag controller
   all go through `specFields()` / `specValue()` / `setSpecValue()` / `scaled()`, so a new
   primitive needs: its struct, a `Traits` entry, `makeX()` in Primitives, and cases in
   `halfExtents()` and `resizeOne()` (both `static_assert` on unhandled types).
+- **Round groups (0.6.1):** a field's `roundGroup` links the X / Y (/ Z) radii of one
+  round part (e.g. a cone's bottom radii are group 1, its top radii group 2). "Round"
+  in the panel and `ResizeOptions::keepRound` change a group together; `isRound()` and
+  `madeRound()` work on groups. Ovals: ellipses all start at +X so lofts don't twist;
+  oval cone = ruled `BRepOffsetAPI_ThruSections`; ellipsoid = sphere stretched with
+  `BRepBuilderAPI_GTransform`; torus with an oval tube is revolved, with an oval ring it
+  is swept (`BRepOffsetAPI_MakePipe`). The pyramid is sewn from planar faces (repeated
+  top corners dropped, so points and ridges work). Torus validity: tube radius < (small
+  ring radius)^2 / (large ring radius), so the hole never closes.
 - `halfExtents(spec)` gives the bounding box; `pivotOf()` and the gizmo handles use it.
   `dimension()` is the full height for Z, and for X/Y the full width (box, wedge) or the
   radius (round shapes).

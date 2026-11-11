@@ -17,13 +17,22 @@ TopoDS_Shape makeCylinder(double radius, double height);
 TopoDS_Shape makeCylinder(double radiusX, double radiusY, double height);
 
 TopoDS_Shape makeSphere(double radius);
-// Either radius may be 0 (a point), not both; equal radii give a cylinder.
+// An ellipsoid when the radii differ; Z is up.
+TopoDS_Shape makeSphere(double radiusX, double radiusY, double radiusZ);
+// Round ends. Either radius may be 0 (a point), not both; equal radii give a cylinder.
 TopoDS_Shape makeCone(double radiusBottom, double radiusTop, double height);
-// Lying flat, resting on the plate. minorRadius < majorRadius.
+// Oval ends: each end's radii are both above 0, or both 0 (a point).
+TopoDS_Shape makeCone(double bottomX, double bottomY, double topX, double topY, double height);
+// Lying flat, resting on the plate.
 TopoDS_Shape makeTorus(double majorRadius, double minorRadius);
+// Oval ring (ringX / ringY) and oval tube (tube across, tubeZ up).
+TopoDS_Shape makeTorus(double ringX, double ringY, double tube, double tubeZ);
 TopoDS_Shape makeTube(double outerRadius, double innerRadius, double height);
+TopoDS_Shape makeTube(double outerX, double outerY, double innerX, double innerY, double height);
 // Tall end at -X, sloping down to the plate at +X.
 TopoDS_Shape makeWedge(double width, double depth, double height);
+// Rectangular base and top, both centred; a top size of 0 makes a point or ridge.
+TopoDS_Shape makePyramid(double baseWidth, double baseDepth, double topWidth, double topDepth, double height);
 
 // Builds whichever primitive the spec describes.
 TopoDS_Shape buildShape(const PrimitiveSpec& spec);

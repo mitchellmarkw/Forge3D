@@ -85,16 +85,17 @@ Vec3 halfExtents(const PrimitiveSpec& spec)
             else if constexpr (std::is_same_v<T, CylinderSpec>)
                 return {p.radiusX, p.radiusY, p.height / 2.0};
             else if constexpr (std::is_same_v<T, SphereSpec>)
-                return {p.radius, p.radius, p.radius};
-            else if constexpr (std::is_same_v<T, ConeSpec>) {
-                const double r = std::max(p.radiusBottom, p.radiusTop);
-                return {r, r, p.height / 2.0};
-            } else if constexpr (std::is_same_v<T, TorusSpec>) {
-                const double r = p.majorRadius + p.minorRadius;
-                return {r, r, p.minorRadius};
-            } else {
-                static_assert(std::is_same_v<T, TubeSpec>, "halfExtents: unhandled primitive");
-                return {p.outerRadius, p.outerRadius, p.height / 2.0};
+                return {p.radiusX, p.radiusY, p.radiusZ};
+            else if constexpr (std::is_same_v<T, ConeSpec>)
+                return {std::max(p.bottomRadiusX, p.topRadiusX), std::max(p.bottomRadiusY, p.topRadiusY), p.height / 2.0};
+            else if constexpr (std::is_same_v<T, TorusSpec>)
+                return {p.ringRadiusX + p.tubeRadius, p.ringRadiusY + p.tubeRadius, p.tubeRadiusZ};
+            else if constexpr (std::is_same_v<T, TubeSpec>)
+                return {p.outerRadiusX, p.outerRadiusY, p.height / 2.0};
+            else {
+                static_assert(std::is_same_v<T, PyramidSpec>, "halfExtents: unhandled primitive");
+                return {std::max(p.baseWidth, p.topWidth) / 2.0, std::max(p.baseDepth, p.topDepth) / 2.0,
+                        p.height / 2.0};
             }
         },
         spec);
@@ -243,55 +244,102 @@ double smallestDimension(const PrimitiveSpec& spec)
     return std::min({dimension(spec, 0), dimension(spec, 1), dimension(spec, 2)});
 }
 
-// Sets dimension(axis) to value, keeping the shape valid.
+// A torus whose tube would close its hole gets a bigger ring (same proportions).
+void keepTorusHole(TorusSpec& t, double minValue)
+{
+    const double small = std::min(t.ringRadiusX, t.ringRadiusY), big = std::max(t.ringRadiusX, t.ringRadiusY);
+    const double limit = small * small / big;  // largest tube radius the ring allows
+    const double needed = t.tubeRadius + minValue / 2.0;
+    if (limit < needed) {
+        const double k = needed / limit;  // the limit grows in step with the ring
+        t.ringRadiusX *= k;
+        t.ringRadiusY *= k;
+    }
+}
+
+// Sets dimension(axis) to value, keeping the shape valid. keepRound: round parts
+// (X / Y radii) change together, so a round shape stays round.
 void resizeOne(PrimitiveSpec& spec, int axis, double value, const ResizeOptions& options)
 {
     const double minV = options.minValue;
+    const bool both = options.keepRound;
+    // Pick the X or Y member (or both when keeping round).
+    const auto sides = [axis, both](double& x, double& y, auto&& f) {
+        if (both || axis == 0)
+            f(x);
+        if (both || axis == 1)
+            f(y);
+    };
     std::visit(
         [&](auto& p) {
             using T = std::decay_t<decltype(p)>;
             if constexpr (std::is_same_v<T, BoxSpec> || std::is_same_v<T, WedgeSpec>) {
                 (axis == 0 ? p.width : axis == 1 ? p.depth : p.height) = value;
-            } else if constexpr (std::is_same_v<T, CylinderSpec>) {
+            } else if constexpr (std::is_same_v<T, PyramidSpec>) {
                 if (axis == 2) {
                     p.height = value;
-                } else if (options.keepRound) {
-                    p.radiusX = value;
-                    p.radiusY = value;
                 } else {
-                    (axis == 0 ? p.radiusX : p.radiusY) = value;
+                    // The wider of base and top gets the new size; the other keeps its proportion.
+                    double& base = axis == 0 ? p.baseWidth : p.baseDepth;
+                    double& top = axis == 0 ? p.topWidth : p.topDepth;
+                    const double factor = value / std::max(base, top);
+                    base *= factor;
+                    top *= factor;
                 }
+            } else if constexpr (std::is_same_v<T, CylinderSpec>) {
+                if (axis == 2)
+                    p.height = value;
+                else
+                    sides(p.radiusX, p.radiusY, [value](double& r) { r = value; });
             } else if constexpr (std::is_same_v<T, SphereSpec>) {
-                p.radius = axis == 2 ? value / 2.0 : value;  // stays a sphere
+                if (both) {
+                    p.radiusX = p.radiusY = p.radiusZ = axis == 2 ? value / 2.0 : value;  // stays a ball
+                } else {
+                    (axis == 0 ? p.radiusX : axis == 1 ? p.radiusY : p.radiusZ) = axis == 2 ? value / 2.0 : value;
+                }
             } else if constexpr (std::is_same_v<T, ConeSpec>) {
                 if (axis == 2) {
                     p.height = value;
                 } else {
-                    // The wider end gets the new radius; the other keeps its proportion.
-                    const double factor = value / std::max(p.radiusBottom, p.radiusTop);
-                    p.radiusBottom *= factor;
-                    p.radiusTop *= factor;
+                    // The wider end gets the new radius; the other end keeps its proportion.
+                    const double current = axis == 0 ? std::max(p.bottomRadiusX, p.topRadiusX)
+                                                     : std::max(p.bottomRadiusY, p.topRadiusY);
+                    const double factor = value / current;
+                    sides(p.bottomRadiusX, p.bottomRadiusY, [factor](double& r) { r *= factor; });
+                    sides(p.topRadiusX, p.topRadiusY, [factor](double& r) { r *= factor; });
                 }
             } else if constexpr (std::is_same_v<T, TorusSpec>) {
                 if (axis == 2) {
-                    // Thicker ring; the ring grows if needed to keep its hole.
-                    p.minorRadius = value / 2.0;
-                    p.majorRadius = std::max(p.majorRadius, p.minorRadius + minV);
-                } else {
+                    p.tubeRadiusZ = value / 2.0;  // thicker ring
+                    if (both)
+                        p.tubeRadius = p.tubeRadiusZ;
+                } else if (both) {
                     // Whole ring wider, same proportions.
-                    const double factor = value / (p.majorRadius + p.minorRadius);
-                    p.majorRadius *= factor;
-                    p.minorRadius *= factor;
+                    const double factor = value / ((axis == 0 ? p.ringRadiusX : p.ringRadiusY) + p.tubeRadius);
+                    p.ringRadiusX *= factor;
+                    p.ringRadiusY *= factor;
+                    p.tubeRadius *= factor;
+                    p.tubeRadiusZ *= factor;
+                } else {
+                    // Stretch the ring along this axis only; the tube stays as it is.
+                    (axis == 0 ? p.ringRadiusX : p.ringRadiusY) = std::max(value - p.tubeRadius, minV);
                 }
+                keepTorusHole(p, minV);
             } else {
                 static_assert(std::is_same_v<T, TubeSpec>, "resizeOne: unhandled primitive");
                 if (axis == 2) {
                     p.height = value;
                 } else {
                     // Same wall thickness; never thinner than the wall plus a hole.
-                    const double wall = p.outerRadius - p.innerRadius;
-                    p.outerRadius = std::max(value, wall + minV);
-                    p.innerRadius = p.outerRadius - wall;
+                    const auto resizeSide = [value, minV](double& outer, double& inner) {
+                        const double wall = outer - inner;
+                        outer = std::max(value, wall + minV);
+                        inner = outer - wall;
+                    };
+                    if (both || axis == 0)
+                        resizeSide(p.outerRadiusX, p.innerRadiusX);
+                    if (both || axis == 1)
+                        resizeSide(p.outerRadiusY, p.innerRadiusY);
                 }
             }
         },

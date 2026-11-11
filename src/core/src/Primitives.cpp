@@ -5,7 +5,20 @@
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_MakeWire.hxx>
+#include <BRepBuilderAPI_GTransform.hxx>
 #include <BRepBuilderAPI_MakePolygon.hxx>
+#include <BRepBuilderAPI_MakeSolid.hxx>
+#include <BRepBuilderAPI_MakeVertex.hxx>
+#include <BRepBuilderAPI_Sewing.hxx>
+#include <BRepClass3d_SolidClassifier.hxx>
+#include <BRepOffsetAPI_MakePipe.hxx>
+#include <BRepOffsetAPI_ThruSections.hxx>
+#include <BRepPrimAPI_MakeRevol.hxx>
+#include <TopExp_Explorer.hxx>
+#include <TopoDS.hxx>
+#include <TopoDS_Edge.hxx>
+#include <gp_Ax1.hxx>
+#include <gp_GTrsf.hxx>
 #include <BRepPrimAPI_MakeCone.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
 #include <BRepPrimAPI_MakeSphere.hxx>
@@ -19,6 +32,10 @@
 #include <gp_Dir.hxx>
 #include <gp_Pnt.hxx>
 
+#include <algorithm>
+#include <array>
+#include <initializer_list>
+#include <numbers>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
@@ -82,46 +99,167 @@ TopoDS_Shape makeCylinder(double radiusX, double radiusY, double height)
     return prism.Shape();
 }
 
+namespace {
+
+// A closed ellipse (circle when rx == ry) in the plane Z = z, centred on the Z axis,
+// starting at +X and running anticlockwise seen from above. Every ellipse built
+// here starts at the same angle, so lofts between them don't twist.
+TopoDS_Edge ellipseEdge(double z, double rx, double ry)
+{
+    const gp_Pnt centre(0.0, 0.0, z);
+    if (rx == ry)
+        return BRepBuilderAPI_MakeEdge(gp_Circ(gp_Ax2(centre, gp_Dir(0, 0, 1), gp_Dir(1, 0, 0)), rx)).Edge();
+    if (rx > ry)
+        return BRepBuilderAPI_MakeEdge(gp_Elips(gp_Ax2(centre, gp_Dir(0, 0, 1), gp_Dir(1, 0, 0)), rx, ry)).Edge();
+    // gp_Elips needs its major radius along the frame's X direction, so this one's
+    // frame points along +Y. Start a quarter turn earlier, at +X, to match the others.
+    const gp_Elips e(gp_Ax2(centre, gp_Dir(0, 0, 1), gp_Dir(0, 1, 0)), ry, rx);
+    const double start = -std::numbers::pi / 2.0;
+    return BRepBuilderAPI_MakeEdge(e, start, start + 2.0 * std::numbers::pi).Edge();
+}
+
+TopoDS_Wire ellipseWire(double z, double rx, double ry)
+{
+    return BRepBuilderAPI_MakeWire(ellipseEdge(z, rx, ry)).Wire();
+}
+
+TopoDS_Shape requireSolid(const TopoDS_Shape& shape, const char* what)
+{
+    if (shape.IsNull())
+        throw std::runtime_error(std::string("Could not build the ") + what);
+    return shape;
+}
+
+}  // namespace
+
 TopoDS_Shape makeSphere(double radius)
 {
     requirePositive(radius, "radius");
     return BRepPrimAPI_MakeSphere(gp_Pnt(0.0, 0.0, radius), radius).Shape();
 }
 
+TopoDS_Shape makeSphere(double radiusX, double radiusY, double radiusZ)
+{
+    requirePositive(radiusX, "radiusX");
+    requirePositive(radiusY, "radiusY");
+    requirePositive(radiusZ, "radiusZ");
+    if (radiusX == radiusY && radiusY == radiusZ)
+        return makeSphere(radiusX);
+    // A unit-ish sphere stretched along each axis (exact, as a B-spline surface).
+    const double r = std::max({radiusX, radiusY, radiusZ});
+    const TopoDS_Shape ball = BRepPrimAPI_MakeSphere(gp_Pnt(0.0, 0.0, 0.0), r).Shape();
+    gp_GTrsf stretch;
+    stretch.SetValue(1, 1, radiusX / r);
+    stretch.SetValue(2, 2, radiusY / r);
+    stretch.SetValue(3, 3, radiusZ / r);
+    stretch.SetValue(3, 4, radiusZ);  // lift it onto the plate
+    BRepBuilderAPI_GTransform maker(ball, stretch, /*copy=*/true);
+    if (!maker.IsDone())
+        throw std::runtime_error("Could not build the ellipsoid");
+    return maker.Shape();
+}
+
 TopoDS_Shape makeCone(double radiusBottom, double radiusTop, double height)
 {
+    return makeCone(radiusBottom, radiusBottom, radiusTop, radiusTop, height);
+}
+
+TopoDS_Shape makeCone(double bottomX, double bottomY, double topX, double topY, double height)
+{
     requirePositive(height, "height");
-    if (radiusBottom < 0.0 || radiusTop < 0.0 || (radiusBottom == 0.0 && radiusTop == 0.0))
-        throw std::invalid_argument("cone radii must not be negative, and not both zero");
-    if (radiusBottom == radiusTop)
-        return makeCylinder(radiusBottom, height);  // OpenCASCADE refuses a "cone" with equal radii
-    const gp_Ax2 axis(gp_Pnt(0.0, 0.0, 0.0), gp_Dir(0.0, 0.0, 1.0));
-    return BRepPrimAPI_MakeCone(axis, radiusBottom, radiusTop, height).Shape();
+    const auto endOk = [](double x, double y) { return x >= 0.0 && y >= 0.0 && (x == 0.0) == (y == 0.0); };
+    if (!endOk(bottomX, bottomY) || !endOk(topX, topY) || (bottomX == 0.0 && topX == 0.0))
+        throw std::invalid_argument("cone ends need both radii above 0, or both 0 (a point), and not two points");
+    const bool round = bottomX == bottomY && topX == topY;
+    if (round && bottomX == topX)
+        return makeCylinder(bottomX, height);  // OpenCASCADE refuses a "cone" with equal radii
+    if (round) {
+        const gp_Ax2 axis(gp_Pnt(0.0, 0.0, 0.0), gp_Dir(0.0, 0.0, 1.0));
+        return BRepPrimAPI_MakeCone(axis, bottomX, topX, height).Shape();
+    }
+    // Oval: straight lines from the bottom ellipse to the top one (or to a point).
+    BRepOffsetAPI_ThruSections loft(/*isSolid=*/true, /*ruled=*/true);
+    if (bottomX == 0.0)
+        loft.AddVertex(BRepBuilderAPI_MakeVertex(gp_Pnt(0.0, 0.0, 0.0)).Vertex());
+    else
+        loft.AddWire(ellipseWire(0.0, bottomX, bottomY));
+    if (topX == 0.0)
+        loft.AddVertex(BRepBuilderAPI_MakeVertex(gp_Pnt(0.0, 0.0, height)).Vertex());
+    else
+        loft.AddWire(ellipseWire(height, topX, topY));
+    loft.CheckCompatibility(false);
+    loft.Build();
+    if (!loft.IsDone())
+        throw std::runtime_error("Could not build the oval cone");
+    return requireSolid(loft.Shape(), "oval cone");
 }
 
 TopoDS_Shape makeTorus(double majorRadius, double minorRadius)
 {
-    requirePositive(majorRadius, "major radius");
-    requirePositive(minorRadius, "minor radius");
-    if (!(minorRadius < majorRadius))
-        throw std::invalid_argument("torus minor radius must be less than the major radius");
-    const gp_Ax2 axis(gp_Pnt(0.0, 0.0, minorRadius), gp_Dir(0.0, 0.0, 1.0));
-    return BRepPrimAPI_MakeTorus(axis, majorRadius, minorRadius).Shape();
+    return makeTorus(majorRadius, majorRadius, minorRadius, minorRadius);
+}
+
+TopoDS_Shape makeTorus(double ringX, double ringY, double tube, double tubeZ)
+{
+    requirePositive(ringX, "ring radius X");
+    requirePositive(ringY, "ring radius Y");
+    requirePositive(tube, "tube radius");
+    requirePositive(tubeZ, "tube radius Z");
+    const double small = std::min(ringX, ringY), big = std::max(ringX, ringY);
+    if (!(tube < small * small / big))
+        throw std::invalid_argument("torus tube radius too big for the ring (no hole left)");
+
+    if (ringX == ringY && tube == tubeZ)
+        return BRepPrimAPI_MakeTorus(gp_Ax2(gp_Pnt(0.0, 0.0, tube), gp_Dir(0.0, 0.0, 1.0)), ringX, tube).Shape();
+
+    // The tube's cross-section: an ellipse in the XZ plane, centred on the ring at +X.
+    const gp_Pnt c(ringX, 0.0, tubeZ);
+    const gp_Dir normal(0, -1, 0);  // the XZ plane
+    TopoDS_Edge profileEdge;
+    if (tube == tubeZ)
+        profileEdge = BRepBuilderAPI_MakeEdge(gp_Circ(gp_Ax2(c, normal, gp_Dir(1, 0, 0)), tube)).Edge();
+    else if (tube > tubeZ)
+        profileEdge = BRepBuilderAPI_MakeEdge(gp_Elips(gp_Ax2(c, normal, gp_Dir(1, 0, 0)), tube, tubeZ)).Edge();
+    else
+        profileEdge = BRepBuilderAPI_MakeEdge(gp_Elips(gp_Ax2(c, normal, gp_Dir(0, 0, 1)), tubeZ, tube)).Edge();
+    BRepBuilderAPI_MakeFace profile(BRepBuilderAPI_MakeWire(profileEdge).Wire(), /*OnlyPlane=*/true);
+    if (!profile.IsDone())
+        throw std::runtime_error("Could not build the torus cross-section");
+
+    if (ringX == ringY) {
+        // Round ring: spin the cross-section around Z (exact surface of revolution).
+        BRepPrimAPI_MakeRevol revol(profile.Face(), gp_Ax1(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)));
+        revol.Build();
+        if (!revol.IsDone())
+            throw std::runtime_error("Could not build the torus");
+        return requireSolid(revol.Shape(), "torus");
+    }
+    // Oval ring: sweep the cross-section along the oval centre line.
+    BRepOffsetAPI_MakePipe pipe(ellipseWire(tubeZ, ringX, ringY), profile.Face());
+    pipe.Build();
+    if (!pipe.IsDone())
+        throw std::runtime_error("Could not build the oval torus");
+    return requireSolid(pipe.Shape(), "oval torus");
 }
 
 TopoDS_Shape makeTube(double outerRadius, double innerRadius, double height)
 {
-    requirePositive(outerRadius, "outer radius");
-    requirePositive(innerRadius, "inner radius");
+    return makeTube(outerRadius, outerRadius, innerRadius, innerRadius, height);
+}
+
+TopoDS_Shape makeTube(double outerX, double outerY, double innerX, double innerY, double height)
+{
+    requirePositive(outerX, "outer radius X");
+    requirePositive(outerY, "outer radius Y");
+    requirePositive(innerX, "inner radius X");
+    requirePositive(innerY, "inner radius Y");
     requirePositive(height, "height");
-    if (!(innerRadius < outerRadius))
-        throw std::invalid_argument("tube inner radius must be less than the outer radius");
-    // A ring-shaped face (outer circle with an inner hole), extruded up.
-    const gp_Ax2 frame(gp_Pnt(0.0, 0.0, 0.0), gp_Dir(0.0, 0.0, 1.0));
-    const TopoDS_Wire outer = BRepBuilderAPI_MakeWire(BRepBuilderAPI_MakeEdge(gp_Circ(frame, outerRadius)).Edge()).Wire();
-    TopoDS_Wire inner = BRepBuilderAPI_MakeWire(BRepBuilderAPI_MakeEdge(gp_Circ(frame, innerRadius)).Edge()).Wire();
+    if (!(innerX < outerX && innerY < outerY))
+        throw std::invalid_argument("tube inner radii must be less than the outer radii");
+    // A ring-shaped face (outer ellipse with an inner hole), extruded up.
+    TopoDS_Wire inner = ellipseWire(0.0, innerX, innerY);
     inner.Reverse();  // a hole runs the other way round
-    BRepBuilderAPI_MakeFace face(outer);
+    BRepBuilderAPI_MakeFace face(ellipseWire(0.0, outerX, outerY));
     face.Add(inner);
     if (!face.IsDone())
         throw std::runtime_error("Could not build the tube's base");
@@ -151,6 +289,67 @@ TopoDS_Shape makeWedge(double width, double depth, double height)
     return prism.Shape();
 }
 
+TopoDS_Shape makePyramid(double baseWidth, double baseDepth, double topWidth, double topDepth, double height)
+{
+    requirePositive(baseWidth, "base width");
+    requirePositive(baseDepth, "base depth");
+    requirePositive(height, "height");
+    if (topWidth < 0.0 || topDepth < 0.0)
+        throw std::invalid_argument("pyramid top sizes must not be negative");
+
+    // Corners anticlockwise from (-x, -y), at the base and at the top. Coinciding top
+    // corners (a point or a ridge) are fine: faces drop repeated corners.
+    const auto corners = [](double w, double d, double z) {
+        return std::array<gp_Pnt, 4>{gp_Pnt(-w / 2, -d / 2, z), gp_Pnt(w / 2, -d / 2, z), gp_Pnt(w / 2, d / 2, z),
+                                     gp_Pnt(-w / 2, d / 2, z)};
+    };
+    const auto base = corners(baseWidth, baseDepth, 0.0);
+    const auto top = corners(topWidth, topDepth, height);
+
+    BRepBuilderAPI_Sewing sewing(1e-6);
+    const auto addFace = [&sewing](std::initializer_list<gp_Pnt> pts) {
+        BRepBuilderAPI_MakePolygon poly;
+        gp_Pnt last;
+        bool any = false;
+        int count = 0;
+        for (const gp_Pnt& p : pts) {
+            if (any && p.Distance(last) < 1e-9)
+                continue;
+            poly.Add(p);
+            last = p;
+            any = true;
+            ++count;
+        }
+        if (count < 3)
+            return;  // the face collapsed to a line or a point
+        poly.Close();
+        BRepBuilderAPI_MakeFace face(poly.Wire(), /*OnlyPlane=*/true);
+        if (face.IsDone())
+            sewing.Add(face.Face());
+    };
+    addFace({base[3], base[2], base[1], base[0]});  // bottom, facing down
+    if (topWidth > 0.0 && topDepth > 0.0)
+        addFace({top[0], top[1], top[2], top[3]});  // flat top, facing up
+    for (int i = 0; i < 4; ++i) {
+        const int j = (i + 1) % 4;
+        addFace({base[i], base[j], top[j], top[i]});
+    }
+    sewing.Perform();
+    const TopoDS_Shape shell = sewing.SewedShape();
+    TopExp_Explorer it(shell, TopAbs_SHELL);
+    if (!it.More())
+        throw std::runtime_error("Could not build the pyramid");
+    BRepBuilderAPI_MakeSolid solid(TopoDS::Shell(it.Current()));
+    if (!solid.IsDone())
+        throw std::runtime_error("Could not build the pyramid");
+    // Make sure the solid's inside is inside (outward-facing faces).
+    TopoDS_Shape result = solid.Solid();
+    BRepClass3d_SolidClassifier inside(result, gp_Pnt(0.0, 0.0, height * 1e-3), 1e-7);
+    if (inside.State() == TopAbs_OUT)
+        result.Reverse();
+    return result;
+}
+
 TopoDS_Shape buildShape(const PrimitiveSpec& spec)
 {
     return std::visit(
@@ -161,16 +360,18 @@ TopoDS_Shape buildShape(const PrimitiveSpec& spec)
             else if constexpr (std::is_same_v<T, CylinderSpec>)
                 return makeCylinder(p.radiusX, p.radiusY, p.height);
             else if constexpr (std::is_same_v<T, SphereSpec>)
-                return makeSphere(p.radius);
+                return makeSphere(p.radiusX, p.radiusY, p.radiusZ);
             else if constexpr (std::is_same_v<T, ConeSpec>)
-                return makeCone(p.radiusBottom, p.radiusTop, p.height);
+                return makeCone(p.bottomRadiusX, p.bottomRadiusY, p.topRadiusX, p.topRadiusY, p.height);
             else if constexpr (std::is_same_v<T, TorusSpec>)
-                return makeTorus(p.majorRadius, p.minorRadius);
+                return makeTorus(p.ringRadiusX, p.ringRadiusY, p.tubeRadius, p.tubeRadiusZ);
             else if constexpr (std::is_same_v<T, TubeSpec>)
-                return makeTube(p.outerRadius, p.innerRadius, p.height);
-            else {
-                static_assert(std::is_same_v<T, WedgeSpec>, "buildShape: unhandled primitive");
+                return makeTube(p.outerRadiusX, p.outerRadiusY, p.innerRadiusX, p.innerRadiusY, p.height);
+            else if constexpr (std::is_same_v<T, WedgeSpec>)
                 return makeWedge(p.width, p.depth, p.height);
+            else {
+                static_assert(std::is_same_v<T, PyramidSpec>, "buildShape: unhandled primitive");
+                return makePyramid(p.baseWidth, p.baseDepth, p.topWidth, p.topDepth, p.height);
             }
         },
         spec);

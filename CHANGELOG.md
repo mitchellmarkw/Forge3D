@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.6.1 — Oval shapes and the pyramid (2026-11-11)
+
+- **Pyramid** in Add Shape: base width and depth, top width and depth, height. Top 0 x 0
+  is a point; one of them 0 is a roof-like ridge; both above 0 is a flat top.
+- **Oval radii** for every round shape, like the cylinder already had:
+  - Sphere: Radius X, Y and Z (eggs and squashed balls).
+  - Cone: bottom radius X / Y and top radius X / Y.
+  - Torus: ring radius X / Y (an oval ring), tube radius across and up (Z).
+  - Tube: outer radius X / Y and inner radius X / Y.
+- The **Round** checkbox now appears for all of these. Ticked, the X / Y radii (a
+  sphere: all three) change together, in Properties and with the Resize handles; ticking
+  it on an oval shape makes it round again. Unticked, each radius changes on its own.
+- File format version 6. Files from 0.6.0 (format 5) still open.
+- 115 unit tests (4 new; the shape tests now cover every oval and pyramid variant).
+
 ## 0.6.0 — Slice 3d: shape library (2026-11-11)
 
 - **Add Shape** dropdown in the toolbar (and a new **Add** menu) replaces Add Box / Add

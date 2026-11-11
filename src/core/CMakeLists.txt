@@ -36,7 +36,7 @@ target_include_directories(forge_core SYSTEM PUBLIC ${OpenCASCADE_INCLUDE_DIR})
 target_link_libraries(forge_core PUBLIC
     TKernel TKMath TKG2d TKG3d TKGeomBase TKBRep
     TKGeomAlgo TKTopAlgo TKPrim TKMesh
-    TKBO TKBool TKShHealing
+    TKBO TKBool TKShHealing TKOffset
 )
 
 # File format libraries are an implementation detail of FileFormat.cpp.
