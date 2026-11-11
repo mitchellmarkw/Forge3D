@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.5.0 — Slice 3c: combine shapes (2026-11-11)
+
+- **Multi-select**: Ctrl+click in the view or the Objects list adds or removes shapes.
+  The order you pick them in is kept.
+- **Merge**, **Subtract** (keeps the first shape picked, cuts the others out of it) and
+  **Intersect** in the toolbar and Edit menu. Exact solids from OpenCASCADE, with faces on
+  the same surface unified so merges have no seams. Combining shapes that would leave
+  nothing (e.g. Intersect of shapes that don't touch) is refused with a message.
+- **Results stay editable**: the Objects panel is now a tree; a result holds its parts.
+  Select a part to see it see-through in place and edit its size and position in
+  Properties; the result rebuilds. Results can be combined again (nesting).
+- **Separate** (toolbar or Properties) splits a result back into its parts, each left
+  where it appeared, even after the result was moved or turned.
+- Move and Rotate work on results with the gizmo; Resize handles are not shown for results.
+- Delete removes a result with all its parts; parts can't be deleted on their own.
+- File format version 4 stores results (operation, parts, pivot).
+- Core: `BooleanSpec` on `Body`; the document tracks which result each part belongs to,
+  caches exact shapes, and rebuilds results when a part changes. `CombineCommand`,
+  `SeparateCommand`, `placementFromTransform()`.
+- 96 unit tests (13 new).
+
 ## 0.4.2 — Fix (2026-11-11)
 
 - Round checkbox now unticks when Undo, Redo or a typed radius turns the selected cylinder

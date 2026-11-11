@@ -26,8 +26,10 @@ class PropertiesPanel : public QWidget {
 public:
     explicit PropertiesPanel(QWidget* parent = nullptr);
 
-    // nullptr = nothing selected.
-    void setBody(const Body* body);
+    // nullptr = nothing selected (or several). `context` is a line shown under the
+    // name ("Made from: ...", "Part of ..."). `isPart`: the body is inside a combined
+    // shape, so "Sit on plate" does not apply.
+    void setBody(const Body* body, const QString& context = {}, bool isPart = false);
 
     // "Uniform scale": changing one size scales the others by the same factor.
     void setUniform(bool on);
@@ -43,6 +45,7 @@ signals:
     void sitOnPlateRequested(ObjectId id);
     void uniformChanged(bool on);
     void keepRoundChanged(bool on);
+    void separateRequested();
 
 private:
     QDoubleSpinBox* makeLength(const QString& tip);
@@ -56,6 +59,11 @@ private:
     QLabel* m_emptyHint = nullptr;
     QLineEdit* m_name = nullptr;
     QLabel* m_type = nullptr;
+    QLabel* m_context = nullptr;
+    QLabel* m_selectionHint = nullptr;
+    QWidget* m_sizeGroup = nullptr;
+    QWidget* m_sitButton = nullptr;
+    QWidget* m_separateButton = nullptr;
 
     QStackedWidget* m_sizePages = nullptr;
     QDoubleSpinBox* m_boxWidth = nullptr;

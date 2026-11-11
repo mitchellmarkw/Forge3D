@@ -2,6 +2,7 @@
 #include "forge/core/Commands.h"
 
 #include "forge/core/Document.h"
+#include "forge/core/Transform.h"
 
 #include <stdexcept>
 #include <utility>
@@ -161,6 +162,73 @@ void EditBodyCommand::redo(Document& doc)
 void EditBodyCommand::undo(Document& doc)
 {
     apply(doc, m_before);
+}
+
+// ---- CombineCommand -------------------------------------------------------------
+
+CombineCommand::CombineCommand(Body result) : m_result(std::move(result))
+{
+    if (!m_result.isBoolean())
+        throw std::invalid_argument("CombineCommand needs a combine result");
+}
+
+std::string CombineCommand::label() const
+{
+    return toString(m_result.boolean->op);
+}
+
+void CombineCommand::redo(Document& doc)
+{
+    for (ObjectId part : m_result.boolean->operands) {
+        if (!doc.find(part))
+            throw std::out_of_range("Cannot combine: a shape is missing");
+        if (!doc.isTopLevel(part))
+            throw std::invalid_argument("Cannot combine: '" + doc.find(part)->name +
+                                        "' is already part of another shape");
+    }
+    if (!m_index)  // put the result where its first part was in the list
+        m_index = doc.indexOf(m_result.boolean->operands.front());
+    doc.insertBody(m_result, *m_index);
+}
+
+void CombineCommand::undo(Document& doc)
+{
+    m_result = doc.removeBody(m_result.id);  // frees the parts
+}
+
+// ---- SeparateCommand ------------------------------------------------------------
+
+SeparateCommand::SeparateCommand(ObjectId id) : m_id(id) {}
+
+void SeparateCommand::redo(Document& doc)
+{
+    const Body* result = doc.find(m_id);
+    if (!result || !result->isBoolean())
+        throw std::invalid_argument("Only a combined shape can be separated");
+    if (!doc.isTopLevel(m_id))
+        throw std::invalid_argument("Separate '" + doc.find(doc.parentOf(m_id))->name + "' first");
+
+    // Where each part is on the plate now, as a placement of its own.
+    const Transform resultT = doc.localTransform(m_id);
+    std::vector<std::pair<ObjectId, Placement>> oldPlacements, newPlacements;
+    for (ObjectId part : result->boolean->operands) {
+        const Body* b = doc.find(part);
+        oldPlacements.emplace_back(part, b->placement);
+        newPlacements.emplace_back(part, placementFromTransform(resultT * doc.localTransform(part), pivotOf(*b)));
+    }
+
+    m_index = doc.indexOf(m_id);
+    m_result = doc.removeBody(m_id);
+    for (const auto& [part, placement] : newPlacements)
+        doc.setPlacement(part, placement);
+    m_oldPlacements = std::move(oldPlacements);
+}
+
+void SeparateCommand::undo(Document& doc)
+{
+    for (const auto& [part, placement] : m_oldPlacements)
+        doc.setPlacement(part, placement);
+    doc.insertBody(*m_result, m_index);
 }
 
 // ---- MacroCommand ---------------------------------------------------------------

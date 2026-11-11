@@ -53,16 +53,16 @@ std::optional<PickHit> pick(const Document& doc, const Ray& ray)
     const V3 worldDir{ray.direction[0] / len, ray.direction[1] / len, ray.direction[2] / len};
 
     std::optional<PickHit> best;
-    for (const Body& body : doc.bodies()) {
+    for (const ObjectId id : doc.topLevelIds()) {  // parts inside a result are not on the plate
         // Move the ray into the body's own coordinates instead of moving every vertex.
         // Rigid transforms keep lengths, so t along the local ray = distance in mm.
-        const Transform toLocal = placementTransform(body.placement, body.spec).inverse();
+        const Transform toLocal = doc.worldTransform(id).inverse();
         const Vec3 lo = toLocal.apply(ray.origin);
         const Vec3 ld = toLocal.applyDirection({worldDir.x, worldDir.y, worldDir.z});
         const V3 o{lo[0], lo[1], lo[2]};
         const V3 d{ld[0], ld[1], ld[2]};
 
-        const auto mesh = doc.mesh(body.id);
+        const auto mesh = doc.mesh(id);
         const auto& P = mesh->positions;
         const auto vertex = [&P](std::uint32_t i) {
             return V3{P[3 * i], P[3 * i + 1], P[3 * i + 2]};
@@ -71,7 +71,7 @@ std::optional<PickHit> pick(const Document& doc, const Ray& ray)
             const double hit = intersect(o, d, vertex(mesh->indices[t]), vertex(mesh->indices[t + 1]),
                                          vertex(mesh->indices[t + 2]));
             if (hit > 1e-9 && (!best || hit < best->distance)) {
-                best = PickHit{body.id, hit,
+                best = PickHit{id, hit,
                                {ray.origin[0] + worldDir.x * hit, ray.origin[1] + worldDir.y * hit,
                                 ray.origin[2] + worldDir.z * hit}};
             }

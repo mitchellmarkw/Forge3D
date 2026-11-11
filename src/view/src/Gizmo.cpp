@@ -87,6 +87,8 @@ QVector3D Gizmo::facePosition(const GizmoHandle& handle) const
 std::vector<GizmoHandle> Gizmo::faceHandles() const
 {
     std::vector<GizmoHandle> handles;
+    if (!m_target.resizable)
+        return handles;
     for (int axis = 0; axis < 3; ++axis)
         for (int side : {+1, -1})
             handles.push_back({GizmoHandle::Kind::Face, axis, side});

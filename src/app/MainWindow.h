@@ -11,12 +11,15 @@
 #include <QVector3D>
 
 #include <memory>
+#include <set>
+#include <vector>
 #include <optional>
 
 class QAction;
 class QCloseEvent;
 class QLabel;
-class QListWidget;
+class QTreeWidget;
+class QTreeWidgetItem;
 class QMenu;
 class QActionGroup;
 
@@ -53,24 +56,31 @@ private:
     // Runs a command through the undo stack; shows a message if it fails.
     bool run(std::unique_ptr<Command> command);
 
-    // Selection (not part of the undo history, like in most CAD tools)
+    // Selection (not part of the undo history, like in most CAD tools). Order matters:
+    // for Subtract, the first selected body is the one kept.
     void setSelection(ObjectId id);
-    void onViewportClicked(const QVector3D& origin, const QVector3D& direction);
+    void setSelection(std::vector<ObjectId> ids);
+    void toggleSelection(ObjectId id);
+    ObjectId selectedOne() const;  // the single selected body, or kInvalidId
+    bool isSelected(ObjectId id) const;
+    void onViewportClicked(const QVector3D& origin, const QVector3D& direction, Qt::KeyboardModifiers modifiers);
 
     // Dragging (gizmo handles, or a body across the plate)
     void onLeftPressed(const QVector3D& origin, const QVector3D& direction, const view::GizmoHandle& handle,
-                       const QPointF& pixel);
+                       const QPointF& pixel, Qt::KeyboardModifiers modifiers);
     void onLeftDragged(const QVector3D& origin, const QVector3D& direction, const QPointF& pixel,
                        Qt::KeyboardModifiers modifiers);
     void onLeftReleased(bool wasDrag);
     void cancelDrag();
     void preview(const Body& state);
-    std::optional<view::GizmoTarget> gizmoTargetFor(const Body& body) const;
+    std::optional<view::GizmoTarget> gizmoTargetFor(ObjectId id) const;
     void setGizmoMode(view::GizmoMode mode);
 
     // Editing
     void addBody(const PrimitiveSpec& spec);
     void deleteSelected();
+    void combineSelected(BooleanOp op);
+    void separateSelected();
     void clearPlate();
 
     // Files
@@ -85,12 +95,14 @@ private:
     void scheduleSceneRefresh();
     void refreshScene();
     void refreshObjectList();
+    void addTreeItem(QTreeWidgetItem* parent, ObjectId id);
+    void onTreeSelectionChanged();
     void refreshCommandState();
     void showAbout();
 
     Document m_doc;
     CommandStack m_stack{m_doc};
-    ObjectId m_selected = kInvalidId;
+    std::vector<ObjectId> m_selection;
     QString m_filePath;  // empty = never saved
     bool m_refreshQueued = false;
     bool m_syncingList = false;
@@ -117,7 +129,8 @@ private:
 
     Viewport* m_viewport = nullptr;
     PropertiesPanel* m_properties = nullptr;
-    QListWidget* m_objects = nullptr;
+    QTreeWidget* m_objects = nullptr;
+    std::set<ObjectId> m_expanded;  // results open in the Objects tree
     QLabel* m_modelInfo = nullptr;
     QLabel* m_glInfo = nullptr;
     QMenu* m_viewMenu = nullptr;
@@ -134,6 +147,10 @@ private:
     QAction* m_addBox = nullptr;
     QAction* m_addCylinder = nullptr;
     QAction* m_clear = nullptr;
+    QAction* m_merge = nullptr;
+    QAction* m_subtract = nullptr;
+    QAction* m_intersect = nullptr;
+    QAction* m_separate = nullptr;
     QAction* m_fit = nullptr;
     QAction* m_resetView = nullptr;
     QAction* m_modeMove = nullptr;

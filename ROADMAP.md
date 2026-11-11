@@ -13,9 +13,10 @@ Gate to Phase 2: a new user prints a customised part within 10 minutes.
 | 2 | Document model, command stack, undo/redo, unit tests | Done (0.2.0) |
 | 3a | Selection, Objects and Properties panels, Save / Open (`.f3d`), 3-axis rotation | Done (0.3.1) |
 | 3b | Gizmo: drag to move, rotate and resize; snapping | Done (0.4.0) |
-| 3b+ | Uniform scale; elliptical cylinders | **Delivered for testing** |
-| 3c | Merge / Subtract / Intersect; primitive library replaces the test buttons | Next |
-| 4 | Merge, Intersect, Split by plane | Planned |
+| 3b+ | Uniform scale; elliptical cylinders | Done (0.4.2) |
+| 3c | Multi-select; Merge / Subtract / Intersect as editable results; Separate | **Delivered for testing** |
+| 3d | Primitive library (sphere, cone, torus, tube, wedge) replaces the test buttons | Next |
+| 4 | Split by plane; gizmo on parts inside results; resize handles for results | Planned |
 | 5 | STL / 3MF import with auto-repair; export; "Send to slicer" | Planned |
 | 6 | Feature tree panel with rollback bar | Planned |
 | 7 | 2D sketcher with constraints | Planned |
