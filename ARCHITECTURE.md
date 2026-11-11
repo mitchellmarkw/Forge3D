@@ -127,6 +127,28 @@ Viewport (mouse)  --leftPressed(ray, handle)-->  MainWindow drag controller
 - **"Round" is UI state**, not stored: when a cylinder is selected it starts ticked if the
   radii are equal. "Uniform" is a window-wide setting shared by the toolbar and Properties.
 
+## Combined shapes (slice 3c)
+
+- A **result** is a `Body` with `boolean` set (`BooleanSpec`: op, operand ids, pivot).
+  Its parts stay in `Document::bodies()`; **which body is inside which is derived** from
+  the results' operand lists (`parentOf()`), so it can never disagree with them. A part
+  belongs to at most one result; results can be parts of other results.
+- **Coordinates:** a part's placement is relative to its result. `localTransform(id)` maps
+  a body into its parent; `worldTransform(id)` chains up to the plate. Drawing, picking and
+  bounds use `worldTransform`. Only top-level bodies are drawn and picked; a selected part
+  is drawn as a see-through "ghost" on top.
+- **Geometry:** `Document::shape(id)` is the exact `TopoDS_Shape` in body coordinates,
+  cached. A result's shape = its parts' shapes, each moved by its `localTransform`, then
+  Fuse / Cut / Common (BRepAlgoAPI), then `ShapeUpgrade_UnifySameDomain`. Changing a part's
+  spec or placement clears the caches of every result above it (`invalidate()`).
+- **Pivot:** a result turns around the pivot stored when it was made (the centre of its
+  parts then), so editing a part never makes a tilted result jump.
+- **Commands:** `CombineCommand` inserts the result (its parts leave the plate);
+  undo removes it (they come back). `SeparateCommand` removes a top-level result and gives
+  each part the placement that keeps it where it was (`placementFromTransform()`).
+  Delete removes a result first, then its parts (`withDescendants()`), in one macro.
+- **Selection** is an ordered list in `MainWindow` (the first picked is what Subtract keeps).
+
 ## Rendering
 
 `Document::mesh()` → `forge::Mesh` (positions, normals, indices) → `DisplayItem`

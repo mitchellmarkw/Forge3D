@@ -32,6 +32,7 @@ struct GizmoTarget {
     std::array<QVector3D, 3> bodyAxes{QVector3D(1, 0, 0), QVector3D(0, 1, 0), QVector3D(0, 0, 1)};
     QVector3D halfExtents{10, 10, 10};       // centre to each face, along bodyAxes
     bool round = false;                      // cylinder: X and Y face handles both set the radius
+    bool resizable = true;                   // false: Resize mode shows no handles (combine results)
 };
 
 // The gizmo for one frame: its size on screen stays constant however far the

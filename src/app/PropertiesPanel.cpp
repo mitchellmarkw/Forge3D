@@ -58,7 +58,16 @@ PropertiesPanel::PropertiesPanel(QWidget* parent) : QWidget(parent)
     m_emptyHint->setWordWrap(true);
     m_emptyHint->setAlignment(Qt::AlignTop | Qt::AlignLeft);
     m_emptyHint->setStyleSheet(QStringLiteral("color: palette(mid);"));
-    m_pages->addWidget(m_emptyHint);
+    // Page 0 holds the hint, plus a note when several shapes are selected.
+    auto* emptyPage = new QWidget;
+    auto* emptyLayout = new QVBoxLayout(emptyPage);
+    emptyLayout->setContentsMargins(0, 0, 0, 0);
+    emptyLayout->addWidget(m_emptyHint);
+    m_selectionHint = new QLabel;
+    m_selectionHint->setWordWrap(true);
+    emptyLayout->addWidget(m_selectionHint);
+    emptyLayout->addStretch(1);
+    m_pages->addWidget(emptyPage);
 
     // Page 1: a body
     auto* page = new QWidget;
@@ -72,10 +81,20 @@ PropertiesPanel::PropertiesPanel(QWidget* parent) : QWidget(parent)
     m_type = new QLabel;
     general->addRow(tr("Name:"), m_name);
     general->addRow(tr("Shape:"), m_type);
+    m_context = new QLabel;
+    m_context->setWordWrap(true);
+    m_context->setStyleSheet(QStringLiteral("color: palette(mid);"));
+    general->addRow(m_context);
+    auto* separate = new QPushButton(tr("Separate into parts"));
+    separate->setToolTip(tr("Break this combined shape back into its parts, each left where it is"));
+    connect(separate, &QPushButton::clicked, this, &PropertiesPanel::separateRequested);
+    general->addRow(separate);
+    m_separateButton = separate;
     layout->addLayout(general);
 
     // Size: one sub-page per primitive type
     auto* sizeGroup = new QGroupBox(tr("Size"));
+    m_sizeGroup = sizeGroup;
     auto* sizeLayout = new QVBoxLayout(sizeGroup);
     m_sizePages = new QStackedWidget;
     sizeLayout->addWidget(m_sizePages);
@@ -124,6 +143,7 @@ PropertiesPanel::PropertiesPanel(QWidget* parent) : QWidget(parent)
     posForm->addRow(tr("Y:"), m_y);
     posForm->addRow(tr("Z (up):"), m_z);
     auto* sit = new QPushButton(tr("Sit on plate"));
+    m_sitButton = sit;
     sit->setToolTip(tr("Move the body up or down so its lowest point touches the plate"));
     posForm->addRow(QString(), sit);
     layout->addWidget(posGroup);
@@ -172,10 +192,13 @@ QDoubleSpinBox* PropertiesPanel::makeLength(const QString& tip)
     return makeSpin(kMinLength, kMaxLength, tr(" mm"), 2, tip);
 }
 
-void PropertiesPanel::setBody(const Body* body)
+void PropertiesPanel::setBody(const Body* body, const QString& context, bool isPart)
 {
     if (!body) {
         m_body.reset();
+        m_emptyHint->setVisible(context.isEmpty());
+        m_selectionHint->setText(context);
+        m_selectionHint->setVisible(!context.isEmpty());
         m_pages->setCurrentIndex(0);
         return;
     }
@@ -188,7 +211,12 @@ void PropertiesPanel::setBody(const Body* body)
 
     if (!m_name->hasFocus() || m_name->text() != QString::fromStdString(body->name))
         m_name->setText(QString::fromStdString(body->name));
-    m_type->setText(QString::fromStdString(typeName(body->spec)));
+    m_type->setText(QString::fromStdString(typeName(*body)));
+    m_context->setText(context);
+    m_context->setVisible(!context.isEmpty());
+    m_separateButton->setVisible(body->isBoolean() && !isPart);
+    m_sizeGroup->setVisible(!body->isBoolean());  // a combined shape is sized through its parts
+    m_sitButton->setVisible(!isPart);
 
     // Size the stack to the page being shown; a stacked widget otherwise reserves
     // room for its tallest page (the cylinder's), leaving a gap under a box's fields.

@@ -129,6 +129,37 @@ private:
     std::string m_label;
 };
 
+// Makes a combine result from top-level bodies (Merge / Subtract / Intersect).
+// `result` must have boolean set; its parts disappear from the plate into it.
+class CombineCommand final : public Command {
+public:
+    explicit CombineCommand(Body result);
+    std::string label() const override;
+    void redo(Document& doc) override;
+    void undo(Document& doc) override;
+    ObjectId id() const { return m_result.id; }
+
+private:
+    Body m_result;
+    std::optional<std::size_t> m_index;
+};
+
+// Breaks a top-level combine result back into its parts, each left exactly
+// where it appeared on the plate.
+class SeparateCommand final : public Command {
+public:
+    explicit SeparateCommand(ObjectId id);
+    std::string label() const override { return "Separate"; }
+    void redo(Document& doc) override;
+    void undo(Document& doc) override;
+
+private:
+    ObjectId m_id;
+    std::optional<Body> m_result;
+    std::size_t m_index = 0;
+    std::vector<std::pair<ObjectId, Placement>> m_oldPlacements;
+};
+
 // Several commands that undo and redo as one step ("Clear Plate").
 class MacroCommand final : public Command {
 public:

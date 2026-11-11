@@ -80,12 +80,36 @@ Vec3 pivotOf(const PrimitiveSpec& spec)
     return std::visit([](const auto& p) { return Vec3{0.0, 0.0, p.height / 2.0}; }, spec);
 }
 
-Transform placementTransform(const Placement& p, const PrimitiveSpec& spec)
+Vec3 pivotOf(const Body& body)
 {
-    const Vec3 c = pivotOf(spec);
+    return body.isBoolean() ? body.boolean->pivot : pivotOf(body.spec);
+}
+
+Transform placementTransform(const Placement& p, const Vec3& c)
+{
     return Transform::translation({p.x, p.y, p.z}) * Transform::translation(c) *
            Transform::rotationXYZ(p.rotationX, p.rotationY, p.rotationZ) *
            Transform::translation({-c[0], -c[1], -c[2]});
+}
+
+Transform placementTransform(const Placement& p, const PrimitiveSpec& spec)
+{
+    return placementTransform(p, pivotOf(spec));
+}
+
+Placement placementFromTransform(const Transform& t, const Vec3& c)
+{
+    // t = T(p) T(c) R T(-c)  =>  translation part = p + c - R c
+    const Vec3 angles = eulerXYZ(t);
+    const Vec3 rc = t.applyDirection(c);
+    Placement p;
+    p.x = t.m[0][3] - c[0] + rc[0];
+    p.y = t.m[1][3] - c[1] + rc[1];
+    p.z = t.m[2][3] - c[2] + rc[2];
+    p.rotationX = angles[0];
+    p.rotationY = angles[1];
+    p.rotationZ = angles[2];
+    return p;
 }
 
 Vec3 eulerXYZ(const Transform& t)

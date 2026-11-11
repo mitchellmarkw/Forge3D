@@ -34,9 +34,26 @@ json placementToJson(const Placement& p)
                 {"rotationZ", p.rotationZ}};
 }
 
+const char* opName(BooleanOp op)
+{
+    switch (op) {
+    case BooleanOp::Merge: return "merge";
+    case BooleanOp::Subtract: return "subtract";
+    case BooleanOp::Intersect: return "intersect";
+    }
+    return "merge";
+}
+
 json bodyToJson(const Body& b)
 {
     json j{{"id", b.id}, {"name", b.name}, {"placement", placementToJson(b.placement)}};
+    if (b.isBoolean()) {
+        j["type"] = "combine";
+        j["operation"] = opName(b.boolean->op);
+        j["operands"] = b.boolean->operands;
+        j["pivot"] = b.boolean->pivot;
+        return j;
+    }
     std::visit(
         [&j](const auto& spec) {
             using T = std::decay_t<decltype(spec)>;
@@ -88,11 +105,46 @@ Body bodyFromJson(const json& j, std::size_t index, int version)
     }  // version 1 files only turned about Z; X and Y stay 0
 
     const auto type = j.find("type");
-    const auto params = j.find("parameters");
-    if (type == j.end() || !type->is_string() || params == j.end() || !params->is_object())
-        damaged(where + ": missing type or parameters");
-
+    if (type == j.end() || !type->is_string())
+        damaged(where + ": missing type");
     const std::string t = type->get<std::string>();
+
+    if (t == "combine" && version >= 4) {
+        BooleanSpec spec;
+        const std::string op = j.value("operation", std::string());
+        if (op == "merge")
+            spec.op = BooleanOp::Merge;
+        else if (op == "subtract")
+            spec.op = BooleanOp::Subtract;
+        else if (op == "intersect")
+            spec.op = BooleanOp::Intersect;
+        else
+            damaged(where + ": unknown combine operation '" + op + "'");
+        const auto operands = j.find("operands");
+        if (operands == j.end() || !operands->is_array())
+            damaged(where + ": missing operands");
+        for (const auto& id : *operands) {
+            if (!id.is_number_unsigned())
+                damaged(where + ": bad operand id");
+            spec.operands.push_back(id.get<ObjectId>());
+        }
+        const auto pivot = j.find("pivot");
+        if (pivot == j.end() || !pivot->is_array() || pivot->size() != 3)
+            damaged(where + ": missing pivot");
+        for (std::size_t i = 0; i < 3; ++i) {
+            if (!(*pivot)[i].is_number())
+                damaged(where + ": bad pivot");
+            spec.pivot[i] = (*pivot)[i].get<double>();
+        }
+        b.boolean = std::move(spec);
+        if (b.name.empty())
+            b.name = typeName(b) + " " + std::to_string(b.id);
+        return b;
+    }
+
+    const auto params = j.find("parameters");
+    if (params == j.end() || !params->is_object())
+        damaged(where + ": missing parameters");
     if (t == "box")
         b.spec = BoxSpec{number(*params, "width", where), number(*params, "depth", where),
                          number(*params, "height", where)};

@@ -29,6 +29,7 @@ struct DisplayItem {
     QMatrix4x4 model;                          // placement on the plate
     QVector3D color{0.28f, 0.55f, 0.85f};
     bool selected = false;
+    bool ghost = false;  // drawn see-through on top (a part inside a combined shape)
 };
 
 // The 3D view: draws the build plate and the scene, and handles navigation.
@@ -66,10 +67,10 @@ public:
 
 signals:
     // A left click (not a drag). origin/direction: the ray under the cursor, in plate mm.
-    void clicked(const QVector3D& origin, const QVector3D& direction);
+    void clicked(const QVector3D& origin, const QVector3D& direction, Qt::KeyboardModifiers modifiers);
     // Left button pressed. `handle` is the gizmo part under the cursor, if any.
     void leftPressed(const QVector3D& origin, const QVector3D& direction, const view::GizmoHandle& handle,
-                     const QPointF& pixel);
+                     const QPointF& pixel, Qt::KeyboardModifiers modifiers);
     // The mouse moved with the left button held, past a small dead zone.
     void leftDragged(const QVector3D& origin, const QVector3D& direction, const QPointF& pixel,
                      Qt::KeyboardModifiers modifiers);

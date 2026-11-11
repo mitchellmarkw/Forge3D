@@ -29,12 +29,19 @@ struct Transform {
 // The point a body turns around, in its own coordinates: the centre of its
 // bounding box (every primitive is centred on X/Y with its base at Z = 0).
 Vec3 pivotOf(const PrimitiveSpec& spec);
+// The same for any body: a primitive's centre, or a combine result's stored pivot.
+Vec3 pivotOf(const Body& body);
 
 // Body coordinates -> plate coordinates:
 //   move to (x, y, z), then rotate about the pivot.
 // With all angles zero this is a plain move, so (x, y, z) is where the centre
 // of the body's base sits.
 Transform placementTransform(const Placement& placement, const PrimitiveSpec& spec);
+Transform placementTransform(const Placement& placement, const Vec3& pivot);
+
+// The placement that reproduces transform t for a body turning about `pivot`
+// (the inverse of placementTransform).
+Placement placementFromTransform(const Transform& t, const Vec3& pivot);
 
 // The X, Y and Z angles (degrees) that rebuild the rotation part of t with
 // rotationXYZ(). When Y is exactly +/-90 degrees the split between X and Z is

@@ -39,6 +39,7 @@ in vec3 vNormal;
 in vec3 vViewPos;
 uniform vec3 uColor;
 uniform float uSelected;  // 0 or 1
+uniform float uAlpha;     // 1 = solid, less = see-through (ghost)
 out vec4 fragColor;
 void main() {
     vec3 n = normalize(vNormal);
@@ -55,7 +56,7 @@ void main() {
     vec3 glow = vec3(0.25, 0.85, 1.0);
     vec3 selectedColor = mix(mix(color, vec3(1.0), 0.30), glow, clamp(0.25 + 0.9 * rim, 0.0, 1.0));
     color = mix(color, selectedColor, uSelected);
-    fragColor = vec4(color, 1.0);
+    fragColor = vec4(color, uAlpha);
 }
 )";
 
@@ -147,7 +148,7 @@ void Viewport::fitView()
 {
     Bounds all;
     for (const DisplayItem& item : m_items) {
-        if (!item.mesh)
+        if (!item.mesh || item.ghost)
             continue;
         const Bounds local = item.mesh->bounds();
         if (!local.valid)
@@ -422,21 +423,34 @@ void Viewport::paintGL()
     }
     m_lineShader->release();
 
-    // Bodies
+    // Bodies: solid ones first, then see-through parts on top of them.
     m_meshShader->bind();
-    for (const DisplayItem& item : m_items) {
-        const auto found = m_gpu.find(item.id);
-        if (found == m_gpu.end() || found->second->indexCount == 0)
-            continue;
-        const QMatrix4x4 modelView = view * item.model;
-        m_meshShader->setUniformValue("uMvp", viewProj * item.model);
-        m_meshShader->setUniformValue("uModelView", modelView);
-        m_meshShader->setUniformValue("uNormalMatrix", modelView.normalMatrix());
-        m_meshShader->setUniformValue("uColor", item.color);
-        m_meshShader->setUniformValue("uSelected", item.selected ? 1.0f : 0.0f);
-        QOpenGLVertexArrayObject::Binder bind(found->second->vao.get());
-        glDrawElements(GL_TRIANGLES, found->second->indexCount, GL_UNSIGNED_INT, nullptr);
-    }
+    const auto drawItems = [&](bool ghosts) {
+        for (const DisplayItem& item : m_items) {
+            if (item.ghost != ghosts)
+                continue;
+            const auto found = m_gpu.find(item.id);
+            if (found == m_gpu.end() || found->second->indexCount == 0)
+                continue;
+            const QMatrix4x4 modelView = view * item.model;
+            m_meshShader->setUniformValue("uMvp", viewProj * item.model);
+            m_meshShader->setUniformValue("uModelView", modelView);
+            m_meshShader->setUniformValue("uNormalMatrix", modelView.normalMatrix());
+            m_meshShader->setUniformValue("uColor", item.color);
+            m_meshShader->setUniformValue("uSelected", item.selected ? 1.0f : 0.0f);
+            m_meshShader->setUniformValue("uAlpha", ghosts ? 0.45f : 1.0f);
+            QOpenGLVertexArrayObject::Binder bind(found->second->vao.get());
+            glDrawElements(GL_TRIANGLES, found->second->indexCount, GL_UNSIGNED_INT, nullptr);
+        }
+    };
+    drawItems(false);
+    // Ghosts are drawn over everything so a part hidden inside a result can be seen.
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glDisable(GL_DEPTH_TEST);
+    drawItems(true);
+    glEnable(GL_DEPTH_TEST);
+    glDisable(GL_BLEND);
     m_meshShader->release();
 
     drawGizmo(viewProj);
@@ -463,7 +477,7 @@ void Viewport::mousePressEvent(QMouseEvent* event)
         view::GizmoHandle handle;
         if (const auto gizmo = makeGizmo())
             handle = gizmo->hitTest(event->position());
-        emit leftPressed(origin, direction, handle, event->position());
+        emit leftPressed(origin, direction, handle, event->position(), event->modifiers());
         return;
     }
     if (event->button() == Qt::MiddleButton || (event->button() == Qt::RightButton && shift))
@@ -520,7 +534,7 @@ void Viewport::mouseReleaseEvent(QMouseEvent* event)
             m_camera.rayThroughPixel(static_cast<float>(event->position().x()),
                                      static_cast<float>(event->position().y()), static_cast<float>(width()),
                                      static_cast<float>(height()), origin, direction);
-            emit clicked(origin, direction);
+            emit clicked(origin, direction, event->modifiers());
         }
         updateHover(event->position());
         return;

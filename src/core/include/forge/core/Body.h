@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <array>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <variant>
+#include <vector>
 
 namespace forge {
 
@@ -61,14 +64,43 @@ using PrimitiveSpec = std::variant<BoxSpec, CylinderSpec>;
 // "Box", "Cylinder": used for default names and command labels.
 std::string typeName(const PrimitiveSpec& spec);
 
-// A solid object in the document.
+// ---- Combine results ------------------------------------------------------------
+
+enum class BooleanOp { Merge, Subtract, Intersect };
+
+// "Merge", "Subtract", "Intersect"
+std::string toString(BooleanOp op);
+
+// A body made by combining other bodies (its parts, or "operands").
+//   Merge:     everything in any part.
+//   Subtract:  the first part, minus all the others.
+//   Intersect: only what every part shares.
+// The parts stay in the document, hidden inside the result and still editable;
+// their placements are relative to the result. A part belongs to at most one result.
+struct BooleanSpec {
+    BooleanOp op = BooleanOp::Merge;
+    std::vector<ObjectId> operands;
+    // The point the result turns around, in its own coordinates. Fixed when the
+    // result is made, so editing a part never makes the result jump.
+    std::array<double, 3> pivot{0.0, 0.0, 0.0};
+
+    bool operator==(const BooleanSpec&) const = default;
+};
+
+// A solid object in the document: either a primitive (spec) or a combine result
+// (boolean). For a result, spec is unused.
 struct Body {
     ObjectId id = kInvalidId;
     std::string name;
     PrimitiveSpec spec;
     Placement placement;
+    std::optional<BooleanSpec> boolean;
 
+    bool isBoolean() const { return boolean.has_value(); }
     bool operator==(const Body&) const = default;
 };
+
+// "Box", "Cylinder", "Merge", "Subtract", "Intersect"
+std::string typeName(const Body& body);
 
 }  // namespace forge
