@@ -7,6 +7,7 @@
 #include <QApplication>
 #include <QCommandLineOption>
 #include <QCommandLineParser>
+#include <QElapsedTimer>
 #include <QStandardPaths>
 #include <QTimer>
 #include <QSurfaceFormat>
@@ -16,6 +17,9 @@
 
 int main(int argc, char* argv[])
 {
+    QElapsedTimer startup;
+    startup.start();
+
     // Ask for an OpenGL 3.3 core context with 4x anti-aliasing. This must be set
     // before the QApplication exists so every OpenGL widget gets the same format.
     QSurfaceFormat format;
@@ -38,6 +42,7 @@ int main(int argc, char* argv[])
     qInfo().noquote() << "Forge3D" << forge::build::kVersion << "starting; Qt" << qVersion()
                       << "| OpenCASCADE" << OCC_VERSION_COMPLETE;
     qInfo().noquote() << "Log file:" << forge::app::logFilePath();
+    qInfo() << "Startup: Qt ready after" << startup.elapsed() << "ms";
 
     // --screenshot <file.png>: render one frame, save the window, exit. Used for automated checks.
     QCommandLineParser parser;
@@ -47,9 +52,18 @@ int main(int argc, char* argv[])
                                   QStringLiteral("Save a picture of the window to <file> and exit."),
                                   QStringLiteral("file"));
     parser.addOption(screenshot);
+    QCommandLineOption demo(QStringLiteral("demo-scene"),
+                            QStringLiteral("Start with a few sample bodies on the plate."));
+    parser.addOption(demo);
     parser.process(app);
 
     forge::app::MainWindow window;
+    qInfo() << "Startup: main window built after" << startup.elapsed() << "ms";
+    QObject::connect(&window, &forge::app::MainWindow::firstFrameRendered, [&startup] {
+        qInfo() << "Startup: first frame drawn after" << startup.elapsed() << "ms";
+    });
+    if (parser.isSet(demo))
+        window.loadDemoScene();
     window.show();
 
     if (parser.isSet(screenshot)) {

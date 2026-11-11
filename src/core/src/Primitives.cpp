@@ -9,6 +9,8 @@
 
 #include <stdexcept>
 #include <string>
+#include <type_traits>
+#include <variant>
 
 namespace forge::primitives {
 
@@ -39,6 +41,19 @@ TopoDS_Shape makeCylinder(double radius, double height)
     const gp_Ax2 axis(gp_Pnt(0.0, 0.0, 0.0), gp_Dir(0.0, 0.0, 1.0));
     BRepPrimAPI_MakeCylinder maker(axis, radius, height);
     return maker.Shape();
+}
+
+TopoDS_Shape buildShape(const PrimitiveSpec& spec)
+{
+    return std::visit(
+        [](const auto& p) -> TopoDS_Shape {
+            using T = std::decay_t<decltype(p)>;
+            if constexpr (std::is_same_v<T, BoxSpec>)
+                return makeBox(p.width, p.depth, p.height);
+            else
+                return makeCylinder(p.radius, p.height);
+        },
+        spec);
 }
 
 }  // namespace forge::primitives

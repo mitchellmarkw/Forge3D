@@ -35,10 +35,41 @@ Rules:
 | Units | Millimetres, Z up, build plate at Z = 0 | Matches 3D printing |
 | License | GPL-3.0-or-later | Allows reuse of GPL code (SolveSpace, Blender) |
 
-## Data flow today (slice 1)
+## Document and undo (slice 2)
 
-`primitives::makeBox()` → exact `TopoDS_Shape` → `tessellate()` → `forge::Mesh`
-(positions, normals, indices) → `Viewport::setMesh()` → GPU buffers → drawn each frame.
+```
+UI action ──> Command ──> CommandStack::execute() ──> Command::redo(Document)
+                                │                            │
+                       undo / redo history          Document notifies listeners
+                                                             │
+                            MainWindow::refreshScene() <─────┘ (queued, once per burst)
+                                     │
+             Document::mesh(id) (cached) + placement ──> Viewport::setItems()
+```
+
+- **`Document`** (`core/Document.h`) owns the bodies. Each `Body` holds an id, a name,
+  a `PrimitiveSpec` (box or cylinder parameters) and a `Placement`. Geometry is never
+  stored as the source of truth: it is rebuilt from the parameters.
+- **Mutators validate first, then change.** A call that throws leaves the document as
+  it was. Commands rely on this.
+- **Geometry cache:** `Document::mesh(id)` tessellates on first use and caches the result
+  until that body's spec changes. Moving a body does not re-tessellate; the viewer applies
+  the placement as a model matrix. A new `shared_ptr` means new geometry, which is how the
+  viewport knows to re-upload.
+- **Commands** (`core/Commands.h`) capture their "before" state on the first `redo()`.
+  `SetPlacementCommand` merges with the next move of the same body, so a whole drag is
+  one undo step. `MacroCommand` groups steps (e.g. Clear Plate).
+- **`CommandStack`** is the only undo history, shared by all modes. It tracks the saved
+  ("clean") index for the `*` in the title, and refuses to merge into the saved step so
+  that state stays reachable.
+- **The UI never calls Document mutators directly** (File → New is the one exception,
+  because it also clears the history).
+
+## Rendering
+
+`Document::mesh()` → `forge::Mesh` (positions, normals, indices) → `DisplayItem`
+(mesh + model matrix + colour) → `Viewport::setItems()` → one GPU buffer set per body →
+drawn each frame.
 
 Tessellation gives each B-rep face its own vertices, so normals are smooth within a face
 and sharp across edges.

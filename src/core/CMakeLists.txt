@@ -3,9 +3,16 @@
 # so it can be unit-tested anywhere and reused by command-line tools later.
 
 add_library(forge_core STATIC
+    include/forge/core/Body.h
+    include/forge/core/CommandStack.h
+    include/forge/core/Commands.h
+    include/forge/core/Document.h
     include/forge/core/Mesh.h
     include/forge/core/Primitives.h
     include/forge/core/Tessellator.h
+    src/CommandStack.cpp
+    src/Commands.cpp
+    src/Document.cpp
     src/Mesh.cpp
     src/Primitives.cpp
     src/Tessellator.cpp

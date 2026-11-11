@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "forge/core/Body.h"
+
 #include <TopoDS_Shape.hxx>
 
 namespace forge::primitives {
@@ -11,5 +13,8 @@ namespace forge::primitives {
 
 TopoDS_Shape makeBox(double width, double depth, double height);
 TopoDS_Shape makeCylinder(double radius, double height);
+
+// Builds whichever primitive the spec describes.
+TopoDS_Shape buildShape(const PrimitiveSpec& spec);
 
 }  // namespace forge::primitives

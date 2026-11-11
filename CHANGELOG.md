@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.2.0 — Slice 2 (2026-11-10)
+
+- `Document`: an ordered list of bodies (box or cylinder parameters, placement, name),
+  with change notifications, unique naming, input validation, and a geometry cache that
+  re-tessellates only when a body's parameters change.
+- Commands: Add, Delete, Move, Resize, Rename, and Macro (several changes as one step).
+- `CommandStack`: one undo history for everything, with merging of repeated moves
+  (for drags), macros, a 200-step limit, and saved-state tracking.
+- Viewport draws any number of bodies, each in its own colour, and re-uploads only
+  meshes that changed.
+- Edit menu and toolbar: Undo / Redo with labels ("Undo Add Box"), Ctrl+Z, Ctrl+Y and
+  Ctrl+Shift+Z. `*` in the title for unsaved changes; File → New and closing ask first.
+- Temporary test tools: Add Box, Add Cylinder, Make Last Taller, Delete Last, Clear Plate.
+- Startup timing (`Startup:` lines) and one `Command:` line per edit in the log.
+- `--demo-scene` start-up option for screenshots.
+- 34 unit tests (21 new for the document and undo stack).
+
 ## 0.1.0 — Slice 1 (2026-11-10)
 
 - CMake + vcpkg project with presets for Windows (Debug, Release) and Linux (dev checks).
