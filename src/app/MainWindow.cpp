@@ -843,6 +843,15 @@ void MainWindow::refreshScene()
     }
     m_viewport->setItems(std::move(items));
     const Body* selected = m_doc.find(m_selected);
+    // "Round" can't be ticked for an oval cylinder. Undo, redo or a typed radius can turn
+    // the selected cylinder oval without a new selection, so check on every refresh.
+    // (A round cylinder keeps the user's choice: they may untick Round before dragging.)
+    if (selected) {
+        if (const auto* cyl = std::get_if<CylinderSpec>(&selected->spec); cyl && !cyl->isRound() && m_keepRound) {
+            m_keepRound = false;
+            m_properties->setKeepRound(false);
+        }
+    }
     m_viewport->setGizmo(selected ? gizmoTargetFor(*selected) : std::nullopt, m_gizmoMode);
     m_properties->setBody(selected);
     refreshObjectList();
