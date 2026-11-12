@@ -154,6 +154,7 @@ void EditBodyCommand::apply(Document& doc, const Body& state)
     try {
         if (state.boolean)
             doc.setBoolean(state.id, *state.boolean);
+        doc.setStepState(state.id, state.suppressed, state.rolledBack);
         doc.setPlacement(state.id, state.placement);
     } catch (...) {
         doc.setSpec(state.id, oldSpec);  // leave the document as it was
@@ -331,6 +332,51 @@ void MacroCommand::undo(Document& doc)
 {
     for (auto it = m_children.rbegin(); it != m_children.rend(); ++it)
         (*it)->undo(doc);
+}
+
+}  // namespace forge
+
+namespace forge {
+
+// ---- InsertStepCommand / RemoveStepCommand --------------------------------------------
+
+InsertStepCommand::InsertStepCommand(Body step, ObjectId above) : m_step(std::move(step)), m_above(above) {}
+
+std::string InsertStepCommand::label() const
+{
+    return typeName(m_step);
+}
+
+void InsertStepCommand::redo(Document& doc)
+{
+    doc.insertStep(m_step, m_above);
+}
+
+void InsertStepCommand::undo(Document& doc)
+{
+    doc.removeStep(m_step.id);
+}
+
+RemoveStepCommand::RemoveStepCommand(ObjectId step) : m_id(step) {}
+
+void RemoveStepCommand::redo(Document& doc)
+{
+    m_above = doc.parentOf(m_id);
+    const Body* step = doc.find(m_id);
+    if (!step)
+        throw std::out_of_range("No step with id " + std::to_string(m_id));
+    m_tools.clear();
+    for (std::size_t i = 1; step->isBoolean() && i < step->boolean->operands.size(); ++i)
+        m_tools.push_back(*doc.find(step->boolean->operands[i]));
+    m_step = doc.removeStep(m_id);
+}
+
+void RemoveStepCommand::undo(Document& doc)
+{
+    // The tools are on the plate again; put them back as they were, then the step.
+    for (const Body& tool : m_tools)
+        doc.setPlacement(tool.id, tool.placement);
+    doc.insertStep(m_step, m_above);
 }
 
 }  // namespace forge

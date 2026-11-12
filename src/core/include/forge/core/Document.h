@@ -90,6 +90,24 @@ public:
     // (its pivot, and a Split's plane). Throws if the operation or parts differ.
     void setBoolean(ObjectId id, const BooleanSpec& spec);
     void rename(ObjectId id, const std::string& name);
+    // Switches a combine step off or on (see Body::suppressed / rolledBack).
+    void setStepState(ObjectId id, bool suppressed, bool rolledBack);
+    // Puts a new step between `above` and its first part: `step` takes that part as its
+    // first part (any others must be on the plate), and `above` takes `step` instead.
+    void insertStep(Body step, ObjectId above);
+    // Takes a step out from inside a result: its first part goes back in its place, any
+    // other parts go back on the plate. Returns the step, for undo.
+    Body removeStep(ObjectId step);
+    // What a step is built from right now: its own recipe, or (switched off) a
+    // pass-through of its parts.
+    BooleanSpec effectiveSpec(const Body& body) const;
+    // A recipe that just passes its parts through: the first one (one-part steps,
+    // Subtract), or all side by side (Merge, Intersect, Group).
+    static BooleanSpec passThrough(const BooleanSpec& spec);
+    // Why a step can't be built right now (an earlier change left it nothing to work
+    // on), or nothing if it's fine. A step like that is left out: the object carries
+    // on as if it were switched off.
+    std::optional<std::string> problemWith(ObjectId id) const;
 
     // ---- Geometry ----
     // The exact solid in the body's own coordinates (placement not applied).
@@ -170,6 +188,7 @@ private:
     mutable std::map<ObjectId, TopoDS_Shape> m_shapeCache;
     mutable std::map<ObjectId, std::shared_ptr<const Mesh>> m_meshCache;
     mutable std::map<ObjectId, MeshSolid> m_solidCache;
+    mutable std::map<ObjectId, std::string> m_problems;  // steps that couldn't be built, and why
     // The last mesh-engine preview, so making that result straight after doesn't
     // work it out a second time. Kept only while its parts are unchanged.
     struct LastPreview {

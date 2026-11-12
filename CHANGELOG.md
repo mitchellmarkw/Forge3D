@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.15.0 — Slice 6: History (2026-11-12)
+
+- **The Objects panel shows how each object was made.** Open an object to see its
+  steps, oldest first (Box 1 → Rounded 1 → Subtract 1), each with a short description
+  ("4 edges rounded R2", "minus Cylinder 1"). Shapes a step used as tools are listed
+  under it.
+- **Double-click a step to change it**: a shape's size (in Properties), the edges of a
+  rounding, the words of an emboss, a split's cut.
+- **Right-click a step** to switch it off or on, change a Merge / Subtract / Intersect
+  into another, roll back to it, or delete it (tools go back on the plate).
+- **Rollback bar**: drag it up the history to see the object as it was at an earlier
+  step. Edges and Emboss added while rolled back go in at the bar. Drag the bar to the
+  bottom (or right-click → Roll forward) to bring every step back. Merge, Split,
+  Mirror and Group wait until the object is rolled forward.
+- A step that can't be done any more (e.g. a rounding whose edges an earlier chamfer
+  changed) is marked ⚠ with the reason and left out, instead of the object vanishing.
+- File format version 12. Older files still open.
+- 158 unit tests (4 new).
+
 ## 0.14.1 — Fillets on outside edges (coves) (2026-11-12)
 
 - **Fillet now works on outside edges too:** it cuts a curved hollow (a cove), as if a

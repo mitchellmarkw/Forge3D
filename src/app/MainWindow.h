@@ -169,7 +169,20 @@ private:
     void scheduleSceneRefresh();
     void refreshScene();
     void refreshObjectList();
-    void addTreeItem(QTreeWidgetItem* parent, ObjectId id);
+    // Objects tree: each object, opened, lists its steps oldest first (tools under the
+    // step that used them) with the rollback bar after the last step shown.
+    void addObjectRow(QTreeWidgetItem* parent, ObjectId id);
+    void addStepRows(QTreeWidgetItem* objectRow, ObjectId top);
+    void showTreeMenu(const QPoint& pos);
+    void editStep(ObjectId id);
+    void rollTo(ObjectId top, std::size_t shown);
+    void setStepOff(ObjectId id, bool off);
+    bool eventFilter(QObject* watched, QEvent* event) override;
+    // Where a tool's preview is drawn: a new step on the plate is in plate coordinates;
+    // a new step inside a history is in its holder's; an edited step in its own.
+    QMatrix4x4 previewFrame(ObjectId target, bool editing) const;
+    // True if any selected object is rolled back (combining it is blocked).
+    bool rolledBackSelected() const;
     void onTreeSelectionChanged();
     void refreshCommandState();
     void showAbout();
@@ -215,7 +228,9 @@ private:
     Viewport* m_viewport = nullptr;
     PropertiesPanel* m_properties = nullptr;
     QTreeWidget* m_objects = nullptr;
-    std::set<ObjectId> m_expanded;  // results open in the Objects tree
+    std::set<std::pair<int, ObjectId>> m_expanded;  // tree rows left open: (row kind, id)
+    ObjectId m_barDrag = kInvalidId;                // the object whose rollback bar is being dragged
+    std::size_t m_barDragShown = 0;
     QLabel* m_modelInfo = nullptr;
     QLabel* m_glInfo = nullptr;
     QMenu* m_viewMenu = nullptr;

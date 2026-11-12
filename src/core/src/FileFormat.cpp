@@ -63,6 +63,10 @@ json bodyToJson(const Body& b)
             j["planePoint"] = b.boolean->planePoint;
             j["planeNormal"] = b.boolean->planeNormal;
         }
+        if (b.suppressed)
+            j["suppressed"] = true;
+        if (b.rolledBack)
+            j["rolledBack"] = true;
         if (const auto& f = b.boolean->edges) {
             static const char* kinds[] = {"rounding", "fillet", "chamfer", "bevel"};
             json picks = json::array();
@@ -240,6 +244,8 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
             spec.emboss = std::move(words);
         }
         b.boolean = std::move(spec);
+        b.suppressed = j.value("suppressed", false);
+        b.rolledBack = j.value("rolledBack", false);
         if (b.name.empty())
             b.name = typeName(b) + " " + std::to_string(b.id);
         return b;

@@ -12,6 +12,7 @@
 #include "forge/core/Edges.h"
 #include "forge/core/Emboss.h"
 #include "forge/core/Export.h"
+#include "forge/core/History.h"
 #include "forge/core/MeshKernel.h"
 #include "forge/core/FileFormat.h"
 #include "forge/core/Import.h"
@@ -80,6 +81,14 @@ constexpr double kSizeStep = 1.0;   // mm
 
 const QString kFileFilter = QObject::tr("Forge3D model (*.f3d)");
 const QString kLastFolderKey = QStringLiteral("files/lastFolder");
+
+// Objects tree rows: what each row is, and (steps, bar) which object it belongs to.
+constexpr int kRowKindRole = Qt::UserRole + 1;
+constexpr int kOwnerRole = Qt::UserRole + 2;
+constexpr int kStepIndexRole = Qt::UserRole + 3;
+constexpr int kObjectRow = 0;
+constexpr int kStepRow = 1;
+constexpr int kBarRow = 2;
 
 // The same transform the core uses for bounds and picking, so what you see is
 // exactly what you click.
@@ -396,7 +405,7 @@ void MainWindow::createActions()
                                         "embossed.").arg(open));
             return;
         }
-        startEmboss(id, false);
+        startEmboss(history::tip(m_doc, id), false);  // at the rollback bar, if it's rolled back
     });
 
     m_edgesAction = new QAction(tr("Edges"), this);
@@ -407,13 +416,14 @@ void MainWindow::createActions()
             statusBar()->showMessage(tr("Edges: select one shape on the plate first."), 6000);
             return;
         }
-        if (m_doc.usesMeshEngine(id)) {
+        const ObjectId target = history::tip(m_doc, id);  // at the rollback bar, if it's rolled back
+        if (m_doc.usesMeshEngine(target)) {
             QMessageBox::information(this, tr("Forge3D"),
                                      tr("Rounding and chamfering work on solid shapes made in Forge3D, not on "
                                         "imported meshes or shapes made with them."));
             return;
         }
-        startEdges(id, false);
+        startEdges(target, false);
     });
 
     // Align Shapes: the first shape selected stays put; the others move to it.
@@ -577,22 +587,35 @@ void MainWindow::createDocks()
     // Objects tree (left): combined shapes hold their parts.
     m_objects = new QTreeWidget;
     m_objects->setHeaderHidden(true);
+    m_objects->setColumnCount(2);
+    m_objects->header()->setStretchLastSection(true);
+    m_objects->header()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
     m_objects->setSelectionMode(QAbstractItemView::ExtendedSelection);  // Ctrl+click, Shift+click
-    m_objects->setToolTip(tr("Every body. Ctrl+click to select several. Open a combined shape to see "
-                             "and edit its parts."));
+    m_objects->setContextMenuPolicy(Qt::CustomContextMenu);
+    m_objects->setToolTip(tr("Every object. Open one to see how it was made, step by step: double-click a "
+                             "step to change it, right-click for more."));
+    m_objects->viewport()->installEventFilter(this);
     connect(m_objects, &QTreeWidget::itemSelectionChanged, this, &MainWindow::onTreeSelectionChanged);
-    connect(m_objects, &QTreeWidget::itemExpanded, this, [this](QTreeWidgetItem* item) {
-        if (!m_syncingList)
-            m_expanded.insert(item->data(0, Qt::UserRole).value<ObjectId>());
+    connect(m_objects, &QTreeWidget::customContextMenuRequested, this, &MainWindow::showTreeMenu);
+    connect(m_objects, &QTreeWidget::itemDoubleClicked, this, [this](QTreeWidgetItem* item) {
+        if (item->data(0, kRowKindRole).toInt() != kBarRow)
+            editStep(item->data(0, Qt::UserRole).value<ObjectId>());
     });
-    connect(m_objects, &QTreeWidget::itemCollapsed, this, [this](QTreeWidgetItem* item) {
+    const auto keyOf = [](QTreeWidgetItem* item) {
+        return std::pair{item->data(0, kRowKindRole).toInt(), item->data(0, Qt::UserRole).value<ObjectId>()};
+    };
+    connect(m_objects, &QTreeWidget::itemExpanded, this, [this, keyOf](QTreeWidgetItem* item) {
         if (!m_syncingList)
-            m_expanded.erase(item->data(0, Qt::UserRole).value<ObjectId>());
+            m_expanded.insert(keyOf(item));
+    });
+    connect(m_objects, &QTreeWidget::itemCollapsed, this, [this, keyOf](QTreeWidgetItem* item) {
+        if (!m_syncingList)
+            m_expanded.erase(keyOf(item));
     });
     auto* objectsDock = new QDockWidget(tr("Objects"), this);
     objectsDock->setObjectName(QStringLiteral("ObjectsDock"));
     objectsDock->setWidget(m_objects);
-    objectsDock->setMinimumWidth(200);
+    objectsDock->setMinimumWidth(270);  // room for the step descriptions
     addDockWidget(Qt::LeftDockWidgetArea, objectsDock);
 
     // Properties (right)
@@ -741,10 +764,12 @@ void MainWindow::setSelection(std::vector<ObjectId> ids)
         m_keepRound = body->isBoolean() || isRound(body->spec);
         m_properties->setKeepRound(m_keepRound);
     }
-    // Show a selected part's result open in the tree.
+    // Show a selected step or tool open in the tree: its object, and the steps above it.
     for (ObjectId id : m_selection)
-        for (ObjectId p = m_doc.parentOf(id); p != kInvalidId; p = m_doc.parentOf(p))
-            m_expanded.insert(p);
+        for (ObjectId p = m_doc.parentOf(id); p != kInvalidId; p = m_doc.parentOf(p)) {
+            m_expanded.insert({kObjectRow, p});
+            m_expanded.insert({kStepRow, p});
+        }
     refreshScene();  // highlight, tree, properties
 }
 
@@ -1805,7 +1830,7 @@ void MainWindow::applySplit()
 void MainWindow::startEdges(ObjectId target, bool editing)
 {
     const Body* body = m_doc.find(target);
-    if (!body || !m_doc.isTopLevel(target))
+    if (!body)
         return;
     if (m_dragState.kind != Drag::Kind::None)
         cancelDrag();
@@ -2109,6 +2134,13 @@ void MainWindow::applyEdges()
     result.boolean = *spec;
     const ObjectId id = result.id;
     endEdges();
+    if (!m_doc.isTopLevel(target)) {
+        // Rolled back: the step goes in at the bar.
+        const ObjectId object = history::objectOf(m_doc, target);
+        if (run(std::make_unique<InsertStepCommand>(std::move(result), m_doc.parentOf(target))))
+            setSelection(object);
+        return;
+    }
     if (run(std::make_unique<CombineCommand>(std::move(result))))
         setSelection(id);
 }
@@ -2121,7 +2153,7 @@ bool MainWindow::toolOpen() const
 void MainWindow::startEmboss(ObjectId target, bool editing)
 {
     const Body* body = m_doc.find(target);
-    if (!body || !m_doc.isTopLevel(target))
+    if (!body)
         return;
     if (m_dragState.kind != Drag::Kind::None)
         cancelDrag();
@@ -2289,6 +2321,13 @@ void MainWindow::applyEmboss()
     result.boolean = *spec;
     const ObjectId id = result.id;
     endEmboss();
+    if (!m_doc.isTopLevel(target)) {
+        // Rolled back: the step goes in at the bar.
+        const ObjectId object = history::objectOf(m_doc, target);
+        if (run(std::make_unique<InsertStepCommand>(std::move(result), m_doc.parentOf(target))))
+            setSelection(object);
+        return;
+    }
     if (run(std::make_unique<CombineCommand>(std::move(result))))
         setSelection(id);
 }
@@ -2822,11 +2861,11 @@ void MainWindow::refreshScene()
             item.id = id;
             item.mesh = m_doc.mesh(id);  // rebuilt only if the shape changed
             item.model = toQMatrix(m_doc.worldTransform(id));
-            if (m_edgesMode.active && id == m_edgesMode.target) {
+            if (m_edgesMode.active && id == history::objectOf(m_doc, m_edgesMode.target)) {
                 if (m_edgesMode.preview) {
+                    // The step being made or changed, shown for the whole object.
                     item.mesh = m_edgesMode.preview;
-                    if (!m_edgesMode.editing)
-                        item.model = QMatrix4x4();
+                    item.model = previewFrame(m_edgesMode.target, m_edgesMode.editing);
                 }
                 // Picked edges in red, the one under the mouse in orange, seen through the shape.
                 for (const auto& [lines, colour, tag] :
@@ -2842,20 +2881,20 @@ void MainWindow::refreshScene()
                     items.push_back(line);
                 }
             }
-            if (m_embossMode.active && id == m_embossMode.target && m_embossMode.preview && m_embossMode.wordsOnly) {
+            const bool embossHere =
+                m_embossMode.active && m_embossMode.preview && id == history::objectOf(m_doc, m_embossMode.target);
+            if (embossHere && m_embossMode.wordsOnly) {
                 // A big shape stays as it is; the words are drawn over it (see below).
                 DisplayItem words;
                 words.id = kEmbossWordsItem;
                 words.mesh = m_embossMode.preview;
-                words.model = m_embossMode.editing ? item.model : QMatrix4x4();
+                words.model = previewFrame(m_embossMode.target, m_embossMode.editing);
                 words.color = QVector3D(1.0f, 0.55f, 0.1f);
                 items.push_back(words);
-            } else if (m_embossMode.active && id == m_embossMode.target && m_embossMode.preview) {
-                // The shape with the words on, as it would be. A new result's coordinates
-                // are the plate's; an edited one keeps its placement.
+            } else if (embossHere) {
+                // The shape with the words on, as it would be, for the whole object.
                 item.mesh = m_embossMode.preview;
-                if (!m_embossMode.editing)
-                    item.model = QMatrix4x4();
+                item.model = previewFrame(m_embossMode.target, m_embossMode.editing);
             }
             item.color = colourOf(id);
             item.selected = isSelected(id);
@@ -2962,40 +3001,113 @@ void MainWindow::refreshScene()
                                          [this](ObjectId id) { return m_doc.isTopLevel(id); });
     m_delete->setEnabled(anySelected && allTopLevel);
     m_deselect->setEnabled(anySelected);
+    // A rolled-back object takes new steps only at its bar (Edges, Emboss): roll it
+    // forward before combining, mirroring or splitting it.
+    const bool rolled = rolledBackSelected();
     for (QAction* a : {m_merge, m_subtract, m_intersect})
-        a->setEnabled(m_selection.size() >= 2 && allTopLevel);
+        a->setEnabled(m_selection.size() >= 2 && allTopLevel && !rolled);
     m_separate->setEnabled(selected && selected->isBoolean() && m_doc.isTopLevel(selected->id));
     m_alignMenu->menuAction()->setEnabled(m_selection.size() >= 2 && allTopLevel);
-    for (QAction* a : {m_duplicate, m_copy, m_cut, m_mirrorMenu->menuAction()})
+    for (QAction* a : {m_duplicate, m_copy, m_cut})
         a->setEnabled(anySelected && allTopLevel && !toolOpen());
-    m_group->setEnabled(m_selection.size() >= 2 && allTopLevel);
+    m_mirrorMenu->menuAction()->setEnabled(anySelected && allTopLevel && !toolOpen() && !rolled);
+    m_group->setEnabled(m_selection.size() >= 2 && allTopLevel && !rolled);
     m_paste->setEnabled(!m_clipboard.empty() && !toolOpen());
     m_export->setEnabled(!m_doc.empty());
     m_sendToSlicer->setEnabled(!m_doc.empty());
-    m_split->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
+    m_split->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen() && !rolled);
     m_emboss->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_edgesAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_clear->setEnabled(!m_doc.empty());
 }
 
-void MainWindow::addTreeItem(QTreeWidgetItem* parent, ObjectId id)
+void MainWindow::addObjectRow(QTreeWidgetItem* parent, ObjectId id)
 {
     const Body* body = m_doc.find(id);
     if (!body)
         return;
     auto* item = parent ? new QTreeWidgetItem(parent) : new QTreeWidgetItem(m_objects);
     item->setText(0, QString::fromStdString(body->name));
+    item->setText(1, QString::fromStdString(history::describe(m_doc, id)));
+    item->setForeground(1, palette().brush(QPalette::Disabled, QPalette::Text));
     item->setData(0, Qt::UserRole, QVariant::fromValue<ObjectId>(id));
+    item->setData(0, kRowKindRole, kObjectRow);
     item->setToolTip(0, QString::fromStdString(typeName(*body)));
     if (body->isBoolean()) {
         QFont bold = item->font(0);
         bold.setBold(true);
         item->setFont(0, bold);
-        for (ObjectId part : body->boolean->operands)
-            addTreeItem(item, part);
-        item->setExpanded(m_expanded.count(id) > 0);
+        addStepRows(item, id);
+        const std::size_t shown = history::barAt(m_doc, id), total = history::steps(m_doc, id).size();
+        if (shown < total)
+            item->setText(1, tr("rolled back to step %1 of %2").arg(shown).arg(total));
+        item->setExpanded(m_expanded.count({kObjectRow, id}) > 0);
     }
     item->setSelected(isSelected(id));
+}
+
+void MainWindow::addStepRows(QTreeWidgetItem* objectRow, ObjectId top)
+{
+    const std::vector<ObjectId> line = history::steps(m_doc, top);
+    const std::size_t shown = history::barAt(m_doc, top);
+    const auto addBar = [&] {
+        auto* bar = new QTreeWidgetItem(objectRow);
+        bar->setText(0, tr("━━━ rollback bar ━━━"));
+        bar->setData(0, kRowKindRole, kBarRow);
+        bar->setData(0, kOwnerRole, QVariant::fromValue<ObjectId>(top));
+        bar->setFlags(Qt::ItemIsEnabled);
+        bar->setForeground(0, QColor(0xc0, 0x39, 0x2b));
+        bar->setToolTip(0, tr("Drag up to see the shape as it was at an earlier step (new Edges and Emboss "
+                              "steps go in here). Drag to the bottom to bring every step back."));
+    };
+    for (std::size_t i = 0; i < line.size(); ++i) {
+        const ObjectId id = line[i];
+        const Body& body = *m_doc.find(id);
+        auto* item = new QTreeWidgetItem(objectRow);
+        QString label = QString::fromStdString(body.name);
+        if (body.suppressed)
+            label += tr("  (off)");
+        item->setText(0, QStringLiteral("%1. %2").arg(i + 1).arg(label));
+        item->setText(1, QString::fromStdString(history::describe(m_doc, id)));
+        item->setData(0, Qt::UserRole, QVariant::fromValue<ObjectId>(id));
+        item->setData(0, kRowKindRole, kStepRow);
+        item->setData(0, kOwnerRole, QVariant::fromValue<ObjectId>(top));
+        item->setData(0, kStepIndexRole, int(i));
+        item->setToolTip(0, tr("%1. Double-click to change it.").arg(QString::fromStdString(typeName(body))));
+        if (const auto problem = body.suppressed || i >= shown ? std::nullopt : m_doc.problemWith(id)) {
+            item->setText(0, QStringLiteral("\u26A0 ") + item->text(0));
+            item->setText(1, tr("didn't work: left out"));
+            const QString why = QString::fromStdString(*problem);
+            item->setToolTip(0, tr("This step can't be done any more, so it's left out: %1\nDouble-click to change "
+                                   "it, or right-click to delete it or switch it off.")
+                                    .arg(why));
+            item->setToolTip(1, item->toolTip(0));
+            QTreeWidgetItem* objectRowItem = objectRow;
+            objectRowItem->setText(1, tr("\u26A0 a step didn't work"));
+            objectRowItem->setForeground(1, QColor(0xc0, 0x39, 0x2b));
+        }
+        const bool dim = body.suppressed || i >= shown;
+        const auto problem = dim ? std::nullopt : m_doc.problemWith(id);
+        for (int c = 0; c < 2; ++c) {
+            item->setForeground(c, palette().brush(dim ? QPalette::Disabled : QPalette::Active,
+                                                   c == 0 ? QPalette::Text : QPalette::PlaceholderText));
+            if (problem)
+                item->setForeground(c, QColor(0xc0, 0x39, 0x2b));
+            if (body.suppressed) {
+                QFont f = item->font(c);
+                f.setItalic(true);
+                item->setFont(c, f);
+            }
+        }
+        // Shapes the step used as tools (the cylinder taken away...), each its own object.
+        if (body.isBoolean())
+            for (std::size_t k = 1; k < body.boolean->operands.size(); ++k)
+                addObjectRow(item, body.boolean->operands[k]);
+        item->setExpanded(m_expanded.count({kStepRow, id}) > 0);
+        item->setSelected(isSelected(id));
+        if (i + 1 == shown)
+            addBar();
+    }
 }
 
 void MainWindow::refreshObjectList()
@@ -3003,8 +3115,185 @@ void MainWindow::refreshObjectList()
     m_syncingList = true;
     m_objects->clear();
     for (ObjectId id : m_doc.topLevelIds())
-        addTreeItem(nullptr, id);
+        addObjectRow(nullptr, id);
     m_syncingList = false;
+}
+
+void MainWindow::rollTo(ObjectId top, std::size_t shown)
+{
+    auto after = history::rolledTo(m_doc, top, shown);
+    if (after.empty())
+        return;
+    std::vector<Body> before;
+    for (const Body& b : after)
+        before.push_back(*m_doc.find(b.id));
+    const std::size_t total = history::steps(m_doc, top).size();
+    run(std::make_unique<EditBodiesCommand>(before, after, shown >= total ? "Roll forward" : "Roll back"));
+    if (history::barAt(m_doc, top) < total)
+        statusBar()->showMessage(tr("Rolled back: new Edges and Emboss steps go in at the bar. Drag the bar to the "
+                                    "bottom to bring every step back."),
+                                 8000);
+}
+
+void MainWindow::setStepOff(ObjectId id, bool off)
+{
+    const Body* body = m_doc.find(id);
+    if (!body || !body->isBoolean() || body->suppressed == off)
+        return;
+    Body after = *body;
+    after.suppressed = off;
+    run(std::make_unique<EditBodyCommand>(*body, after, off ? "Switch step off" : "Switch step on"));
+}
+
+void MainWindow::editStep(ObjectId id)
+{
+    const Body* body = m_doc.find(id);
+    if (!body || toolOpen())
+        return;
+    setSelection(id);
+    if (!body->isBoolean())
+        return;  // its size and place are in Properties
+    switch (body->boolean->op) {
+    case BooleanOp::Edges: startEdges(id, true); break;
+    case BooleanOp::Emboss: startEmboss(id, true); break;
+    case BooleanOp::Split:
+        if (m_doc.isTopLevel(id))
+            startSplit(id, true);
+        break;
+    default: break;  // Properties shows it; right-click to change the kind of combine
+    }
+}
+
+void MainWindow::showTreeMenu(const QPoint& pos)
+{
+    QTreeWidgetItem* item = m_objects->itemAt(pos);
+    if (!item || toolOpen())
+        return;
+    const int kind = item->data(0, kRowKindRole).toInt();
+    QMenu menu(this);
+    if (kind == kBarRow) {
+        const ObjectId top = item->data(0, kOwnerRole).value<ObjectId>();
+        menu.addAction(tr("Roll forward to the end"), this,
+                       [this, top] { rollTo(top, history::steps(m_doc, top).size()); });
+        menu.exec(m_objects->viewport()->mapToGlobal(pos));
+        return;
+    }
+    const ObjectId id = item->data(0, Qt::UserRole).value<ObjectId>();
+    const Body* body = m_doc.find(id);
+    if (!body)
+        return;
+    const bool isStep = kind == kStepRow;
+    const ObjectId top = isStep ? item->data(0, kOwnerRole).value<ObjectId>() : id;
+    menu.addAction(tr("Change..."), this, [this, id] { editStep(id); });
+    if (body->isBoolean()) {
+        menu.addAction(body->suppressed ? tr("Switch this step on") : tr("Switch this step off"), this,
+                       [this, id, off = !body->suppressed] { setStepOff(id, off); });
+        const BooleanOp op = body->boolean->op;
+        if (op == BooleanOp::Merge || op == BooleanOp::Subtract || op == BooleanOp::Intersect) {
+            QMenu* change = menu.addMenu(tr("Change to"));
+            for (BooleanOp to : {BooleanOp::Merge, BooleanOp::Subtract, BooleanOp::Intersect}) {
+                QAction* a = change->addAction(QString::fromStdString(toString(to)), this, [this, id, to] {
+                    const Body* now = m_doc.find(id);
+                    if (!now)
+                        return;
+                    Body after = *now;
+                    after.boolean->op = to;
+                    run(std::make_unique<EditBodyCommand>(*now, after, "Change to " + toString(to)));
+                });
+                a->setEnabled(to != op);
+            }
+        }
+    }
+    if (isStep) {
+        menu.addSeparator();
+        const std::size_t index = std::size_t(item->data(0, kStepIndexRole).toInt());
+        menu.addAction(tr("Roll back to here"), this, [this, top, index] { rollTo(top, index + 1); });
+        if (history::barAt(m_doc, top) < history::steps(m_doc, top).size())
+            menu.addAction(tr("Roll forward to the end"), this,
+                           [this, top] { rollTo(top, history::steps(m_doc, top).size()); });
+        if (body->isBoolean() && !m_doc.isTopLevel(id)) {
+            menu.addSeparator();
+            menu.addAction(tr("Delete this step"), this, [this, id] {
+                run(std::make_unique<RemoveStepCommand>(id));
+                statusBar()->showMessage(tr("Step deleted. Any shapes it used as tools are back on the plate."),
+                                         6000);
+            });
+        }
+    }
+    menu.exec(m_objects->viewport()->mapToGlobal(pos));
+}
+
+bool MainWindow::eventFilter(QObject* watched, QEvent* event)
+{
+    // Dragging the rollback bar in the Objects tree.
+    if (watched != m_objects->viewport())
+        return QMainWindow::eventFilter(watched, event);
+    const auto pointOf = [](QEvent* e) { return static_cast<QMouseEvent*>(e)->position().toPoint(); };
+    switch (event->type()) {
+    case QEvent::MouseButtonPress: {
+        auto* me = static_cast<QMouseEvent*>(event);
+        QTreeWidgetItem* item = m_objects->itemAt(pointOf(event));
+        if (me->button() == Qt::LeftButton && item && item->data(0, kRowKindRole).toInt() == kBarRow &&
+            !toolOpen()) {
+            m_barDrag = item->data(0, kOwnerRole).value<ObjectId>();
+            m_barDragShown = history::barAt(m_doc, m_barDrag);
+            m_objects->viewport()->setCursor(Qt::SizeVerCursor);
+            return true;
+        }
+        break;
+    }
+    case QEvent::MouseMove:
+        if (m_barDrag != kInvalidId) {
+            // The bar goes after the step under the mouse (before it, in its top half).
+            const QPoint p = pointOf(event);
+            QTreeWidgetItem* item = m_objects->itemAt(p);
+            while (item && item->data(0, kRowKindRole).toInt() == kObjectRow && item->parent())
+                item = item->parent();  // a tool row: use its step
+            if (item && item->data(0, kRowKindRole).toInt() == kStepRow &&
+                item->data(0, kOwnerRole).value<ObjectId>() == m_barDrag) {
+                const QRect r = m_objects->visualItemRect(item);
+                const int index = item->data(0, kStepIndexRole).toInt();
+                m_barDragShown = std::size_t(std::max(1, p.y() < r.center().y() ? index : index + 1));
+                const std::size_t total = history::steps(m_doc, m_barDrag).size();
+                statusBar()->showMessage(m_barDragShown >= total
+                                             ? tr("Let go to show every step")
+                                             : tr("Let go to show the first %1 of %2 steps")
+                                                   .arg(m_barDragShown)
+                                                   .arg(total));
+            }
+            return true;
+        }
+        break;
+    case QEvent::MouseButtonRelease:
+        if (m_barDrag != kInvalidId) {
+            const ObjectId top = m_barDrag;
+            m_barDrag = kInvalidId;
+            m_objects->viewport()->unsetCursor();
+            statusBar()->clearMessage();
+            const std::size_t shown = m_barDragShown;
+            QTimer::singleShot(0, this, [this, top, shown] { rollTo(top, shown); });
+            return true;
+        }
+        break;
+    default: break;
+    }
+    return QMainWindow::eventFilter(watched, event);
+}
+
+QMatrix4x4 MainWindow::previewFrame(ObjectId target, bool editing) const
+{
+    if (editing)
+        return toQMatrix(m_doc.worldTransform(target));
+    const ObjectId holder = m_doc.parentOf(target);
+    return holder == kInvalidId ? QMatrix4x4() : toQMatrix(m_doc.worldTransform(holder));
+}
+
+bool MainWindow::rolledBackSelected() const
+{
+    for (ObjectId id : m_selection)
+        if (m_doc.isTopLevel(id) && history::barAt(m_doc, id) < history::steps(m_doc, id).size())
+            return true;
+    return false;
 }
 
 void MainWindow::onTreeSelectionChanged()

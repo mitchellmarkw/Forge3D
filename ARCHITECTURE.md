@@ -348,6 +348,28 @@ Viewport (mouse)  --leftPressed(ray, handle)-->  MainWindow drag controller
   draws picks and hover as thin tubes, and previews the result via
   `Document::previewMesh` (now for OCCT combines too).
 
+## History: steps, switching off, the rollback bar (slice 6)
+
+- An object's history is read from its result tree: the main line follows each step's
+  first part down to the starting shape (`history::steps`, oldest first). Other parts
+  are the step's tools and appear under it in the Objects tree.
+- Steps can be switched off: `Body::suppressed` (by hand) or `Body::rolledBack` (below
+  the bar). Off, a step passes its shape through (`Document::passThrough`: the first
+  part for one-part steps and Subtract, all parts side by side for Merge / Intersect /
+  Group). Saved in the file (format 12).
+- The bar sits below the oldest rolled-back step on the main line (`history::barAt`);
+  moving it is one EditBodiesCommand (`history::rolledTo`). While rolled back, Edges
+  and Emboss work on the last shown step (`history::tip`) and the new step is put in
+  between it and the next one (`Document::insertStep`, InsertStepCommand). Its picks
+  are converted into the coordinates of the step that will hold it. Combining,
+  mirroring and splitting a rolled-back object are blocked until it's rolled forward.
+- A step that can't be built (an earlier change left it nothing to work on) is passed
+  through like a switched-off one, and `Document::problemWith` says why; the tree marks
+  it. Deleting a step (`RemoveStepCommand`) puts its first part back in its place and
+  its tools back on the plate.
+- Merge / Subtract / Intersect can be switched into each other in place
+  (`Document::setBoolean` allows it).
+
 ## Rendering
 
 `Document::mesh()` → `forge::Mesh` (positions, normals, indices) → `DisplayItem`
