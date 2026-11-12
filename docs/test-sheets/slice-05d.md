@@ -15,7 +15,7 @@ check, download the artifact, unzip and run `Forge3D.exe`. **Help → About** sa
 | --- | --- | --- | --- |
 | 1 | **Add → Text** | The word "Text" in 3D, lying flat, letters about 10 mm tall, in Arial. Properties has a Text box: Words, Font (label right above the list), Bold, Italic, Letter height | |
 | 2 | Type `Hello World` in Words and press Enter | The letters change; the block gets longer, the letters stay the same size. One Undo goes back | |
-| 3 | Open the Font list | Your installed fonts. Pick another one (e.g. Comic Sans MS or Impact) | The letters change to that font | |
+| 3 | Open the Font list and pick another font (e.g. Comic Sans MS or Impact) | The list shows your installed fonts; the letters change to the one you pick | |
 | 4 | Tick Bold, then Italic | Thicker, then slanted letters | |
 | 5 | Set Letter height to 20 | Twice as big; Width and Depth double too | |
 | 6 | Change Width only (Uniform off) | The letters stretch sideways | |
