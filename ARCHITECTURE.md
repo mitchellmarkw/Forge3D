@@ -208,6 +208,22 @@ Viewport (mouse)  --leftPressed(ray, handle)-->  MainWindow drag controller
   display items; `DisplayItem::alpha < 1` draws see-through items after the solids,
   depth-tested but not depth-writing.
 
+## Handles on parts and combined shapes (slice 4b)
+
+- A part's handles work in plate directions; the drag converts to the part's own
+  placement inside its parent: `movedOnPlate(body, delta, parentWorld)` and
+  `rotatedAboutPlateAxis(..., parentWorld)`. Resize uses `resizedFace()` unchanged: it
+  keeps the anchor fixed in the parent's coordinates, so also on the plate.
+- Resizing a combined shape is `scaledTree(doc, id, factors, anchor)`: the shape's own
+  placement stays; each part gets new sizes and position, `p' = S (p + c - A) + A - c'`
+  (c, c' the part's pivot before / after). A nested shape keeps its placement and
+  scales its contents about the anchor seen from inside it; a Split plane's point
+  scales and its normal scales inversely. Uneven factors need each part's axes to lie
+  within directions that stretch alike (any turn about Z is fine when only Z
+  stretches); otherwise `NotScalable`, and the app falls back to even scaling.
+- The drag computes from a snapshot `Document` taken at the start (the live one holds
+  the preview), previews every changed body, and records one `EditBodiesCommand`.
+
 ## Rendering
 
 `Document::mesh()` → `forge::Mesh` (positions, normals, indices) → `DisplayItem`

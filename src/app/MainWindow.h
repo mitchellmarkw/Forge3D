@@ -5,6 +5,7 @@
 #include "forge/core/CommandStack.h"
 #include "forge/core/Document.h"
 #include "forge/core/Split.h"
+#include "forge/core/Scale.h"
 #include "forge/view/Gizmo.h"
 
 #include <QMainWindow>
@@ -97,6 +98,7 @@ private:
     void updateSplitPlane();  // after the panel changed: redraw, update side names and range
     SplitPlane currentSplitPlane() const;
     void addSplitItems(std::vector<DisplayItem>& items) const;
+    void previewAll(const std::vector<Body>& states);  // like preview(), for several bodies
     float splitPlaneHalfSize() const;  // half the drawn plane's width (mm)
     // Starts dragging the Split plane if the ray hits it or its arrow.
     bool grabSplitPlane(const QVector3D& origin, const QVector3D& direction);
@@ -138,6 +140,12 @@ private:
         QPointF centrePixel;
         double turned = 0.0;          // Ring: degrees so far (unsnapped)
         double startOffset = 0.0;     // SplitPlane: the plane's offset when grabbed
+        Transform parentWorld;        // the dragged body's parent on the plate (identity if on the plate)
+        // Resizing a combined shape changes its parts: their states when the drag
+        // started, a copy of the document then (to compute from), and its size then.
+        std::vector<Body> beforeAll;
+        std::shared_ptr<Document> snapshot;
+        Bounds localBounds;
         QVector3D axis;               // SplitPlane: the plane's direction
         Vec3 turnCentre{};            // Ring: the point it turns about (body coordinates)
         bool moved = false;
