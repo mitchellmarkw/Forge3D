@@ -503,15 +503,22 @@ TopoDS_Shape Document::combine(const BooleanSpec& spec) const
             return unify.Shape();
         }
         bool first = true;
+        Bounds reach;
         for (ObjectId part : operands) {
             // Each part in the result's coordinates: its own shape, moved by its placement.
-            const TopoDS_Shape placed =
+            TopoDS_Shape placed =
                 BRepBuilderAPI_Transform(shape(part), toTrsf(localTransform(part)), /*copy=*/true).Shape();
             if (first) {
                 result = placed;
                 first = false;
+                reach = shapeBounds(placed);
                 continue;
             }
+            if (op == BooleanOp::Subtract && spec.throughAll)
+                if (const auto stretched = throughTool(part, reach))
+                    placed = BRepBuilderAPI_Transform(primitives::buildShape(stretched->first),
+                                                      toTrsf(stretched->second), true)
+                                 .Shape();
             switch (op) {
             case BooleanOp::Merge: {
                 BRepAlgoAPI_Fuse fuse(result, placed);
@@ -710,6 +717,43 @@ BooleanSpec Document::effectiveSpec(const Body& body) const
     return body.isOff() ? passThrough(*body.boolean) : *body.boolean;
 }
 
+std::optional<std::pair<PrimitiveSpec, Transform>> Document::throughTool(ObjectId tool, const Bounds& reach) const
+{
+    const Body* body = find(tool);
+    if (!body || body->isBoolean())
+        return std::nullopt;
+    double* height = nullptr;
+    PrimitiveSpec spec = body->spec;
+    if (auto* b = std::get_if<BoxSpec>(&spec))
+        height = &b->height;
+    else if (auto* c = std::get_if<CylinderSpec>(&spec))
+        height = &c->height;
+    else if (auto* t = std::get_if<TubeSpec>(&spec))
+        height = &t->height;
+    else if (auto* x = std::get_if<TextSpec>(&spec))
+        height = &x->height;
+    if (!height)
+        return std::nullopt;
+    // How far the first part reaches along the tool's own height (its local Z).
+    const Transform place = localTransform(tool);
+    const Transform toTool = place.inverse();
+    double lo = 1e300, hi = -1e300;
+    for (int k = 0; k < 8; ++k) {
+        const Vec3 corner{k & 1 ? reach.max[0] : reach.min[0], k & 2 ? reach.max[1] : reach.min[1],
+                          k & 4 ? reach.max[2] : reach.min[2]};
+        const double z = toTool.apply(corner)[2];
+        lo = std::min(lo, z);
+        hi = std::max(hi, z);
+    }
+    if (!(hi > lo))
+        return std::nullopt;
+    const double margin = 1.0 + 0.01 * (hi - lo);
+    *height = hi - lo + 2.0 * margin;
+    Transform lift;
+    lift.m[2][3] = lo - margin;  // the stretched tool's base, below the first part
+    return std::pair{spec, place * lift};
+}
+
 std::optional<std::string> Document::problemWith(ObjectId id) const
 {
     const Body* body = find(id);
@@ -859,8 +903,26 @@ MeshSolid Document::combineMeshes(const BooleanSpec& spec) const
         throw GeometryError("Nothing to combine");
     switch (spec.op) {
     case BooleanOp::Merge: return meshkernel::merged(parts);
-    case BooleanOp::Subtract:
-        return meshkernel::subtracted(parts.front(), std::vector<MeshSolid>(parts.begin() + 1, parts.end()));
+    case BooleanOp::Subtract: {
+        std::vector<MeshSolid> tools(parts.begin() + 1, parts.end());
+        if (spec.throughAll) {
+            const Bounds reach = meshkernel::bounds(parts.front());
+            for (std::size_t i = 1; i < spec.operands.size(); ++i)
+                if (const auto stretched = throughTool(spec.operands[i], reach)) {
+                    // As triangles: the stretched tool on its own, then placed.
+                    Document scratch;
+                    Body b;
+                    b.id = 1;
+                    b.name = "tool";
+                    b.spec = stretched->first;
+                    scratch.insertBody(b);
+                    const ExportMesh m = exportMeshes(scratch, {1}, exportQuality()).front();
+                    tools[i - 1] = meshkernel::transformed(meshkernel::fromTriangles(m.positions, m.indices),
+                                                           stretched->second);
+                }
+        }
+        return meshkernel::subtracted(parts.front(), tools);
+    }
     case BooleanOp::Intersect: return meshkernel::intersected(parts);
     case BooleanOp::Split: return meshkernel::trimmed(parts.front(), spec.planePoint, spec.planeNormal);
     case BooleanOp::Mirror: return meshkernel::mirrored(parts.front(), spec.planePoint, spec.planeNormal);

@@ -340,9 +340,12 @@ Viewport (mouse)  --leftPressed(ray, handle)-->  MainWindow drag controller
   and how they bend: Convex (rounding), Concave (fillet), Smooth (nothing to do).
   Concave = walking off the edge across one face heads the way the other face points.
 - Picks are stored by place (`EdgeRef`: a point on the edge, a point on the face it was
-  picked from), in the result's coordinates, so they survive saving and moving. If the
-  part under them changes (a box made taller), each pick goes to the nearest suitable
-  edge within a fifth of the shape's size.
+  picked from), in the result's coordinates, plus (`edges::locate`) where the edge sits
+  within the part's box (0..1 per axis) and which way its face points. `edges::match`
+  finds each pick again: same place; else same spot in the (resized) box with a face
+  facing the same way; else the nearest suitable edge within a fifth of the shape's
+  size. Bevels pick their face by its facing. The Edges tool re-opens with
+  `pickedEdges`, matched the same way.
 - The tool: `Viewport::hovered` gives the ray under the mouse; the window finds the
   suitable edge drawn within 9 px that the shape doesn't hide (`edges::FaceFinder`),
   draws picks and hover as thin tubes, and previews the result via
@@ -369,6 +372,12 @@ Viewport (mouse)  --leftPressed(ray, handle)-->  MainWindow drag controller
   its tools back on the plate.
 - Merge / Subtract / Intersect can be switched into each other in place
   (`Document::setBoolean` allows it).
+- Subtract `throughAll`: each straight tool (box, cylinder, tube, text) is rebuilt with
+  its height stretched to reach past the first part's box along the tool's own Z
+  (`Document::throughTool`), in both engines.
+- Emboss centring (`emboss::centeredOnFace`): spread from the triangle at the spot
+  across edges bending less than 35° to get the face, take its extent along the words'
+  across / up directions, and drop onto the face above the middle.
 
 ## Rendering
 

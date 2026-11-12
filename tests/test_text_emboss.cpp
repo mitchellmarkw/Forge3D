@@ -309,3 +309,51 @@ TEST_CASE("Emboss saves, loads and scales", "[emboss]")
     std::error_code ec;
     fs::remove_all(dir, ec);
 }
+
+TEST_CASE("Centering words on a face", "[emboss][center]")
+{
+    Document doc;
+    CommandStack stack(doc);
+    EmbossText words;
+    words.letterHeight = 4.0;
+    using emboss::Center;
+
+    SECTION("the front of a box")
+    {
+        const ObjectId box = add(stack, doc, BoxSpec{40, 30, 20});
+        const emboss::SurfacePoint spot{{7, -15, 4}, {0, -1, 0}};
+        const auto both = centeredSpot(doc, box, spot, words, Center::Both);
+        REQUIRE(both);
+        CHECK_THAT(both->point[0], WithinAbs(0.0, 1e-6));
+        CHECK_THAT(both->point[1], WithinAbs(-15.0, 1e-6));
+        CHECK_THAT(both->point[2], WithinAbs(10.0, 1e-6));
+        CHECK_THAT(both->normal[1], WithinAbs(-1.0, 1e-9));
+        const auto upDown = centeredSpot(doc, box, spot, words, Center::TopBottom);
+        REQUIRE(upDown);
+        CHECK_THAT(upDown->point[0], WithinAbs(7.0, 1e-6));
+        CHECK_THAT(upDown->point[2], WithinAbs(10.0, 1e-6));
+        const auto across = centeredSpot(doc, box, spot, words, Center::LeftRight);
+        REQUIRE(across);
+        CHECK_THAT(across->point[0], WithinAbs(0.0, 1e-6));
+        CHECK_THAT(across->point[2], WithinAbs(4.0, 1e-6));
+    }
+    SECTION("the top of a box, words turned a quarter")
+    {
+        const ObjectId box = add(stack, doc, BoxSpec{40, 30, 20});
+        words.angle = 90;  // reading along +Y: "across" is now Y
+        const emboss::SurfacePoint spot{{5, 3, 20}, {0, 0, 1}};
+        const auto across = centeredSpot(doc, box, spot, words, Center::LeftRight);
+        REQUIRE(across);
+        CHECK_THAT(across->point[0], WithinAbs(5.0, 1e-6));
+        CHECK_THAT(across->point[1], WithinAbs(0.0, 1e-6));
+    }
+    SECTION("up and down the side of a cylinder")
+    {
+        const ObjectId cyl = add(stack, doc, CylinderSpec{10, 30}, 50);
+        const emboss::SurfacePoint spot{{50, -10, 5}, {0, -1, 0}};
+        const auto upDown = centeredSpot(doc, cyl, spot, words, Center::TopBottom);
+        REQUIRE(upDown);
+        CHECK_THAT(upDown->point[2], WithinAbs(15.0, 1e-3));
+        CHECK_THAT(upDown->point[1], WithinAbs(-10.0, 0.05));
+    }
+}

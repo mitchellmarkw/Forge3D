@@ -110,6 +110,14 @@ PropertiesPanel::PropertiesPanel(QWidget* parent) : QWidget(parent)
     connect(editEdges, &QPushButton::clicked, this, &PropertiesPanel::editEdgesRequested);
     general->addRow(editEdges);
     m_editEdgesButton = editEdges;
+    m_throughAll = new QCheckBox(tr("Through all"));
+    m_throughAll->setToolTip(tr("Straight tools (box, cylinder, tube, text) reach right through the shape along "
+                                "their own height, whatever size the shape becomes"));
+    connect(m_throughAll, &QCheckBox::toggled, this, [this](bool on) {
+        if (m_body)
+            emit throughAllRequested(m_body->id, on);
+    });
+    general->addRow(m_throughAll);
     layout->addLayout(general);
 
     // A Text shape's words
@@ -238,6 +246,12 @@ void PropertiesPanel::setBody(const Body* body, const QString& context, bool isP
     const bool embossed = body->isBoolean() && body->boolean->op == BooleanOp::Emboss;
     m_editEmbossButton->setVisible(embossed && !isPart);
     m_editEdgesButton->setVisible(body->isBoolean() && body->boolean->op == BooleanOp::Edges && !isPart);
+    const bool subtract = body->isBoolean() && body->boolean->op == BooleanOp::Subtract;
+    m_throughAll->setVisible(subtract);
+    if (subtract) {
+        const QSignalBlocker block(m_throughAll);
+        m_throughAll->setChecked(body->boolean->throughAll);
+    }
     const auto* textSpec = body->isBoolean() ? nullptr : std::get_if<TextSpec>(&body->spec);
     m_textGroup->setVisible(textSpec != nullptr);
     if (textSpec) {

@@ -250,6 +250,11 @@ enum class EdgeFinishKind {
 struct EdgeRef {
     std::array<double, 3> point{0.0, 0.0, 0.0};
     std::array<double, 3> facePoint{0.0, 0.0, 0.0};
+    // Where the edge sits within the part's box (0..1 on each axis), and which way the
+    // face it was picked from points: these find it again after the part is resized.
+    bool located = false;
+    std::array<double, 3> relative{0.0, 0.0, 0.0};
+    std::array<double, 3> faceNormal{0.0, 0.0, 0.0};
     bool operator==(const EdgeRef&) const = default;
 };
 
@@ -311,6 +316,9 @@ struct BooleanSpec {
     std::optional<EmbossText> emboss{};
     // Edges: what to do to which edges.
     std::optional<EdgeFinish> edges{};
+    // Subtract: straight tools (box, cylinder, tube, text) are stretched along their own
+    // height to go right through the first part, whatever its size ("through all").
+    bool throughAll = false;
 
     bool operator==(const BooleanSpec&) const = default;
 };

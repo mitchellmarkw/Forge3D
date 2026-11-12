@@ -150,7 +150,8 @@ std::string describe(const Document& doc, ObjectId id)
     const BooleanSpec& spec = *body->boolean;
     switch (spec.op) {
     case BooleanOp::Merge: return "with " + names(doc, spec.operands, 1);
-    case BooleanOp::Subtract: return "minus " + names(doc, spec.operands, 1);
+    case BooleanOp::Subtract:
+        return "minus " + names(doc, spec.operands, 1) + (spec.throughAll ? " (through all)" : "");
     case BooleanOp::Intersect: return "overlap with " + names(doc, spec.operands, 1);
     case BooleanOp::Split: return "cut in two";
     case BooleanOp::Mirror: return "mirrored";

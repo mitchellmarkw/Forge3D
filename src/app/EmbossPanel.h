@@ -34,6 +34,8 @@ signals:
     void changed();         // a finished change: preview now
     void typing();          // a key press in the words: preview soon
     void applyRequested();
+    // Move the words to the middle of their face: 0 both ways, 1 top-bottom, 2 left-right.
+    void centerRequested(int how);
     void cancelRequested();
 
 private:

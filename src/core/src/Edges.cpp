@@ -69,6 +69,37 @@ double diagonal(const TopoDS_Shape& shape)
 }
 
 Vec3 toVec(const gp_Pnt& p) { return {p.X(), p.Y(), p.Z()}; }
+Vec3 toVec(const gp_Vec& v) { return {v.X(), v.Y(), v.Z()}; }
+
+// The shape's tight box, as min and size per axis.
+struct Box {
+    Vec3 min{0, 0, 0}, size{1, 1, 1};
+    Vec3 relative(const Vec3& p) const
+    {
+        Vec3 r{};
+        for (int k = 0; k < 3; ++k)
+            r[std::size_t(k)] = size[std::size_t(k)] > 1e-9 ? (p[std::size_t(k)] - min[std::size_t(k)]) / size[std::size_t(k)]
+                                                             : 0.5;
+        return r;
+    }
+};
+Box boxOf(const TopoDS_Shape& shape)
+{
+    Bnd_Box b;
+    BRepBndLib::AddOptimal(shape, b, /*useTriangulation=*/false, /*useShapeTolerance=*/false);
+    Box out;
+    if (b.IsVoid())
+        return out;
+    double x0, y0, z0, x1, y1, z1;
+    b.Get(x0, y0, z0, x1, y1, z1);
+    out.min = {x0, y0, z0};
+    out.size = {x1 - x0, y1 - y0, z1 - z0};
+    return out;
+}
+double distance3(const Vec3& a, const Vec3& b)
+{
+    return std::hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+}
 
 // The face's outward facing at a point of it (face orientation included).
 std::optional<gp_Vec> outward(const TopoDS_Face& face, const gp_Pnt2d& uv)
@@ -181,6 +212,9 @@ ShapeEdges analyseWith(const TopoDS_Shape& shape, Maps& maps)
                 normals[std::size_t(k)] = outward(faces[std::size_t(k)], pcurve->Value(midParam));
             e.faces[std::size_t(k)] = maps.faces.FindIndex(faces[std::size_t(k)]) - 1;
         }
+        for (int k = 0; k < 2; ++k)
+            if (normals[std::size_t(k)])
+                e.normals[std::size_t(k)] = toVec(*normals[std::size_t(k)]);
         if (normals[0] && normals[1]) {
             const double cosine = normals[0]->Dot(*normals[1]);
             if (cosine > std::cos(5.0 * std::numbers::pi / 180.0)) {
@@ -374,6 +408,97 @@ int edgeFor(const ShapeEdges& found, const EdgeRef& ref, double tolerance)
     return best;
 }
 
+void locate(const TopoDS_Shape& part, std::vector<EdgeRef>& refs)
+{
+    Maps maps;
+    const ShapeEdges found = analyseWith(part, maps);
+    const Box box = boxOf(part);
+    const double tolerance = std::max(diagonal(part) * 2e-3, 1e-3);
+    for (EdgeRef& ref : refs) {
+        const int e = edgeFor(found, ref, tolerance);
+        if (e < 0) {
+            ref.located = false;
+            continue;
+        }
+        const ShapeEdge& edge = found.edges[std::size_t(e)];
+        // The face it was picked from: the one its face point lies on.
+        const TopoDS_Vertex at =
+            BRepBuilderAPI_MakeVertex(gp_Pnt(ref.facePoint[0], ref.facePoint[1], ref.facePoint[2])).Vertex();
+        int side = 0;
+        double bestD = 1e300;
+        for (int k = 0; k < 2; ++k) {
+            BRepExtrema_DistShapeShape dist(at, maps.faces.FindKey(edge.faces[std::size_t(k)] + 1));
+            if (dist.IsDone() && dist.Value() < bestD) {
+                bestD = dist.Value();
+                side = k;
+            }
+        }
+        ref.relative = box.relative(edge.mid);
+        ref.faceNormal = edge.normals[std::size_t(side)];
+        ref.located = true;
+    }
+}
+
+std::vector<int> match(const TopoDS_Shape& shape, const ShapeEdges& found, const std::vector<EdgeRef>& refs,
+                       EdgeFinishKind kind)
+{
+    std::vector<int> out(refs.size(), -1);
+    std::vector<bool> taken(found.edges.size(), false);
+    const double diag = diagonal(shape);
+    const double tolerance = std::max(diag * 2e-3, 1e-3);
+    // 1. Still exactly where it was.
+    for (std::size_t i = 0; i < refs.size(); ++i) {
+        const int e = edgeFor(found, refs[i], tolerance);
+        if (e >= 0 && !taken[std::size_t(e)]) {
+            out[i] = e;
+            taken[std::size_t(e)] = true;
+        }
+    }
+    // 2. At the same spot in the shape's box (the part was resized), facing the same way.
+    const Box box = boxOf(shape);
+    for (std::size_t i = 0; i < refs.size(); ++i) {
+        if (out[i] >= 0 || !refs[i].located)
+            continue;
+        double best = 0.12;
+        for (std::size_t k = 0; k < found.edges.size(); ++k) {
+            const ShapeEdge& edge = found.edges[k];
+            if (taken[k] || !suits(kind, edge.bend))
+                continue;
+            double d = distance3(box.relative(edge.mid), refs[i].relative);
+            // An edge between faces facing other ways isn't the same edge.
+            const auto& n = refs[i].faceNormal;
+            const double facing = std::max(edge.normals[0][0] * n[0] + edge.normals[0][1] * n[1] + edge.normals[0][2] * n[2],
+                                           edge.normals[1][0] * n[0] + edge.normals[1][1] * n[1] + edge.normals[1][2] * n[2]);
+            if (facing < 0.9)
+                continue;
+            if (d < best) {
+                best = d;
+                out[i] = int(k);
+            }
+        }
+        if (out[i] >= 0)
+            taken[std::size_t(out[i])] = true;
+    }
+    // 3. The nearest one it suits, if close enough to be the same one moved.
+    for (std::size_t i = 0; i < refs.size(); ++i) {
+        if (out[i] >= 0)
+            continue;
+        double best = diag * 0.2;
+        for (std::size_t k = 0; k < found.edges.size(); ++k) {
+            if (taken[k] || !suits(kind, found.edges[k].bend))
+                continue;
+            const double d = pointToPolyline(refs[i].point, found.edges[k].polyline);
+            if (d < best) {
+                best = d;
+                out[i] = int(k);
+            }
+        }
+        if (out[i] >= 0)
+            taken[std::size_t(out[i])] = true;
+    }
+    return out;
+}
+
 TopoDS_Shape apply(const TopoDS_Shape& shape, const EdgeFinish& finish)
 {
     if (!(finish.size > 0.0))
@@ -384,46 +509,38 @@ TopoDS_Shape apply(const TopoDS_Shape& shape, const EdgeFinish& finish)
         throw std::invalid_argument("Pick at least one edge");
     Maps maps;
     const ShapeEdges found = analyseWith(shape, maps);
-    const double diag = diagonal(shape);
-    const double tolerance = std::max(diag * 2e-3, 1e-3);
     std::vector<std::pair<int, int>> picks;  // edge, face index for Bevel
-    for (const EdgeRef& ref : finish.edges) {
-        int e = edgeFor(found, ref, tolerance);
-        if (e < 0) {
-            // The shape under it changed (resized, say): take the nearest edge it suits
-            // that isn't picked already, if it's close enough to be the same one moved.
-            double best = diag * 0.2;
-            for (std::size_t i = 0; i < found.edges.size(); ++i) {
-                if (!suits(finish.kind, found.edges[i].bend))
-                    continue;
-                if (std::any_of(picks.begin(), picks.end(), [i](const auto& p) { return p.first == int(i); }))
-                    continue;
-                const double d = pointToPolyline(ref.point, found.edges[i].polyline);
-                if (d < best) {
-                    best = d;
-                    e = int(i);
-                }
-            }
-        }
+    const std::vector<int> matched = match(shape, found, finish.edges, finish.kind);
+    for (std::size_t i = 0; i < matched.size(); ++i) {
+        const int e = matched[i];
+        const EdgeRef& ref = finish.edges[i];
         if (e < 0)
             throw GeometryError("A picked edge is no longer there (the shape under it changed). Pick the "
                                 "edges again.");
         int face = found.edges[std::size_t(e)].faces[0];
         if (finish.kind == EdgeFinishKind::Bevel) {
-            // The face it was picked from: the one its face point lies on.
-            const TopoDS_Vertex at =
-                BRepBuilderAPI_MakeVertex(gp_Pnt(ref.facePoint[0], ref.facePoint[1], ref.facePoint[2])).Vertex();
-            double bestD = 1e300;
-            for (int f : found.edges[std::size_t(e)].faces) {
-                BRepExtrema_DistShapeShape dist(at, maps.faces.FindKey(f + 1));
-                if (dist.IsDone() && dist.Value() < bestD) {
-                    bestD = dist.Value();
-                    face = f;
+            const auto& edge = found.edges[std::size_t(e)];
+            if (ref.located) {
+                // The face pointing the way the picked one did.
+                const auto dot = [&ref](const Vec3& n) {
+                    return n[0] * ref.faceNormal[0] + n[1] * ref.faceNormal[1] + n[2] * ref.faceNormal[2];
+                };
+                face = dot(edge.normals[1]) > dot(edge.normals[0]) ? edge.faces[1] : edge.faces[0];
+            } else {
+                // Older files: the face its face point lies on.
+                const TopoDS_Vertex at =
+                    BRepBuilderAPI_MakeVertex(gp_Pnt(ref.facePoint[0], ref.facePoint[1], ref.facePoint[2])).Vertex();
+                double bestD = 1e300;
+                for (int f : edge.faces) {
+                    BRepExtrema_DistShapeShape dist(at, maps.faces.FindKey(f + 1));
+                    if (dist.IsDone() && dist.Value() < bestD) {
+                        bestD = dist.Value();
+                        face = f;
+                    }
                 }
             }
         }
-        if (std::find_if(picks.begin(), picks.end(), [e](const auto& p) { return p.first == e; }) == picks.end())
-            picks.emplace_back(e, face);
+        picks.emplace_back(e, face);
     }
     try {
         TopoDS_Shape result;
@@ -517,7 +634,11 @@ const Body& edgesResult(const Document& doc, ObjectId result)
 }
 EdgeRef moved(const EdgeRef& r, const Transform& t)
 {
-    return {t.apply(r.point), t.apply(r.facePoint)};
+    EdgeRef out = r;
+    out.point = t.apply(r.point);
+    out.facePoint = t.apply(r.facePoint);
+    out.faceNormal = t.applyDirection(r.faceNormal);
+    return out;
 }
 }  // namespace
 
@@ -552,11 +673,25 @@ BooleanSpec edgesSpec(const Document& doc, ObjectId target, const EdgeFinish& fi
     EdgeFinish local = finish;
     for (EdgeRef& r : local.edges)
         r = moved(r, toStep);
+    edges::locate(BRepBuilderAPI_Transform(doc.shape(target), toTrsf(doc.localTransform(target)), true).Shape(),
+                  local.edges);
     spec.edges = local;
     const auto c = doc.worldBounds(target).center();
     const Vec3 centre = toStep.apply(Vec3{c[0], c[1], c[2]});
     spec.pivot = {centre[0], centre[1], centre[2]};
     return spec;
+}
+
+std::vector<int> pickedEdges(const Document& doc, ObjectId result)
+{
+    const Body& body = edgesResult(doc, result);
+    // Matched where they're stored (the result's own coordinates); the edges come out
+    // in the same order as those of pickableShape().
+    const ObjectId part = body.boolean->operands.front();
+    const TopoDS_Shape placed =
+        BRepBuilderAPI_Transform(doc.shape(part), toTrsf(doc.localTransform(part)), true).Shape();
+    const auto found = edges::analyse(placed);
+    return edges::match(placed, found, body.boolean->edges->edges, body.boolean->edges->kind);
 }
 
 EdgeFinish edgesInPlate(const Document& doc, ObjectId result)
@@ -576,6 +711,8 @@ Body withEdges(const Document& doc, ObjectId result, const EdgeFinish& inPlate)
     const Transform t = doc.worldTransform(result).inverse();
     for (EdgeRef& r : f.edges)
         r = moved(r, t);
+    const ObjectId part = next.boolean->operands.front();
+    edges::locate(BRepBuilderAPI_Transform(doc.shape(part), toTrsf(doc.localTransform(part)), true).Shape(), f.edges);
     next.boolean->edges = f;
     return next;
 }

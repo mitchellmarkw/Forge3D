@@ -651,6 +651,31 @@ void MainWindow::createDocks()
     connect(m_embossPanel, &EmbossPanel::typing, this, [this] { m_embossTimer->start(400); });
     connect(m_embossPanel, &EmbossPanel::applyRequested, this, &MainWindow::applyEmboss);
     connect(m_embossPanel, &EmbossPanel::cancelRequested, this, &MainWindow::endEmboss);
+    connect(m_embossPanel, &EmbossPanel::centerRequested, this, [this](int how) {
+        if (!m_embossMode.active)
+            return;
+        if (!m_embossMode.spot) {
+            statusBar()->showMessage(tr("Click on the shape first, to say which face."), 5000);
+            return;
+        }
+        std::optional<emboss::SurfacePoint> moved;
+        try {
+            QApplication::setOverrideCursor(Qt::WaitCursor);
+            moved = centeredSpot(m_doc, m_embossMode.target, *m_embossMode.spot, m_embossPanel->words(),
+                                 how == 0 ? emboss::Center::Both
+                                          : how == 1 ? emboss::Center::TopBottom : emboss::Center::LeftRight);
+            QApplication::restoreOverrideCursor();
+        } catch (const std::exception& e) {
+            QApplication::restoreOverrideCursor();
+            qWarning() << "Centering the words failed:" << e.what();
+        }
+        if (!moved) {
+            statusBar()->showMessage(tr("The middle of that face isn't on the face (it may be hollow there)."), 6000);
+            return;
+        }
+        m_embossMode.spot = moved;
+        updateEmbossPreview();
+    });
     m_edgesTimer = new QTimer(this);
     m_edgesTimer->setSingleShot(true);
     connect(m_edgesTimer, &QTimer::timeout, this, &MainWindow::updateEdgesPreview);
@@ -678,6 +703,14 @@ void MainWindow::createDocks()
     connect(m_properties, &PropertiesPanel::editCutRequested, this, [this] { startSplit(selectedOne(), true); });
     connect(m_properties, &PropertiesPanel::editEmbossRequested, this, [this] { startEmboss(selectedOne(), true); });
     connect(m_properties, &PropertiesPanel::editEdgesRequested, this, [this] { startEdges(selectedOne(), true); });
+    connect(m_properties, &PropertiesPanel::throughAllRequested, this, [this](ObjectId id, bool on) {
+        const Body* body = m_doc.find(id);
+        if (!body || !body->isBoolean() || body->boolean->throughAll == on)
+            return;
+        Body after = *body;
+        after.boolean->throughAll = on;
+        run(std::make_unique<EditBodyCommand>(*body, after, on ? "Through all" : "Not through all"));
+    });
     connect(m_properties, &PropertiesPanel::keepRoundChanged, this, [this](bool on) { m_keepRound = on; });
     connect(m_properties, &PropertiesPanel::sitOnPlateRequested, this, [this](ObjectId id) {
         try {
@@ -1857,11 +1890,26 @@ void MainWindow::startEdges(ObjectId target, bool editing)
             if (!body->isBoolean() || body->boolean->op != BooleanOp::Edges)
                 return;
             finish = edgesInPlate(m_doc, target);
-            for (const EdgeRef& ref : finish.edges) {
-                const int e = edges::edgeFor(mode.found, ref, std::max(mode.size * 2e-3, 1e-3));
-                if (e >= 0)
-                    mode.picks.push_back({e, ref});
+            // The picks as the result finds them now (the shape under them may have changed
+            // size); each re-made from its edge as it is now, so it's stored fresh on Apply.
+            const std::vector<int> found = pickedEdges(m_doc, target);
+            for (std::size_t i = 0; i < found.size(); ++i) {
+                if (found[i] < 0)
+                    continue;
+                const auto& faces = mode.found.edges[std::size_t(found[i])].faces;
+                const Vec3 n = finish.edges[i].faceNormal;
+                // Keep the face it was picked from: the one facing the same way.
+                int face = -1;
+                if (finish.edges[i].located) {
+                    const auto& normals = mode.found.edges[std::size_t(found[i])].normals;
+                    const auto dot = [&n](const Vec3& a) { return a[0] * n[0] + a[1] * n[1] + a[2] * n[2]; };
+                    face = dot(normals[1]) > dot(normals[0]) ? faces[1] : faces[0];
+                }
+                mode.picks.push_back({found[i], edges::refFor(mode.shape, mode.found, found[i], face)});
             }
+            if (found.size() != finish.edges.size() ||
+                std::count(found.begin(), found.end(), -1) > 0)
+                qInfo() << "Some picked edges could not be found again";
         } else {
             // A size to suit the shape: about a twentieth of its smallest side.
             auto sides = m_doc.worldBounds(target).size();
@@ -2190,6 +2238,10 @@ void MainWindow::startEmboss(ObjectId target, bool editing)
             const Vec3 from{eye.x(), eye.y(), eye.z()};
             mode.spot = surfaceUnder(m_doc, target, from, {c[0] - from[0], c[1] - from[1], c[2] - from[2]},
                                      words.letterHeight / 2.0);
+            // ...in the middle of that face.
+            if (mode.spot)
+                if (const auto middle = centeredSpot(m_doc, target, *mode.spot, words, emboss::Center::Both))
+                    mode.spot = middle;
         }
     } catch (const std::exception& e) {
         qWarning() << "Emboss could not start:" << e.what();

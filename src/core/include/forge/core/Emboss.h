@@ -39,12 +39,28 @@ Vec3 upFor(const Vec3& normal);
 MeshSolid letters(const std::vector<float>& positions, const std::vector<std::uint32_t>& indices, const Vec3& point,
                   const Vec3& normal, const EmbossText& words);
 
+// Centring the words on the face they're on: across, up and down, or both, as the
+// words read (their turn included).
+enum class Center { Both, TopBottom, LeftRight };
+
+// The spot moved to the middle of the face under it: the triangles joined smoothly to
+// the one at the spot (bending less than 35° from one to the next), so a box's face or
+// a cylinder's curved side. Nothing if the middle isn't on that face.
+std::optional<SurfacePoint> centeredOnFace(const std::vector<float>& positions,
+                                           const std::vector<std::uint32_t>& indices, const SurfacePoint& spot,
+                                           double angleDegrees, Center how, double radius);
+
 }  // namespace emboss
 
 // The Emboss result for `target` (a shape on the plate) with the words at a spot on
 // it, given in plate coordinates. Not added: preview it with Document::previewMesh,
 // then add it with CombineCommand.
 Body embossBody(Document& doc, ObjectId target, const emboss::SurfacePoint& where, const EmbossText& words);
+
+// centeredOnFace for a shape in the document (or the part an Emboss result works on),
+// with the spot in plate coordinates.
+std::optional<emboss::SurfacePoint> centeredSpot(const Document& doc, ObjectId id, const emboss::SurfacePoint& spot,
+                                                 const EmbossText& words, emboss::Center how);
 // Just its recipe (for previews): changes nothing in the document.
 BooleanSpec embossSpec(const Document& doc, ObjectId target, const emboss::SurfacePoint& where,
                        const EmbossText& words);
