@@ -253,6 +253,21 @@ TEST_CASE("Rounding, fillets, chamfers and bevels", "[edges]")
         const ObjectId r = finish(stack, doc, box, f, {{0, -10, 10}});
         CHECK_THAT(4000.0 - volumeOf(doc.shape(r)), WithinRel(20 * 2 * 2 / 2.0, 1e-6));
     }
+    SECTION("a bevel keeps its face when the box grows")
+    {
+        const ObjectId box = add(stack, doc, BoxSpec{20, 20, 10});
+        const TopoDS_Shape shape = pickableShape(doc, box);
+        const auto top = edges::faceUnder(shape, {0, 0, 50}, {0, 0, -1});
+        REQUIRE(top);
+        EdgeFinish f;
+        f.kind = EdgeFinishKind::Bevel;
+        f.size = 6.0;
+        f.angle = 30.0;
+        const ObjectId r = finish(stack, doc, box, f, {{0, -10, 10}}, {top->face});
+        stack.execute(std::make_unique<SetSpecCommand>(box, PrimitiveSpec{BoxSpec{20, 20, 30}}));
+        // Still 6 across the top, sloping 30° from it (not 6 down the front).
+        CHECK_THAT(20 * 20 * 30 - volumeOf(doc.shape(r)), WithinRel(20 * 6 * 6 * std::tan(pi / 6) / 2.0, 1e-3));
+    }
     SECTION("a bevel measured from the top face")
     {
         const ObjectId box = add(stack, doc, BoxSpec{20, 20, 10});
@@ -331,6 +346,30 @@ TEST_CASE("Edge finishes stay put when things change", "[edges]")
         stack.execute(std::make_unique<SetSpecCommand>(box, PrimitiveSpec{taller}));
         const double now = volumeOf(doc.shape(r));
         CHECK_THAT(now, WithinRel(v + 20 * 20 * 4, 1e-6));  // the same two edges, still rounded
+    }
+    SECTION("the box under it grows a lot taller, one mm at a time (the 28 mm case)")
+    {
+        for (double h = 11; h <= 40; h += 1) {
+            stack.execute(std::make_unique<SetSpecCommand>(box, PrimitiveSpec{BoxSpec{20, 20, h}}));
+            INFO("height " << h);
+            REQUIRE_FALSE(doc.problemWith(r));
+            CHECK_THAT(volumeOf(doc.shape(r)), WithinRel(v + 20 * 20 * (h - 10), 1e-6));
+        }
+        // The tool finds the same two edges again, at the new top.
+        const auto found = pickedEdges(doc, r);
+        REQUIRE(found.size() == 2);
+        const auto all = edges::analyse(pickableShape(doc, r));
+        for (int e : found) {
+            REQUIRE(e >= 0);
+            CHECK_THAT(all.edges[std::size_t(e)].mid[2], WithinAbs(40.0, 1e-6));
+        }
+    }
+    SECTION("wider and deeper too")
+    {
+        stack.execute(std::make_unique<SetSpecCommand>(box, PrimitiveSpec{BoxSpec{60, 45, 33}}));
+        REQUIRE_FALSE(doc.problemWith(r));
+        // Front (60 long) and right (45 long) top edges, still rounded.
+        CHECK_THAT(volumeOf(doc.shape(r)), WithinRel(60 * 45 * 33 - (60 + 45) * (4 - std::numbers::pi), 1e-4));
     }
     SECTION("resizing evenly")
     {

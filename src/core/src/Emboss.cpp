@@ -6,6 +6,7 @@
 #include "forge/core/Text.h"
 
 #include <algorithm>
+#include <numbers>
 #include <cmath>
 #include <limits>
 #include <stdexcept>
@@ -464,6 +465,94 @@ MeshSolid letters(const std::vector<float>& positions, const std::vector<std::ui
     return solids.size() == 1 ? solids.front() : meshkernel::merged(solids);
 }
 
+
+std::optional<SurfacePoint> centeredOnFace(const std::vector<float>& positions,
+                                           const std::vector<std::uint32_t>& indices, const SurfacePoint& spot,
+                                           double angleDegrees, Center how, double radius)
+{
+    const Surface s{positions, indices};
+    const Vec3 n = unit(spot.normal);
+    // The triangle at the spot: where a short ray down onto it lands.
+    std::int64_t seed = -1;
+    {
+        double best = 1e300;
+        const double lift = 1e-3 + radius * 1e-3;
+        const Vec3 from = add(spot.point, mul(n, lift));
+        for (std::size_t t = 0; t < s.triangles(); ++t) {
+            const double hit = rayTriangle(from, mul(n, -1.0), s.corner(t, 0), s.corner(t, 1), s.corner(t, 2));
+            if (hit > -1e-9 && std::abs(hit - lift) < best) {
+                best = std::abs(hit - lift);
+                seed = std::int64_t(t);
+            }
+        }
+        if (seed < 0)
+            return std::nullopt;
+    }
+    // The face: spread across edges where the surface bends less than 35°.
+    std::vector<std::pair<std::uint64_t, std::uint32_t>> edges;
+    edges.reserve(indices.size());
+    for (std::size_t t = 0; t < s.triangles(); ++t)
+        for (int k = 0; k < 3; ++k) {
+            std::uint64_t a = indices[3 * t + k], b = indices[3 * t + (k + 1) % 3];
+            if (a > b)
+                std::swap(a, b);
+            edges.emplace_back(a << 32 | b, std::uint32_t(t));
+        }
+    std::sort(edges.begin(), edges.end());
+    std::vector<char> inFace(s.triangles(), 0);
+    std::vector<std::uint32_t> face{std::uint32_t(seed)}, todo{std::uint32_t(seed)};
+    inFace[std::size_t(seed)] = 1;
+    while (!todo.empty()) {
+        const std::uint32_t t = todo.back();
+        todo.pop_back();
+        const Vec3 nt = s.areaNormal(t);
+        const double lt = length(nt);
+        for (int k = 0; k < 3; ++k) {
+            std::uint64_t a = indices[3 * t + k], b = indices[3 * t + (k + 1) % 3];
+            if (a > b)
+                std::swap(a, b);
+            const std::uint64_t key = a << 32 | b;
+            for (auto it = std::lower_bound(edges.begin(), edges.end(), std::make_pair(key, std::uint32_t(0)));
+                 it != edges.end() && it->first == key; ++it) {
+                const std::uint32_t o = it->second;
+                if (inFace[o])
+                    continue;
+                const Vec3 no = s.areaNormal(o);
+                const double lo = length(no);
+                if (lt > 0 && lo > 0 && dot(nt, no) / (lt * lo) > kCrease) {
+                    inFace[o] = 1;
+                    face.push_back(o);
+                    todo.push_back(o);
+                }
+            }
+        }
+    }
+    // How far the face reaches across and up, as the words read.
+    const Vec3 up0 = upFor(n), right0 = cross(up0, n);
+    const double a = angleDegrees * std::numbers::pi / 180.0;
+    const Vec3 right = add(mul(right0, std::cos(a)), mul(up0, std::sin(a)));
+    const Vec3 up = add(mul(right0, -std::sin(a)), mul(up0, std::cos(a)));
+    double u0 = 1e300, u1 = -1e300, v0 = 1e300, v1 = -1e300, w1 = -1e300;
+    for (std::uint32_t t : face)
+        for (int k = 0; k < 3; ++k) {
+            const Vec3 d = sub(s.corner(t, k), spot.point);
+            u0 = std::min(u0, dot(d, right));
+            u1 = std::max(u1, dot(d, right));
+            v0 = std::min(v0, dot(d, up));
+            v1 = std::max(v1, dot(d, up));
+            w1 = std::max(w1, dot(d, n));
+        }
+    const double du = how == Center::TopBottom ? 0.0 : (u0 + u1) / 2.0;
+    const double dv = how == Center::LeftRight ? 0.0 : (v0 + v1) / 2.0;
+    // Down onto the face from above that middle.
+    std::vector<std::uint32_t> faceIdx;
+    faceIdx.reserve(face.size() * 3);
+    for (std::uint32_t t : face)
+        faceIdx.insert(faceIdx.end(), {indices[3 * t], indices[3 * t + 1], indices[3 * t + 2]});
+    const Vec3 above = add(add(add(spot.point, mul(right, du)), mul(up, dv)), mul(n, std::max(w1, 0.0) + 1.0));
+    return surfaceAt(positions, faceIdx, above, mul(n, -1.0), radius);
+}
+
 }  // namespace emboss
 
 namespace {
@@ -522,6 +611,22 @@ BooleanSpec embossSpec(const Document& doc, ObjectId target, const emboss::Surfa
     const Vec3 centre = toStep.apply(Vec3{c[0], c[1], c[2]});
     spec.pivot = {centre[0], centre[1], centre[2]};
     return spec;
+}
+
+std::optional<emboss::SurfacePoint> centeredSpot(const Document& doc, ObjectId id, const emboss::SurfacePoint& spot,
+                                                 const EmbossText& words, emboss::Center how)
+{
+    const ObjectId part = embossedPart(doc, id);
+    std::vector<float> pos;
+    std::vector<std::uint32_t> idx;
+    surfaceOf(doc, part, pos, idx);
+    const Transform toPlate = doc.worldTransform(part);
+    const Transform toLocal = toPlate.inverse();
+    const emboss::SurfacePoint local{toLocal.apply(spot.point), unit(toLocal.applyDirection(spot.normal))};
+    const auto moved = emboss::centeredOnFace(pos, idx, local, words.angle, how, words.letterHeight / 2.0);
+    if (!moved)
+        return std::nullopt;
+    return emboss::SurfacePoint{toPlate.apply(moved->point), unit(toPlate.applyDirection(moved->normal))};
 }
 
 Body embossBody(Document& doc, ObjectId target, const emboss::SurfacePoint& where, const EmbossText& words)

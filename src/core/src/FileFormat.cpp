@@ -63,6 +63,8 @@ json bodyToJson(const Body& b)
             j["planePoint"] = b.boolean->planePoint;
             j["planeNormal"] = b.boolean->planeNormal;
         }
+        if (b.boolean->throughAll)
+            j["throughAll"] = true;
         if (b.suppressed)
             j["suppressed"] = true;
         if (b.rolledBack)
@@ -71,7 +73,14 @@ json bodyToJson(const Body& b)
             static const char* kinds[] = {"rounding", "fillet", "chamfer", "bevel"};
             json picks = json::array();
             for (const EdgeRef& r : f->edges)
-                picks.push_back(json{{"point", r.point}, {"facePoint", r.facePoint}});
+            {
+                json pick{{"point", r.point}, {"facePoint", r.facePoint}};
+                if (r.located) {
+                    pick["relative"] = r.relative;
+                    pick["faceNormal"] = r.faceNormal;
+                }
+                picks.push_back(pick);
+            }
             j["edges"] = json{{"kind", kinds[int(f->kind)]}, {"size", f->size}, {"angle", f->angle}, {"picks", picks}};
         }
         if (const auto& e = b.boolean->emboss) {
@@ -223,6 +232,11 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
                 };
                 readPoint("point", r.point);
                 readPoint("facePoint", r.facePoint);
+                if (p.contains("relative") && p.contains("faceNormal")) {
+                    readPoint("relative", r.relative);
+                    readPoint("faceNormal", r.faceNormal);
+                    r.located = true;
+                }
                 f.edges.push_back(r);
             }
             spec.edges = std::move(f);
@@ -243,6 +257,7 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
             words.angle = e->value("angle", 0.0);
             spec.emboss = std::move(words);
         }
+        spec.throughAll = j.value("throughAll", false);
         b.boolean = std::move(spec);
         b.suppressed = j.value("suppressed", false);
         b.rolledBack = j.value("rolledBack", false);

@@ -68,6 +68,23 @@ EmbossPanel::EmbossPanel(QWidget* parent) : QWidget(parent)
     kindLayout->addWidget(m_engraved);
     layout->addWidget(kindGroup);
 
+    auto* centerGroup = new QGroupBox(tr("Center on the face"));
+    auto* centerLayout = new QHBoxLayout(centerGroup);
+    const struct {
+        QString label, tip;
+    } centers[] = {
+        {tr("All"), tr("Move the words to the middle of the face they're on")},
+        {tr("Top-Bottom"), tr("Move the words up or down to the middle of the face, as the words read")},
+        {tr("Left-Right"), tr("Move the words across to the middle of the face, as the words read")},
+    };
+    for (int i = 0; i < 3; ++i) {
+        auto* button = new QPushButton(centers[i].label);
+        button->setToolTip(centers[i].tip);
+        connect(button, &QPushButton::clicked, this, [this, i] { emit centerRequested(i); });
+        centerLayout->addWidget(button);
+    }
+    layout->addWidget(centerGroup);
+
     auto* hint = new QLabel(tr("Click anywhere on the shape to move the words there. They follow the "
                                "surface, so they bend round curves."));
     hint->setWordWrap(true);

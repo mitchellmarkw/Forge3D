@@ -7,6 +7,9 @@
 #include "forge/core/Edges.h"
 #include "forge/core/FileFormat.h"
 #include "forge/core/History.h"
+#include "forge/core/Export.h"
+#include "forge/core/Import.h"
+#include "forge/core/MeshKernel.h"
 
 #include <BRepGProp.hxx>
 #include <GProp_GProps.hxx>
@@ -102,7 +105,7 @@ Built build(CommandStack& stack, Document& doc)
     return b;
 }
 
-const double kBox = 4000.0;
+const double kBox = 4000.0;  // a 20 x 20 x 10 box
 const double kRound = 20 * (4.0 - pi);  // one 20 mm edge at R2
 const double kHole = pi * 9 * 10;
 
@@ -304,4 +307,87 @@ TEST_CASE("Deleting a step and changing a combine", "[history]")
         CHECK_THAT(volumeOf(doc, b.cut), WithinRel(kHole, 1e-4));
         CHECK(history::describe(doc, b.cut) == "overlap with Cylinder 1");
     }
+}
+
+TEST_CASE("Subtract through all", "[history][through]")
+{
+    Document doc;
+    CommandStack stack(doc);
+    const ObjectId box = add(stack, doc, BoxSpec{20, 20, 10});
+    const ObjectId peg = add(stack, doc, CylinderSpec{3, 4}, 0, 0, 3);  // a short peg inside: no hole
+    Body cut;
+    cut.id = doc.allocateId();
+    cut.name = "Subtract";
+    cut.boolean = BooleanSpec{BooleanOp::Subtract, {box, peg}};
+    cut.boolean->throughAll = true;
+    stack.execute(std::make_unique<CombineCommand>(cut));
+    CHECK_THAT(volumeOf(doc, cut.id), WithinRel(kBox - pi * 9 * 10, 1e-6));
+    CHECK(history::describe(doc, cut.id) == "minus Cylinder 1 (through all)");
+
+    SECTION("still through when the box grows")
+    {
+        stack.execute(std::make_unique<SetSpecCommand>(box, PrimitiveSpec{BoxSpec{20, 20, 30}}));
+        CHECK_THAT(volumeOf(doc, cut.id), WithinRel(20 * 20 * 30 - pi * 9 * 30, 1e-6));
+    }
+    SECTION("off: just the short peg's pocket")
+    {
+        Body before = *doc.find(cut.id), after = before;
+        after.boolean->throughAll = false;
+        stack.execute(std::make_unique<EditBodyCommand>(before, after, "Not through"));
+        CHECK_THAT(volumeOf(doc, cut.id), WithinRel(kBox - pi * 9 * 4, 1e-6));
+    }
+    SECTION("a peg lying on its side goes through sideways")
+    {
+        Placement p = doc.find(peg)->placement;
+        p.rotationX = 90;
+        p.z = 5;
+        stack.execute(std::make_unique<SetPlacementCommand>(peg, p, false));
+        CHECK_THAT(volumeOf(doc, cut.id), WithinRel(kBox - pi * 9 * 20, 1e-4));
+    }
+    SECTION("saved and loaded")
+    {
+        std::random_device rd;
+        const fs::path dir = fs::temp_directory_path() / ("forge3d-through-" + std::to_string(rd()));
+        fs::create_directories(dir);
+        file::save(doc, dir / "t.f3d", "test");
+        Document loaded;
+        loaded.replaceAll(file::load(dir / "t.f3d"));
+        CHECK(loaded.find(cut.id)->boolean->throughAll);
+        std::error_code ec;
+        fs::remove_all(dir, ec);
+    }
+}
+
+TEST_CASE("Subtract through all on an imported mesh", "[history][through]")
+{
+    // A 20 x 20 x 10 box brought in as triangles.
+    Document scratch;
+    CommandStack s2(scratch);
+    const ObjectId b0 = add(s2, scratch, BoxSpec{20, 20, 10});
+    const ExportMesh m = exportMeshes(scratch, {b0}).front();
+    RawMesh raw;
+    raw.name = "Scan";
+    raw.positions = m.positions;
+    raw.indices = m.indices;
+    RepairReport report;
+    Vec3 offset;
+    const auto data = repairMesh(raw, report, offset);
+    MeshSpec spec;
+    spec.data = data;
+    spec.width = data->size[0];
+    spec.depth = data->size[1];
+    spec.height = data->size[2];
+
+    Document doc;
+    CommandStack stack(doc);
+    const ObjectId scan = add(stack, doc, spec);
+    const ObjectId peg = add(stack, doc, CylinderSpec{3, 4}, 0, 0, 3);
+    Body cut;
+    cut.id = doc.allocateId();
+    cut.name = "Subtract";
+    cut.boolean = BooleanSpec{BooleanOp::Subtract, {scan, peg}};
+    cut.boolean->throughAll = true;
+    stack.execute(std::make_unique<CombineCommand>(cut));
+    REQUIRE(doc.usesMeshEngine(cut.id));
+    CHECK_THAT(meshkernel::volume(doc.meshSolid(cut.id)), WithinRel(kBox - pi * 9 * 10, 2e-3));
 }

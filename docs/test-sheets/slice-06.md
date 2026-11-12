@@ -33,6 +33,19 @@ then the cylinder, **Subtract**.
 | 13 | Save, close, reopen (rolled back, with a step off) | Same steps, same bar, same off step | |
 | 14 | Merge two separate boxes; open the result | 1. Box 1, 2. Merge 1 with Box 2 under it | |
 
+### Fixes from the first test
+
+| # | Do this | You should see | Result |
+| --- | --- | --- | --- |
+| 15 | Box with its top edges rounded: make the box taller 1 mm at a time up to 40 mm (then wider) | Stays rounded at the new top every time | |
+| 16 | Then **Change the edges...** on the rounding | The four top edges are already picked | |
+| 17 | Select the Subtract step, tick **Through all** in Properties | The cylinder's hole goes right through; make the box taller: still right through | |
+| 18 | Untick it | Back to the cylinder's own length | |
+| 19 | Lay the cylinder on its side (rotate 90° around X), Through all on | A hole right through sideways | |
+| 20 | Open **Emboss** on a box | The words start in the middle of the face you're looking at | |
+| 21 | Click near a corner, then **Center on the face: Top-Bottom**, then **Left-Right**, then move and **All** | Each moves the words to the middle that way only (All: both). Turn the words 90° and Left-Right follows the words' direction | |
+| 22 | Emboss on a cylinder's side, **Top-Bottom** | Halfway up the side | |
+
 ## Send back
 
 "All pass" or the failures (screenshots of the Objects panel help), and `forge3d.log` if

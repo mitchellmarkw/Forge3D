@@ -31,6 +31,7 @@ struct ShapeEdge {
     Vec3 mid{0, 0, 0};           // a point half way along it
     Bend bend = Bend::Smooth;
     std::array<int, 2> faces{-1, -1};  // the two faces it joins (indices into ShapeEdges::faceEdges)
+    std::array<Vec3, 2> normals{};     // which way each of those faces points, at `mid`
 };
 
 struct ShapeEdges {
@@ -70,6 +71,15 @@ private:
 EdgeRef refFor(const TopoDS_Shape& shape, const ShapeEdges& found, int edge, int face);
 // Which edge a reference means (-1 if none is there any more).
 int edgeFor(const ShapeEdges& found, const EdgeRef& ref, double tolerance);
+// Notes where each reference sits within `part` (its box) and which way its face points
+// (EdgeRef::located), so it can be found again when the part is resized. `part` and the
+// references in the same coordinates.
+void locate(const TopoDS_Shape& part, std::vector<EdgeRef>& refs);
+// The edge each reference means now, in `found` (the edges of `shape`), or -1: the edge
+// at the same place; else the one at the same spot in the shape's box (it was resized);
+// else the nearest one this kind suits, if close. No edge is used twice.
+std::vector<int> match(const TopoDS_Shape& shape, const ShapeEdges& found, const std::vector<EdgeRef>& refs,
+                       EdgeFinishKind kind);
 
 // The shape with the finish applied. Throws GeometryError with a plain message when
 // it can't be done (a radius too big for the faces next to an edge, say).
@@ -83,6 +93,9 @@ BooleanSpec edgesSpec(const Document& doc, ObjectId target, const EdgeFinish& fi
 // An Edges result's finish with its picks in plate coordinates, and the result with a
 // new finish given in plate coordinates.
 EdgeFinish edgesInPlate(const Document& doc, ObjectId result);
+// Which of the edges of pickableShape(doc, result) an Edges result's picks mean now
+// (-1: not found), matched as the result itself does.
+std::vector<int> pickedEdges(const Document& doc, ObjectId result);
 Body withEdges(const Document& doc, ObjectId result, const EdgeFinish& inPlate);
 // The shape in plate coordinates, as the Edges tool picks on it: the target's own
 // shape, or the shape under the finish when changing an Edges result.
