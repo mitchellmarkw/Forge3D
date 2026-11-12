@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.10.0 — Slice 5a: Export and Send to Slicer (2026-11-11)
+
+- **Export** (File menu, toolbar, Ctrl+E): saves the selected shapes, or everything if
+  nothing is selected, as **3MF** (best for slicers: keeps names and millimetres),
+  **STL** (binary) or **OBJ**. Fine triangles (within 0.01 mm of the true surface);
+  points shared between triangles so the files are watertight.
+- **Send to Slicer** (File menu, toolbar): writes a 3MF to a temporary folder and opens
+  it in your slicer. The first time, pick from the slicers found on the PC (PrusaSlicer,
+  Bambu Studio, OrcaSlicer, Cura, Creality Print, SuperSlicer), the program Windows uses
+  for .3mf files, or browse to any program. **File > Choose Slicer...** changes it.
+- If a shape's surface isn't closed, Export says which one.
+- The folder and file type used last are remembered.
+- Core: Export.h (`exportMeshes`, `writeMeshes`, `formatForPath`).
+- 138 unit tests (4 new); the 3MF files were also checked with an independent reader
+  (trimesh): watertight, right way out, names kept.
+
 ## 0.9.0 — Slice 4c: Duplicate, Mirror, Group, move several (2026-11-11)
 
 - **Duplicate** (Ctrl+D, toolbar): copies of the selected shapes, placed to the right of

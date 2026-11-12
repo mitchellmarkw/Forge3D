@@ -7,6 +7,7 @@
 #include "SplitPanel.h"
 #include "Viewport.h"
 
+#include "forge/core/Export.h"
 #include "forge/core/FileFormat.h"
 #include "forge/core/Picking.h"
 #include "forge/core/Primitives.h"
@@ -23,6 +24,8 @@
 #include <QDockWidget>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QInputDialog>
+#include <QProcess>
 #include <QKeySequence>
 #include <QLabel>
 #include <QTreeWidget>
@@ -164,6 +167,19 @@ void MainWindow::createActions()
     m_save = new QAction(tr("&Save"), this);
     m_save->setShortcut(QKeySequence::Save);
     connect(m_save, &QAction::triggered, this, &MainWindow::save);
+
+    m_export = new QAction(tr("&Export..."), this);
+    m_export->setShortcut(Qt::CTRL | Qt::Key_E);
+    m_export->setToolTip(tr("Export (Ctrl+E): save the selected shapes (or everything) as STL, 3MF or OBJ for "
+                            "printing or other programs"));
+    connect(m_export, &QAction::triggered, this, &MainWindow::exportShapes);
+    m_sendToSlicer = new QAction(tr("Send to Slicer"), this);
+    m_sendToSlicer->setToolTip(tr("Send to Slicer: open the selected shapes (or everything) in your slicer, "
+                                  "ready to print"));
+    connect(m_sendToSlicer, &QAction::triggered, this, &MainWindow::sendToSlicer);
+    m_chooseSlicer = new QAction(tr("Choose Slicer..."), this);
+    m_chooseSlicer->setToolTip(tr("Pick which slicer Send to Slicer opens"));
+    connect(m_chooseSlicer, &QAction::triggered, this, [this] { chooseSlicer(); });
 
     m_saveAs = new QAction(tr("Save &As..."), this);
     m_saveAs->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_S));
@@ -368,6 +384,10 @@ void MainWindow::createMenus()
     file->addAction(m_save);
     file->addAction(m_saveAs);
     file->addSeparator();
+    file->addAction(m_export);
+    file->addAction(m_sendToSlicer);
+    file->addAction(m_chooseSlicer);
+    file->addSeparator();
     file->addAction(m_quit);
 
     QMenu* edit = menuBar()->addMenu(tr("&Edit"));
@@ -423,6 +443,8 @@ void MainWindow::createToolBar()
     bar->setToolButtonStyle(Qt::ToolButtonTextOnly);
     bar->addAction(m_open);
     bar->addAction(m_save);
+    bar->addAction(m_export);
+    bar->addAction(m_sendToSlicer);
     bar->addSeparator();
     bar->addAction(m_undo);
     bar->addAction(m_redo);
@@ -1689,6 +1711,239 @@ bool MainWindow::save()
     return m_filePath.isEmpty() ? saveAs() : saveTo(m_filePath);
 }
 
+// ---- Export / print -------------------------------------------------------------
+
+std::vector<ObjectId> MainWindow::exportTargets() const
+{
+    // The selected shapes (a selected part counts as the shape it is in), else everything.
+    std::vector<ObjectId> ids;
+    for (ObjectId id : m_selection) {
+        ObjectId top = id;
+        while (m_doc.parentOf(top) != kInvalidId)
+            top = m_doc.parentOf(top);
+        if (std::find(ids.begin(), ids.end(), top) == ids.end())
+            ids.push_back(top);
+    }
+    return ids.empty() ? m_doc.topLevelIds() : ids;
+}
+
+namespace {
+
+// Builds the triangles (can take a moment for big shapes) with a busy cursor.
+std::vector<ExportMesh> buildExportMeshes(const Document& doc, const std::vector<ObjectId>& ids)
+{
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    try {
+        auto meshes = exportMeshes(doc, ids);
+        QApplication::restoreOverrideCursor();
+        return meshes;
+    } catch (...) {
+        QApplication::restoreOverrideCursor();
+        throw;
+    }
+}
+
+QString leakWarning(const std::vector<ExportMesh>& meshes)
+{
+    QStringList open;
+    for (const ExportMesh& m : meshes)
+        if (m.openEdges > 0)
+            open << QString::fromStdString(m.name);
+    if (open.isEmpty())
+        return {};
+    return QObject::tr("These shapes have small gaps in their surface: %1. Most slicers still print them, "
+                       "but check the preview.")
+        .arg(open.join(QStringLiteral(", ")));
+}
+
+}  // namespace
+
+void MainWindow::exportShapes()
+{
+    const std::vector<ObjectId> ids = exportTargets();
+    if (ids.empty())
+        return;
+    QSettings settings;
+    const QString folder = settings.value(QStringLiteral("export/folder"), startFolder()).toString();
+    const QString base = m_filePath.isEmpty() ? (ids.size() == 1 ? QString::fromStdString(m_doc.find(ids[0])->name)
+                                                                 : tr("Model"))
+                                              : QFileInfo(m_filePath).completeBaseName();
+    const QString filters = tr("3MF - best for slicers (*.3mf);;STL (*.stl);;OBJ (*.obj)");
+    QString filter = settings.value(QStringLiteral("export/filter")).toString();
+    const QString ext = filter.contains(QStringLiteral("*.stl")) ? QStringLiteral(".stl")
+                        : filter.contains(QStringLiteral("*.obj")) ? QStringLiteral(".obj")
+                                                                     : QStringLiteral(".3mf");
+    const QString what = ids.size() == 1 ? tr("Export '%1'").arg(QString::fromStdString(m_doc.find(ids[0])->name))
+                                         : tr("Export %1 shapes").arg(ids.size());
+    QString path = QFileDialog::getSaveFileName(this, what, QDir(folder).filePath(base + ext), filters, &filter);
+    if (path.isEmpty())
+        return;
+    // Add the extension of the chosen type if the name has none we know.
+    const QString lower = path.toLower();
+    if (!lower.endsWith(QLatin1String(".stl")) && !lower.endsWith(QLatin1String(".3mf")) &&
+        !lower.endsWith(QLatin1String(".obj")))
+        path += filter.contains(QStringLiteral("*.stl")) ? QStringLiteral(".stl")
+                : filter.contains(QStringLiteral("*.obj")) ? QStringLiteral(".obj")
+                                                             : QStringLiteral(".3mf");
+    settings.setValue(QStringLiteral("export/folder"), QFileInfo(path).absolutePath());
+    settings.setValue(QStringLiteral("export/filter"), filter);
+
+    try {
+        const auto meshes = buildExportMeshes(m_doc, ids);
+        writeMeshes(meshes, toPath(path), formatForPath(toPath(path)));
+        std::size_t triangles = 0;
+        for (const auto& m : meshes)
+            triangles += m.triangleCount();
+        qInfo().noquote() << "Exported" << ids.size() << "shape(s)," << triangles << "triangles to" << path;
+        statusBar()->showMessage(tr("Exported %1 to %2 (%3 triangles)")
+                                     .arg(ids.size() == 1 ? tr("1 shape") : tr("%1 shapes").arg(ids.size()))
+                                     .arg(QDir::toNativeSeparators(path))
+                                     .arg(triangles),
+                                 8000);
+        if (const QString warning = leakWarning(meshes); !warning.isEmpty())
+            QMessageBox::information(this, tr("Forge3D"), warning);
+    } catch (const std::exception& e) {
+        qWarning() << "Export failed:" << e.what();
+        QMessageBox::warning(this, tr("Forge3D"), tr("Export did not work:\n%1").arg(QString::fromUtf8(e.what())));
+    }
+}
+
+namespace {
+
+struct SlicerChoice {
+    QString label;
+    QString path;  // empty: the default app for .3mf files
+};
+
+// Slicers installed in their usual places on Windows.
+std::vector<SlicerChoice> findSlicers()
+{
+    std::vector<SlicerChoice> found;
+    const QStringList roots{qEnvironmentVariable("ProgramFiles", QStringLiteral("C:/Program Files")),
+                            qEnvironmentVariable("ProgramFiles(x86)"),
+                            QDir(qEnvironmentVariable("LOCALAPPDATA")).filePath(QStringLiteral("Programs"))};
+    struct Known {
+        const char* name;
+        const char* folderPattern;  // a folder under Program Files (may contain *)
+        const char* exe;
+    };
+    const Known known[] = {
+        {"PrusaSlicer", "Prusa3D/PrusaSlicer", "prusa-slicer.exe"},
+        {"Bambu Studio", "Bambu Studio", "bambu-studio.exe"},
+        {"OrcaSlicer", "OrcaSlicer", "orca-slicer.exe"},
+        {"UltiMaker Cura", "UltiMaker Cura*", "UltiMaker-Cura.exe"},
+        {"Ultimaker Cura", "Ultimaker Cura*", "Ultimaker-Cura.exe"},
+        {"Creality Print", "Creality Print*", "CrealityPrint.exe"},
+        {"SuperSlicer", "SuperSlicer", "superslicer.exe"},
+    };
+    for (const QString& root : roots) {
+        if (root.isEmpty() || !QDir(root).exists())
+            continue;
+        for (const Known& k : known) {
+            const QString pattern = QString::fromLatin1(k.folderPattern);
+            const int slash = pattern.lastIndexOf(QLatin1Char('/'));
+            const QDir parent(QDir(root).filePath(slash < 0 ? QString() : pattern.left(slash)));
+            const QString leaf = slash < 0 ? pattern : pattern.mid(slash + 1);
+            for (const QString& folder : parent.entryList({leaf}, QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name)) {
+                const QString exe = QDir(parent.filePath(folder)).filePath(QString::fromLatin1(k.exe));
+                if (QFileInfo::exists(exe))
+                    found.push_back({QString::fromLatin1(k.name) + QStringLiteral(" (") + folder + QLatin1Char(')'),
+                                     QDir::cleanPath(exe)});
+            }
+        }
+    }
+    return found;
+}
+
+}  // namespace
+
+bool MainWindow::chooseSlicer()
+{
+    std::vector<SlicerChoice> choices = findSlicers();
+    choices.push_back({tr("The program Windows opens .3mf files with"), QString()});
+    const QString browse = tr("Browse for a slicer program...");
+    QStringList labels;
+    for (const auto& c : choices)
+        labels << c.label;
+    labels << browse;
+
+    QSettings settings;
+    const QString current = settings.value(QStringLiteral("slicer/path")).toString();
+    int start = 0;
+    for (int i = 0; i < static_cast<int>(choices.size()); ++i)
+        if (choices[static_cast<std::size_t>(i)].path == current && settings.contains(QStringLiteral("slicer/path")))
+            start = i;
+    bool ok = false;
+    const QString picked = QInputDialog::getItem(this, tr("Choose Slicer"),
+                                                 tr("Send to Slicer opens your shapes in:"), labels, start, false, &ok);
+    if (!ok)
+        return false;
+    QString path;
+    if (picked == browse) {
+        path = QFileDialog::getOpenFileName(this, tr("Choose your slicer program"),
+                                            qEnvironmentVariable("ProgramFiles", QStringLiteral("C:/Program Files")),
+                                            tr("Programs (*.exe);;All files (*)"));
+        if (path.isEmpty())
+            return false;
+    } else {
+        path = choices[static_cast<std::size_t>(labels.indexOf(picked))].path;
+    }
+    settings.setValue(QStringLiteral("slicer/path"), path);
+    qInfo().noquote() << "Slicer:" << (path.isEmpty() ? QStringLiteral("default app for .3mf") : path);
+    statusBar()->showMessage(tr("Send to Slicer will use: %1").arg(path.isEmpty() ? picked : QDir::toNativeSeparators(path)),
+                             6000);
+    return true;
+}
+
+void MainWindow::sendToSlicer()
+{
+    const std::vector<ObjectId> ids = exportTargets();
+    if (ids.empty())
+        return;
+    QSettings settings;
+    if (!settings.contains(QStringLiteral("slicer/path")) && !chooseSlicer())
+        return;
+    QString slicer = settings.value(QStringLiteral("slicer/path")).toString();
+    if (!slicer.isEmpty() && !QFileInfo::exists(slicer)) {
+        QMessageBox::information(this, tr("Forge3D"),
+                                 tr("The slicer chosen before can't be found:\n%1\nPlease choose it again.")
+                                     .arg(QDir::toNativeSeparators(slicer)));
+        if (!chooseSlicer())
+            return;
+        slicer = settings.value(QStringLiteral("slicer/path")).toString();
+    }
+
+    // A 3MF in a temporary folder (slicers read 3MF best: names, millimetres).
+    const QString folder = QDir(QStandardPaths::writableLocation(QStandardPaths::TempLocation)).filePath(
+        QStringLiteral("Forge3D"));
+    QDir().mkpath(folder);
+    QString base = m_filePath.isEmpty() ? tr("Forge3D model") : QFileInfo(m_filePath).completeBaseName();
+    const QString path = QDir(folder).filePath(base + QStringLiteral(".3mf"));
+    try {
+        const auto meshes = buildExportMeshes(m_doc, ids);
+        writeMeshes(meshes, toPath(path), ExportFormat::ThreeMf);
+        if (const QString warning = leakWarning(meshes); !warning.isEmpty())
+            statusBar()->showMessage(warning, 10000);
+    } catch (const std::exception& e) {
+        QMessageBox::warning(this, tr("Forge3D"), tr("Could not prepare the file for the slicer:\n%1")
+                                                      .arg(QString::fromUtf8(e.what())));
+        return;
+    }
+
+    const bool started = slicer.isEmpty() ? QDesktopServices::openUrl(QUrl::fromLocalFile(path))
+                                          : QProcess::startDetached(slicer, {QDir::toNativeSeparators(path)});
+    qInfo().noquote() << "Send to slicer:" << path << (started ? "opened" : "FAILED to open");
+    if (!started)
+        QMessageBox::warning(this, tr("Forge3D"),
+                             tr("Could not start the slicer. The file is ready at:\n%1\n\nUse File > Choose Slicer to "
+                                "pick another program.")
+                                 .arg(QDir::toNativeSeparators(path)));
+    else
+        statusBar()->showMessage(tr("Sent %1 to the slicer").arg(ids.size() == 1 ? tr("1 shape")
+                                                                                 : tr("%1 shapes").arg(ids.size())),
+                                 6000);
+}
+
 bool MainWindow::saveAs()
 {
     const QString suggested = m_filePath.isEmpty()
@@ -1858,6 +2113,8 @@ void MainWindow::refreshScene()
         a->setEnabled(anySelected && allTopLevel && !m_splitMode.active);
     m_group->setEnabled(m_selection.size() >= 2 && allTopLevel);
     m_paste->setEnabled(!m_clipboard.empty() && !m_splitMode.active);
+    m_export->setEnabled(!m_doc.empty());
+    m_sendToSlicer->setEnabled(!m_doc.empty());
     m_split->setEnabled(m_selection.size() == 1 && allTopLevel && !m_splitMode.active);
     m_clear->setEnabled(!m_doc.empty());
 }
