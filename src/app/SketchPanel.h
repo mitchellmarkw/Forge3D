@@ -19,11 +19,26 @@ class SketchPanel : public QWidget {
 public:
     explicit SketchPanel(QWidget* parent = nullptr);
 
-    // pocketAllowed: sketching on a shape's face (or changing a pocket), so it can cut in.
-    void start(const QString& title, bool pocketAllowed, bool pocket, double length, bool otherWay, bool bothWays,
-               bool throughAll, bool editing);
-    bool pocket() const;
+    // What Finish makes. Pocket and Groove cut into the shape sketched on.
+    enum class Make { Pad, Pocket, Revolve, Groove };
+    struct Options {
+        Make make = Make::Pad;
+        double length = 10.0;
+        double angle = 360.0;
+        bool otherWay = false;
+        bool bothWays = false;
+        bool throughAll = false;
+    };
+    // onFace: sketching on a shape's face, so it can cut in. editing: changing one made
+    // before (it stays adding, or cutting).
+    void start(const QString& title, bool onFace, bool editing, const Options& options);
+    // Only placing points (a Hole's spots): no Make section.
+    void startPositions(const QString& title);
+    Make make() const;
+    bool pocket() const { return make() == Make::Pocket || make() == Make::Groove; }
+    bool revolve() const { return make() == Make::Revolve || make() == Make::Groove; }
     double length() const;
+    double angle() const;
     bool otherWay() const;
     bool bothWays() const;
     bool throughAll() const;
@@ -44,6 +59,11 @@ private:
     QComboBox* m_make = nullptr;
     QLabel* m_lengthLabel = nullptr;
     QDoubleSpinBox* m_length = nullptr;
+    QLabel* m_angleLabel = nullptr;
+    QDoubleSpinBox* m_angle = nullptr;
+    QLabel* m_axisHelp = nullptr;
+    QWidget* m_makeGroup = nullptr;
+    QLabel* m_help = nullptr;
     QCheckBox* m_otherWay = nullptr;
     QCheckBox* m_bothWays = nullptr;
     QCheckBox* m_throughAll = nullptr;

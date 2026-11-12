@@ -29,8 +29,8 @@ Gate to Phase 2: a new user prints a customised part within 10 minutes.
 | 5e | Rounding / fillet / chamfer / bevel edges, picked in the view; coves | Done (0.14.1) |
 | — | Emboss an image or logo | Planned |
 | 6 | History (feature tree) with rollback bar, switching steps off, steps added at the bar; Through all | Done (0.15.1) |
-| 7 | 2D sketcher with dimensions and rules, on the plate or a flat face; Pad and Pocket | **Delivered for testing** |
-| 8 | Revolve, Shell, Hole (Pad and Pocket came with slice 7) | Planned |
+| 7 | 2D sketcher with dimensions and rules, on the plate or a flat face; Pad and Pocket | Done (0.16.0) |
+| 8 | Revolve / Groove, Hole (plain, counterbored, countersunk, metric sizes), Shell | **Delivered for testing** |
 | — | Ribbon UI with Build / Design / Sculpt / Print tabs (grows across slices) | Planned |
 
 Separate track: sculpt-engine prototype (one Draw brush on a 1M-triangle mesh at 60 fps).

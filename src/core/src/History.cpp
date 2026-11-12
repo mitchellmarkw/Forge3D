@@ -49,7 +49,7 @@ std::string names(const Document& doc, const std::vector<ObjectId>& ids, std::si
     return out;
 }
 
-std::string describeHoles(const HoleSpec& h)
+std::string describeHoles(const HoleSpec& h, bool throughAll = false)
 {
     const std::size_t n = sketch::loosePoints(h.sketch).size();
     std::string out = n == 1 ? "1 hole " : std::to_string(n) + " holes ";
@@ -58,7 +58,7 @@ std::string describeHoles(const HoleSpec& h)
         out += " counterbored";
     else if (h.kind == HoleKind::Countersunk)
         out += " countersunk";
-    return out + ", " + num(h.depth) + " mm deep";
+    return out + (throughAll ? std::string(", through all") : ", " + num(h.depth) + " mm deep");
 }
 
 }  // namespace
@@ -173,7 +173,7 @@ std::string describe(const Document& doc, ObjectId id)
         if (spec.operands.size() == 2)
             if (const Body* tool = doc.find(spec.operands[1]); tool && !tool->isBoolean())
                 if (const auto* hole = std::get_if<HoleSpec>(&tool->spec))
-                    return describeHoles(*hole) + (spec.throughAll ? ", through all" : "");
+                    return describeHoles(*hole, spec.throughAll);
         return "minus " + names(doc, spec.operands, 1) + (spec.throughAll ? " (through all)" : "");
     case BooleanOp::Intersect: return "overlap with " + names(doc, spec.operands, 1);
     case BooleanOp::Split: return "cut in two";

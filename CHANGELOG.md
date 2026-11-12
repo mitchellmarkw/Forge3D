@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.17.0 — Slice 8: Revolve, Hole, Shell (2026-11-12)
+
+- **Revolve** (in the sketch's **Make:** list): spins the outline round a helper line
+  (pick the line, or have just one): knobs, bottles, wheels. Angle, the other way,
+  both ways. On the plate the sketch is the side view, standing up, and the shape sits
+  on the plate. On a face, **Groove** cuts it in instead.
+- **Hole** (new button): pick a shape, click a flat face where the holes go (each click
+  adds one), then choose:
+  - **Type**: plain, counterbored (flat step for a bolt head) or countersunk (cone for
+    a flat-head screw);
+  - **Size**: M2 to M12 (fills in every size), made for a bolt to pass through
+    (clearance) or for cutting a thread (tap drill); or Custom, typed;
+  - **Depth**, or **Through all**.
+  Spots can be typed (mm from the face's middle), removed, or placed exactly in a
+  sketch (**Place exactly...**: points with dimensions and rules). The preview shows
+  the holes as they'll be. Double-click the Drilled step later to change them.
+- **Shell** (new button): hollows the selected shape out to walls of a set thickness.
+  Click the faces to leave open (the top of a box makes a cup), or none for a sealed
+  hollow; walls inside or outside. Open faces are kept when the shape is resized.
+  Double-click the step to change it.
+- Sketcher: a **Point** tool (P), for hole spots; deleting a line keeps points that
+  stand on their own.
+- File format version 14. Older files still open.
+- 174 unit tests (5 new).
+
 ## 0.16.0 — Slice 7: Sketches, Pad and Pocket (2026-11-12)
 
 - **Sketch** (new button): draw a flat outline and push it out (**Pad**) or cut it in

@@ -23,7 +23,7 @@ class SketchView : public QWidget {
     Q_OBJECT
 
 public:
-    enum class Tool { Select, Line, Rectangle, Circle, Arc, Slot };
+    enum class Tool { Select, Line, Rectangle, Circle, Arc, Slot, Point };
 
     explicit SketchView(QWidget* parent = nullptr);
 
@@ -46,6 +46,9 @@ public:
     void addDimension(int how);
     void toggleConstruction();
     void deleteSelection();
+    // The lines and circles picked (e.g. the axis for Revolve), and picking one.
+    std::vector<int> pickedGeos() const { return picked(Pick::Geo); }
+    void pickGeo(int geo);
     void undo();
     void redo();
     void fit();

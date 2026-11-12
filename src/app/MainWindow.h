@@ -13,6 +13,8 @@
 #include "forge/core/Scale.h"
 #include "forge/view/Gizmo.h"
 
+#include "SketchPanel.h"
+
 #include <QMainWindow>
 #include <QPointF>
 #include <QString>
@@ -43,6 +45,8 @@ class PropertiesPanel;
 class SplitPanel;
 class EmbossPanel;
 class EdgesPanel;
+class HolePanel;
+class ShellPanel;
 class SketchPanel;
 class SketchView;
 struct DisplayItem;
@@ -160,15 +164,37 @@ private:
     void sketchClicked();                  // the Sketch button
     void sketchFaceClick(const QVector3D& origin, const QVector3D& direction);
     void openSketch(const sketch::Sketch& sketch, std::vector<std::vector<QPointF>> reference, const QString& title,
-                    bool pocketAllowed, bool pocket, double length, bool otherWay, bool bothWays, bool throughAll);
+                    bool onFace, const SketchPanel::Options& options);
     void startSketchEdit(ObjectId id);     // a pad, or the Merge / Subtract step holding one
     void finishSketch();
     void endSketch();
     void updateSketchStatus();
     void lockForSketch(bool on);  // every other command off while sketching
     void relockForSketch();       // again, after commands were updated
-    // The pad a step or body is: the body itself, or a Merge / Subtract step's added shape.
-    ObjectId padOf(ObjectId id) const;
+    // The sketched tool (pad, revolve, hole) a body or step is: the body itself, or a
+    // Merge / Subtract step's second part.
+    ObjectId sketchedToolOf(ObjectId id) const;
+    // Adds `tool` and a Merge / Subtract of it with `target` (top-level), as one undo step.
+    bool addWithStep(ObjectId target, Body tool, BooleanOp op, bool throughAll, const std::string& label,
+                     const std::string& resultName, const Bounds& toolBox);
+
+    // Holes (slice 8): click spots on a flat face; settings in the Hole panel.
+    void holeClicked();
+    void startHole(ObjectId target, bool editing);
+    void holeClick(const QVector3D& origin, const QVector3D& direction);
+    HoleSpec currentHole() const;
+    void updateHolePreview();
+    void showHoleSpots();
+    void applyHole();
+    void endHole();
+    // Shell (slice 8): hollow out, faces clicked to leave open.
+    void startShell(ObjectId target, bool editing);
+    void shellClick(const QVector3D& origin, const QVector3D& direction);
+    std::optional<BooleanSpec> currentShellSpec() const;
+    void updateShellPreview();
+    void rebuildShellHighlights();
+    void applyShell();
+    void endShell();
 
     // Files
     void newDocument();
@@ -352,11 +378,49 @@ private:
         bool picking = false;  // waiting for a click on the face to sketch on
         bool active = false;   // the sketch view is open
         ObjectId target = kInvalidId;  // the shape sketched on (kInvalidId: the plate)
-        ObjectId pad = kInvalidId;     // the pad being changed
+        ObjectId pad = kInvalidId;     // the pad (or revolve) being changed
         ObjectId step = kInvalidId;    // the Merge / Subtract step holding it
         Transform frame;               // sketch -> plate coordinates
     };
     SketchMode m_sketchMode;
+
+    QAction* m_holeAction = nullptr;
+    HolePanel* m_holePanel = nullptr;
+    QTimer* m_holeTimer = nullptr;
+    struct HoleMode {
+        bool active = false;
+        bool editing = false;
+        bool placed = false;           // the face is chosen (frame set)
+        ObjectId target = kInvalidId;  // the shape drilled; editing: the Subtract step
+        ObjectId tool = kInvalidId;    // editing: the hole body
+        Transform frame;               // the face: sketch -> plate coordinates
+        TopoDS_Shape shape;            // what is drilled, in plate coordinates
+        std::shared_ptr<edges::FaceFinder> finder;
+        double size = 1.0;             // the shape's diagonal
+        sketch::Sketch spots;          // loose points: the holes
+        bool positioning = false;      // the spots are open in the sketch view
+        std::shared_ptr<const Mesh> preview;  // the drilled shape (plate coordinates)
+    };
+    HoleMode m_holeMode;
+    QAction* m_shellAction = nullptr;
+    ShellPanel* m_shellPanel = nullptr;
+    QTimer* m_shellTimer = nullptr;
+    struct ShellMode {
+        bool active = false;
+        bool editing = false;
+        ObjectId target = kInvalidId;
+        TopoDS_Shape shape;  // what is picked on, in plate coordinates
+        edges::ShapeEdges found;
+        std::shared_ptr<edges::FaceFinder> finder;
+        struct Pick {
+            int face = -1;
+            FaceRef ref;
+        };
+        std::vector<Pick> picks;
+        std::shared_ptr<const Mesh> preview;  // result coordinates (like Edges)
+        std::shared_ptr<const Mesh> pickedLines;
+    };
+    ShellMode m_shellMode;
 };
 
 }  // namespace forge::app
