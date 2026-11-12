@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.15.1 — Slice 6 fixes (2026-11-12)
+
+- **Rounded / chamfered edges survive resizing.** Each picked edge also remembers
+  where it sits within the shape's box and which way its face points, so making the
+  box under a rounding much taller (or wider) keeps the same edges rounded, and
+  Change the edges... shows them picked. (A box rounded on top used to lose its
+  rounding once it was made 8 mm or more taller.)
+- **Subtract → Through all** (tick box in Properties): straight tools (box, cylinder,
+  tube, text) reach right through the shape along their own height, whatever size the
+  shape becomes. Works on imported meshes too.
+- **Emboss → Center on the face**: All, Top-Bottom, Left-Right (as the words read).
+  New words start in the middle of the face you're looking at. Clicking still moves
+  them anywhere.
+- 161 unit tests (3 new).
+
 ## 0.15.0 — Slice 6: History (2026-11-12)
 
 - **The Objects panel shows how each object was made.** Open an object to see its
@@ -16,19 +31,8 @@
   Mirror and Group wait until the object is rolled forward.
 - A step that can't be done any more (e.g. a rounding whose edges an earlier chamfer
   changed) is marked ⚠ with the reason and left out, instead of the object vanishing.
-- **Rounded / chamfered edges survive resizing.** Each picked edge also remembers
-  where it sits within the shape's box and which way its face points, so making the
-  box under a rounding much taller (or wider) keeps the same edges rounded, and
-  Change the edges... shows them picked. (A box rounded on top used to lose its
-  rounding once it was made 8 mm or more taller.)
-- **Subtract → Through all** (tick box in Properties): straight tools (box, cylinder,
-  tube, text) reach right through the shape along their own height, whatever size the
-  shape becomes. Works on imported meshes too.
-- **Emboss → Center on the face**: All, Top-Bottom, Left-Right (as the words read).
-  New words start in the middle of the face you're looking at. Clicking still moves
-  them anywhere.
 - File format version 12. Older files still open.
-- 161 unit tests (7 new).
+- 158 unit tests (4 new).
 
 ## 0.14.1 — Fillets on outside edges (coves) (2026-11-12)
 
