@@ -75,7 +75,7 @@ double expectedVolume(const PrimitiveSpec& spec)
             else if constexpr (std::is_same_v<T, PyramidSpec>)
                 return linearProduct(p.baseWidth, p.baseDepth, p.topWidth, p.topDepth, p.height);
             else
-                return 0.0;  // imported meshes: checked in test_import
+                return -1.0;  // text (depends on the font) and imported meshes: just above zero
         },
         spec);
 }
@@ -88,7 +88,10 @@ void checkShape(const PrimitiveSpec& spec, double volumeTol = 1e-4, double bound
     const TopoDS_Shape shape = primitives::buildShape(spec);
     REQUIRE_FALSE(shape.IsNull());
     CHECK(BRepCheck_Analyzer(shape).IsValid());
-    CHECK_THAT(volumeOf(shape), WithinRel(expectedVolume(spec), volumeTol));
+    if (expectedVolume(spec) >= 0.0)
+        CHECK_THAT(volumeOf(shape), WithinRel(expectedVolume(spec), volumeTol));
+    else
+        CHECK(volumeOf(shape) > 0.0);
     const Bounds b = shapeBounds(shape);
     const Vec3 h = halfExtents(spec);
     CHECK_THAT(b.min[0], WithinAbs(-h[0], boundsTol));

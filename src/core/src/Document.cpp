@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "forge/core/Document.h"
 
+#include "forge/core/Emboss.h"
+
 #include "forge/core/Export.h"
 #include "forge/core/Primitives.h"
 #include "forge/core/Tessellator.h"
@@ -193,7 +195,9 @@ void Document::validateBoolean(const Body& body, const std::map<ObjectId, Object
 {
     const auto& ops = body.boolean->operands;
     const BooleanOp op = body.boolean->op;
-    if (op == BooleanOp::Split || op == BooleanOp::Mirror) {
+    if (op == BooleanOp::Split || op == BooleanOp::Mirror || op == BooleanOp::Emboss) {
+        if (op == BooleanOp::Emboss && !body.boolean->emboss)
+            throw std::invalid_argument("Emboss needs words");
         if (ops.size() != 1)
             throw std::invalid_argument(toString(op) + " works on exactly one shape");
         const auto& n = body.boolean->planeNormal;
@@ -433,6 +437,8 @@ TopoDS_Shape Document::combine(const BooleanSpec& spec) const
     const std::vector<ObjectId>& operands = spec.operands;
     TopoDS_Shape result;
     try {
+        if (op == BooleanOp::Emboss)
+            throw GeometryError("Emboss is worked out by the mesh engine");
         if (op == BooleanOp::Mirror) {
             const ObjectId part = operands.at(0);
             gp_Trsf mirror;
@@ -510,7 +516,8 @@ TopoDS_Shape Document::combine(const BooleanSpec& spec) const
             case BooleanOp::Split:
             case BooleanOp::Mirror:
             case BooleanOp::Group:
-                break;  // handled above
+            case BooleanOp::Emboss:
+                break;  // handled above / by the mesh engine
             }
         }
         // Merge faces that ended up on the same surface, so the result has clean
@@ -586,7 +593,8 @@ TopoDS_Shape Document::previewCombine(const BooleanSpec& spec) const
     for (ObjectId part : spec.operands)
         if (!find(part))
             throw std::out_of_range("No body with id " + std::to_string(part));
-    if ((spec.op == BooleanOp::Split || spec.op == BooleanOp::Mirror) && spec.operands.size() != 1)
+    if ((spec.op == BooleanOp::Split || spec.op == BooleanOp::Mirror || spec.op == BooleanOp::Emboss) &&
+        spec.operands.size() != 1)
         throw std::invalid_argument(toString(spec.op) + " works on exactly one shape");
     return combine(spec);
 }
@@ -645,6 +653,8 @@ bool Document::usesMeshEngine(ObjectId id) const
 
 bool Document::specUsesMesh(const BooleanSpec& spec) const
 {
+    if (spec.op == BooleanOp::Emboss)
+        return true;  // letters following a surface only exist as triangles
     for (ObjectId part : spec.operands)
         if (usesMeshEngine(part))
             return true;
@@ -659,7 +669,7 @@ MeshSolid Document::meshSolid(ObjectId id) const
     if (!body)
         throw std::out_of_range("No body with id " + std::to_string(id));
     MeshSolid built;
-    if (body->isBoolean()) {
+    if (body->isBoolean() && usesMeshEngine(id)) {
         if (m_lastPreview && m_lastPreview->spec == *body->boolean && partsUnchanged(*m_lastPreview))
             built = m_lastPreview->solid;
         else
@@ -702,6 +712,16 @@ MeshSolid Document::combineMeshes(const BooleanSpec& spec) const
     case BooleanOp::Split: return meshkernel::trimmed(parts.front(), spec.planePoint, spec.planeNormal);
     case BooleanOp::Mirror: return meshkernel::mirrored(parts.front(), spec.planePoint, spec.planeNormal);
     case BooleanOp::Group: return meshkernel::together(parts);
+    case BooleanOp::Emboss: {
+        if (!spec.emboss)
+            throw GeometryError("Emboss has no words");
+        std::vector<float> pos;
+        std::vector<std::uint32_t> idx;
+        meshkernel::triangles(parts.front(), pos, idx);
+        const MeshSolid words = emboss::letters(pos, idx, spec.planePoint, spec.planeNormal, *spec.emboss);
+        return spec.emboss->raised ? meshkernel::merged({parts.front(), words})
+                                   : meshkernel::subtracted(parts.front(), {words});
+    }
     }
     throw GeometryError("Unknown combine");
 }
@@ -736,6 +756,26 @@ Document::Preview Document::previewResult(const BooleanSpec& spec) const
         out.bounds = shapeBounds(s);
     }
     return out;
+}
+
+std::shared_ptr<const Mesh> Document::previewMesh(const BooleanSpec& spec) const
+{
+    for (ObjectId part : spec.operands)
+        if (!find(part))
+            throw std::out_of_range("No body with id " + std::to_string(part));
+    if (!specUsesMesh(spec))
+        throw std::invalid_argument("previewMesh is for mesh-engine results");
+    MeshSolid solid;
+    if (m_lastPreview && m_lastPreview->spec == spec && partsUnchanged(*m_lastPreview)) {
+        solid = m_lastPreview->solid;
+    } else {
+        solid = combineMeshes(spec);
+        LastPreview keep{spec, {}, solid};
+        for (ObjectId part : spec.operands)
+            keep.parts.push_back(*find(part));
+        m_lastPreview = std::move(keep);
+    }
+    return std::make_shared<const Mesh>(meshkernel::displayMesh(solid));
 }
 
 Bounds shapeBounds(const TopoDS_Shape& shape, const Transform& t)

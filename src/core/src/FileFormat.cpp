@@ -44,6 +44,7 @@ const char* opName(BooleanOp op)
     case BooleanOp::Split: return "split";
     case BooleanOp::Mirror: return "mirror";
     case BooleanOp::Group: return "group";
+    case BooleanOp::Emboss: return "emboss";
     }
     return "merge";
 }
@@ -56,15 +57,27 @@ json bodyToJson(const Body& b)
         j["operation"] = opName(b.boolean->op);
         j["operands"] = b.boolean->operands;
         j["pivot"] = b.boolean->pivot;
-        if (b.boolean->op == BooleanOp::Split || b.boolean->op == BooleanOp::Mirror) {
+        if (b.boolean->op == BooleanOp::Split || b.boolean->op == BooleanOp::Mirror ||
+            b.boolean->op == BooleanOp::Emboss) {
             j["planePoint"] = b.boolean->planePoint;
             j["planeNormal"] = b.boolean->planeNormal;
+        }
+        if (const auto& e = b.boolean->emboss) {
+            j["emboss"] = json{{"text", e->text},     {"font", e->font},   {"bold", e->bold},
+                               {"italic", e->italic}, {"letterHeight", e->letterHeight},
+                               {"depth", e->depth},   {"raised", e->raised}, {"angle", e->angle}};
         }
         return j;
     }
     j["type"] = fileTypeName(b.spec);
     if (std::holds_alternative<MeshSpec>(b.spec))
         j["data"] = "meshes/" + std::to_string(b.id) + ".bin";
+    if (const auto* t = std::get_if<TextSpec>(&b.spec)) {
+        j["text"] = t->text;
+        j["font"] = t->font;
+        j["bold"] = t->bold;
+        j["italic"] = t->italic;
+    }
     json params = json::object();
     const auto& fields = specFields(b.spec);
     for (std::size_t i = 0; i < fields.size(); ++i)
@@ -129,6 +142,8 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
             spec.op = BooleanOp::Mirror;
         else if (op == "group" && version >= 8)
             spec.op = BooleanOp::Group;
+        else if (op == "emboss" && version >= 10)
+            spec.op = BooleanOp::Emboss;
         else
             damaged(where + ": unknown combine operation '" + op + "'");
         const auto operands = j.find("operands");
@@ -147,7 +162,7 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
                 damaged(where + ": bad pivot");
             spec.pivot[i] = (*pivot)[i].get<double>();
         }
-        if (spec.op == BooleanOp::Split || spec.op == BooleanOp::Mirror) {
+        if (spec.op == BooleanOp::Split || spec.op == BooleanOp::Mirror || spec.op == BooleanOp::Emboss) {
             const auto readVec = [&](const char* key, std::array<double, 3>& out) {
                 const auto v = j.find(key);
                 if (v == j.end() || !v->is_array() || v->size() != 3)
@@ -160,6 +175,21 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
             };
             readVec("planePoint", spec.planePoint);
             readVec("planeNormal", spec.planeNormal);
+        }
+        if (spec.op == BooleanOp::Emboss) {
+            const auto e = j.find("emboss");
+            if (e == j.end() || !e->is_object())
+                damaged(where + ": missing emboss words");
+            EmbossText words;
+            words.text = e->value("text", std::string());
+            words.font = e->value("font", std::string());
+            words.bold = e->value("bold", true);
+            words.italic = e->value("italic", false);
+            words.letterHeight = number(*e, "letterHeight", where);
+            words.depth = number(*e, "depth", where);
+            words.raised = e->value("raised", true);
+            words.angle = e->value("angle", 0.0);
+            spec.emboss = std::move(words);
         }
         b.boolean = std::move(spec);
         if (b.name.empty())
@@ -203,6 +233,12 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
             const auto& fields = specFields(spec);
             for (std::size_t i = 0; i < fields.size(); ++i)
                 setSpecValue(spec, i, number(*params, fields[i].key, where));
+            if (auto* text = std::get_if<TextSpec>(&spec)) {
+                text->text = j.value("text", std::string());
+                text->font = j.value("font", std::string());
+                text->bold = j.value("bold", false);
+                text->italic = j.value("italic", false);
+            }
             b.spec = spec;
             known = true;
         }

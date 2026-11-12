@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.13.0 — Slice 5d: Text and Emboss (2026-11-11)
+
+- **Text shape** (Add → Text): 3D letters lying flat on the plate, in any font installed
+  on the PC. Properties has the words, font, Bold, Italic and Letter height; Width,
+  Depth and Thickness stretch it like a box. Typing more words makes the block longer;
+  the letters keep their size.
+- **Emboss** (toolbar, Edit menu): puts raised or engraved words on the selected shape.
+  The words start on the side facing you; click anywhere on the shape to move them.
+  Choose the words, font, bold / italic, letter height, depth, turn, and raised or
+  engraved; the view shows the result as you change things.
+- Embossed words **follow the surface**: each letter stands the same depth out of (or
+  into) the surface under it, and lines wrap round curves such as a cylinder or ball,
+  keeping their width. Works on imported meshes too.
+- Words that would hang off the edge of a shape are refused with a message in the panel.
+- The result stays editable: select it and click **Change the words...** in Properties
+  (or **Remove the words** to get the shape back). Resizing it evenly resizes the words.
+- File format version 10 (text shapes and emboss results). Older files still open.
+- Core: `Text.h` (fonts, `makeText`, `withText`, `flatLetters`), `Emboss.h`
+  (`emboss::letters`, `surfaceUnder`, `embossSpec`, `withEmboss`),
+  `Document::previewMesh()`, `TextSpec`, `EmbossText`, `BooleanOp::Emboss`.
+- 151 unit tests (4 new).
+
 ## 0.12.0 — Slice 5c: Mesh engine (2026-11-11)
 
 - **Big imported meshes now combine quickly.** Merge, Subtract, Intersect, Split,

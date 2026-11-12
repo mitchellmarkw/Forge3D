@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "PropertiesPanel.h"
 
+#include "WordsEditor.h"
+#include "forge/core/Text.h"
+
 #include <QCheckBox>
 #include <QDoubleSpinBox>
 #include <QFormLayout>
@@ -97,7 +100,26 @@ PropertiesPanel::PropertiesPanel(QWidget* parent) : QWidget(parent)
     connect(editCut, &QPushButton::clicked, this, &PropertiesPanel::editCutRequested);
     general->addRow(editCut);
     m_editCutButton = editCut;
+    auto* editEmboss = new QPushButton(tr("Change the words..."));
+    editEmboss->setToolTip(tr("Change the embossed words, their size or depth, or click to move them"));
+    connect(editEmboss, &QPushButton::clicked, this, &PropertiesPanel::editEmbossRequested);
+    general->addRow(editEmboss);
+    m_editEmbossButton = editEmboss;
     layout->addLayout(general);
+
+    // A Text shape's words
+    auto* textGroup = new QGroupBox(tr("Text"));
+    m_textGroup = textGroup;
+    auto* textLayout = new QVBoxLayout(textGroup);
+    m_words = new WordsEditor;
+    textLayout->addWidget(m_words);
+    auto* textForm = new QFormLayout;
+    textForm->setContentsMargins(0, 4, 0, 0);
+    m_letterHeight = makeSpin(0.5, kMaxLength, tr(" mm"), 2,
+                              tr("How tall a capital letter is. Changes the width and depth to match"));
+    textForm->addRow(tr("Letter height:"), m_letterHeight);
+    textLayout->addLayout(textForm);
+    layout->addWidget(textGroup);
 
     // Size: one sub-page per primitive type
     auto* sizeGroup = new QGroupBox(tr("Size"));
@@ -159,6 +181,8 @@ PropertiesPanel::PropertiesPanel(QWidget* parent) : QWidget(parent)
     for (std::size_t i = 0; i < m_sizeFields.size(); ++i)
         connect(m_sizeFields[i], &QDoubleSpinBox::valueChanged, this, [this, i] { commitSpec(i); });
     connect(m_uniform, &QCheckBox::toggled, this, &PropertiesPanel::uniformChanged);
+    connect(m_words, &WordsEditor::changed, this, &PropertiesPanel::commitWords);
+    connect(m_letterHeight, &QDoubleSpinBox::valueChanged, this, &PropertiesPanel::commitLetterHeight);
     connect(m_round, &QCheckBox::toggled, this, [this](bool on) {
         updateRadiusYEnabled();
         emit keepRoundChanged(on);
@@ -206,6 +230,18 @@ void PropertiesPanel::setBody(const Body* body, const QString& context, bool isP
     m_separateButton->setVisible(body->isBoolean() && !isPart);
     const bool split = body->isBoolean() && body->boolean->op == BooleanOp::Split;
     m_editCutButton->setVisible(split && !isPart);
+    const bool embossed = body->isBoolean() && body->boolean->op == BooleanOp::Emboss;
+    m_editEmbossButton->setVisible(embossed && !isPart);
+    const auto* textSpec = body->isBoolean() ? nullptr : std::get_if<TextSpec>(&body->spec);
+    m_textGroup->setVisible(textSpec != nullptr);
+    if (textSpec) {
+        m_words->setWords(textSpec->text, textSpec->font, textSpec->bold, textSpec->italic);
+        const QSignalBlocker block(m_letterHeight);
+        try {
+            m_letterHeight->setValue(text::letterHeightOf(*textSpec));
+        } catch (const std::exception&) {
+        }
+    }
     if (auto* button = qobject_cast<QPushButton*>(m_separateButton); button && body->isBoolean()) {
         switch (body->boolean->op) {
         case BooleanOp::Split:
@@ -215,6 +251,10 @@ void PropertiesPanel::setBody(const Body* body, const QString& context, bool isP
         case BooleanOp::Mirror:
             button->setText(tr("Remove the mirror"));
             button->setToolTip(tr("Give back the shape the right way round, where it is"));
+            break;
+        case BooleanOp::Emboss:
+            button->setText(tr("Remove the words"));
+            button->setToolTip(tr("Give back the shape without the embossed words, where it is"));
             break;
         case BooleanOp::Group:
             button->setText(tr("Ungroup"));
@@ -334,6 +374,45 @@ void PropertiesPanel::commitSpec(std::size_t i)
     }
     if (changed)
         emit specRequested(m_body->id, spec);
+}
+
+void PropertiesPanel::commitWords()
+{
+    if (!m_body || m_body->isBoolean())
+        return;
+    const auto* old = std::get_if<TextSpec>(&m_body->spec);
+    if (!old)
+        return;
+    TextSpec next;
+    try {
+        next = text::withText(*old, m_words->text(), m_words->font(), m_words->bold(), m_words->italic());
+    } catch (const std::exception&) {
+        // No letters (e.g. the box was emptied): show the words it still has.
+        m_words->setWords(old->text, old->font, old->bold, old->italic);
+        return;
+    }
+    if (!(next == *old))
+        emit specRequested(m_body->id, next);
+}
+
+void PropertiesPanel::commitLetterHeight()
+{
+    if (!m_body || m_body->isBoolean())
+        return;
+    const auto* old = std::get_if<TextSpec>(&m_body->spec);
+    if (!old)
+        return;
+    try {
+        const double now = text::letterHeightOf(*old);
+        const double wanted = m_letterHeight->value();
+        if (!(now > 0.0) || !differs(now, wanted))
+            return;
+        TextSpec next = *old;
+        next.width *= wanted / now;
+        next.depth *= wanted / now;
+        emit specRequested(m_body->id, next);
+    } catch (const std::exception&) {
+    }
 }
 
 void PropertiesPanel::updateRadiusYEnabled()

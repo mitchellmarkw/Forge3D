@@ -3,6 +3,7 @@
 #include "CrashHandler.h"
 #include "Log.h"
 #include "MainWindow.h"
+#include "forge/core/Text.h"
 
 #include <QApplication>
 #include <QCommandLineOption>
@@ -12,6 +13,8 @@
 #include <QTimer>
 #include <QSurfaceFormat>
 #include <QtDebug>
+
+#include <thread>
 
 #include <Standard_Version.hxx>
 
@@ -63,6 +66,14 @@ int main(int argc, char* argv[])
     qInfo() << "Startup: main window built after" << startup.elapsed() << "ms";
     QObject::connect(&window, &forge::app::MainWindow::firstFrameRendered, [&startup] {
         qInfo() << "Startup: first frame drawn after" << startup.elapsed() << "ms";
+        // Look through the installed fonts in the background, so Text and Emboss open
+        // without a wait.
+        std::thread([] {
+            try {
+                forge::text::warmUp();
+            } catch (...) {
+            }
+        }).detach();
     });
     window.show();
     if (!parser.positionalArguments().isEmpty()) {

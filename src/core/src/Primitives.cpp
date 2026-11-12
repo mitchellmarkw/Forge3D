@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "forge/core/Primitives.h"
 
+#include "forge/core/Text.h"
+
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
@@ -430,6 +432,8 @@ TopoDS_Shape buildShape(const PrimitiveSpec& spec)
                 return makeTube(p.outerRadiusX, p.outerRadiusY, p.innerRadiusX, p.innerRadiusY, p.height);
             else if constexpr (std::is_same_v<T, WedgeSpec>)
                 return makeWedge(p.width, p.depth, p.height);
+            else if constexpr (std::is_same_v<T, TextSpec>)
+                return text::makeText(p);
             else if constexpr (std::is_same_v<T, MeshSpec>)
                 return makeMeshSolid(*p.data, {p.width / p.data->size[0], p.depth / p.data->size[1],
                                                p.height / p.data->size[2]});

@@ -80,7 +80,8 @@ Vec3 halfExtents(const PrimitiveSpec& spec)
     return std::visit(
         [](const auto& p) -> Vec3 {
             using T = std::decay_t<decltype(p)>;
-            if constexpr (std::is_same_v<T, BoxSpec> || std::is_same_v<T, WedgeSpec> || std::is_same_v<T, MeshSpec>)
+            if constexpr (std::is_same_v<T, BoxSpec> || std::is_same_v<T, WedgeSpec> || std::is_same_v<T, MeshSpec> ||
+                          std::is_same_v<T, TextSpec>)
                 return {p.width / 2.0, p.depth / 2.0, p.height / 2.0};
             else if constexpr (std::is_same_v<T, CylinderSpec>)
                 return {p.radiusX, p.radiusY, p.height / 2.0};
@@ -290,7 +291,8 @@ void resizeOne(PrimitiveSpec& spec, int axis, double value, const ResizeOptions&
     std::visit(
         [&](auto& p) {
             using T = std::decay_t<decltype(p)>;
-            if constexpr (std::is_same_v<T, BoxSpec> || std::is_same_v<T, WedgeSpec> || std::is_same_v<T, MeshSpec>) {
+            if constexpr (std::is_same_v<T, BoxSpec> || std::is_same_v<T, WedgeSpec> || std::is_same_v<T, MeshSpec> ||
+                          std::is_same_v<T, TextSpec>) {
                 (axis == 0 ? p.width : axis == 1 ? p.depth : p.height) = value;
             } else if constexpr (std::is_same_v<T, PyramidSpec>) {
                 if (axis == 2) {

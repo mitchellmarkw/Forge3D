@@ -139,6 +139,10 @@ public:
         Bounds bounds;
     };
     Preview previewResult(const BooleanSpec& spec) const;
+    // What a mesh-engine combine (e.g. Emboss) would look like, for drawing before it
+    // is made: flat-shaded triangles in the result's coordinates. Kept, so making the
+    // result straight after doesn't work it out again.
+    std::shared_ptr<const Mesh> previewMesh(const BooleanSpec& spec) const;
 
     // ---- Change notification ----
     int addListener(Listener listener);

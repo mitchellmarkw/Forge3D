@@ -18,6 +18,8 @@ class QStackedWidget;
 
 namespace forge::app {
 
+class WordsEditor;
+
 // Shows the selected body's name, size and position, and turns edits into
 // requests. It never changes the document itself: the main window turns each
 // request into an undoable command, then calls setBody() with the result.
@@ -48,12 +50,15 @@ signals:
     void keepRoundChanged(bool on);
     void separateRequested();
     void editCutRequested();
+    void editEmbossRequested();
 
 private:
     QDoubleSpinBox* makeLength(const QString& tip);
     void commitName();
     void commitSpec(std::size_t field);
     void commitPlacement();
+    void commitWords();
+    void commitLetterHeight();
     void updateRadiusYEnabled();
 
     std::optional<Body> m_body;  // copy of what is shown
@@ -68,6 +73,10 @@ private:
     QWidget* m_sitButton = nullptr;
     QWidget* m_separateButton = nullptr;
     QWidget* m_editCutButton = nullptr;
+    QWidget* m_editEmbossButton = nullptr;
+    QWidget* m_textGroup = nullptr;  // the words of a Text shape
+    WordsEditor* m_words = nullptr;
+    QDoubleSpinBox* m_letterHeight = nullptr;
 
     QFormLayout* m_sizeForm = nullptr;
     std::array<QDoubleSpinBox*, 5> m_sizeFields{};  // the shape's lengths (specFields order)

@@ -29,7 +29,9 @@ namespace forge::file {
 //   7  split results (operation "split", planePoint, planeNormal)
 //   8  mirror results (operation "mirror", plane) and groups (operation "group")
 //   9  imported meshes (type "mesh", width / depth / height, "data": zip entry name)
-inline constexpr int kFormatVersion = 9;
+//  10  text (type "text": text, font, bold, italic) and emboss results (operation
+//      "emboss", planePoint / planeNormal, "emboss": the words)
+inline constexpr int kFormatVersion = 10;
 inline constexpr const char* kExtension = ".f3d";
 inline constexpr const char* kDocumentEntry = "document.json";
 

@@ -27,6 +27,7 @@ add_library(forge_core STATIC
     src/CommandStack.cpp
     src/Commands.cpp
     src/Document.cpp
+    src/Emboss.cpp
     src/Export.cpp
     src/FileFormat.cpp
     src/Import.cpp
@@ -37,6 +38,7 @@ add_library(forge_core STATIC
     src/Scale.cpp
     src/Split.cpp
     src/Tessellator.cpp
+    src/Text.cpp
     src/Transform.cpp
 )
 add_library(Forge3D::core ALIAS forge_core)
@@ -49,6 +51,7 @@ target_link_libraries(forge_core PUBLIC
     TKernel TKMath TKG2d TKG3d TKGeomBase TKBRep
     TKGeomAlgo TKTopAlgo TKPrim TKMesh
     TKBO TKBool TKShHealing TKOffset
+    TKService TKV3d  # fonts: Font_FontMgr, StdPrs_BRepFont / StdPrs_BRepTextBuilder
 )
 
 # File format libraries are an implementation detail of FileFormat.cpp.
