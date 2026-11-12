@@ -9,7 +9,9 @@
 #include <BRepBuilderAPI_Transform.hxx>
 #include <BRepCheck_Analyzer.hxx>
 #include <BRepExtrema_DistShapeShape.hxx>
+#include <BRepGProp.hxx>
 #include <BRepGProp_Face.hxx>
+#include <GProp_GProps.hxx>
 #include <BRepOffsetAPI_MakeOffsetShape.hxx>
 #include <BRepOffsetAPI_MakeThickSolid.hxx>
 #include <BRep_Tool.hxx>
@@ -229,6 +231,9 @@ TopoDS_Shape apply(const TopoDS_Shape& shape, const ShellFinish& finish)
         throw std::invalid_argument("The wall thickness must be greater than zero");
     const TopoDS_Shape solid = onlySolid(shape);
     const Box box = boxOf(solid);
+    const double smallest = std::min({box.size[0], box.size[1], box.size[2]});
+    if (!finish.outward && 2.0 * finish.thickness >= smallest)
+        throw GeometryError("Walls that thick would fill the whole shape. Try thinner walls.");
     const double tol = 1e-4;
     TopoDS_Shape result;
     try {
@@ -267,8 +272,24 @@ TopoDS_Shape apply(const TopoDS_Shape& shape, const ShellFinish& finish)
     }
     if (result.IsNull() || !BRepCheck_Analyzer(result).IsValid())
         throw GeometryError("The walls can't be made this thick here. Try thinner walls.");
+    // A sound result: some solid left, less than before (walls inside) and inside the
+    // old box, or around it (walls outside).
     const Box after = boxOf(result);
-    if (after.diagonal() < box.diagonal() * 0.5)
+    const auto volume = [](const TopoDS_Shape& s) {
+        GProp_GProps props;
+        BRepGProp::VolumeProperties(s, props);
+        return props.Mass();
+    };
+    const double before = volume(solid), left = volume(result);
+    const double slack = box.diagonal() * 1e-3;
+    bool sound = left > before * 1e-6 && after.diagonal() >= box.diagonal() * 0.5;
+    if (!finish.outward) {
+        sound = sound && left < before;
+        for (std::size_t k = 0; k < 3; ++k)
+            sound = sound && after.min[k] >= box.min[k] - slack &&
+                    after.min[k] + after.size[k] <= box.min[k] + box.size[k] + slack;
+    }
+    if (!sound)
         throw GeometryError("The walls can't be made this thick here. Try thinner walls.");
     ShapeUpgrade_UnifySameDomain unify(result, true, true, false);
     unify.Build();
