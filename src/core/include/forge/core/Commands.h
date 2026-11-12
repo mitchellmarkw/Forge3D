@@ -180,6 +180,36 @@ private:
 };
 
 // Several commands that undo and redo as one step ("Clear Plate").
+// Puts a new step into an object's history, between `above` and its first part (an
+// Edges or Emboss step added at the rollback bar).
+class InsertStepCommand final : public Command {
+public:
+    InsertStepCommand(Body step, ObjectId above);
+    std::string label() const override;
+    void redo(Document& doc) override;
+    void undo(Document& doc) override;
+
+private:
+    Body m_step;
+    ObjectId m_above;
+};
+
+// Deletes a step from inside an object's history: the shape it worked on takes its
+// place; any shapes it used as tools go back on the plate.
+class RemoveStepCommand final : public Command {
+public:
+    explicit RemoveStepCommand(ObjectId step);
+    std::string label() const override { return "Delete step"; }
+    void redo(Document& doc) override;
+    void undo(Document& doc) override;
+
+private:
+    ObjectId m_id;
+    ObjectId m_above = kInvalidId;
+    Body m_step;
+    std::vector<Body> m_tools;  // their placements as they were
+};
+
 class MacroCommand final : public Command {
 public:
     explicit MacroCommand(std::string label);

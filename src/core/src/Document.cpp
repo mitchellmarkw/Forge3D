@@ -338,6 +338,7 @@ void Document::replaceAll(std::vector<Body> bodies)
     m_shapeCache.clear();
     m_solidCache.clear();
     m_meshCache.clear();
+    m_problems.clear();
     m_lastPreview.reset();
     for (ObjectId id : oldIds)
         notify(ChangeKind::Removed, id);
@@ -367,7 +368,11 @@ void Document::setBoolean(ObjectId id, const BooleanSpec& spec)
         throw std::invalid_argument("'" + body.name + "' is not a combined shape");
     if (*body.boolean == spec)
         return;
-    if (body.boolean->op != spec.op || body.boolean->operands != spec.operands)
+    const auto swappable = [](BooleanOp op) {
+        return op == BooleanOp::Merge || op == BooleanOp::Subtract || op == BooleanOp::Intersect;
+    };
+    const bool opOk = body.boolean->op == spec.op || (swappable(body.boolean->op) && swappable(spec.op));
+    if (!opOk || body.boolean->operands != spec.operands)
         throw std::invalid_argument("Changing which parts a combined shape holds needs Separate and Combine");
     Body check = body;
     check.boolean = spec;
@@ -407,6 +412,7 @@ void Document::invalidate(ObjectId id, bool includeSelf)
         m_shapeCache.erase(id);
         m_meshCache.erase(id);
         m_solidCache.erase(id);
+        m_problems.erase(id);
     }
     // Every result above this body depends on it.
     std::set<ObjectId> visited{id};
@@ -414,6 +420,7 @@ void Document::invalidate(ObjectId id, bool includeSelf)
         m_shapeCache.erase(p);
         m_meshCache.erase(p);
         m_solidCache.erase(p);
+        m_problems.erase(p);
         notify(ChangeKind::Modified, p);
     }
     if (m_lastPreview)
@@ -572,7 +579,21 @@ TopoDS_Shape Document::shape(ObjectId id) const
             return TopoDS_Shape();
         built = primitives::makeMeshSolid(*data, {1.0, 1.0, 1.0});
     } else {
-        built = body->isBoolean() ? combine(*body->boolean) : primitives::buildShape(body->spec);
+        if (!body->isBoolean()) {
+            built = primitives::buildShape(body->spec);
+        } else {
+            try {
+                built = combine(effectiveSpec(*body));
+                m_problems.erase(id);
+            } catch (const GeometryError& e) {
+                // A step that can't be built (an earlier change left it nothing to work
+                // on): note why, and carry on as if it were switched off.
+                if (body->isOff())
+                    throw;
+                m_problems[id] = e.what();
+                built = combine(passThrough(*body->boolean));
+            }
+        }
     }
     m_shapeCache[id] = built;
     return built;
@@ -664,7 +685,113 @@ bool Document::usesMeshEngine(ObjectId id) const
         return false;
     if (!body->isBoolean())
         return std::holds_alternative<MeshSpec>(body->spec);
-    return specUsesMesh(*body->boolean);
+    return specUsesMesh(effectiveSpec(*body));
+}
+
+BooleanSpec Document::passThrough(const BooleanSpec& spec)
+{
+    BooleanSpec pass = spec;
+    pass.op = BooleanOp::Group;
+    pass.emboss.reset();
+    pass.edges.reset();
+    switch (spec.op) {
+    case BooleanOp::Merge:
+    case BooleanOp::Intersect:
+    case BooleanOp::Group: break;  // all parts, side by side
+    default: pass.operands.resize(1); break;  // just the first part
+    }
+    return pass;
+}
+
+BooleanSpec Document::effectiveSpec(const Body& body) const
+{
+    if (!body.isBoolean())
+        throw std::invalid_argument("'" + body.name + "' is not a combined shape");
+    return body.isOff() ? passThrough(*body.boolean) : *body.boolean;
+}
+
+std::optional<std::string> Document::problemWith(ObjectId id) const
+{
+    const Body* body = find(id);
+    if (!body || !body->isBoolean())
+        return std::nullopt;
+    try {
+        if (usesMeshEngine(id))
+            (void)meshSolid(id);
+        else
+            (void)shape(id);
+    } catch (const std::exception& e) {
+        return std::string(e.what());
+    }
+    if (const auto it = m_problems.find(id); it != m_problems.end())
+        return it->second;
+    return std::nullopt;
+}
+
+void Document::setStepState(ObjectId id, bool suppressed, bool rolledBack)
+{
+    Body& body = require(id);
+    if (body.suppressed == suppressed && body.rolledBack == rolledBack)
+        return;
+    if (!body.isBoolean() && (suppressed || rolledBack))
+        throw std::invalid_argument("Only a combine step can be switched off");
+    body.suppressed = suppressed;
+    body.rolledBack = rolledBack;
+    invalidate(id, true);
+    notify(ChangeKind::Modified, id);
+}
+
+void Document::insertStep(Body step, ObjectId above)
+{
+    if (!step.isBoolean() || step.boolean->operands.empty())
+        throw std::invalid_argument("A step needs parts");
+    Body& parent = require(above);
+    if (!parent.isBoolean() || parent.boolean->operands.empty())
+        throw std::invalid_argument("'" + parent.name + "' is not a combined shape");
+    const ObjectId below = step.boolean->operands.front();
+    auto& slots = parent.boolean->operands;
+    const auto slot = std::find(slots.begin(), slots.end(), below);
+    if (slot == slots.end())
+        throw std::invalid_argument("The new step's first part must be a part of '" + parent.name + "'");
+    if (find(step.id) || step.id == kInvalidId)
+        throw std::invalid_argument("The new step needs a new id");
+    // Check it as if `below` were free.
+    std::map<ObjectId, ObjectId> parents = m_parentOf;
+    parents.erase(below);
+    validateBoolean(step, parents, m_bodies);
+    requireFinite(step.placement, "Body '" + step.name + "'");
+    m_nextId = std::max(m_nextId, step.id + 1);
+    const ObjectId id = step.id;
+    *slot = id;
+    m_bodies.push_back(std::move(step));
+    rebuildParents();
+    invalidate(id, true);
+    notify(ChangeKind::Added, id);
+}
+
+Body Document::removeStep(ObjectId id)
+{
+    const Body& step = require(id);
+    if (!step.isBoolean())
+        throw std::invalid_argument("'" + step.name + "' is not a step");
+    const ObjectId above = parentOf(id);
+    if (above == kInvalidId)
+        throw std::invalid_argument("'" + step.name + "' is on the plate; use Separate");
+    Body taken = step;
+    Body& parent = require(above);
+    std::replace(parent.boolean->operands.begin(), parent.boolean->operands.end(), id,
+                 taken.boolean->operands.front());
+    m_bodies.erase(std::remove_if(m_bodies.begin(), m_bodies.end(), [id](const Body& b) { return b.id == id; }),
+                   m_bodies.end());
+    m_shapeCache.erase(id);
+    m_meshCache.erase(id);
+    m_solidCache.erase(id);
+    rebuildParents();
+    invalidate(above, true);
+    notify(ChangeKind::Removed, id);
+    for (std::size_t i = 1; i < taken.boolean->operands.size(); ++i)
+        notify(ChangeKind::Modified, taken.boolean->operands[i]);
+    return taken;
 }
 
 bool Document::specUsesMesh(const BooleanSpec& spec) const
@@ -686,10 +813,20 @@ MeshSolid Document::meshSolid(ObjectId id) const
         throw std::out_of_range("No body with id " + std::to_string(id));
     MeshSolid built;
     if (body->isBoolean() && usesMeshEngine(id)) {
-        if (m_lastPreview && m_lastPreview->spec == *body->boolean && partsUnchanged(*m_lastPreview))
+        if (!body->isOff() && m_lastPreview && m_lastPreview->spec == *body->boolean &&
+            partsUnchanged(*m_lastPreview))
             built = m_lastPreview->solid;
-        else
-            built = combineMeshes(*body->boolean);
+        else {
+            try {
+                built = combineMeshes(effectiveSpec(*body));
+                m_problems.erase(id);
+            } catch (const GeometryError& e) {
+                if (body->isOff())
+                    throw;
+                m_problems[id] = e.what();  // as in shape(): note it, carry on without the step
+                built = combineMeshes(passThrough(*body->boolean));
+            }
+        }
         m_lastPreview.reset();
     } else if (const auto* mesh = std::get_if<MeshSpec>(&body->spec)) {
         built = meshkernel::fromMeshData(*mesh->data, {mesh->width / mesh->data->size[0],

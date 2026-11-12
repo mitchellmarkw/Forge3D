@@ -508,16 +508,18 @@ BooleanSpec embossSpec(const Document& doc, ObjectId target, const emboss::Surfa
 {
     if (!doc.find(target))
         throw std::out_of_range("No body with id " + std::to_string(target));
-    if (!doc.isTopLevel(target))
-        throw std::invalid_argument("Only a shape on the plate can be embossed");
     BooleanSpec spec;
     spec.op = BooleanOp::Emboss;
     spec.operands = {target};
-    // A new result sits where its parts are, so plate coordinates are its own.
-    spec.planePoint = where.point;
-    spec.planeNormal = unit(where.normal);
+    // The new step sits where its part is: in the coordinates of whatever holds the part
+    // (the plate for a shape on it; the next step up when added inside a history).
+    const ObjectId holder = doc.parentOf(target);
+    const Transform toStep = holder == kInvalidId ? Transform{} : doc.worldTransform(holder).inverse();
+    spec.planePoint = toStep.apply(where.point);
+    spec.planeNormal = unit(toStep.applyDirection(where.normal));
     spec.emboss = words;
-    const auto centre = doc.worldBounds(target).center();
+    const auto c = doc.worldBounds(target).center();
+    const Vec3 centre = toStep.apply(Vec3{c[0], c[1], c[2]});
     spec.pivot = {centre[0], centre[1], centre[2]};
     return spec;
 }

@@ -323,8 +323,14 @@ struct Body {
     PrimitiveSpec spec;
     Placement placement;
     std::optional<BooleanSpec> boolean;
+    // A combine step can be switched off: by hand (suppressed), or because the rollback
+    // bar is below it (rolledBack). Off, it passes its shape through: its first part
+    // (one-part steps, Subtract), or its parts side by side (Merge, Intersect, Group).
+    bool suppressed = false;
+    bool rolledBack = false;
 
     bool isBoolean() const { return boolean.has_value(); }
+    bool isOff() const { return boolean.has_value() && (suppressed || rolledBack); }
     bool operator==(const Body&) const = default;
 };
 

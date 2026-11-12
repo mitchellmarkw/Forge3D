@@ -539,16 +539,22 @@ BooleanSpec edgesSpec(const Document& doc, ObjectId target, const EdgeFinish& fi
 {
     if (!doc.find(target))
         throw std::out_of_range("No body with id " + std::to_string(target));
-    if (!doc.isTopLevel(target))
-        throw std::invalid_argument("Only a shape on the plate can have its edges changed");
     if (doc.usesMeshEngine(target))
         throw std::invalid_argument("Rounding and chamfering work on solid shapes, not on imported meshes or "
                                     "shapes made with them.");
     BooleanSpec spec;
     spec.op = BooleanOp::Edges;
     spec.operands = {target};
-    spec.edges = finish;  // a new result sits where its part is: plate coordinates are its own
-    const auto centre = doc.worldBounds(target).center();
+    // The new step sits where its part is: in the coordinates of whatever holds the part
+    // (the plate for a shape on it; the next step up when added inside a history).
+    const ObjectId holder = doc.parentOf(target);
+    const Transform toStep = holder == kInvalidId ? Transform{} : doc.worldTransform(holder).inverse();
+    EdgeFinish local = finish;
+    for (EdgeRef& r : local.edges)
+        r = moved(r, toStep);
+    spec.edges = local;
+    const auto c = doc.worldBounds(target).center();
+    const Vec3 centre = toStep.apply(Vec3{c[0], c[1], c[2]});
     spec.pivot = {centre[0], centre[1], centre[2]};
     return spec;
 }

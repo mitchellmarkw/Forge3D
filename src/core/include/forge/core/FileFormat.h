@@ -32,7 +32,8 @@ namespace forge::file {
 //  10  text (type "text": text, font, bold, italic) and emboss results (operation
 //      "emboss", planePoint / planeNormal, "emboss": the words)
 //  11  edge finishes (operation "edges"; "edges": kind, size, angle, picks)
-inline constexpr int kFormatVersion = 11;
+//  12  steps switched off: "suppressed" / "rolledBack" on results (missing = false)
+inline constexpr int kFormatVersion = 12;
 inline constexpr const char* kExtension = ".f3d";
 inline constexpr const char* kDocumentEntry = "document.json";
 
