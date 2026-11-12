@@ -224,6 +224,20 @@ Viewport (mouse)  --leftPressed(ray, handle)-->  MainWindow drag controller
 - The drag computes from a snapshot `Document` taken at the start (the live one holds
   the preview), previews every changed body, and records one `EditBodiesCommand`.
 
+## Arrange: Duplicate, clipboard, Mirror, Group (slice 4c)
+
+- The clipboard holds `BodyTree`s (a shape and its parts, parts first) captured by value,
+  so pasting works after the originals are deleted. `cloneTree()` gives new ids and
+  names ("Box 1 copy") and remaps operands; `addCopies()` inserts trees as one step.
+- **Mirror** is a result with one operand and a plane through the shape's visible
+  centre: geometry = the placed part transformed by `gp_Trsf::SetMirror`. Scaling keeps
+  it exact when the stretch is along or across the mirror (always true for the plate-
+  axis planes the UI makes).
+- **Group** is a result whose shape is a `TopoDS_Compound` of the placed parts (no
+  boolean), so they move, turn, scale, combine and save as one.
+- Several selected shapes share a gizmo at their combined bounds' centre (plate axes,
+  no resize); the drag previews every shape and records one `EditBodiesCommand`.
+
 ## Rendering
 
 `Document::mesh()` → `forge::Mesh` (positions, normals, indices) → `DisplayItem`

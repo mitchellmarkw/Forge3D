@@ -30,6 +30,11 @@ std::vector<ObjectId> addCopies(CommandStack& stack, Document& doc, const std::v
 // How far to move copies of these shapes so they sit just beside them along +X
 // (their combined width plus a gap).
 Vec3 besideOffset(const Document& doc, const std::vector<ObjectId>& ids, double gap = 5.0);
+// How far along +X to move something whose left edge is at `minX` so it lands
+// clear of everything on the plate (a gap to the right of the rightmost shape).
+Vec3 clearOfPlate(const Document& doc, double minX, double gap = 5.0);
+// The left edge (smallest X on the plate) of these shapes.
+double leftEdge(const Document& doc, const std::vector<ObjectId>& ids);
 
 // Mirrors each shape on the plate in place, across the plate axis `axis` (0 = X
 // flips left / right, 1 = Y, 2 = Z flips upside down) through its own middle, as

@@ -143,3 +143,16 @@ TEST_CASE("Mirrored and grouped shapes combine, scale and save", "[arrange]")
     CHECK(loaded.find(m)->boolean->op == BooleanOp::Mirror);
     CHECK_THAT(volumeOf(loaded.shape(m)), WithinRel(volumeOf(doc.shape(m)), 1e-9));
 }
+
+TEST_CASE("Copies land clear of everything on the plate", "[arrange]")
+{
+    Document doc;
+    CommandStack stack(doc);
+    const ObjectId a = add(stack, doc, BoxSpec{20, 10, 10});      // x -10..10
+    add(stack, doc, BoxSpec{10, 10, 10}, 40);                      // x 35..45
+    CHECK_THAT(leftEdge(doc, {a}), WithinAbs(-10, 1e-4));
+    const Vec3 offset = clearOfPlate(doc, leftEdge(doc, {a}));
+    CHECK_THAT(offset[0], WithinAbs(45 + 5 + 10, 1e-4));
+    const auto made = addCopies(stack, doc, {captureTree(doc, a)}, offset, "Duplicate");
+    CHECK_THAT(doc.worldBounds(made.front()).min[0], WithinAbs(50, 1e-4));
+}

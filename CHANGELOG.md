@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.9.0 — Slice 4c: Duplicate, Mirror, Group, move several (2026-11-11)
+
+- **Duplicate** (Ctrl+D, toolbar): copies of the selected shapes, placed to the right of
+  everything on the plate. Combined shapes are copied with all their parts.
+- **Copy / Cut / Paste** (Ctrl+C / Ctrl+X / Ctrl+V, Edit menu). Paste after Copy lands
+  clear of everything; the first Paste after Cut puts the shapes back where they were.
+- **Mirror** (toolbar dropdown, Edit menu): flip the selected shapes in place, left /
+  right, front / back or upside down. "Remove the mirror" (Properties) flips it back.
+- **Group** (Ctrl+G): shapes move, turn and resize as one without merging. **Ungroup**
+  (Properties, Separate, or Ctrl+Shift+G).
+- **Several shapes at once**: with two or more selected, the Move and Rotate handles
+  appear at their shared middle and move / turn them together (one Undo); dragging one
+  of them on the plate slides them all. To resize several together, Group them.
+- Fixed: long hints (e.g. "2 shapes selected...") no longer widen the Properties panel.
+- File format version 8 (Mirror and Group). Older files still open.
+- Core: `BooleanOp::Mirror` / `Group`, Arrange.h (`captureTree`, `cloneTree`,
+  `addCopies`, `clearOfPlate`, `mirrorBodies`, `groupBodies`).
+- 134 unit tests (5 new).
+
 ## 0.8.0 — Slice 4b: handles everywhere (2026-11-11)
 
 - **Parts inside combined shapes get handles.** Select a part in Objects (e.g. the

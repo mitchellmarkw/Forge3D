@@ -128,6 +128,28 @@ Vec3 besideOffset(const Document& doc, const std::vector<ObjectId>& ids, double 
     return {all.valid ? all.size()[0] + gap : gap, 0.0, 0.0};
 }
 
+Vec3 clearOfPlate(const Document& doc, double minX, double gap)
+{
+    const Bounds all = doc.worldBounds();
+    if (!all.valid)
+        return {0.0, 0.0, 0.0};
+    return {all.max[0] + gap - minX, 0.0, 0.0};
+}
+
+double leftEdge(const Document& doc, const std::vector<ObjectId>& ids)
+{
+    double left = 0.0;
+    bool any = false;
+    for (ObjectId id : ids) {
+        const Bounds b = doc.worldBounds(id);
+        if (b.valid && (!any || b.min[0] < left)) {
+            left = b.min[0];
+            any = true;
+        }
+    }
+    return left;
+}
+
 std::vector<ObjectId> mirrorBodies(CommandStack& stack, Document& doc, const std::vector<ObjectId>& ids, int axis)
 {
     if (axis < 0 || axis > 2)
