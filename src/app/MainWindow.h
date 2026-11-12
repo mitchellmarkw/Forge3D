@@ -2,6 +2,7 @@
 #pragma once
 
 #include "forge/core/Align.h"
+#include "forge/core/Arrange.h"
 #include "forge/core/CommandStack.h"
 #include "forge/core/Document.h"
 #include "forge/core/Split.h"
@@ -86,6 +87,16 @@ private:
     // Editing
     void addBody(const PrimitiveSpec& spec);
     void deleteSelected();
+    void duplicateSelected();
+    void copySelected();
+    void cutSelected();
+    void paste();
+    void mirrorSelected(int axis);
+    void groupSelected();
+    // Handles for the selection: one shape's, or a shared set (move / turn only) at
+    // the middle of several shapes on the plate.
+    std::optional<view::GizmoTarget> selectionGizmo() const;
+    bool multiSelection() const;  // two or more shapes, all on the plate
     void combineSelected(BooleanOp op);
     void alignSelected(AlignMode mode);
     void separateSelected();
@@ -144,6 +155,8 @@ private:
         // Resizing a combined shape changes its parts: their states when the drag
         // started, a copy of the document then (to compute from), and its size then.
         std::vector<Body> beforeAll;
+        bool multi = false;               // moving / turning several shapes together
+        std::vector<Vec3> turnCentres;    // multi: the shared middle, in each shape's own coordinates
         std::shared_ptr<Document> snapshot;
         Bounds localBounds;
         QVector3D axis;               // SplitPlane: the plane's direction
@@ -181,6 +194,15 @@ private:
     QAction* m_intersect = nullptr;
     QAction* m_separate = nullptr;
     QAction* m_split = nullptr;
+    QAction* m_duplicate = nullptr;
+    QAction* m_copy = nullptr;
+    QAction* m_cut = nullptr;
+    QAction* m_paste = nullptr;
+    QAction* m_group = nullptr;
+    QMenu* m_mirrorMenu = nullptr;
+    std::vector<BodyTree> m_clipboard;  // what Copy / Cut captured
+    double m_clipboardLeft = 0.0;       // left edge of what was copied, on the plate
+    int m_pasteCount = 0;               // pastes since Copy / Cut (0 right after Cut)
     QWidget* m_propsStack = nullptr;
     QDockWidget* m_propsDock = nullptr;
     int m_propsDockWidth = 300;  // holds Properties and the Split tool's panel (one shown)

@@ -206,10 +206,25 @@ void PropertiesPanel::setBody(const Body* body, const QString& context, bool isP
     m_separateButton->setVisible(body->isBoolean() && !isPart);
     const bool split = body->isBoolean() && body->boolean->op == BooleanOp::Split;
     m_editCutButton->setVisible(split && !isPart);
-    if (auto* button = qobject_cast<QPushButton*>(m_separateButton)) {
-        button->setText(split ? tr("Remove the cut") : tr("Separate into parts"));
-        button->setToolTip(split ? tr("Give back the whole shape, where it is")
-                                 : tr("Break this combined shape back into its parts, each left where it is"));
+    if (auto* button = qobject_cast<QPushButton*>(m_separateButton); button && body->isBoolean()) {
+        switch (body->boolean->op) {
+        case BooleanOp::Split:
+            button->setText(tr("Remove the cut"));
+            button->setToolTip(tr("Give back the whole shape, where it is"));
+            break;
+        case BooleanOp::Mirror:
+            button->setText(tr("Remove the mirror"));
+            button->setToolTip(tr("Give back the shape the right way round, where it is"));
+            break;
+        case BooleanOp::Group:
+            button->setText(tr("Ungroup"));
+            button->setToolTip(tr("Let the shapes in this group move on their own again, where they are"));
+            break;
+        default:
+            button->setText(tr("Separate into parts"));
+            button->setToolTip(tr("Break this combined shape back into its parts, each left where it is"));
+            break;
+        }
     }
     m_sizeGroup->setVisible(!body->isBoolean());  // a combined shape is sized through its parts
     m_sitButton->setVisible(!isPart);

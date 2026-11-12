@@ -194,6 +194,39 @@ void MainWindow::createActions()
     m_delete->setToolTip(tr("Delete the selected bodies (Del). Deleting a combined shape deletes its parts too."));
     connect(m_delete, &QAction::triggered, this, &MainWindow::deleteSelected);
 
+    m_duplicate = new QAction(tr("Duplicate"), this);
+    m_duplicate->setShortcut(Qt::CTRL | Qt::Key_D);
+    m_duplicate->setToolTip(tr("Duplicate (Ctrl+D): copies of the selected shapes, placed to the right of everything on the plate"));
+    connect(m_duplicate, &QAction::triggered, this, &MainWindow::duplicateSelected);
+    m_copy = new QAction(tr("&Copy"), this);
+    m_copy->setShortcut(QKeySequence::Copy);
+    connect(m_copy, &QAction::triggered, this, &MainWindow::copySelected);
+    m_cut = new QAction(tr("Cu&t"), this);
+    m_cut->setShortcut(QKeySequence::Cut);
+    connect(m_cut, &QAction::triggered, this, &MainWindow::cutSelected);
+    m_paste = new QAction(tr("&Paste"), this);
+    m_paste->setShortcut(QKeySequence::Paste);
+    m_paste->setToolTip(tr("Paste (Ctrl+V): copies of what you copied, to the right of everything on the plate"));
+    connect(m_paste, &QAction::triggered, this, &MainWindow::paste);
+
+    m_group = new QAction(tr("Group"), this);
+    m_group->setShortcut(Qt::CTRL | Qt::Key_G);
+    m_group->setToolTip(tr("Group (Ctrl+G): the selected shapes move, turn and resize as one, without merging. "
+                           "Ungroup with Separate"));
+    connect(m_group, &QAction::triggered, this, &MainWindow::groupSelected);
+
+    m_mirrorMenu = new QMenu(tr("Mirror"), this);
+    m_mirrorMenu->menuAction()->setToolTip(tr("Mirror: flip the selected shapes in place"));
+    m_mirrorMenu->setToolTipsVisible(true);
+    const auto addMirror = [this](const QString& text, const QString& tip, int axis) {
+        QAction* a = m_mirrorMenu->addAction(text);
+        a->setToolTip(tip);
+        connect(a, &QAction::triggered, this, [this, axis] { mirrorSelected(axis); });
+    };
+    addMirror(tr("Left / right (X)"), tr("Flip across X: what was on the left ends up on the right"), 0);
+    addMirror(tr("Front / back (Y)"), tr("Flip across Y: what was at the front ends up at the back"), 1);
+    addMirror(tr("Upside down (Z)"), tr("Flip across Z: the top ends up at the bottom, still on the plate"), 2);
+
     m_deselect = new QAction(tr("Select &None"), this);
     m_deselect->setShortcut(Qt::Key_Escape);
     connect(m_deselect, &QAction::triggered, this, [this] {
@@ -276,6 +309,7 @@ void MainWindow::createActions()
     m_intersect->setToolTip(tr("Intersect: keep only the space the selected shapes share"));
     connect(m_intersect, &QAction::triggered, this, [this] { combineSelected(BooleanOp::Intersect); });
     m_separate = new QAction(tr("Separate"), this);
+    m_separate->setShortcut(Qt::CTRL | Qt::SHIFT | Qt::Key_G);
     m_separate->setToolTip(tr("Separate: break a combined shape back into its parts, where they are"));
     connect(m_separate, &QAction::triggered, this, &MainWindow::separateSelected);
 
@@ -340,6 +374,10 @@ void MainWindow::createMenus()
     edit->addAction(m_undo);
     edit->addAction(m_redo);
     edit->addSeparator();
+    edit->addAction(m_cut);
+    edit->addAction(m_copy);
+    edit->addAction(m_paste);
+    edit->addAction(m_duplicate);
     edit->addAction(m_delete);
     edit->addAction(m_deselect);
     edit->addSeparator();
@@ -355,6 +393,8 @@ void MainWindow::createMenus()
     edit->addAction(m_separate);
     edit->addAction(m_split);
     edit->addMenu(m_alignMenu);
+    edit->addMenu(m_mirrorMenu);
+    edit->addAction(m_group);
 
     QMenu* add = menuBar()->addMenu(tr("&Add"));
     add->addActions(m_addMenu->actions());
@@ -415,7 +455,14 @@ void MainWindow::createToolBar()
         alignButton->setToolButtonStyle(Qt::ToolButtonTextOnly);
         alignButton->setObjectName(QStringLiteral("AlignShapesButton"));
         bar->addWidget(alignButton);
+        auto* mirrorButton = new QToolButton(bar);
+        mirrorButton->setDefaultAction(m_mirrorMenu->menuAction());
+        mirrorButton->setPopupMode(QToolButton::InstantPopup);
+        mirrorButton->setToolButtonStyle(Qt::ToolButtonTextOnly);
+        bar->addWidget(mirrorButton);
     }
+    bar->addAction(m_group);
+    bar->addAction(m_duplicate);
     bar->addSeparator();
     bar->addAction(m_delete);
     bar->addAction(m_clear);
@@ -457,12 +504,14 @@ void MainWindow::createDocks()
     stackLayout->addWidget(m_properties);
     stackLayout->addWidget(m_splitPanel);
     m_splitPanel->hide();
+    // Long hint texts wrap instead of widening the dock.
+    m_propsStack->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     propsDock->setWidget(m_propsStack);
     m_propsDock = propsDock;
     connect(m_splitPanel, &SplitPanel::planeChanged, this, &MainWindow::updateSplitPlane);
     connect(m_splitPanel, &SplitPanel::applyRequested, this, &MainWindow::applySplit);
     connect(m_splitPanel, &SplitPanel::cancelRequested, this, &MainWindow::endSplit);
-    propsDock->setMinimumWidth(280);
+    propsDock->setMinimumWidth(320);
     addDockWidget(Qt::RightDockWidgetArea, propsDock);
 
     connect(m_properties, &PropertiesPanel::renameRequested, this, [this](ObjectId id, const QString& name) {
@@ -671,6 +720,42 @@ void MainWindow::onLeftPressed(const QVector3D& origin, const QVector3D& directi
         return;
     }
 
+    if (handle.valid() && multiSelection()) {
+        // Several shapes: move or turn them together about their shared middle.
+        const auto frame = selectionGizmo();
+        if (!frame)
+            return;
+        m_pressOnHandle = true;
+        m_dragState.multi = true;
+        m_dragState.handle = handle;
+        m_dragState.frame = *frame;
+        const Vec3 mid{frame->centre.x(), frame->centre.y(), frame->centre.z()};
+        for (ObjectId id : m_selection) {
+            m_dragState.beforeAll.push_back(*m_doc.find(id));
+            m_dragState.turnCentres.push_back(m_doc.worldTransform(id).inverse().apply(mid));
+        }
+        const view::Gizmo gizmo(m_viewport->camera(), QSizeF(m_viewport->width(), m_viewport->height()),
+                                m_dragState.frame, m_gizmoMode);
+        if (handle.kind == view::GizmoHandle::Kind::Arrow) {
+            const auto s = view::closestOnLine(origin, direction, frame->centre, gizmo.direction(handle));
+            if (!s)
+                return;
+            m_dragState.kind = Drag::Kind::Arrow;
+            m_dragState.startParam = *s;
+        } else if (handle.kind == view::GizmoHandle::Kind::Ring) {
+            const auto centre = m_viewport->projectToScreen(frame->centre);
+            if (!centre)
+                return;
+            m_dragState.kind = Drag::Kind::Ring;
+            m_dragState.centrePixel = *centre;
+            m_dragState.lastPixel = pixel;
+        } else {
+            return;
+        }
+        m_viewport->setActiveHandle(handle);
+        return;
+    }
+
     const Body* selected = m_doc.find(selectedOne());
     const auto frame = gizmoTargetFor(selectedOne());
     if (handle.valid() && selected && frame) {
@@ -728,6 +813,16 @@ void MainWindow::onLeftPressed(const QVector3D& origin, const QVector3D& directi
     const auto hit = pick(m_doc, ray);
     if (!hit)
         return;  // empty space: the click (on release) clears the selection
+    if (multiSelection() && isSelected(hit->id)) {
+        // Grabbed one of several selected shapes: slide them all. (A plain click,
+        // without dragging, still selects just that one.)
+        m_dragState.kind = Drag::Kind::Plate;
+        m_dragState.multi = true;
+        for (ObjectId id : m_selection)
+            m_dragState.beforeAll.push_back(*m_doc.find(id));
+        m_dragState.grabPoint = QVector3D(float(hit->point[0]), float(hit->point[1]), float(hit->point[2]));
+        return;
+    }
     setSelection(hit->id);
     m_dragState.kind = Drag::Kind::Plate;
     m_dragState.before = *m_doc.find(hit->id);
@@ -743,6 +838,47 @@ void MainWindow::onLeftDragged(const QVector3D& origin, const QVector3D& directi
     const bool snap = m_snap && !modifiers.testFlag(Qt::AltModifier);
     const auto step = [snap](double value, double size) { return snap ? view::snapTo(value, size) : value; };
     const QString freeHint = snap ? tr("   (hold Alt to move freely)") : QString();
+
+    if (d.multi) {
+        std::vector<Body> next = d.beforeAll;
+        QString status;
+        if (d.kind == Drag::Kind::Plate) {
+            const auto hit = view::intersectPlane(origin, direction, d.grabPoint, QVector3D(0, 0, 1));
+            if (!hit)
+                return;
+            const double dx = step(hit->x() - d.grabPoint.x(), kMoveStep);
+            const double dy = step(hit->y() - d.grabPoint.y(), kMoveStep);
+            for (Body& b : next)
+                b.placement = movedOnPlate(b, {dx, dy, 0.0});
+            status = tr("Move  X %1 mm   Y %2 mm").arg(dx, 0, 'f', 1).arg(dy, 0, 'f', 1);
+        } else if (d.kind == Drag::Kind::Arrow) {
+            const QVector3D dir(d.handle.axis == 0, d.handle.axis == 1, d.handle.axis == 2);
+            const auto s = view::closestOnLine(origin, direction, d.frame.centre, dir);
+            if (!s)
+                return;
+            const double delta = step(*s - d.startParam, kMoveStep);
+            Vec3 move{0.0, 0.0, 0.0};
+            move[static_cast<std::size_t>(d.handle.axis)] = delta;
+            for (Body& b : next)
+                b.placement = movedOnPlate(b, move);
+            status = tr("Move  %1 %2 mm").arg(QChar("XYZ"[d.handle.axis])).arg(delta, 0, 'f', 1);
+        } else if (d.kind == Drag::Kind::Ring) {
+            d.turned += view::screenAngle(d.centrePixel, d.lastPixel, pixel);
+            d.lastPixel = pixel;
+            const QVector3D axis(d.handle.axis == 0, d.handle.axis == 1, d.handle.axis == 2);
+            const float facing = QVector3D::dotProduct(axis, m_viewport->camera().eyePosition() - d.frame.centre);
+            const double degrees = step(d.turned * (facing >= 0.0f ? 1.0 : -1.0), kTurnStep);
+            for (std::size_t i = 0; i < next.size(); ++i)
+                next[i].placement = rotatedAboutPlateAxis(d.beforeAll[i], d.handle.axis, degrees, d.turnCentres[i]);
+            status = tr("Rotate around %1  %2°").arg(QChar("XYZ"[d.handle.axis])).arg(degrees, 0, 'f', 1);
+        } else {
+            return;
+        }
+        d.moved = true;
+        previewAll(next);
+        statusBar()->showMessage(tr("%1 shapes:  ").arg(next.size()) + status + freeHint);
+        return;
+    }
 
     Body next = d.before;
     QString status;
@@ -893,7 +1029,8 @@ void MainWindow::onLeftReleased(bool wasDrag)
         }
         if (before.empty())
             return;
-        if (!run(std::make_unique<EditBodiesCommand>(before, after, "Resize")))
+        const char* label = !d.multi ? "Resize" : d.kind == Drag::Kind::Ring ? "Rotate" : "Move";
+        if (!run(std::make_unique<EditBodiesCommand>(before, after, label)))
             previewAll(d.beforeAll);
         return;
     }
@@ -1083,6 +1220,120 @@ void MainWindow::alignSelected(AlignMode mode)
                                           : tr("%1 shapes").arg(moves.size()))
                                  .arg(QString::fromStdString(m_doc.find(fixed)->name)),
                              5000);
+}
+
+// ---- Arrange: duplicate, clipboard, mirror, group -----------------------------------
+
+bool MainWindow::multiSelection() const
+{
+    return m_selection.size() >= 2 &&
+           std::all_of(m_selection.begin(), m_selection.end(), [this](ObjectId id) { return m_doc.isTopLevel(id); });
+}
+
+std::optional<view::GizmoTarget> MainWindow::selectionGizmo() const
+{
+    if (!multiSelection())
+        return gizmoTargetFor(selectedOne());
+    Bounds all;
+    for (ObjectId id : m_selection) {
+        const Bounds b = m_doc.worldBounds(id);
+        if (b.valid) {
+            all.expand(b.min[0], b.min[1], b.min[2]);
+            all.expand(b.max[0], b.max[1], b.max[2]);
+        }
+    }
+    if (!all.valid)
+        return std::nullopt;
+    const auto c = all.center();
+    view::GizmoTarget target;
+    target.centre = QVector3D(c[0], c[1], c[2]);
+    target.bodyAxes = {QVector3D(1, 0, 0), QVector3D(0, 1, 0), QVector3D(0, 0, 1)};
+    target.resizable = false;  // Group them to resize together
+    return target;
+}
+
+void MainWindow::duplicateSelected()
+{
+    if (m_selection.empty() || !std::all_of(m_selection.begin(), m_selection.end(),
+                                             [this](ObjectId id) { return m_doc.isTopLevel(id); }))
+        return;
+    std::vector<BodyTree> trees;
+    for (ObjectId id : m_selection)
+        trees.push_back(captureTree(m_doc, id));
+    try {
+        // Copies go to the right of everything, so they never land inside another shape.
+        const auto made =
+            addCopies(m_stack, m_doc, trees, clearOfPlate(m_doc, leftEdge(m_doc, m_selection)), "Duplicate");
+        qInfo().noquote() << "Command:" << QString::fromStdString(m_stack.undoLabel());
+        setSelection(made);
+    } catch (const std::exception& e) {
+        QMessageBox::warning(this, tr("Forge3D"), tr("Duplicate did not work:\n%1").arg(QString::fromUtf8(e.what())));
+    }
+}
+
+void MainWindow::copySelected()
+{
+    if (m_selection.empty())
+        return;
+    m_clipboard.clear();
+    for (ObjectId id : m_selection)
+        if (m_doc.isTopLevel(id))
+            m_clipboard.push_back(captureTree(m_doc, id));
+    m_clipboardLeft = leftEdge(m_doc, m_selection);
+    m_pasteCount = 1;
+    statusBar()->showMessage(tr("Copied %n shape(s). Ctrl+V pastes.", nullptr, int(m_clipboard.size())), 4000);
+    refreshScene();  // Paste becomes available
+}
+
+void MainWindow::cutSelected()
+{
+    copySelected();
+    m_pasteCount = 0;  // the originals are gone: the first paste puts them back where they were
+    deleteSelected();
+}
+
+void MainWindow::paste()
+{
+    if (m_clipboard.empty())
+        return;
+    try {
+        // Right after Cut: back where they were. Otherwise: clear of everything on the plate.
+        const Vec3 offset = m_pasteCount == 0 ? Vec3{0.0, 0.0, 0.0} : clearOfPlate(m_doc, m_clipboardLeft);
+        const auto made = addCopies(m_stack, m_doc, m_clipboard, offset, "Paste");
+        ++m_pasteCount;
+        qInfo().noquote() << "Command:" << QString::fromStdString(m_stack.undoLabel());
+        setSelection(made);
+    } catch (const std::exception& e) {
+        QMessageBox::warning(this, tr("Forge3D"), tr("Paste did not work:\n%1").arg(QString::fromUtf8(e.what())));
+    }
+}
+
+void MainWindow::mirrorSelected(int axis)
+{
+    if (m_selection.empty())
+        return;
+    try {
+        const auto made = mirrorBodies(m_stack, m_doc, m_selection, axis);
+        qInfo().noquote() << "Command:" << QString::fromStdString(m_stack.undoLabel());
+        setSelection(made);
+    } catch (const std::exception& e) {
+        QMessageBox::warning(this, tr("Forge3D"), tr("Mirror did not work:\n%1").arg(QString::fromUtf8(e.what())));
+    }
+}
+
+void MainWindow::groupSelected()
+{
+    if (m_selection.size() < 2) {
+        statusBar()->showMessage(tr("Group: select two or more shapes (Ctrl+click)."), 5000);
+        return;
+    }
+    try {
+        const ObjectId id = groupBodies(m_stack, m_doc, m_selection);
+        qInfo().noquote() << "Command:" << QString::fromStdString(m_stack.undoLabel());
+        setSelection(id);
+    } catch (const std::exception& e) {
+        QMessageBox::warning(this, tr("Forge3D"), tr("Group did not work:\n%1").arg(QString::fromUtf8(e.what())));
+    }
 }
 
 // ---- Split tool -------------------------------------------------------------------
@@ -1558,7 +1809,7 @@ void MainWindow::refreshScene()
             m_properties->setKeepRound(false);
         }
     }
-    m_viewport->setGizmo(m_splitMode.active ? std::nullopt : gizmoTargetFor(selectedOne()), m_gizmoMode);
+    m_viewport->setGizmo(m_splitMode.active ? std::nullopt : selectionGizmo(), m_gizmoMode);
 
     // Properties: what the selected body is made of, or what it belongs to.
     QString context;
@@ -1570,9 +1821,12 @@ void MainWindow::refreshScene()
             const QString joiner = selected->boolean->op == BooleanOp::Subtract ? QStringLiteral(" − ")
                                    : selected->boolean->op == BooleanOp::Merge  ? QStringLiteral(" + ")
                                                                                 : QStringLiteral(" ∩ ");
-            context = selected->boolean->op == BooleanOp::Split
-                          ? tr("Made from: %1, cut by a plane").arg(names.join(QString()))
-                          : tr("Made from: %1").arg(names.join(joiner));
+            switch (selected->boolean->op) {
+            case BooleanOp::Split: context = tr("Made from: %1, cut by a plane").arg(names.join(QString())); break;
+            case BooleanOp::Mirror: context = tr("Made from: %1, mirrored").arg(names.join(QString())); break;
+            case BooleanOp::Group: context = tr("A group of: %1").arg(names.join(QStringLiteral(", "))); break;
+            default: context = tr("Made from: %1").arg(names.join(joiner)); break;
+            }
         } else if (const ObjectId owner = m_doc.parentOf(selected->id); owner != kInvalidId) {
             context = tr("Part of '%1'. Its position is measured inside that shape.")
                           .arg(QString::fromStdString(m_doc.find(owner)->name));
@@ -1600,6 +1854,10 @@ void MainWindow::refreshScene()
         a->setEnabled(m_selection.size() >= 2 && allTopLevel);
     m_separate->setEnabled(selected && selected->isBoolean() && m_doc.isTopLevel(selected->id));
     m_alignMenu->menuAction()->setEnabled(m_selection.size() >= 2 && allTopLevel);
+    for (QAction* a : {m_duplicate, m_copy, m_cut, m_mirrorMenu->menuAction()})
+        a->setEnabled(anySelected && allTopLevel && !m_splitMode.active);
+    m_group->setEnabled(m_selection.size() >= 2 && allTopLevel);
+    m_paste->setEnabled(!m_clipboard.empty() && !m_splitMode.active);
     m_split->setEnabled(m_selection.size() == 1 && allTopLevel && !m_splitMode.active);
     m_clear->setEnabled(!m_doc.empty());
 }

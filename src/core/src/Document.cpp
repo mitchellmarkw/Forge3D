@@ -17,6 +17,8 @@
 #include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
+#include <BRep_Builder.hxx>
+#include <TopoDS_Compound.hxx>
 #include <gp_Ax2.hxx>
 #include <gp_Dir.hxx>
 #include <gp_Pnt.hxx>
@@ -187,9 +189,10 @@ void Document::validateBoolean(const Body& body, const std::map<ObjectId, Object
                                const std::vector<Body>& all) const
 {
     const auto& ops = body.boolean->operands;
-    if (body.boolean->op == BooleanOp::Split) {
+    const BooleanOp op = body.boolean->op;
+    if (op == BooleanOp::Split || op == BooleanOp::Mirror) {
         if (ops.size() != 1)
-            throw std::invalid_argument("Split works on exactly one shape");
+            throw std::invalid_argument(toString(op) + " works on exactly one shape");
         const auto& n = body.boolean->planeNormal;
         const double len = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
         if (!(len > 1e-9) || !std::isfinite(len))
@@ -198,7 +201,7 @@ void Document::validateBoolean(const Body& body, const std::map<ObjectId, Object
             if (!std::isfinite(v))
                 throw std::invalid_argument("Split has an invalid plane");
     } else if (ops.size() < 2) {
-        throw std::invalid_argument(toString(body.boolean->op) + " needs at least two shapes");
+        throw std::invalid_argument(toString(op) + " needs at least two shapes");
     }
     std::set<ObjectId> seen;
     for (ObjectId part : ops) {
@@ -406,6 +409,24 @@ TopoDS_Shape Document::combine(const BooleanSpec& spec) const
     const std::vector<ObjectId>& operands = spec.operands;
     TopoDS_Shape result;
     try {
+        if (op == BooleanOp::Mirror) {
+            const ObjectId part = operands.at(0);
+            gp_Trsf mirror;
+            mirror.SetMirror(gp_Ax2(gp_Pnt(spec.planePoint[0], spec.planePoint[1], spec.planePoint[2]),
+                                    gp_Dir(spec.planeNormal[0], spec.planeNormal[1], spec.planeNormal[2])));
+            const gp_Trsf placed = mirror * toTrsf(localTransform(part));
+            return BRepBuilderAPI_Transform(shape(part), placed, /*copy=*/true).Shape();
+        }
+        if (op == BooleanOp::Group) {
+            // Side by side, not merged: a compound of the placed parts.
+            BRep_Builder builder;
+            TopoDS_Compound group;
+            builder.MakeCompound(group);
+            for (ObjectId part : operands)
+                builder.Add(group,
+                            BRepBuilderAPI_Transform(shape(part), toTrsf(localTransform(part)), /*copy=*/true).Shape());
+            return group;
+        }
         if (op == BooleanOp::Split) {
             const ObjectId part = operands.at(0);
             const TopoDS_Shape placed =
@@ -463,6 +484,8 @@ TopoDS_Shape Document::combine(const BooleanSpec& spec) const
                 break;
             }
             case BooleanOp::Split:
+            case BooleanOp::Mirror:
+            case BooleanOp::Group:
                 break;  // handled above
             }
         }
@@ -522,8 +545,8 @@ TopoDS_Shape Document::previewCombine(const BooleanSpec& spec) const
     for (ObjectId part : spec.operands)
         if (!find(part))
             throw std::out_of_range("No body with id " + std::to_string(part));
-    if (spec.op == BooleanOp::Split && spec.operands.size() != 1)
-        throw std::invalid_argument("Split works on exactly one shape");
+    if ((spec.op == BooleanOp::Split || spec.op == BooleanOp::Mirror) && spec.operands.size() != 1)
+        throw std::invalid_argument(toString(spec.op) + " works on exactly one shape");
     return combine(spec);
 }
 
