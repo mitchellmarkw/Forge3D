@@ -120,6 +120,7 @@ TEST_CASE("Edges of shapes are found and sorted by how they bend", "[edges]")
         CHECK(found.edges[std::size_t(corner)].bend == edges::Bend::Concave);
         CHECK_FALSE(edges::suits(EdgeFinishKind::Rounding, edges::Bend::Concave));
         CHECK(edges::suits(EdgeFinishKind::Fillet, edges::Bend::Concave));
+        CHECK(edges::suits(EdgeFinishKind::Fillet, edges::Bend::Convex));  // a cove
         CHECK(edges::suits(EdgeFinishKind::Chamfer, edges::Bend::Concave));
     }
     SECTION("a cylinder: two rims, no seam")
@@ -186,6 +187,62 @@ TEST_CASE("Rounding, fillets, chamfers and bevels", "[edges]")
         // A ring of (r² - πr²/4) cross-section round a 5 mm peg: about 2π(5 + 0.45r) long.
         const double expected = (4.0 - pi) * 2 * pi * (5 + 0.45 * 2);
         CHECK_THAT(added, WithinRel(expected, 0.1));
+    }
+    SECTION("a fillet on an outside edge cuts a cove")
+    {
+        const ObjectId box = add(stack, doc, BoxSpec{20, 20, 10});
+        EdgeFinish f;
+        f.kind = EdgeFinishKind::Fillet;
+        f.size = 2.0;
+        const ObjectId r = finish(stack, doc, box, f, {{0, -10, 10}});
+        // A quarter of a 2 mm cylinder along the 20 mm edge.
+        CHECK_THAT(4000.0 - volumeOf(doc.shape(r)), WithinRel(20 * pi * 4 / 4, 1e-4));
+        CHECK_THAT(doc.worldBounds(r).max[2], WithinAbs(10.0, 1e-4));
+        CHECK(exportMeshes(doc, {r}).front().openEdges == 0);
+    }
+    SECTION("coves all round the top of a box join at the corners")
+    {
+        const ObjectId box = add(stack, doc, BoxSpec{20, 20, 10});
+        EdgeFinish f;
+        f.kind = EdgeFinishKind::Fillet;
+        f.size = 2.0;
+        const ObjectId r = finish(stack, doc, box, f, {{0, -10, 10}, {10, 0, 10}, {0, 10, 10}, {-10, 0, 10}});
+        // Four quarter cylinders, less the corner squares counted twice (each a quarter
+        // disk's worth swept... measured: between 4 x 62.8 less overlaps and 4 x 62.8).
+        const double removed = 4000.0 - volumeOf(doc.shape(r));
+        CHECK(removed < 4 * 20 * pi);
+        CHECK(removed > 4 * 16 * pi);
+        CHECK(exportMeshes(doc, {r}).front().openEdges == 0);
+    }
+    SECTION("a cove round the rim of a cylinder")
+    {
+        const ObjectId cyl = add(stack, doc, CylinderSpec{10, 20});
+        const double before = volumeOf(doc.shape(cyl));
+        EdgeFinish f;
+        f.kind = EdgeFinishKind::Fillet;
+        f.size = 2.0;
+        const ObjectId r = finish(stack, doc, cyl, f, {{10, 0, 20}});
+        // Pappus: a quarter disk (area pi r^2 / 4) whose middle is 4r/3pi inside the rim.
+        const double expected = pi * 4 / 4 * 2 * pi * (10 - 4 * 2 / (3 * pi));
+        CHECK_THAT(before - volumeOf(doc.shape(r)), WithinRel(expected, 1e-3));
+    }
+    SECTION("inside and outside edges in one fillet")
+    {
+        const ObjectId plate = add(stack, doc, BoxSpec{40, 40, 5});
+        const ObjectId peg = add(stack, doc, CylinderSpec{5, 20}, 0, 0, 5);
+        Body merge;
+        merge.id = doc.allocateId();
+        merge.name = "Merge";
+        merge.boolean = BooleanSpec{BooleanOp::Merge, {plate, peg}};
+        stack.execute(std::make_unique<CombineCommand>(merge));
+        const double before = volumeOf(doc.shape(merge.id));
+        EdgeFinish f;
+        f.kind = EdgeFinishKind::Fillet;
+        f.size = 1.0;
+        const ObjectId r = finish(stack, doc, merge.id, f, {{5, 0, 5}, {0, -20, 5}});
+        const double filled = (1.0 - pi / 4) * 2 * pi * (5 + 0.45);  // the corner round the peg
+        const double cove = 40 * pi / 4;                               // along the plate's front edge
+        CHECK_THAT(volumeOf(doc.shape(r)) - before, WithinRel(filled - cove, 0.05));
     }
     SECTION("a chamfer on one edge")
     {

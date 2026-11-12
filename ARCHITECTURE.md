@@ -331,8 +331,11 @@ Viewport (mouse)  --leftPressed(ray, handle)-->  MainWindow drag controller
 
 - A combine op (`BooleanOp::Edges`, one solid part, `EdgeFinish` in the spec: kind,
   size, angle, picked edges). Worked out by OCCT: `BRepFilletAPI_MakeFillet` for
-  Rounding / Fillet, `BRepFilletAPI_MakeChamfer` (`Add` for Chamfer, `AddDA` for Bevel:
-  width on the picked face, angle to it). Not for mesh-engine shapes.
+  Rounding / inside Fillets, `BRepFilletAPI_MakeChamfer` (`Add` for Chamfer, `AddDA` for Bevel:
+  width on the picked face, angle to it). A Fillet on an outside edge is a cove:
+  `cutCoves` subtracts everything within the radius of the edges (a cylinder along a
+  straight edge, a torus segment along an arc, a swept circle otherwise, and a ball at
+  each end so corners join). Not for mesh-engine shapes.
 - `edges::analyse` lists the edges two faces meet at (no seams), with a polyline each
   and how they bend: Convex (rounding), Concave (fillet), Smooth (nothing to do).
   Concave = walking off the edge across one face heads the way the other face points.
