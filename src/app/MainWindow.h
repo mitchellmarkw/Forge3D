@@ -131,6 +131,9 @@ private:
     // A shape with an open (not watertight) imported mesh in it can't be combined or
     // split; says so and returns its name, or returns empty.
     QString openMeshIn(const std::vector<ObjectId>& ids) const;
+    // Combining, splitting, mirroring or grouping a big imported mesh is slow (Forge3D
+    // doesn't respond meanwhile): asks first. True to go ahead.
+    bool confirmHeavyMesh(const std::vector<ObjectId>& ids, const QString& action);
     void sendToSlicer();
     bool chooseSlicer();  // asks which slicer to use; false if cancelled
     bool saveTo(const QString& path);

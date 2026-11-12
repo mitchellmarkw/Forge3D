@@ -364,6 +364,8 @@ void MainWindow::createActions()
                                          .arg(open));
             return;
         }
+        if (!confirmHeavyMesh({id}, tr("Split")))
+            return;
         startSplit(id, false);
     });
 
@@ -1192,6 +1194,9 @@ void MainWindow::combineSelected(BooleanOp op)
         return;
     }
 
+    if (!confirmHeavyMesh(m_selection, name))
+        return;
+
     // Check the result first: an empty result (e.g. Intersect of shapes that don't
     // touch) would vanish from the plate, which looks like a bug.
     TopoDS_Shape previewShape;
@@ -1368,7 +1373,7 @@ void MainWindow::paste()
 
 void MainWindow::mirrorSelected(int axis)
 {
-    if (m_selection.empty())
+    if (m_selection.empty() || !confirmHeavyMesh(m_selection, tr("Mirror")))
         return;
     try {
         const auto made = mirrorBodies(m_stack, m_doc, m_selection, axis);
@@ -1385,6 +1390,8 @@ void MainWindow::groupSelected()
         statusBar()->showMessage(tr("Group: select two or more shapes (Ctrl+click)."), 5000);
         return;
     }
+    if (!confirmHeavyMesh(m_selection, tr("Group")))
+        return;
     try {
         const ObjectId id = groupBodies(m_stack, m_doc, m_selection);
         qInfo().noquote() << "Command:" << QString::fromStdString(m_stack.undoLabel());
@@ -1749,6 +1756,30 @@ bool MainWindow::save()
 
 // ---- Import -----------------------------------------------------------------------
 
+bool MainWindow::confirmHeavyMesh(const std::vector<ObjectId>& ids, const QString& action)
+{
+    constexpr std::size_t kHeavy = 20000;
+    std::size_t triangles = 0;
+    for (ObjectId id : ids)
+        for (ObjectId part : m_doc.withDescendants(id))
+            if (const Body* b = m_doc.find(part); b && !b->isBoolean())
+                if (const auto* mesh = std::get_if<MeshSpec>(&b->spec))
+                    triangles += mesh->data->indices.size() / 3;
+    if (triangles < kHeavy)
+        return true;
+    qInfo().noquote() << action << "with imported meshes of" << triangles << "triangles: asking first";
+    const auto answer = QMessageBox::question(
+        this, tr("Forge3D"),
+        tr("%1 works on %2 triangles of imported mesh here. With this many it can take several minutes, and "
+           "Forge3D won't respond until it's done.\n\nGo ahead?")
+            .arg(action)
+            .arg(triangles),
+        QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+    const bool go = answer == QMessageBox::Yes;
+    qInfo().noquote() << action << (go ? "started" : "cancelled by the user");
+    return go;
+}
+
 QString MainWindow::openMeshIn(const std::vector<ObjectId>& ids) const
 {
     for (ObjectId id : ids)
@@ -1768,7 +1799,30 @@ void MainWindow::importFiles(const QStringList& paths)
         const QString file = QFileInfo(path).fileName();
         QApplication::setOverrideCursor(Qt::WaitCursor);
         try {
-            const ImportResult result = importFile(m_stack, m_doc, toPath(path));
+            const auto askUnits = [this, &file](double largest) {
+                QApplication::restoreOverrideCursor();
+                const QStringList choices{
+                    tr("Metres: x1000, making it %1 mm across").arg(largest * 1000.0, 0, 'f', 1),
+                    tr("Inches: x25.4, making it %1 mm across").arg(largest * 25.4, 0, 'f', 1),
+                    tr("Centimetres: x10, making it %1 mm across").arg(largest * 10.0, 0, 'f', 1),
+                    tr("Keep it: %1 mm across").arg(largest, 0, 'g', 3)};
+                const int suggested = largest * 1000.0 <= 2000.0 ? 0 : 1;
+                bool ok = false;
+                const QString picked = QInputDialog::getItem(
+                    this, tr("Import %1").arg(file),
+                    tr("This model is only %1 mm across.\nSTL and OBJ files don't record their units: it was "
+                       "probably\nsaved in metres (Blender does this) or inches.\n\nWhat units was it made in?")
+                        .arg(largest, 0, 'g', 3),
+                    choices, suggested, false, &ok);
+                QApplication::setOverrideCursor(Qt::WaitCursor);
+                if (!ok)
+                    return 1.0;
+                const int i = static_cast<int>(choices.indexOf(picked));
+                const double scale = i == 0 ? 1000.0 : i == 1 ? 25.4 : i == 2 ? 10.0 : 1.0;
+                qInfo().noquote() << "Import units: x" << scale;
+                return scale;
+            };
+            const ImportResult result = importFile(m_stack, m_doc, toPath(path), askUnits);
             QApplication::restoreOverrideCursor();
             qInfo().noquote() << "Imported" << path << "-" << result.bodies.size() << "shape(s)";
             for (std::size_t i = 0; i < result.bodies.size(); ++i) {

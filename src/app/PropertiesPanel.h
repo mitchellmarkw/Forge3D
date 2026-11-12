@@ -52,7 +52,7 @@ signals:
 private:
     QDoubleSpinBox* makeLength(const QString& tip);
     void commitName();
-    void commitSpec();
+    void commitSpec(std::size_t field);
     void commitPlacement();
     void updateRadiusYEnabled();
 

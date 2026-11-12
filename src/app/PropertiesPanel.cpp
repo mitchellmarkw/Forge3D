@@ -156,8 +156,8 @@ PropertiesPanel::PropertiesPanel(QWidget* parent) : QWidget(parent)
     m_pages->addWidget(page);
 
     connect(m_name, &QLineEdit::editingFinished, this, &PropertiesPanel::commitName);
-    for (QDoubleSpinBox* spin : m_sizeFields)
-        connect(spin, &QDoubleSpinBox::valueChanged, this, &PropertiesPanel::commitSpec);
+    for (std::size_t i = 0; i < m_sizeFields.size(); ++i)
+        connect(m_sizeFields[i], &QDoubleSpinBox::valueChanged, this, [this, i] { commitSpec(i); });
     connect(m_uniform, &QCheckBox::toggled, this, &PropertiesPanel::uniformChanged);
     connect(m_round, &QCheckBox::toggled, this, [this](bool on) {
         updateRadiusYEnabled();
@@ -298,19 +298,20 @@ bool PropertiesPanel::keepRound() const
     return m_round->isChecked();
 }
 
-void PropertiesPanel::commitSpec()
+void PropertiesPanel::commitSpec(std::size_t i)
 {
-    if (!m_body)
+    if (!m_body || i >= specFields(m_body->spec).size())
         return;
-    // Which field did the user change? Its new value decides the result.
+    // Only the field the user changed counts. (Comparing every field would also catch
+    // one the box couldn't show exactly, e.g. a 0.003 mm import shown as its 0.1 mm
+    // minimum, and change that one instead.)
     PrimitiveSpec spec = m_body->spec;
     const bool uniform = m_uniform->isChecked();
     bool changed = false;
-    const std::size_t count = specFields(spec).size();
-    for (std::size_t i = 0; i < count && i < m_sizeFields.size(); ++i) {
+    {
         const double old = specValue(spec, i), v = m_sizeFields[i]->value();
         if (!differs(old, v))
-            continue;
+            return;
         if (uniform && old > 0.0) {
             spec = scaled(spec, v / old);
         } else {
@@ -330,7 +331,6 @@ void PropertiesPanel::commitSpec()
             }
         }
         changed = true;
-        break;  // one field changes at a time
     }
     if (changed)
         emit specRequested(m_body->id, spec);

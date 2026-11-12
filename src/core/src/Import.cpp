@@ -702,7 +702,8 @@ std::shared_ptr<const MeshData> repairMesh(const RawMesh& raw, RepairReport& rep
     return out;
 }
 
-ImportResult importFile(CommandStack& stack, Document& doc, const std::filesystem::path& path)
+ImportResult importFile(CommandStack& stack, Document& doc, const std::filesystem::path& path,
+                        const std::function<double(double largestSide)>& askScale)
 {
     const std::vector<RawMesh> raws = readMeshFile(path);
     ImportResult result;
@@ -738,6 +739,32 @@ ImportResult importFile(CommandStack& stack, Document& doc, const std::filesyste
         result.reports.push_back(report);
         result.names.push_back(raw.name);
     }
+    // No units in STL / OBJ: a tiny result was probably saved in metres or inches.
+    const std::string ext = lower(path.extension().string());
+    const double largest = std::max({all.size()[0], all.size()[1], all.size()[2]});
+    if (askScale && ext != ".3mf" && largest < kTinyImport) {
+        const double s = askScale(largest);
+        if (s > 0.0 && s != 1.0) {
+            for (Body& b : bodies) {
+                auto& spec = std::get<MeshSpec>(b.spec);
+                spec.width *= s;
+                spec.depth *= s;
+                spec.height *= s;
+                b.placement.x *= s;
+                b.placement.y *= s;
+                b.placement.z *= s;
+            }
+            all = Bounds{};
+            for (const Body& b : bodies) {
+                const auto& spec = std::get<MeshSpec>(b.spec);
+                all.expand(float(b.placement.x - spec.width / 2), float(b.placement.y - spec.depth / 2),
+                           float(b.placement.z));
+                all.expand(float(b.placement.x + spec.width / 2), float(b.placement.y + spec.depth / 2),
+                           float(b.placement.z + spec.height));
+            }
+        }
+    }
+
     // Together: lowest point on the plate; centred on the plate if it's empty, else to
     // the right of what's there.
     Vec3 shift{-(all.min[0] + all.max[0]) / 2.0, -(all.min[1] + all.max[1]) / 2.0, -double(all.min[2])};

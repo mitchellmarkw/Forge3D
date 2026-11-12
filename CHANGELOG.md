@@ -16,6 +16,14 @@
   Split** with other shapes. One that can't be made watertight can be moved, resized
   and exported, but not combined or split (Properties says so).
 - Saved inside the .f3d file (file format version 9). Older files still open.
+- **Units**: STL and OBJ files don't record their units. If one comes in under 2 mm
+  across (usually saved in metres, e.g. from Blender, or in inches), Forge3D asks
+  which units it was made in and scales it (metres x1000, inches x25.4, cm x10, or keep).
+- Typing a size now always changes the field you typed in. (Before, a size the box
+  couldn't show exactly, such as 0.003 mm, could be changed instead, and your number
+  seemed to reset.)
+- Combining, splitting, mirroring or grouping more than 20,000 triangles of imported
+  mesh asks first, since it can take minutes, and logs when it starts.
 - Sample files for testing are in `test-sheets/samples`.
 - Core: `MeshSpec` / `MeshData`, Import.h (`readStl`, `readObj`, `read3mf`,
   `repairMesh`, `importFile`), `makeMeshSolid()`.
