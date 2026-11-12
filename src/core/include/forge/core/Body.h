@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "forge/core/Sketch.h"
+
 #include <array>
 #include <memory>
 #include <cstddef>
@@ -165,6 +167,17 @@ struct TextSpec {
     bool operator==(const TextSpec&) const = default;
 };
 
+// A sketch pushed up into a solid: its closed outlines (holes inside outlines stay
+// holes) rise `length` from the sketch plane (local XY), or sink below it when
+// reversed, or go half each way (midplane).
+struct PadSpec {
+    sketch::Sketch sketch;
+    double length = 10.0;
+    bool reversed = false;
+    bool midplane = false;
+    bool operator==(const PadSpec&) const = default;
+};
+
 // Triangles read from a file (STL / 3MF / OBJ), after repair. Shared between copies
 // and never changed once made. Points are centred on X and Y with the lowest at Z = 0,
 // like every primitive.
@@ -189,11 +202,11 @@ struct MeshSpec {
 
 using PrimitiveSpec =
     std::variant<BoxSpec, CylinderSpec, SphereSpec, ConeSpec, TorusSpec, TubeSpec, WedgeSpec, PyramidSpec, TextSpec,
-                 MeshSpec>;
+                 PadSpec, MeshSpec>;
 
-// The kinds of primitive the Add Shape menu offers (every kind but the imported
-// mesh, which is last), and a new one of each.
-inline constexpr std::size_t kPrimitiveKindCount = std::variant_size_v<PrimitiveSpec> - 1;
+// The kinds of primitive the Add Shape menu offers (every kind but a sketch pad and an
+// imported mesh, the last two), and a new one of each.
+inline constexpr std::size_t kPrimitiveKindCount = std::variant_size_v<PrimitiveSpec> - 2;
 PrimitiveSpec defaultSpec(std::size_t kind);  // kind = variant index
 
 // "Box", "Cylinder", "Sphere", ...: used for default names and command labels.

@@ -732,6 +732,11 @@ std::optional<std::pair<PrimitiveSpec, Transform>> Document::throughTool(ObjectI
         height = &t->height;
     else if (auto* x = std::get_if<TextSpec>(&spec))
         height = &x->height;
+    else if (auto* pad = std::get_if<PadSpec>(&spec)) {
+        pad->reversed = false;  // stretched from its base up, like the others
+        pad->midplane = false;
+        height = &pad->length;
+    }
     if (!height)
         return std::nullopt;
     // How far the first part reaches along the tool's own height (its local Z).
@@ -1109,7 +1114,8 @@ Vec3 Document::visibleCentre(ObjectId id) const
     const Body* body = find(id);
     if (!body)
         throw std::out_of_range("No body with id " + std::to_string(id));
-    if (!body->isBoolean())
+    // A pad's sketch can sit anywhere around its origin: the middle of its box.
+    if (!body->isBoolean() && !std::holds_alternative<PadSpec>(body->spec))
         return pivotOf(body->spec);
     const Bounds b = localBounds(id);
     if (!b.valid)

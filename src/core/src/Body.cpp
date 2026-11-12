@@ -162,6 +162,19 @@ struct Traits<TextSpec> {
 };
 
 template <>
+struct Traits<PadSpec> {
+    static constexpr const char* name = "Pad";
+    static constexpr const char* file = "pad";
+    static const std::vector<Field<PadSpec>>& fields()
+    {
+        static const std::vector<Field<PadSpec>> f{
+            {&PadSpec::length, {"length", "Length (Z)", "How far the sketch is pushed up", false, 0}},
+        };
+        return f;
+    }
+};
+
+template <>
 struct Traits<MeshSpec> {
     static constexpr const char* name = "Mesh";
     static constexpr const char* file = "mesh";
@@ -250,6 +263,8 @@ PrimitiveSpec scaled(const PrimitiveSpec& spec, double factor)
     PrimitiveSpec out = spec;
     for (std::size_t i = 0; i < specFields(spec).size(); ++i)
         setSpecValue(out, i, specValue(spec, i) * factor);
+    if (auto* pad = std::get_if<PadSpec>(&out))
+        sketch::scale(pad->sketch, factor, factor);
     return out;
 }
 

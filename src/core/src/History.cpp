@@ -140,6 +140,9 @@ std::string describe(const Document& doc, ObjectId id)
                     return num(p.baseWidth) + kTimes + num(p.baseDepth) + " base" + kTimes + num(p.height) + " mm";
                 else if constexpr (std::is_same_v<T, TextSpec>)
                     return "\"" + p.text + "\"";
+                else if constexpr (std::is_same_v<T, PadSpec>)
+                    return std::string("sketch, ") + num(p.length) + " mm" +
+                           (p.reversed ? " down" : p.midplane ? " both ways" : "");
                 else if constexpr (std::is_same_v<T, MeshSpec>)
                     return p.data ? std::to_string(p.data->indices.size() / 3) + " triangles" : std::string();
                 else

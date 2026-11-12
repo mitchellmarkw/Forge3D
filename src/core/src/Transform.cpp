@@ -93,6 +93,22 @@ Vec3 halfExtents(const PrimitiveSpec& spec)
                 return {p.ringRadiusX + p.tubeRadius, p.ringRadiusY + p.tubeRadius, p.tubeRadiusZ};
             else if constexpr (std::is_same_v<T, TubeSpec>)
                 return {p.outerRadiusX, p.outerRadiusY, p.height / 2.0};
+            else if constexpr (std::is_same_v<T, PadSpec>) {
+                // As far as the sketch reaches from its origin, either way.
+                double x = 0, y = 0;
+                for (const auto& q : p.sketch.points) {
+                    x = std::max(x, std::abs(q.x));
+                    y = std::max(y, std::abs(q.y));
+                }
+                for (const auto& g : p.sketch.geos)
+                    if (g.kind == sketch::GeoKind::Circle) {
+                        const auto& c = p.sketch.points[std::size_t(g.a)];
+                        const double r = sketch::radiusOf(p.sketch, g);
+                        x = std::max(x, std::abs(c.x) + r);
+                        y = std::max(y, std::abs(c.y) + r);
+                    }
+                return {std::max(x, 0.5), std::max(y, 0.5), p.length / 2.0};
+            }
             else {
                 static_assert(std::is_same_v<T, PyramidSpec>, "halfExtents: unhandled primitive");
                 return {std::max(p.baseWidth, p.topWidth) / 2.0, std::max(p.baseDepth, p.topDepth) / 2.0,
@@ -104,6 +120,10 @@ Vec3 halfExtents(const PrimitiveSpec& spec)
 
 Vec3 pivotOf(const PrimitiveSpec& spec)
 {
+    // A pad turns about its sketch's origin, so changing its length never moves the
+    // sketch plane.
+    if (std::holds_alternative<PadSpec>(spec))
+        return {0.0, 0.0, 0.0};
     return {0.0, 0.0, halfExtents(spec)[2]};
 }
 
@@ -344,6 +364,15 @@ void resizeOne(PrimitiveSpec& spec, int axis, double value, const ResizeOptions&
                     (axis == 0 ? p.ringRadiusX : p.ringRadiusY) = std::max(value - p.tubeRadius, minV);
                 }
                 keepTorusHole(p, minV);
+            } else if constexpr (std::is_same_v<T, PadSpec>) {
+                if (axis == 2) {
+                    p.length = value;
+                } else {
+                    // Sketches resize evenly across (circles stay circles).
+                    const double current = 2.0 * halfExtents(PrimitiveSpec{p})[std::size_t(axis)];
+                    if (current > 0.0)
+                        sketch::scale(p.sketch, value / current, value / current);
+                }
             } else {
                 static_assert(std::is_same_v<T, TubeSpec>, "resizeOne: unhandled primitive");
                 if (axis == 2) {

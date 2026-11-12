@@ -6,6 +6,8 @@
 #include "EmbossPanel.h"
 #include "Log.h"
 #include "PropertiesPanel.h"
+#include "SketchPanel.h"
+#include "SketchView.h"
 #include "SplitPanel.h"
 #include "Viewport.h"
 
@@ -18,6 +20,7 @@
 #include "forge/core/Import.h"
 #include "forge/core/Picking.h"
 #include "forge/core/Primitives.h"
+#include "forge/core/SketchShape.h"
 #include "forge/core/Tessellator.h"
 #include "forge/core/Text.h"
 #include "forge/core/Transform.h"
@@ -43,6 +46,7 @@
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QSettings>
+#include <QStackedWidget>
 #include <QStandardPaths>
 #include <QStatusBar>
 #include <QTimer>
@@ -142,7 +146,11 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
     setAcceptDrops(true);  // drop STL / 3MF / OBJ (import) or .f3d (open) files on the window
 
     m_viewport = new Viewport(this);
-    setCentralWidget(m_viewport);
+    m_sketchView = new SketchView(this);
+    m_central = new QStackedWidget(this);
+    m_central->addWidget(m_viewport);
+    m_central->addWidget(m_sketchView);
+    setCentralWidget(m_central);
     connect(m_viewport, &Viewport::firstFrameRendered, this, &MainWindow::firstFrameRendered);
     connect(m_viewport, &Viewport::clicked, this, &MainWindow::onViewportClicked);
     connect(m_viewport, &Viewport::hovered, this, [this](const QVector3D& o, const QVector3D& d, const QPointF& px) {
@@ -156,6 +164,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
     createActions();
     createMenus();
     createToolBar();
+    createSketchBar();
     createDocks();
     createStatusBar();
 
@@ -294,7 +303,11 @@ void MainWindow::createActions()
             endEmboss();
         else if (m_edgesMode.active)
             endEdges();
-        else
+        else if (m_sketchMode.picking) {
+            m_sketchMode.picking = false;
+            statusBar()->clearMessage();
+            refreshScene();
+        } else
             setSelection(std::vector<ObjectId>{});
     });
 
@@ -426,6 +439,12 @@ void MainWindow::createActions()
         startEdges(target, false);
     });
 
+    m_sketchAction = new QAction(tr("Sketch"), this);
+    m_sketchAction->setToolTip(tr("Sketch: draw an outline, then push it out (Pad) or cut it in (Pocket). With "
+                                  "nothing selected it goes on the plate; with a shape selected, click the flat "
+                                  "face to draw on"));
+    connect(m_sketchAction, &QAction::triggered, this, &MainWindow::sketchClicked);
+
     // Align Shapes: the first shape selected stays put; the others move to it.
     m_alignMenu = new QMenu(tr("Align Shapes"), this);
     m_alignMenu->setToolTipsVisible(true);
@@ -501,6 +520,7 @@ void MainWindow::createMenus()
     edit->addAction(m_split);
     edit->addAction(m_emboss);
     edit->addAction(m_edgesAction);
+    edit->addAction(m_sketchAction);
     edit->addMenu(m_alignMenu);
     edit->addMenu(m_mirrorMenu);
     edit->addAction(m_group);
@@ -561,6 +581,7 @@ void MainWindow::createToolBar()
     bar->addAction(m_split);
     bar->addAction(m_emboss);
     bar->addAction(m_edgesAction);
+    bar->addAction(m_sketchAction);
     bar->addSeparator();
     {
         auto* alignButton = new QToolButton(bar);
@@ -637,6 +658,20 @@ void MainWindow::createDocks()
     m_edgesPanel = new EdgesPanel;
     stackLayout->addWidget(m_edgesPanel);
     m_edgesPanel->hide();
+    m_sketchPanel = new SketchPanel;
+    stackLayout->addWidget(m_sketchPanel);
+    m_sketchPanel->hide();
+    connect(m_sketchPanel, &SketchPanel::finishRequested, this, &MainWindow::finishSketch);
+    connect(m_sketchPanel, &SketchPanel::cancelRequested, this, &MainWindow::endSketch);
+    connect(m_sketchView, &SketchView::changed, this, &MainWindow::updateSketchStatus);
+    connect(m_sketchView, &SketchView::message, this, [this](const QString& text, bool problem) {
+        m_sketchPanel->setMessage(text, problem);
+    });
+    connect(m_sketchView, &SketchView::toolChanged, this, [this](SketchView::Tool tool) {
+        const auto i = std::size_t(tool);
+        if (i < m_sketchToolActions.size())
+            m_sketchToolActions[i]->setChecked(true);
+    });
     // Long hint texts wrap instead of widening the dock.
     m_propsStack->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     propsDock->setWidget(m_propsStack);
@@ -790,6 +825,10 @@ void MainWindow::setSelection(std::vector<ObjectId> ids)
         endEmboss();
     if (m_edgesMode.active)
         endEdges();
+    if (m_sketchMode.picking) {
+        m_sketchMode.picking = false;  // picking something else leaves the face picking
+        statusBar()->clearMessage();
+    }
     const ObjectId previousOne = selectedOne();
     m_selection = std::move(ids);
     if (const Body* body = m_doc.find(selectedOne()); body && body->id != previousOne) {
@@ -833,6 +872,10 @@ void MainWindow::onViewportClicked(const QVector3D& origin, const QVector3D& dir
         edgesClick(origin, direction);
         return;
     }
+    if (m_sketchMode.picking) {
+        sketchFaceClick(origin, direction);
+        return;
+    }
     Ray ray;
     ray.origin = {origin.x(), origin.y(), origin.z()};
     ray.direction = {direction.x(), direction.y(), direction.z()};
@@ -865,7 +908,7 @@ std::optional<view::GizmoTarget> MainWindow::gizmoTargetFor(ObjectId id) const
     view::GizmoTarget target;
     target.centre = QVector3D(static_cast<float>(c[0]), static_cast<float>(c[1]), static_cast<float>(c[2]));
     target.bodyAxes = {axis(1, 0, 0), axis(0, 1, 0), axis(0, 0, 1)};
-    if (body->isBoolean()) {
+    if (body->isBoolean() || std::holds_alternative<PadSpec>(body->spec)) {
         // The box around what you see; resizing scales everything inside.
         const Bounds b = m_doc.localBounds(id);
         const auto size = b.size();
@@ -969,7 +1012,9 @@ void MainWindow::onLeftPressed(const QVector3D& origin, const QVector3D& directi
         m_dragState.frame = *frame;
         if (const ObjectId parent = m_doc.parentOf(selected->id); parent != kInvalidId)
             m_dragState.parentWorld = m_doc.worldTransform(parent);
-        if (handle.kind == view::GizmoHandle::Kind::Face && selected->isBoolean()) {
+        // Combined shapes and pads resize by scaling what's inside their box.
+        if (handle.kind == view::GizmoHandle::Kind::Face &&
+            (selected->isBoolean() || std::holds_alternative<PadSpec>(selected->spec))) {
             for (ObjectId id : m_doc.withDescendants(selected->id))
                 m_dragState.beforeAll.push_back(*m_doc.find(id));
             m_dragState.snapshot = std::make_shared<Document>();
@@ -1137,8 +1182,8 @@ void MainWindow::onLeftDragged(const QVector3D& origin, const QVector3D& directi
         const auto s = view::closestOnLine(origin, direction, d.frame.centre, dir);
         if (!s)
             return;
-        if (d.before.isBoolean()) {
-            // A combined shape: stretch everything inside, keeping the opposite side still.
+        if (!d.beforeAll.empty()) {
+            // A combined shape (or a pad): stretch everything inside, keeping the opposite side still.
             const std::size_t axis = static_cast<std::size_t>(d.handle.axis);
             const auto size = d.localBounds.size();
             const double was = size[axis];
@@ -2195,7 +2240,8 @@ void MainWindow::applyEdges()
 
 bool MainWindow::toolOpen() const
 {
-    return m_splitMode.active || m_embossMode.active || m_edgesMode.active;
+    return m_splitMode.active || m_embossMode.active || m_edgesMode.active || m_sketchMode.picking ||
+           m_sketchMode.active;
 }
 
 void MainWindow::startEmboss(ObjectId target, bool editing)
@@ -3030,6 +3076,9 @@ void MainWindow::refreshScene()
                    mesh && m_doc.isTopLevel(selected->id)) {
             context = tr("Imported: %1 triangles.").arg(mesh->data->indices.size() / 3) +
                       (mesh->data->closed ? QString() : tr(" Not watertight: it can't be combined or split."));
+        } else if (std::holds_alternative<PadSpec>(selected->spec)) {
+            context = tr("Made from a sketch. To change the sketch, double-click it in Objects (or right-click "
+                         "> Change...).");
         } else if (const ObjectId owner = m_doc.parentOf(selected->id); owner != kInvalidId) {
             context = tr("Part of '%1'. Its position is measured inside that shape.")
                           .arg(QString::fromStdString(m_doc.find(owner)->name));
@@ -3070,7 +3119,10 @@ void MainWindow::refreshScene()
     m_split->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen() && !rolled);
     m_emboss->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_edgesAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
+    m_sketchAction->setEnabled((m_selection.empty() || (m_selection.size() == 1 && allTopLevel && !rolled)) &&
+                               !toolOpen());
     m_clear->setEnabled(!m_doc.empty());
+    relockForSketch();
 }
 
 void MainWindow::addObjectRow(QTreeWidgetItem* parent, ObjectId id)
@@ -3203,6 +3255,10 @@ void MainWindow::editStep(ObjectId id)
     if (!body || toolOpen())
         return;
     setSelection(id);
+    if (padOf(id) != kInvalidId) {
+        startSketchEdit(id);  // a pad, or a Pad / Pocket step: change its sketch
+        return;
+    }
     if (!body->isBoolean())
         return;  // its size and place are in Properties
     switch (body->boolean->op) {
@@ -3383,6 +3439,7 @@ void MainWindow::refreshCommandState()
     setWindowTitle(QStringLiteral("%1[*] - %2 %3")
                        .arg(name, QString::fromLatin1(build::kAppName), QString::fromLatin1(build::kVersion)));
     setWindowModified(!m_stack.isClean());
+    relockForSketch();
 }
 
 void MainWindow::showAbout()
@@ -3398,6 +3455,460 @@ void MainWindow::showAbout()
            "ABSOLUTELY NO WARRANTY.</p>")
             .arg(QString::fromLatin1(build::kVersion), QString::fromLatin1(qVersion()),
                  QString::fromLatin1(OCC_VERSION_COMPLETE), m_viewport->glVersionString()));
+}
+
+// ---- Sketches ---------------------------------------------------------------------
+
+void MainWindow::createSketchBar()
+{
+    m_sketchBar = new QToolBar(tr("Sketch"), this);
+    m_sketchBar->setObjectName(QStringLiteral("SketchToolBar"));
+    m_sketchBar->setMovable(false);
+    m_sketchBar->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    addToolBarBreak();
+    addToolBar(m_sketchBar);
+    m_sketchBar->hide();
+
+    const auto add = [this](const QString& text, const QKeySequence& key, const QString& tip, auto&& slot) {
+        auto* a = new QAction(text, m_sketchBar);
+        if (!key.isEmpty()) {
+            a->setShortcut(key);
+            a->setToolTip(QStringLiteral("%1 (%2)").arg(tip, key.toString(QKeySequence::NativeText)));
+        } else {
+            a->setToolTip(tip);
+        }
+        connect(a, &QAction::triggered, this, slot);
+        m_sketchBar->addAction(a);
+        return a;
+    };
+    auto* tools = new QActionGroup(m_sketchBar);
+    const struct {
+        SketchView::Tool tool;
+        QString text;
+        QKeySequence key;
+        QString tip;
+    } toolList[] = {
+        {SketchView::Tool::Select, tr("Pick"), {}, tr("Pick and drag (Esc gets back here)")},
+        {SketchView::Tool::Line, tr("Line"), Qt::Key_L, tr("Lines, one after another; click the first point to close")},
+        {SketchView::Tool::Rectangle, tr("Rectangle"), Qt::Key_R, tr("A rectangle from two corners")},
+        {SketchView::Tool::Circle, tr("Circle"), Qt::Key_C, tr("A circle from its middle and a point on its edge")},
+        {SketchView::Tool::Arc, tr("Arc"), Qt::Key_A, tr("An arc: its middle, then its start, then its end")},
+        {SketchView::Tool::Slot, tr("Slot"), Qt::Key_S, tr("A slot: the middles of its round ends, then its width")},
+    };
+    for (const auto& t : toolList) {
+        QAction* a = add(t.text, t.key, t.tip, [this, tool = t.tool] { m_sketchView->setTool(tool); });
+        a->setCheckable(true);
+        tools->addAction(a);
+        m_sketchToolActions.push_back(a);
+    }
+    m_sketchToolActions.front()->setChecked(true);
+    m_sketchBar->addSeparator();
+    using sketch::Rule;
+    add(tr("Horizontal"), Qt::Key_H, tr("Make the picked lines level (or two points level with each other)"),
+        [this] { m_sketchView->addRule(Rule::Horizontal); });
+    add(tr("Vertical"), Qt::Key_V, tr("Make the picked lines upright (or two points above each other)"),
+        [this] { m_sketchView->addRule(Rule::Vertical); });
+    add(tr("Parallel"), {}, tr("Make two picked lines parallel"), [this] { m_sketchView->addRule(Rule::Parallel); });
+    add(tr("Perpendicular"), {}, tr("Make two picked lines meet square"),
+        [this] { m_sketchView->addRule(Rule::Perpendicular); });
+    add(tr("Equal"), Qt::Key_E, tr("Make the picked lines the same length, or circles / arcs the same size"),
+        [this] { m_sketchView->addRule(Rule::Equal); });
+    add(tr("Tangent"), Qt::Key_T, tr("Make a line touch a circle / arc (or two circles touch) smoothly"),
+        [this] { m_sketchView->addRule(Rule::Tangent); });
+    add(tr("Coincident"), Qt::Key_O, tr("Join two picked points into one, or put a point on a line / circle"),
+        [this] { m_sketchView->addRule(Rule::Coincident); });
+    add(tr("Symmetric"), {}, tr("Mirror two picked points about a picked line"),
+        [this] { m_sketchView->addRule(Rule::Symmetric); });
+    add(tr("Lock"), {}, tr("Lock the picked points where they are"), [this] { m_sketchView->addRule(Rule::Fixed); });
+    m_sketchBar->addSeparator();
+    add(tr("Dimension"), Qt::Key_D,
+        tr("A size on what's picked: a line's length, two points' distance, a circle's radius, two lines' angle"),
+        [this] { m_sketchView->addDimension(0); });
+    add(tr("Across"), QKeySequence(Qt::SHIFT | Qt::Key_H),
+        tr("A distance measured across only (X): a line, two points, or one point from the origin"),
+        [this] { m_sketchView->addDimension(1); });
+    add(tr("Up"), QKeySequence(Qt::SHIFT | Qt::Key_V),
+        tr("A distance measured up only (Y): a line, two points, or one point from the origin"),
+        [this] { m_sketchView->addDimension(2); });
+    m_sketchBar->addSeparator();
+    add(tr("Helper"), Qt::Key_G,
+        tr("Turn the picked lines into helper lines (dashed: used by rules, not part of the shape), or back"),
+        [this] { m_sketchView->toggleConstruction(); });
+    add(tr("Delete"), QKeySequence::Delete, tr("Delete what's picked"), [this] { m_sketchView->deleteSelection(); });
+    add(tr("Undo"), QKeySequence::Undo, tr("Undo the last change to the sketch"), [this] { m_sketchView->undo(); });
+    add(tr("Redo"), QKeySequence::Redo, tr("Redo"), [this] { m_sketchView->redo(); });
+    add(tr("Fit"), Qt::Key_F, tr("Show the whole sketch"), [this] { m_sketchView->fit(); });
+    // While sketching only: the window's own commands are off then.
+    for (QAction* a : m_sketchBar->actions())
+        a->setEnabled(false);
+}
+
+ObjectId MainWindow::padOf(ObjectId id) const
+{
+    const Body* body = m_doc.find(id);
+    if (!body)
+        return kInvalidId;
+    if (!body->isBoolean())
+        return std::holds_alternative<PadSpec>(body->spec) ? id : kInvalidId;
+    const BooleanOp op = body->boolean->op;
+    if ((op != BooleanOp::Merge && op != BooleanOp::Subtract) || body->boolean->operands.size() != 2)
+        return kInvalidId;
+    const ObjectId added = body->boolean->operands[1];
+    const Body* pad = m_doc.find(added);
+    return pad && !pad->isBoolean() && std::holds_alternative<PadSpec>(pad->spec) ? added : kInvalidId;
+}
+
+void MainWindow::sketchClicked()
+{
+    if (toolOpen())
+        return;
+    if (m_dragState.kind != Drag::Kind::None)
+        cancelDrag();
+    if (m_selection.empty()) {
+        m_sketchMode = SketchMode{};
+        openSketch(sketch::Sketch{}, {}, tr("Sketch on the plate"), false, false, 10.0, false, false, false);
+        return;
+    }
+    const ObjectId id = selectedOne();
+    if (id == kInvalidId || !m_doc.isTopLevel(id)) {
+        statusBar()->showMessage(tr("Sketch: select one shape on the plate (to sketch on one of its faces), or "
+                                    "nothing (to sketch on the plate)."),
+                                 8000);
+        return;
+    }
+    if (rolledBackSelected()) {
+        statusBar()->showMessage(tr("'%1' is rolled back: roll it forward to the end before sketching on it.")
+                                     .arg(QString::fromStdString(m_doc.find(id)->name)),
+                                 8000);
+        return;
+    }
+    if (m_doc.usesMeshEngine(id)) {
+        QMessageBox::information(this, tr("Forge3D"),
+                                 tr("Sketches go on solid shapes made in Forge3D, not on imported meshes or shapes "
+                                    "made with them. Deselect it to sketch on the plate instead."));
+        return;
+    }
+    m_sketchMode = SketchMode{};
+    m_sketchMode.picking = true;
+    m_sketchMode.target = id;
+    statusBar()->showMessage(tr("Sketch: click the flat face of '%1' to draw on. Esc cancels.")
+                                 .arg(QString::fromStdString(m_doc.find(id)->name)));
+    refreshScene();
+}
+
+void MainWindow::sketchFaceClick(const QVector3D& origin, const QVector3D& direction)
+{
+    const ObjectId target = m_sketchMode.target;
+    const Body* body = m_doc.find(target);
+    if (!body) {
+        m_sketchMode = SketchMode{};
+        return;
+    }
+    std::optional<sketch::FacePlane> plane;
+    try {
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        struct RestoreCursor {
+            ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
+        } restore;
+        const TopoDS_Shape shape = pickableShape(m_doc, target);
+        const auto hit = edges::faceUnder(shape, {origin.x(), origin.y(), origin.z()},
+                                          {direction.x(), direction.y(), direction.z()});
+        if (!hit) {
+            statusBar()->showMessage(tr("Sketch: click on '%1' itself, on the flat face to draw on. Esc cancels.")
+                                         .arg(QString::fromStdString(body->name)));
+            return;
+        }
+        plane = sketch::planeOfFace(shape, hit->face);
+    } catch (const std::exception& e) {
+        qWarning() << "Finding the face failed:" << e.what();
+    }
+    if (!plane) {
+        statusBar()->showMessage(tr("Sketch: that face is curved. Click a flat face. Esc cancels."));
+        return;
+    }
+    m_sketchMode.picking = false;
+    m_sketchMode.frame = plane->frame;
+    std::vector<std::vector<QPointF>> reference;
+    for (const auto& line : plane->outlines) {
+        std::vector<QPointF> q;
+        for (const auto& p : line)
+            q.emplace_back(p.x, p.y);
+        reference.push_back(std::move(q));
+    }
+    openSketch(sketch::Sketch{}, std::move(reference),
+               tr("Sketch on a face of '%1'").arg(QString::fromStdString(body->name)), true, false, 5.0, false, false,
+               false);
+}
+
+void MainWindow::startSketchEdit(ObjectId id)
+{
+    const ObjectId padId = padOf(id);
+    const Body* pad = m_doc.find(padId);
+    if (!pad)
+        return;
+    if (toolOpen())
+        return;
+    if (m_dragState.kind != Drag::Kind::None)
+        cancelDrag();
+    const auto& spec = std::get<PadSpec>(pad->spec);
+    m_sketchMode = SketchMode{};
+    m_sketchMode.pad = padId;
+    const ObjectId holder = m_doc.parentOf(padId);
+    if (holder != kInvalidId && padOf(holder) == padId)
+        m_sketchMode.step = holder;
+    m_sketchMode.frame = m_doc.worldTransform(padId);
+    const Body* step = m_doc.find(m_sketchMode.step);
+    const bool pocket = step && step->boolean->op == BooleanOp::Subtract;
+    const QString name = QString::fromStdString((step ? step : pad)->name);
+    // The face it was drawn on, to show again.
+    std::vector<std::vector<QPointF>> reference;
+    if (step) {
+        try {
+            const ObjectId under = step->boolean->operands.front();
+            if (!m_doc.usesMeshEngine(under))
+                for (const auto& line :
+                     sketch::outlinesOnPlane(pickableShape(m_doc, under), m_sketchMode.frame)) {
+                    std::vector<QPointF> q;
+                    for (const auto& p : line)
+                        q.emplace_back(p.x, p.y);
+                    reference.push_back(std::move(q));
+                }
+        } catch (const std::exception& e) {
+            qWarning() << "Finding the face under the sketch failed:" << e.what();
+        }
+    }
+    openSketch(spec.sketch, std::move(reference), tr("Change the sketch of '%1'").arg(name), pocket, pocket, spec.length,
+               pocket ? !spec.reversed : spec.reversed, spec.midplane, step && step->boolean->throughAll);
+}
+
+void MainWindow::openSketch(const sketch::Sketch& sketch, std::vector<std::vector<QPointF>> reference,
+                            const QString& title, bool pocketAllowed, bool pocket, double length, bool otherWay,
+                            bool bothWays, bool throughAll)
+{
+    if (m_splitMode.active)
+        endSplit();
+    if (m_embossMode.active)
+        endEmboss();
+    if (m_edgesMode.active)
+        endEdges();
+    m_sketchMode.active = true;
+    const bool editing = m_sketchMode.pad != kInvalidId;
+    m_central->setCurrentWidget(m_sketchView);
+    m_sketchPanel->start(title, pocketAllowed, pocket, length, otherWay, bothWays, throughAll, editing);
+    m_propsDockWidth = m_propsDock->width();
+    m_properties->hide();
+    m_sketchPanel->show();
+    m_sketchView->start(sketch, std::move(reference));
+    if (!editing)
+        m_sketchView->setTool(SketchView::Tool::Line);
+    m_sketchBar->show();
+    lockForSketch(true);
+    m_sketchView->setFocus();
+    statusBar()->showMessage(tr("Sketching: draw a closed outline, then click Finish."));
+    // The view only knows its size once shown.
+    QTimer::singleShot(0, this, [this] {
+        if (m_sketchMode.active)
+            m_sketchView->fit();
+    });
+    updateSketchStatus();
+}
+
+void MainWindow::updateSketchStatus()
+{
+    if (!m_sketchMode.active)
+        return;
+    const sketch::Sketch& s = m_sketchView->sketch();
+    const sketch::Solved& solved = m_sketchView->solved();
+    const auto loose = sketch::looseEnds(s);
+    QString text;
+    bool problem = false, held = false;
+    if (!solved.ok) {
+        text = tr("Some rules can't all be met: they're shown in red. Delete or change one.");
+        problem = true;
+    } else if (s.geos.empty()) {
+        text = tr("Nothing drawn yet.");
+    } else if (solved.freedom == 0) {
+        text = tr("Fully set: every size and place is fixed.");
+        held = true;
+    } else {
+        text = solved.freedom == 1 ? tr("It can still move or change size 1 way. (That's fine: add dimensions "
+                                        "and rules to pin it down.)")
+                                   : tr("It can still move or change size %1 ways. (That's fine: add dimensions "
+                                        "and rules to pin it down.)")
+                                         .arg(solved.freedom);
+    }
+    if (!loose.empty())
+        text += QStringLiteral("\n") + (loose.size() == 1 ? tr("1 loose end (red): the outline isn't closed there.")
+                                                          : tr("%1 loose ends (red): the outline isn't closed there.")
+                                                                .arg(loose.size()));
+    m_sketchPanel->setStatus(text, problem, held);
+}
+
+void MainWindow::finishSketch()
+{
+    if (!m_sketchMode.active)
+        return;
+    const sketch::Solved& solved = m_sketchView->solved();
+    if (!solved.ok) {
+        m_sketchPanel->setMessage(tr("Some rules can't all be met (shown in red). Fix them first."), true);
+        return;
+    }
+    const bool pocket = m_sketchPanel->pocket();
+    PadSpec pad;
+    pad.sketch = m_sketchView->sketch();
+    pad.length = m_sketchPanel->length();
+    pad.reversed = pocket ? !m_sketchPanel->otherWay() : m_sketchPanel->otherWay();
+    pad.midplane = m_sketchPanel->bothWays();
+    TopoDS_Shape solid;
+    try {
+        solid = primitives::buildShape(PrimitiveSpec{pad});
+    } catch (const std::exception& e) {
+        m_sketchPanel->setMessage(QString::fromUtf8(e.what()), true);
+        return;
+    }
+    const bool throughAll = m_sketchPanel->throughAll();
+    const SketchMode mode = m_sketchMode;
+    endSketch();
+
+    if (mode.pad != kInvalidId) {  // changing one
+        const Body* now = m_doc.find(mode.pad);
+        if (!now)
+            return;
+        Body after = *now;
+        after.spec = pad;
+        const Body* step = m_doc.find(mode.step);
+        if (step && step->boolean->throughAll != throughAll && step->boolean->op == BooleanOp::Subtract) {
+            Body stepAfter = *step;
+            stepAfter.boolean->throughAll = throughAll;
+            m_stack.beginMacro("Change sketch");
+            try {
+                m_stack.execute(std::make_unique<EditBodyCommand>(*now, after, "Change sketch"));
+                m_stack.execute(std::make_unique<EditBodyCommand>(*m_doc.find(mode.step), stepAfter, "Through all"));
+            } catch (const std::exception& e) {
+                qWarning() << "Changing the sketch failed:" << e.what();
+            }
+            m_stack.endMacro();
+        } else {
+            run(std::make_unique<EditBodyCommand>(*now, after, "Change sketch"));
+        }
+        setSelection(mode.step != kInvalidId ? history::objectOf(m_doc, mode.step) : mode.pad);
+        return;
+    }
+
+    Body body;
+    body.id = m_doc.allocateId();
+    body.spec = pad;
+    body.name = m_doc.uniqueName(pocket ? "Pocket" : "Pad");
+    body.placement = placementFromTransform(mode.frame, pivotOf(body.spec));
+    const ObjectId padId = body.id;
+    if (mode.target == kInvalidId) {  // on the plate
+        if (run(std::make_unique<AddBodyCommand>(std::move(body))))
+            setSelection(padId);
+        return;
+    }
+    // On a face: added to (or cut from) the shape it was drawn on.
+    const Body* target = m_doc.find(mode.target);
+    if (!target)
+        return;
+    BooleanSpec spec;
+    spec.op = pocket ? BooleanOp::Subtract : BooleanOp::Merge;
+    spec.operands = {mode.target, padId};
+    spec.throughAll = throughAll;
+    Bounds box = m_doc.worldBounds(mode.target);
+    if (!pocket) {
+        const Bounds padBox = shapeBounds(solid, mode.frame);
+        if (padBox.valid) {
+            box.expand(padBox.min[0], padBox.min[1], padBox.min[2]);
+            box.expand(padBox.max[0], padBox.max[1], padBox.max[2]);
+        }
+    }
+    const auto centre = box.center();
+    spec.pivot = {centre[0], centre[1], centre[2]};
+    Body result;
+    result.id = m_doc.allocateId();
+    result.name = m_doc.uniqueName(pocket ? "Pocketed" : "Padded");
+    result.boolean = spec;
+    const ObjectId resultId = result.id;
+    const std::string label = pocket ? "Pocket" : "Pad";
+    m_stack.beginMacro(label);
+    bool ok = true;
+    try {
+        m_stack.execute(std::make_unique<AddBodyCommand>(std::move(body)));
+        m_stack.execute(std::make_unique<CombineCommand>(std::move(result)));
+    } catch (const std::exception& e) {
+        ok = false;
+        qWarning().noquote() << QString::fromStdString(label) << "failed:" << e.what();
+        m_stack.endMacro();
+        if (m_stack.canUndo() && m_doc.find(padId))
+            m_stack.undo();
+        QMessageBox::warning(this, tr("Forge3D"), tr("%1 did not work:\n%2")
+                                                      .arg(QString::fromStdString(label), QString::fromUtf8(e.what())));
+    }
+    if (ok) {
+        m_stack.endMacro();
+        qInfo().noquote() << "Command:" << QString::fromStdString(m_stack.undoLabel());
+        setSelection(resultId);
+    }
+}
+
+void MainWindow::endSketch()
+{
+    const bool wasOpen = m_sketchMode.active;
+    m_sketchMode = SketchMode{};
+    if (!wasOpen)
+        return;
+    lockForSketch(false);
+    m_sketchBar->hide();
+    m_sketchPanel->hide();
+    m_properties->show();
+    QTimer::singleShot(0, this, [this] { resizeDocks({m_propsDock}, {m_propsDockWidth}, Qt::Horizontal); });
+    m_central->setCurrentWidget(m_viewport);
+    statusBar()->clearMessage();
+    refreshScene();
+    refreshCommandState();
+}
+
+void MainWindow::lockForSketch(bool on)
+{
+    if (on) {
+        m_lockedActions.clear();
+        for (QAction* a : findChildren<QAction*>()) {
+            QObject* owner = a->parent();
+            if (owner == m_sketchBar || !(owner == this || qobject_cast<QMenu*>(owner) || qobject_cast<QActionGroup*>(owner)))
+                continue;
+            if (qobject_cast<QActionGroup*>(owner) && owner->parent() == m_sketchBar)
+                continue;
+            if (a->isEnabled())
+                m_lockedActions.push_back(a);
+            a->setEnabled(false);
+        }
+        for (QAction* a : m_sketchBar->actions())
+            a->setEnabled(true);
+        m_objects->setEnabled(false);
+    } else {
+        for (QAction* a : m_sketchBar->actions())
+            a->setEnabled(false);
+        for (QAction* a : m_lockedActions)
+            a->setEnabled(true);
+        m_lockedActions.clear();
+        m_objects->setEnabled(true);
+    }
+}
+
+void MainWindow::relockForSketch()
+{
+    if (!m_sketchMode.active)
+        return;
+    for (QAction* a : findChildren<QAction*>()) {
+        QObject* owner = a->parent();
+        if (owner == m_sketchBar || (qobject_cast<QActionGroup*>(owner) && owner->parent() == m_sketchBar))
+            continue;
+        if (owner == this || qobject_cast<QMenu*>(owner) || qobject_cast<QActionGroup*>(owner)) {
+            if (a->isEnabled() && std::find(m_lockedActions.begin(), m_lockedActions.end(), a) == m_lockedActions.end())
+                m_lockedActions.push_back(a);
+            a->setEnabled(false);
+        }
+    }
 }
 
 }  // namespace forge::app

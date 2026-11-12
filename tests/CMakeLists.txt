@@ -24,6 +24,7 @@ add_executable(forge_tests
     test_text_emboss.cpp
     test_edges.cpp
     test_history.cpp
+    test_sketch.cpp
 )
 target_link_libraries(forge_tests PRIVATE
     Forge3D::core

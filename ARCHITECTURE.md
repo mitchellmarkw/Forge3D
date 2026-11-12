@@ -379,6 +379,37 @@ Viewport (mouse)  --leftPressed(ray, handle)-->  MainWindow drag controller
   across edges bending less than 35° to get the face, take its extent along the words'
   across / up directions, and drop onto the face above the middle.
 
+## Sketches, Pad and Pocket (slice 7)
+
+- `sketch::Sketch` (core, no OpenCASCADE): points (point 0 is the fixed origin), radii,
+  geometry (lines, circles, arcs by point index) and constraints (rules and
+  dimensions). `sketch::solve` is a damped least-squares (Levenberg–Marquardt) solver
+  with a numeric Jacobian; residuals are in millimetres (angles scaled by the sketch's
+  size). It reports `freedom` (variables minus the Jacobian's rank) and the rules it
+  couldn't meet. While dragging, `pull` adds weak residuals towards the mouse.
+  Tangency at a shared end point is written as "square to the radius" (or "centres in
+  line"), since the distance form has no slope there.
+- `makeRule` makes ready-to-add rules (dimensions take the current measure; Tangent
+  picks its side), and the editing helpers keep indices consistent when points are
+  joined or geometry removed.
+- `sketch::faces` (SketchShape) builds the closed outlines into faces: wires found from
+  the edges, nested by containment (even depth solid, odd depth a hole).
+  `PadSpec{sketch, length, reversed, midplane}` is a primitive; its solid is the
+  prism of those faces. It turns about the sketch origin (`pivotOf` = 0); handles and
+  rotation use its box like a combined shape's.
+- Sketching on a face: `sketch::planeOfFace` gives the face's frame (origin at its
+  centre of area, Z out of the solid, X along the plate's X on up / down faces, else
+  level) and its outline. The pad's placement is that frame
+  (`placementFromTransform`). On a face, Finish adds the pad and a Merge (Pad) or
+  Subtract (Pocket: the pad reversed into the solid, Through all optional) in one
+  macro. Changing a sketch later is one EditBodyCommand on the pad (plus the step for
+  Through all); `outlinesOnPlane` finds the face under it again to show.
+- App: `SketchView` (a QWidget swapped in for the 3D view by a QStackedWidget) draws
+  and edits the sketch with its own undo; `SketchPanel` holds the finish options.
+  While sketching every other window command is switched off (`lockForSketch`), so
+  the sketch keys (L, R, C, A, S, H, V, D, Delete, Ctrl+Z) don't clash.
+- File format 13: `"pad"` bodies carry the sketch as JSON.
+
 ## Rendering
 
 `Document::mesh()` → `forge::Mesh` (positions, normals, indices) → `DisplayItem`

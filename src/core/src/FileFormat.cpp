@@ -18,6 +18,70 @@ using nlohmann::json;
 
 namespace {
 
+const char* const kGeoKinds[] = {"line", "circle", "arc"};
+const char* const kRules[] = {"horizontal", "vertical", "parallel", "perpendicular", "equal",  "tangent",
+                              "pointOn",    "coincident", "symmetric", "midpoint", "fixed", "distance",
+                              "distanceX", "distanceY", "radius", "angle"};
+
+json sketchToJson(const sketch::Sketch& s)
+{
+    json points = json::array(), geos = json::array(), rules = json::array();
+    for (const auto& p : s.points)
+        points.push_back({p.x, p.y});
+    for (const auto& g : s.geos)
+        geos.push_back(json{{"kind", kGeoKinds[int(g.kind)]}, {"a", g.a}, {"b", g.b}, {"c", g.c}, {"r", g.r},
+                            {"construction", g.construction}});
+    for (const auto& c : s.constraints)
+        rules.push_back(json{{"rule", kRules[int(c.rule)]}, {"a", c.a}, {"b", c.b}, {"c", c.c},
+                             {"value", c.value}, {"value2", c.value2}});
+    return json{{"points", points}, {"radii", s.radii}, {"geos", geos}, {"rules", rules}};
+}
+
+sketch::Sketch sketchFromJson(const json& j, const std::string& where)
+{
+    sketch::Sketch s;
+    s.points.clear();
+    try {
+        for (const auto& p : j.at("points"))
+            s.points.push_back({p.at(0).get<double>(), p.at(1).get<double>()});
+        s.radii = j.at("radii").get<std::vector<double>>();
+        for (const auto& g : j.at("geos")) {
+            sketch::Geo geo;
+            const std::string kind = g.at("kind").get<std::string>();
+            const auto k = std::find(std::begin(kGeoKinds), std::end(kGeoKinds), kind);
+            if (k == std::end(kGeoKinds))
+                throw std::runtime_error("unknown curve " + kind);
+            geo.kind = sketch::GeoKind(k - std::begin(kGeoKinds));
+            geo.a = g.at("a").get<int>();
+            geo.b = g.at("b").get<int>();
+            geo.c = g.at("c").get<int>();
+            geo.r = g.at("r").get<int>();
+            geo.construction = g.value("construction", false);
+            s.geos.push_back(geo);
+        }
+        for (const auto& r : j.at("rules")) {
+            sketch::Constraint c;
+            const std::string rule = r.at("rule").get<std::string>();
+            const auto k = std::find(std::begin(kRules), std::end(kRules), rule);
+            if (k == std::end(kRules))
+                throw std::runtime_error("unknown rule " + rule);
+            c.rule = sketch::Rule(k - std::begin(kRules));
+            c.a = r.at("a").get<int>();
+            c.b = r.at("b").get<int>();
+            c.c = r.at("c").get<int>();
+            c.value = r.at("value").get<double>();
+            c.value2 = r.value("value2", 0.0);
+            s.constraints.push_back(c);
+        }
+    } catch (const std::exception& e) {
+        throw FileError("The file is damaged (" + where + ": sketch: " + e.what() + ").");
+    }
+    if (s.points.empty())
+        s.points.push_back({});
+    return s;
+}
+
+
 constexpr const char* kFormatName = "forge3d-document";
 
 [[noreturn]] void damaged(const std::string& detail)
@@ -93,6 +157,11 @@ json bodyToJson(const Body& b)
     j["type"] = fileTypeName(b.spec);
     if (std::holds_alternative<MeshSpec>(b.spec))
         j["data"] = "meshes/" + std::to_string(b.id) + ".bin";
+    if (const auto* pad = std::get_if<PadSpec>(&b.spec)) {
+        j["reversed"] = pad->reversed;
+        j["midplane"] = pad->midplane;
+        j["sketch"] = sketchToJson(pad->sketch);
+    }
     if (const auto* t = std::get_if<TextSpec>(&b.spec)) {
         j["text"] = t->text;
         j["font"] = t->font;
@@ -284,6 +353,16 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
             damaged(where + ": mesh data not available");
         mesh.data = meshFromBytes(readEntry(entry));
         b.spec = mesh;
+    } else if (t == "pad" && version >= 13) {
+        PadSpec pad;
+        pad.length = number(*params, "length", where);
+        pad.reversed = j.value("reversed", false);
+        pad.midplane = j.value("midplane", false);
+        const auto sk = j.find("sketch");
+        if (sk == j.end() || !sk->is_object())
+            damaged(where + ": missing sketch");
+        pad.sketch = sketchFromJson(*sk, where);
+        b.spec = pad;
     } else if (version < 6 && t == "sphere") {  // 0.6.0 shapes were always round
         b.spec = SphereSpec{num("radius")};
     } else if (version < 6 && t == "cone") {
