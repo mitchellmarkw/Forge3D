@@ -238,6 +238,19 @@ Viewport (mouse)  --leftPressed(ray, handle)-->  MainWindow drag controller
 - Several selected shapes share a gizmo at their combined bounds' centre (plate axes,
   no resize); the drag previews every shape and records one `EditBodiesCommand`.
 
+## Export (slice 5a)
+
+- `exportMeshes()` tessellates a copy of each shape (`BRepBuilderAPI_Copy` without its
+  mesh, so display triangles stay as they are) at export quality (0.01 mm, 0.15 rad),
+  moves the points onto the plate and welds them on a 1e-5 mm grid; triangles that
+  collapse are dropped and edges not used exactly twice are counted (`openEdges`).
+- Writers: binary STL (one solid), OBJ (one `o` per shape, 1-based global indices) and
+  3MF (zip of `[Content_Types].xml`, `_rels/.rels`, `3D/3dmodel.model`, one object and
+  build item per shape, `unit="millimeter"`). All write to `<file>.saving` and rename.
+- Send to Slicer writes a 3MF under the temp folder and starts the chosen program
+  (`QProcess::startDetached`) or the .3mf file association (`QDesktopServices`).
+  The choice is kept in QSettings (`slicer/path`; empty = file association).
+
 ## Rendering
 
 `Document::mesh()` → `forge::Mesh` (positions, normals, indices) → `DisplayItem`

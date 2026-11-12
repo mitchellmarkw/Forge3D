@@ -120,6 +120,11 @@ private:
     void openDocument();
     bool save();
     bool saveAs();
+    // ---- Export / print ----
+    std::vector<ObjectId> exportTargets() const;  // the selected shapes on the plate, or all of them
+    void exportShapes();
+    void sendToSlicer();
+    bool chooseSlicer();  // asks which slicer to use; false if cancelled
     bool saveTo(const QString& path);
     bool confirmDiscardChanges();
 
@@ -195,6 +200,9 @@ private:
     QAction* m_separate = nullptr;
     QAction* m_split = nullptr;
     QAction* m_duplicate = nullptr;
+    QAction* m_export = nullptr;
+    QAction* m_sendToSlicer = nullptr;
+    QAction* m_chooseSlicer = nullptr;
     QAction* m_copy = nullptr;
     QAction* m_cut = nullptr;
     QAction* m_paste = nullptr;

@@ -18,11 +18,13 @@ add_executable(forge_tests
     test_split.cpp
     test_handles.cpp
     test_arrange.cpp
+    test_export.cpp
 )
 target_link_libraries(forge_tests PRIVATE
     Forge3D::core
     Forge3D::view
     Catch2::Catch2WithMain
+    miniz::miniz  # the export test opens 3MF files
 )
 
 include(Catch)
