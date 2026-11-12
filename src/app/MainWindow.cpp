@@ -2,17 +2,20 @@
 #include "MainWindow.h"
 
 #include "BuildInfo.h"
+#include "EmbossPanel.h"
 #include "Log.h"
 #include "PropertiesPanel.h"
 #include "SplitPanel.h"
 #include "Viewport.h"
 
+#include "forge/core/Emboss.h"
 #include "forge/core/Export.h"
 #include "forge/core/FileFormat.h"
 #include "forge/core/Import.h"
 #include "forge/core/Picking.h"
 #include "forge/core/Primitives.h"
 #include "forge/core/Tessellator.h"
+#include "forge/core/Text.h"
 #include "forge/core/Transform.h"
 
 #include <QAction>
@@ -271,6 +274,8 @@ void MainWindow::createActions()
             cancelDrag();  // Esc during a drag puts the body back
         else if (m_splitMode.active)
             endSplit();  // Esc leaves the Split tool without cutting
+        else if (m_embossMode.active)
+            endEmboss();
         else
             setSelection(std::vector<ObjectId>{});
     });
@@ -325,6 +330,7 @@ void MainWindow::createActions()
         tr("A ramp: tall at its -X end, sloping down to the plate at +X"),
         tr("A pyramid on a rectangular base; give it a top width and depth for a flat top, or just one for a "
            "roof-like ridge"),
+        tr("3D letters lying flat: type the words, pick a font in Properties"),
     };
     for (std::size_t kind = 0; kind < kPrimitiveKindCount; ++kind) {
         const PrimitiveSpec spec = defaultSpec(kind);
@@ -365,6 +371,23 @@ void MainWindow::createActions()
             return;
         }
         startSplit(id, false);
+    });
+
+    m_emboss = new QAction(tr("Emboss"), this);
+    m_emboss->setToolTip(tr("Emboss: put raised or engraved words on the selected shape; they follow its surface"));
+    connect(m_emboss, &QAction::triggered, this, [this] {
+        const ObjectId id = selectedOne();
+        if (id == kInvalidId || m_selection.size() != 1 || !m_doc.isTopLevel(id)) {
+            statusBar()->showMessage(tr("Emboss: select one shape on the plate first."), 6000);
+            return;
+        }
+        if (const QString open = openMeshIn({id}); !open.isEmpty()) {
+            QMessageBox::information(this, tr("Forge3D"),
+                                     tr("'%1' has gaps in its surface (it isn't watertight), so it can't be "
+                                        "embossed.").arg(open));
+            return;
+        }
+        startEmboss(id, false);
     });
 
     // Align Shapes: the first shape selected stays put; the others move to it.
@@ -440,6 +463,7 @@ void MainWindow::createMenus()
     edit->addAction(m_intersect);
     edit->addAction(m_separate);
     edit->addAction(m_split);
+    edit->addAction(m_emboss);
     edit->addMenu(m_alignMenu);
     edit->addMenu(m_mirrorMenu);
     edit->addAction(m_group);
@@ -498,6 +522,7 @@ void MainWindow::createToolBar()
     bar->addAction(m_intersect);
     bar->addAction(m_separate);
     bar->addAction(m_split);
+    bar->addAction(m_emboss);
     bar->addSeparator();
     {
         auto* alignButton = new QToolButton(bar);
@@ -555,6 +580,9 @@ void MainWindow::createDocks()
     stackLayout->addWidget(m_properties);
     stackLayout->addWidget(m_splitPanel);
     m_splitPanel->hide();
+    m_embossPanel = new EmbossPanel;
+    stackLayout->addWidget(m_embossPanel);
+    m_embossPanel->hide();
     // Long hint texts wrap instead of widening the dock.
     m_propsStack->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     propsDock->setWidget(m_propsStack);
@@ -562,6 +590,13 @@ void MainWindow::createDocks()
     connect(m_splitPanel, &SplitPanel::planeChanged, this, &MainWindow::updateSplitPlane);
     connect(m_splitPanel, &SplitPanel::applyRequested, this, &MainWindow::applySplit);
     connect(m_splitPanel, &SplitPanel::cancelRequested, this, &MainWindow::endSplit);
+    m_embossTimer = new QTimer(this);
+    m_embossTimer->setSingleShot(true);
+    connect(m_embossTimer, &QTimer::timeout, this, &MainWindow::updateEmbossPreview);
+    connect(m_embossPanel, &EmbossPanel::changed, this, [this] { m_embossTimer->start(0); });
+    connect(m_embossPanel, &EmbossPanel::typing, this, [this] { m_embossTimer->start(400); });
+    connect(m_embossPanel, &EmbossPanel::applyRequested, this, &MainWindow::applyEmboss);
+    connect(m_embossPanel, &EmbossPanel::cancelRequested, this, &MainWindow::endEmboss);
     propsDock->setMinimumWidth(320);
     addDockWidget(Qt::RightDockWidgetArea, propsDock);
 
@@ -574,6 +609,7 @@ void MainWindow::createDocks()
     connect(m_properties, &PropertiesPanel::uniformChanged, m_uniformAction, &QAction::setChecked);
     connect(m_properties, &PropertiesPanel::separateRequested, this, &MainWindow::separateSelected);
     connect(m_properties, &PropertiesPanel::editCutRequested, this, [this] { startSplit(selectedOne(), true); });
+    connect(m_properties, &PropertiesPanel::editEmbossRequested, this, [this] { startEmboss(selectedOne(), true); });
     connect(m_properties, &PropertiesPanel::keepRoundChanged, this, [this](bool on) { m_keepRound = on; });
     connect(m_properties, &PropertiesPanel::sitOnPlateRequested, this, [this](ObjectId id) {
         try {
@@ -649,6 +685,8 @@ void MainWindow::setSelection(std::vector<ObjectId> ids)
         return;
     if (m_splitMode.active)
         endSplit();  // picking something else leaves the Split tool
+    if (m_embossMode.active)
+        endEmboss();
     const ObjectId previousOne = selectedOne();
     m_selection = std::move(ids);
     if (const Body* body = m_doc.find(selectedOne()); body && body->id != previousOne) {
@@ -682,6 +720,10 @@ void MainWindow::onViewportClicked(const QVector3D& origin, const QVector3D& dir
     }
     if (m_splitMode.active)
         return;  // while splitting, clicks don't change what is selected (Cancel or Esc leaves)
+    if (m_embossMode.active) {
+        placeEmboss(origin, direction);  // a click on the shape moves the words there
+        return;
+    }
     Ray ray;
     ray.origin = {origin.x(), origin.y(), origin.z()};
     ray.direction = {direction.x(), direction.y(), direction.z()};
@@ -770,6 +812,8 @@ void MainWindow::onLeftPressed(const QVector3D& origin, const QVector3D& directi
             m_pressOnHandle = true;
         return;
     }
+    if (m_embossMode.active)
+        return;  // shapes stay put while the words are placed
 
     if (handle.valid() && multiSelection()) {
         // Several shapes: move or turn them together about their shared middle.
@@ -1135,8 +1179,18 @@ void MainWindow::addBody(const PrimitiveSpec& spec)
     Body body;
     body.id = m_doc.allocateId();
     body.spec = spec;
+    if (const auto* t = std::get_if<TextSpec>(&spec)) {
+        // Letters 10 mm tall in their natural proportions, in the default font.
+        TextSpec text = *t;
+        try {
+            text.font = text::defaultFont();
+            body.spec = text::sizedForLetters(text, 10.0);
+        } catch (const std::exception& e) {
+            qWarning() << "Text could not be laid out:" << e.what();
+        }
+    }
     body.name = m_doc.uniqueName(typeName(spec));
-    body.placement = suggestPlacement(m_doc, footprintWidth(spec));
+    body.placement = suggestPlacement(m_doc, footprintWidth(body.spec));
     const ObjectId id = body.id;
     if (run(std::make_unique<AddBodyCommand>(std::move(body))))
         setSelection(id);  // like 3D Builder: a new object is ready to edit
@@ -1654,6 +1708,170 @@ void MainWindow::applySplit()
     // Select the arrow-side half on its own, so the move and rotate handles show
     // straight away (as after Merge); click the other half to work on it.
     setSelection(made.front());
+}
+
+bool MainWindow::toolOpen() const
+{
+    return m_splitMode.active || m_embossMode.active;
+}
+
+void MainWindow::startEmboss(ObjectId target, bool editing)
+{
+    const Body* body = m_doc.find(target);
+    if (!body || !m_doc.isTopLevel(target))
+        return;
+    if (m_dragState.kind != Drag::Kind::None)
+        cancelDrag();
+    if (m_splitMode.active)
+        endSplit();
+
+    EmbossMode mode;
+    mode.active = true;
+    mode.editing = editing;
+    mode.target = target;
+    EmbossText words = m_lastWords;
+    try {
+        if (editing) {
+            if (!body->isBoolean() || body->boolean->op != BooleanOp::Emboss || !body->boolean->emboss)
+                return;
+            words = *body->boolean->emboss;
+            mode.spot = embossSpot(m_doc, target);
+        } else {
+            // Letters to suit the shape: about a fifth of its middle size.
+            auto size = m_doc.worldBounds(target).size();
+            std::sort(size.begin(), size.end());
+            words.letterHeight = std::clamp(std::round(double(size[1]) * 0.2 * 2.0) / 2.0, 2.0, 20.0);
+            // Start on the side facing you, in the middle.
+            const QVector3D eye = m_viewport->camera().eyePosition();
+            const auto c = m_doc.worldTransform(target).apply(m_doc.visibleCentre(target));
+            const Vec3 from{eye.x(), eye.y(), eye.z()};
+            mode.spot = surfaceUnder(m_doc, target, from, {c[0] - from[0], c[1] - from[1], c[2] - from[2]},
+                                     words.letterHeight / 2.0);
+        }
+    } catch (const std::exception& e) {
+        qWarning() << "Emboss could not start:" << e.what();
+        if (editing)
+            return;
+    }
+    m_embossMode = mode;
+    const QString name = QString::fromStdString(body->name);
+    m_embossPanel->start(editing ? tr("Change the words on '%1'").arg(name) : tr("Emboss '%1'").arg(name),
+                         editing, words);
+    m_propsDockWidth = m_propsDock->width();
+    m_properties->hide();
+    m_embossPanel->show();
+    statusBar()->showMessage(tr("Emboss: type the words in the panel on the right and click the shape where they "
+                                "go, then click %1. Esc cancels.")
+                                 .arg(editing ? tr("Apply") : tr("Emboss")));
+    updateEmbossPreview();
+    refreshCommandState();
+}
+
+void MainWindow::endEmboss()
+{
+    if (!m_embossMode.active)
+        return;
+    m_embossTimer->stop();
+    m_embossMode = EmbossMode{};
+    m_embossPanel->hide();
+    m_properties->show();
+    QTimer::singleShot(0, this, [this] { resizeDocks({m_propsDock}, {m_propsDockWidth}, Qt::Horizontal); });
+    statusBar()->clearMessage();
+    refreshScene();
+    refreshCommandState();
+}
+
+std::optional<BooleanSpec> MainWindow::currentEmbossSpec() const
+{
+    if (!m_embossMode.active || !m_embossMode.spot)
+        return std::nullopt;
+    const EmbossText words = m_embossPanel->words();
+    if (m_embossMode.editing)
+        return withEmboss(m_doc, m_embossMode.target, *m_embossMode.spot, words).boolean;
+    return embossSpec(m_doc, m_embossMode.target, *m_embossMode.spot, words);
+}
+
+void MainWindow::updateEmbossPreview()
+{
+    if (!m_embossMode.active)
+        return;
+    m_embossMode.preview.reset();
+    bool ok = false;
+    try {
+        const auto spec = currentEmbossSpec();
+        if (!spec) {
+            m_embossPanel->setStatus(tr("Click on the shape where the words should go."), false);
+        } else {
+            QApplication::setOverrideCursor(Qt::WaitCursor);
+            struct RestoreCursor {
+                ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
+            } restore;
+            m_embossMode.preview = m_doc.previewMesh(*spec);
+            m_embossPanel->setStatus(tr("This is how it will look. Click elsewhere on the shape to move the words."),
+                                     false);
+            ok = true;
+        }
+    } catch (const std::exception& e) {
+        m_embossPanel->setStatus(QString::fromUtf8(e.what()), true);
+    }
+    m_embossPanel->setApplyEnabled(ok);
+    refreshScene();
+}
+
+void MainWindow::placeEmboss(const QVector3D& origin, const QVector3D& direction)
+{
+    try {
+        const auto spot = surfaceUnder(m_doc, m_embossMode.target, {origin.x(), origin.y(), origin.z()},
+                                       {direction.x(), direction.y(), direction.z()},
+                                       m_embossPanel->words().letterHeight / 2.0);
+        if (!spot) {
+            statusBar()->showMessage(tr("Click on the shape itself to put the words there."), 4000);
+            return;
+        }
+        m_embossMode.spot = spot;
+    } catch (const std::exception& e) {
+        qWarning() << "Placing the words failed:" << e.what();
+        return;
+    }
+    updateEmbossPreview();
+}
+
+void MainWindow::applyEmboss()
+{
+    if (!m_embossMode.active)
+        return;
+    std::optional<BooleanSpec> spec;
+    try {
+        spec = currentEmbossSpec();
+        if (!spec)
+            return;
+        m_doc.previewMesh(*spec);  // fails here (with its message) rather than in the command
+    } catch (const std::exception& e) {
+        QMessageBox::warning(this, tr("Forge3D"), tr("Emboss did not work:\n%1").arg(QString::fromUtf8(e.what())));
+        return;
+    }
+    m_lastWords = *spec->emboss;
+    const ObjectId target = m_embossMode.target;
+    if (m_embossMode.editing) {
+        const Body* now = m_doc.find(target);
+        if (!now)
+            return endEmboss();
+        const Body before = *now;
+        Body after = before;
+        after.boolean = *spec;
+        endEmboss();
+        run(std::make_unique<EditBodyCommand>(before, after, "Change words"));
+        setSelection(target);
+        return;
+    }
+    Body result;
+    result.id = m_doc.allocateId();
+    result.name = m_doc.uniqueName("Emboss");
+    result.boolean = *spec;
+    const ObjectId id = result.id;
+    endEmboss();
+    if (run(std::make_unique<CombineCommand>(std::move(result))))
+        setSelection(id);
 }
 
 void MainWindow::separateSelected()
@@ -2176,11 +2394,20 @@ void MainWindow::refreshScene()
     };
     try {
         // Everything on the plate...
+        if (m_embossMode.active && !m_doc.find(m_embossMode.target))
+            endEmboss();  // e.g. Undo removed the shape
         for (ObjectId id : m_doc.topLevelIds()) {
             DisplayItem item;
             item.id = id;
             item.mesh = m_doc.mesh(id);  // rebuilt only if the shape changed
             item.model = toQMatrix(m_doc.worldTransform(id));
+            if (m_embossMode.active && id == m_embossMode.target && m_embossMode.preview) {
+                // The shape with the words on, as it would be. A new result's coordinates
+                // are the plate's; an edited one keeps its placement.
+                item.mesh = m_embossMode.preview;
+                if (!m_embossMode.editing)
+                    item.model = QMatrix4x4();
+            }
             item.color = colourOf(id);
             item.selected = isSelected(id);
             triangles += item.mesh->triangleCount();
@@ -2218,7 +2445,7 @@ void MainWindow::refreshScene()
             m_properties->setKeepRound(false);
         }
     }
-    m_viewport->setGizmo(m_splitMode.active ? std::nullopt : selectionGizmo(), m_gizmoMode);
+    m_viewport->setGizmo(toolOpen() ? std::nullopt : selectionGizmo(), m_gizmoMode);
 
     // Properties: what the selected body is made of, or what it belongs to.
     QString context;
@@ -2234,6 +2461,14 @@ void MainWindow::refreshScene()
             case BooleanOp::Split: context = tr("Made from: %1, cut by a plane").arg(names.join(QString())); break;
             case BooleanOp::Mirror: context = tr("Made from: %1, mirrored").arg(names.join(QString())); break;
             case BooleanOp::Group: context = tr("A group of: %1").arg(names.join(QStringLiteral(", "))); break;
+            case BooleanOp::Emboss:
+                context = tr("Made from: %1, with the words \"%2\" %3")
+                              .arg(names.join(QString()),
+                                   QString::fromStdString(selected->boolean->emboss ? selected->boolean->emboss->text
+                                                                                    : std::string()),
+                                   selected->boolean->emboss && !selected->boolean->emboss->raised ? tr("engraved")
+                                                                                                    : tr("raised"));
+                break;
             default: context = tr("Made from: %1").arg(names.join(joiner)); break;
             }
         } else if (const auto* mesh = std::get_if<MeshSpec>(&selected->spec);
@@ -2268,12 +2503,13 @@ void MainWindow::refreshScene()
     m_separate->setEnabled(selected && selected->isBoolean() && m_doc.isTopLevel(selected->id));
     m_alignMenu->menuAction()->setEnabled(m_selection.size() >= 2 && allTopLevel);
     for (QAction* a : {m_duplicate, m_copy, m_cut, m_mirrorMenu->menuAction()})
-        a->setEnabled(anySelected && allTopLevel && !m_splitMode.active);
+        a->setEnabled(anySelected && allTopLevel && !toolOpen());
     m_group->setEnabled(m_selection.size() >= 2 && allTopLevel);
-    m_paste->setEnabled(!m_clipboard.empty() && !m_splitMode.active);
+    m_paste->setEnabled(!m_clipboard.empty() && !toolOpen());
     m_export->setEnabled(!m_doc.empty());
     m_sendToSlicer->setEnabled(!m_doc.empty());
-    m_split->setEnabled(m_selection.size() == 1 && allTopLevel && !m_splitMode.active);
+    m_split->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
+    m_emboss->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_clear->setEnabled(!m_doc.empty());
 }
 

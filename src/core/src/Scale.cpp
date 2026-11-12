@@ -88,9 +88,15 @@ void scaleInto(const Document& doc, ObjectId id, const Vec3& factors, const Vec3
     }
     for (ObjectId part : body->boolean->operands)
         scaleChild(doc, part, factors, anchor, out);
-    if (body->boolean->op == BooleanOp::Split || body->boolean->op == BooleanOp::Mirror) {
-        // The cutting / mirror plane stretches with everything else.
+    if (body->boolean->op == BooleanOp::Split || body->boolean->op == BooleanOp::Mirror ||
+        body->boolean->op == BooleanOp::Emboss) {
+        // The cutting / mirror plane (or the words' spot) stretches with everything else.
         Body next = *body;
+        if (next.boolean->emboss && even(factors)) {
+            // Scaled evenly, the words grow with the shape; stretched, they keep their size.
+            next.boolean->emboss->letterHeight *= factors[0];
+            next.boolean->emboss->depth *= factors[0];
+        }
         if (body->boolean->op == BooleanOp::Mirror && !even(factors)) {
             // A reflection only survives a stretch along or across its mirror.
             const Vec3& n0 = body->boolean->planeNormal;
@@ -120,7 +126,8 @@ PrimitiveSpec scaledSpec(const PrimitiveSpec& spec, const Vec3& f)
     return std::visit(
         [&f](auto p) -> PrimitiveSpec {
             using T = std::decay_t<decltype(p)>;
-            if constexpr (std::is_same_v<T, BoxSpec> || std::is_same_v<T, WedgeSpec> || std::is_same_v<T, MeshSpec>) {
+            if constexpr (std::is_same_v<T, BoxSpec> || std::is_same_v<T, WedgeSpec> || std::is_same_v<T, MeshSpec> ||
+                          std::is_same_v<T, TextSpec>) {
                 p.width *= f[0];
                 p.depth *= f[1];
                 p.height *= f[2];

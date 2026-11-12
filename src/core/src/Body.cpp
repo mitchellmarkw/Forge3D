@@ -147,6 +147,21 @@ struct Traits<PyramidSpec> {
 };
 
 template <>
+struct Traits<TextSpec> {
+    static constexpr const char* name = "Text";
+    static constexpr const char* file = "text";
+    static const std::vector<Field<TextSpec>>& fields()
+    {
+        static const std::vector<Field<TextSpec>> f{
+            {&TextSpec::width, {"width", "Width (X)", "Length of the text along X", false, 0}},
+            {&TextSpec::depth, {"depth", "Depth (Y)", "Size of the text along Y: from the lowest letter to the highest", false, 0}},
+            {&TextSpec::height, {"height", "Thickness (Z)", "How thick the letters are (up)", false, 0}},
+        };
+        return f;
+    }
+};
+
+template <>
 struct Traits<MeshSpec> {
     static constexpr const char* name = "Mesh";
     static constexpr const char* file = "mesh";
@@ -296,6 +311,7 @@ std::string toString(BooleanOp op)
     case BooleanOp::Split: return "Split";
     case BooleanOp::Mirror: return "Mirror";
     case BooleanOp::Group: return "Group";
+    case BooleanOp::Emboss: return "Emboss";
     }
     return "Combine";
 }

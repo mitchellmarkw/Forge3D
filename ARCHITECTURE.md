@@ -294,6 +294,34 @@ Viewport (mouse)  --leftPressed(ray, handle)-->  MainWindow drag controller
 - Manifold refuses meshes that aren't closed (`MeshEngineError`); open imports are
   already kept out of combining and Split.
 
+## Text and Emboss (slice 5d)
+
+- Letters come from the fonts installed on the PC through OCCT (`Font_FontMgr`,
+  `StdPrs_BRepFont`, `StdPrs_BRepTextBuilder`, FreeType). `Text.h` hides it; one mutex
+  guards the font code (not thread-safe). The first font scan takes a second or two, so
+  the app starts it on a background thread after the first frame (`text::warmUp`).
+- `TextSpec` is a primitive like a box: the laid-out words (font size 10, cached) are
+  stretched to width x depth and pushed up `height`. Changing the words or font goes
+  through `text::withText`, which keeps the letter size and stretch, so the block grows
+  with the words. Saved as type "text" with text / font / bold / italic (format 10).
+- Emboss is a combine op (`BooleanOp::Emboss`, one part, `EmbossText` in the spec,
+  planePoint / planeNormal = the spot and the way the surface faces there, in the
+  result's coordinates). It always uses the mesh engine.
+- `emboss::letters` makes the letters' solid on the part's triangles:
+  1. `text::flatLetters`: the letter faces triangulated flat, centred, turned, and every
+     edge split until none is longer than letterHeight / 25, so letters can bend.
+  2. Wrapping: the surface is cut by a plane through the spot to get a line running "up"
+     the surface; at each step along it another cut runs "across". A letter point (u, v)
+     goes v along the up line and u along its row, both measured along the surface (like
+     smoothing on a sticker), so words keep their width round a cylinder. Running off
+     the end of the surface is an error ("would hang off the edge").
+  3. Each point stands out along the surface's facing there (corner normals averaged over
+     faces bent less than 35°, so box faces stay square). Raised: depth out, a little in;
+     engraved: depth in, a little out. Tops, bottoms and outline walls make a closed
+     piece per letter piece; pieces are united, then merged into or cut from the part.
+- `Document::previewMesh` draws the result before it is made (the Emboss tool's live
+  preview); the last preview is kept, so applying doesn't work it out again.
+
 ## Rendering
 
 `Document::mesh()` → `forge::Mesh` (positions, normals, indices) → `DisplayItem`

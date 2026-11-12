@@ -150,6 +150,20 @@ struct PyramidSpec {
     bool operator==(const PyramidSpec&) const = default;
 };
 
+// 3D letters lying flat on the plate, read from above (+Y is the top of the letters).
+// The laid-out text is stretched to width x depth (its block on the plate) and is
+// height thick. Changing the words or font keeps the letter size (see text::withText).
+struct TextSpec {
+    std::string text = "Text";
+    std::string font;  // family name; empty = the default font
+    bool bold = false;
+    bool italic = false;
+    double width = 30.0;   // X: the whole line(s)
+    double depth = 10.0;   // Y: from the lowest to the highest letter
+    double height = 3.0;   // Z: thickness
+    bool operator==(const TextSpec&) const = default;
+};
+
 // Triangles read from a file (STL / 3MF / OBJ), after repair. Shared between copies
 // and never changed once made. Points are centred on X and Y with the lowest at Z = 0,
 // like every primitive.
@@ -173,7 +187,8 @@ struct MeshSpec {
 };
 
 using PrimitiveSpec =
-    std::variant<BoxSpec, CylinderSpec, SphereSpec, ConeSpec, TorusSpec, TubeSpec, WedgeSpec, PyramidSpec, MeshSpec>;
+    std::variant<BoxSpec, CylinderSpec, SphereSpec, ConeSpec, TorusSpec, TubeSpec, WedgeSpec, PyramidSpec, TextSpec,
+                 MeshSpec>;
 
 // The kinds of primitive the Add Shape menu offers (every kind but the imported
 // mesh, which is last), and a new one of each.
@@ -219,7 +234,22 @@ PrimitiveSpec madeRound(const PrimitiveSpec& spec);
 
 // ---- Combine results ------------------------------------------------------------
 
-enum class BooleanOp { Merge, Subtract, Intersect, Split, Mirror, Group };
+enum class BooleanOp { Merge, Subtract, Intersect, Split, Mirror, Group, Emboss };
+
+// Words raised from (or engraved into) a shape's surface. Each letter follows the
+// surface: every point of it stands `depth` out from (or sinks `depth` into) the
+// surface under it.
+struct EmbossText {
+    std::string text = "Text";
+    std::string font;  // empty = the default font
+    bool bold = true;
+    bool italic = false;
+    double letterHeight = 8.0;  // height of a capital letter, mm
+    double depth = 1.0;         // how far the letters stand out / go in, mm
+    bool raised = true;         // false: engraved
+    double angle = 0.0;         // turn of the words on the surface, degrees (anticlockwise)
+    bool operator==(const EmbossText&) const = default;
+};
 
 // "Merge", "Subtract", "Intersect", "Split", "Mirror", "Group"
 std::string toString(BooleanOp op);
@@ -234,6 +264,9 @@ std::string toString(BooleanOp op);
 //   Mirror:    one part, reflected in the plane (planePoint / planeNormal).
 //   Group:     the parts kept as they are, side by side, moving as one (no
 //              merging: they may overlap or be far apart).
+//   Emboss:    one part with words raised from or engraved into its surface,
+//              centred on planePoint (on the surface) and facing out along
+//              planeNormal; see `emboss`.
 // The parts stay in the document, hidden inside the result and still editable;
 // their placements are relative to the result. A part belongs to at most one result.
 struct BooleanSpec {
@@ -246,6 +279,8 @@ struct BooleanSpec {
     // a unit normal pointing into the half that is kept. Mirror: the mirror plane.
     std::array<double, 3> planePoint{0.0, 0.0, 0.0};
     std::array<double, 3> planeNormal{0.0, 0.0, 1.0};
+    // Emboss: the words.
+    std::optional<EmbossText> emboss;
 
     bool operator==(const BooleanSpec&) const = default;
 };

@@ -5,6 +5,7 @@
 #include "forge/core/Arrange.h"
 #include "forge/core/CommandStack.h"
 #include "forge/core/Document.h"
+#include "forge/core/Emboss.h"
 #include "forge/core/Split.h"
 #include "forge/core/Scale.h"
 #include "forge/view/Gizmo.h"
@@ -35,6 +36,7 @@ namespace forge::app {
 
 class PropertiesPanel;
 class SplitPanel;
+class EmbossPanel;
 struct DisplayItem;
 class Viewport;
 
@@ -118,6 +120,17 @@ private:
     // Starts dragging the Split plane if the ray hits it or its arrow.
     bool grabSplitPlane(const QVector3D& origin, const QVector3D& direction);
     void clearPlate();
+
+    // ---- Emboss tool ----
+    // target: a shape on the plate to put words on, or (editing) an Emboss result.
+    void startEmboss(ObjectId target, bool editing);
+    void endEmboss();
+    void applyEmboss();
+    // Puts the words where the ray meets the shape.
+    void placeEmboss(const QVector3D& origin, const QVector3D& direction);
+    void updateEmbossPreview();
+    std::optional<BooleanSpec> currentEmbossSpec() const;
+    bool toolOpen() const;  // Split or Emboss
 
     // Files
     void newDocument();
@@ -232,6 +245,18 @@ private:
         Vec3 centre{};                  // middle of `measured` on the plate
     };
     SplitMode m_splitMode;
+    QAction* m_emboss = nullptr;
+    EmbossPanel* m_embossPanel = nullptr;
+    struct EmbossMode {
+        bool active = false;
+        bool editing = false;
+        ObjectId target = kInvalidId;  // the shape being embossed, or the Emboss result being edited
+        std::optional<emboss::SurfacePoint> spot;  // where the words go (plate coordinates)
+        std::shared_ptr<const Mesh> preview;      // the result as it would be (result coordinates)
+    };
+    EmbossMode m_embossMode;
+    EmbossText m_lastWords;          // the words used last, offered next time
+    QTimer* m_embossTimer = nullptr;  // previews a moment after typing stops
     QMenu* m_alignMenu = nullptr;  // Align Shapes (toolbar dropdown and Edit submenu)
     QAction* m_fit = nullptr;
     QAction* m_resetView = nullptr;
