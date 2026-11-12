@@ -260,9 +260,15 @@ std::vector<ExportMesh> exportMeshes(const Document& doc, const std::vector<Obje
         const Body* body = doc.find(id);
         if (!body)
             throw std::out_of_range("No body with id " + std::to_string(id));
-        // A fresh copy, so the finer triangles don't replace the ones used for display.
-        const TopoDS_Shape shape = BRepBuilderAPI_Copy(doc.shape(id), /*copyGeom=*/true, /*copyMesh=*/false).Shape();
-        const Mesh mesh = tessellate(shape, quality);
+        Mesh mesh;
+        if (!body->isBoolean() && std::holds_alternative<MeshSpec>(body->spec)) {
+            mesh = displayMesh(std::get<MeshSpec>(body->spec));  // already triangles: use them as they are
+        } else {
+            // A fresh copy, so the finer triangles don't replace the ones used for display.
+            const TopoDS_Shape shape =
+                BRepBuilderAPI_Copy(doc.shape(id), /*copyGeom=*/true, /*copyMesh=*/false).Shape();
+            mesh = tessellate(shape, quality);
+        }
         const Transform toPlate = doc.worldTransform(id);
         ExportMesh m;
         m.name = body->name;

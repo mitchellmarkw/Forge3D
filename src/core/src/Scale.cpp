@@ -120,7 +120,7 @@ PrimitiveSpec scaledSpec(const PrimitiveSpec& spec, const Vec3& f)
     return std::visit(
         [&f](auto p) -> PrimitiveSpec {
             using T = std::decay_t<decltype(p)>;
-            if constexpr (std::is_same_v<T, BoxSpec> || std::is_same_v<T, WedgeSpec>) {
+            if constexpr (std::is_same_v<T, BoxSpec> || std::is_same_v<T, WedgeSpec> || std::is_same_v<T, MeshSpec>) {
                 p.width *= f[0];
                 p.depth *= f[1];
                 p.height *= f[2];

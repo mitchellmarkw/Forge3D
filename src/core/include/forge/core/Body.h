@@ -2,6 +2,7 @@
 #pragma once
 
 #include <array>
+#include <memory>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -149,11 +150,34 @@ struct PyramidSpec {
     bool operator==(const PyramidSpec&) const = default;
 };
 
-using PrimitiveSpec =
-    std::variant<BoxSpec, CylinderSpec, SphereSpec, ConeSpec, TorusSpec, TubeSpec, WedgeSpec, PyramidSpec>;
+// Triangles read from a file (STL / 3MF / OBJ), after repair. Shared between copies
+// and never changed once made. Points are centred on X and Y with the lowest at Z = 0,
+// like every primitive.
+struct MeshData {
+    std::vector<float> positions;       // 3 per point, millimetres
+    std::vector<std::uint32_t> indices;  // 3 per triangle, anticlockwise seen from outside
+    std::array<float, 3> size{0.f, 0.f, 0.f};  // its natural width, depth, height
+    bool closed = true;                 // watertight (every edge shared by two triangles)
+};
 
-// How many kinds of primitive there are, and a new one of each (Add Shape menu).
-inline constexpr std::size_t kPrimitiveKindCount = std::variant_size_v<PrimitiveSpec>;
+// An imported shape: the triangles stretched to width x depth x height.
+struct MeshSpec {
+    std::shared_ptr<const MeshData> data;
+    double width = 1.0;
+    double depth = 1.0;
+    double height = 1.0;
+    bool operator==(const MeshSpec& o) const
+    {
+        return data == o.data && width == o.width && depth == o.depth && height == o.height;
+    }
+};
+
+using PrimitiveSpec =
+    std::variant<BoxSpec, CylinderSpec, SphereSpec, ConeSpec, TorusSpec, TubeSpec, WedgeSpec, PyramidSpec, MeshSpec>;
+
+// The kinds of primitive the Add Shape menu offers (every kind but the imported
+// mesh, which is last), and a new one of each.
+inline constexpr std::size_t kPrimitiveKindCount = std::variant_size_v<PrimitiveSpec> - 1;
 PrimitiveSpec defaultSpec(std::size_t kind);  // kind = variant index
 
 // "Box", "Cylinder", "Sphere", ...: used for default names and command labels.

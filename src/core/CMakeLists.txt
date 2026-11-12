@@ -12,6 +12,7 @@ add_library(forge_core STATIC
     include/forge/core/Document.h
     include/forge/core/Export.h
     include/forge/core/FileFormat.h
+    include/forge/core/Import.h
     include/forge/core/Mesh.h
     include/forge/core/Picking.h
     include/forge/core/Primitives.h
@@ -27,6 +28,7 @@ add_library(forge_core STATIC
     src/Document.cpp
     src/Export.cpp
     src/FileFormat.cpp
+    src/Import.cpp
     src/Mesh.cpp
     src/Picking.cpp
     src/Primitives.cpp

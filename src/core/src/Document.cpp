@@ -52,6 +52,8 @@ void validate(const PrimitiveSpec& spec)
             throw std::invalid_argument(std::string(fields[i].label) +
                                         (fields[i].allowZero ? " must not be negative" : " must be a positive number"));
     }
+    if (const auto* mesh = std::get_if<MeshSpec>(&spec); mesh && (!mesh->data || mesh->data->indices.empty()))
+        throw std::invalid_argument("The imported shape has no triangles");
     if (const auto* cone = std::get_if<ConeSpec>(&spec)) {
         const auto endOk = [](double x, double y) { return (x == 0.0) == (y == 0.0); };
         if (!endOk(cone->bottomRadiusX, cone->bottomRadiusY) || !endOk(cone->topRadiusX, cone->topRadiusY))
@@ -527,7 +529,12 @@ std::shared_ptr<const Mesh> Document::mesh(ObjectId id) const
     const auto cached = m_meshCache.find(id);
     if (cached != m_meshCache.end())
         return cached->second;
-    auto built = std::make_shared<const Mesh>(tessellate(shape(id)));
+    const Body* body = find(id);
+    std::shared_ptr<const Mesh> built;
+    if (body && !body->isBoolean() && std::holds_alternative<MeshSpec>(body->spec))
+        built = std::make_shared<const Mesh>(displayMesh(std::get<MeshSpec>(body->spec)));  // no B-rep needed
+    else
+        built = std::make_shared<const Mesh>(tessellate(shape(id)));
     m_meshCache[id] = built;
     return built;
 }
@@ -630,8 +637,55 @@ Bounds shapeBounds(const TopoDS_Shape& shape, const Transform& t)
     return out;
 }
 
+Mesh displayMesh(const MeshSpec& spec)
+{
+    // Flat shading: each triangle gets its own three points and its face normal.
+    Mesh m;
+    const MeshData& d = *spec.data;
+    const float sx = float(spec.width / d.size[0]), sy = float(spec.depth / d.size[1]),
+                sz = float(spec.height / d.size[2]);
+    m.positions.reserve(d.indices.size() * 3);
+    m.normals.reserve(d.indices.size() * 3);
+    m.indices.reserve(d.indices.size());
+    for (std::size_t t = 0; t + 2 < d.indices.size(); t += 3) {
+        float p[3][3];
+        for (int k = 0; k < 3; ++k) {
+            const std::uint32_t i = d.indices[t + k];
+            p[k][0] = d.positions[i * 3] * sx;
+            p[k][1] = d.positions[i * 3 + 1] * sy;
+            p[k][2] = d.positions[i * 3 + 2] * sz;
+        }
+        const float ux = p[1][0] - p[0][0], uy = p[1][1] - p[0][1], uz = p[1][2] - p[0][2];
+        const float wx = p[2][0] - p[0][0], wy = p[2][1] - p[0][1], wz = p[2][2] - p[0][2];
+        float n[3] = {uy * wz - uz * wy, uz * wx - ux * wz, ux * wy - uy * wx};
+        const float len = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+        if (len > 0.0f)
+            for (float& c : n)
+                c /= len;
+        for (int k = 0; k < 3; ++k) {
+            m.indices.push_back(static_cast<std::uint32_t>(m.positions.size() / 3));
+            m.positions.insert(m.positions.end(), {p[k][0], p[k][1], p[k][2]});
+            m.normals.insert(m.normals.end(), {n[0], n[1], n[2]});
+        }
+    }
+    return m;
+}
+
 Bounds Document::worldBounds(ObjectId id) const
 {
+    if (const Body* body = find(id); body && !body->isBoolean() && std::holds_alternative<MeshSpec>(body->spec)) {
+        // Exact and quick: the corners of a flat-faced shape are its points.
+        const MeshSpec& spec = std::get<MeshSpec>(body->spec);
+        const MeshData& d = *spec.data;
+        const Transform t = worldTransform(id);
+        const Vec3 s{spec.width / d.size[0], spec.depth / d.size[1], spec.height / d.size[2]};
+        Bounds out;
+        for (std::size_t i = 0; i + 2 < d.positions.size(); i += 3) {
+            const Vec3 p = t.apply({d.positions[i] * s[0], d.positions[i + 1] * s[1], d.positions[i + 2] * s[2]});
+            out.expand(float(p[0]), float(p[1]), float(p[2]));
+        }
+        return out;
+    }
     return shapeBounds(shape(id), worldTransform(id));
 }
 

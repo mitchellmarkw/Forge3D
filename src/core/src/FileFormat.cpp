@@ -6,6 +6,7 @@
 #include <miniz.h>
 #include <nlohmann/json.hpp>
 
+#include <cstring>
 #include <fstream>
 #include <iterator>
 #include <system_error>
@@ -62,6 +63,8 @@ json bodyToJson(const Body& b)
         return j;
     }
     j["type"] = fileTypeName(b.spec);
+    if (std::holds_alternative<MeshSpec>(b.spec))
+        j["data"] = "meshes/" + std::to_string(b.id) + ".bin";
     json params = json::object();
     const auto& fields = specFields(b.spec);
     for (std::size_t i = 0; i < fields.size(); ++i)
@@ -78,7 +81,8 @@ double number(const json& obj, const char* key, const std::string& where)
     return it->get<double>();
 }
 
-Body bodyFromJson(const json& j, std::size_t index, int version)
+Body bodyFromJson(const json& j, std::size_t index, int version,
+                  const std::function<std::string(const std::string&)>& readEntry)
 {
     const std::string where = "body " + std::to_string(index + 1);
     if (!j.is_object())
@@ -169,6 +173,18 @@ Body bodyFromJson(const json& j, std::size_t index, int version)
     const auto num = [&](const char* key) { return number(*params, key, where); };
     if (t == "cylinder" && version < 3) {
         b.spec = CylinderSpec{num("radius"), num("height")};  // round
+    } else if (t == "mesh" && version >= 9) {
+        MeshSpec mesh;
+        mesh.width = num("width");
+        mesh.depth = num("depth");
+        mesh.height = num("height");
+        const std::string entry = j.value("data", std::string());
+        if (entry.empty())
+            damaged(where + ": missing mesh data");
+        if (!readEntry)
+            damaged(where + ": mesh data not available");
+        mesh.data = meshFromBytes(readEntry(entry));
+        b.spec = mesh;
     } else if (version < 6 && t == "sphere") {  // 0.6.0 shapes were always round
         b.spec = SphereSpec{num("radius")};
     } else if (version < 6 && t == "cone") {
@@ -225,7 +241,7 @@ std::string toJson(const Document& doc, const std::string& createdBy)
     return root.dump(2);
 }
 
-std::vector<Body> fromJson(const std::string& text)
+std::vector<Body> fromJson(const std::string& text, const std::function<std::string(const std::string&)>& readEntry)
 {
     json root;
     try {
@@ -256,7 +272,7 @@ std::vector<Body> fromJson(const std::string& text)
     std::vector<Body> result;
     result.reserve(bodies->size());
     for (std::size_t i = 0; i < bodies->size(); ++i)
-        result.push_back(bodyFromJson((*bodies)[i], i, fileVersion));
+        result.push_back(bodyFromJson((*bodies)[i], i, fileVersion, readEntry));
     return result;
 }
 
@@ -272,9 +288,19 @@ void save(const Document& doc, const std::filesystem::path& path, const std::str
         throw FileError("Could not prepare the file for saving (out of memory?).");
     void* buffer = nullptr;
     size_t size = 0;
-    const bool ok = mz_zip_writer_add_mem(&zip, kDocumentEntry, jsonText.data(), jsonText.size(),
-                                          static_cast<mz_uint>(MZ_DEFAULT_COMPRESSION)) &&
-                    mz_zip_writer_finalize_heap_archive(&zip, &buffer, &size);
+    bool ok = mz_zip_writer_add_mem(&zip, kDocumentEntry, jsonText.data(), jsonText.size(),
+                                    static_cast<mz_uint>(MZ_DEFAULT_COMPRESSION));
+    for (const Body& b : doc.bodies()) {
+        if (!ok)
+            break;
+        if (const auto* mesh = std::get_if<MeshSpec>(&b.spec); mesh && mesh->data) {
+            const std::string name = "meshes/" + std::to_string(b.id) + ".bin";
+            const std::string bytes = meshToBytes(*mesh->data);
+            ok = mz_zip_writer_add_mem(&zip, name.c_str(), bytes.data(), bytes.size(),
+                                       static_cast<mz_uint>(MZ_DEFAULT_COMPRESSION));
+        }
+    }
+    ok = ok && mz_zip_writer_finalize_heap_archive(&zip, &buffer, &size);
     if (!ok) {
         mz_zip_writer_end(&zip);
         throw FileError("Could not prepare the file for saving.");
@@ -319,9 +345,75 @@ std::vector<Body> load(const std::filesystem::path& path)
     }
     std::string jsonText(static_cast<const char*>(data), size);
     mz_free(data);
-    mz_zip_reader_end(&zip);
 
-    return fromJson(jsonText);
+    const auto readEntry = [&zip](const std::string& name) {
+        size_t entrySize = 0;
+        void* entry = mz_zip_reader_extract_file_to_heap(&zip, name.c_str(), &entrySize, 0);
+        if (!entry)
+            damaged("missing " + name);
+        std::string out(static_cast<const char*>(entry), entrySize);
+        mz_free(entry);
+        return out;
+    };
+    try {
+        std::vector<Body> bodies = fromJson(jsonText, readEntry);
+        mz_zip_reader_end(&zip);
+        return bodies;
+    } catch (...) {
+        mz_zip_reader_end(&zip);
+        throw;
+    }
+}
+
+namespace {
+constexpr char kMeshMagic[8] = {'F', '3', 'D', 'M', 'E', 'S', 'H', '1'};
+}
+
+std::string meshToBytes(const MeshData& mesh)
+{
+    std::string out(kMeshMagic, sizeof kMeshMagic);
+    const auto put = [&out](const void* p, std::size_t n) { out.append(static_cast<const char*>(p), n); };
+    const std::uint32_t points = static_cast<std::uint32_t>(mesh.positions.size() / 3);
+    const std::uint32_t tris = static_cast<std::uint32_t>(mesh.indices.size() / 3);
+    const std::uint8_t closed = mesh.closed ? 1 : 0;
+    put(&points, 4);
+    put(&tris, 4);
+    put(mesh.size.data(), 12);
+    put(&closed, 1);
+    put(mesh.positions.data(), mesh.positions.size() * sizeof(float));
+    put(mesh.indices.data(), mesh.indices.size() * sizeof(std::uint32_t));
+    return out;
+}
+
+std::shared_ptr<const MeshData> meshFromBytes(const std::string& bytes)
+{
+    std::size_t at = 0;
+    const auto take = [&](void* p, std::size_t n) {
+        if (at + n > bytes.size())
+            damaged("mesh data is cut short");
+        std::memcpy(p, bytes.data() + at, n);
+        at += n;
+    };
+    char magic[8];
+    take(magic, 8);
+    if (std::memcmp(magic, kMeshMagic, 8) != 0)
+        damaged("mesh data is not in a known format");
+    auto mesh = std::make_shared<MeshData>();
+    std::uint32_t points = 0, tris = 0;
+    std::uint8_t closed = 1;
+    take(&points, 4);
+    take(&tris, 4);
+    take(mesh->size.data(), 12);
+    take(&closed, 1);
+    mesh->closed = closed != 0;
+    mesh->positions.resize(std::size_t(points) * 3);
+    mesh->indices.resize(std::size_t(tris) * 3);
+    take(mesh->positions.data(), mesh->positions.size() * sizeof(float));
+    take(mesh->indices.data(), mesh->indices.size() * sizeof(std::uint32_t));
+    for (std::uint32_t i : mesh->indices)
+        if (i >= points)
+            damaged("mesh data refers to a missing point");
+    return mesh;
 }
 
 }  // namespace forge::file

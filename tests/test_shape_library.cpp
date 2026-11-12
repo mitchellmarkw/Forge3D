@@ -72,8 +72,10 @@ double expectedVolume(const PrimitiveSpec& spec)
                 return pi * (p.outerRadiusX * p.outerRadiusY - p.innerRadiusX * p.innerRadiusY) * p.height;
             else if constexpr (std::is_same_v<T, WedgeSpec>)
                 return p.width * p.depth * p.height / 2.0;
-            else
+            else if constexpr (std::is_same_v<T, PyramidSpec>)
                 return linearProduct(p.baseWidth, p.baseDepth, p.topWidth, p.topDepth, p.height);
+            else
+                return 0.0;  // imported meshes: checked in test_import
         },
         spec);
 }

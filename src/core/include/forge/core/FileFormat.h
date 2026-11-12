@@ -4,6 +4,8 @@
 #include "forge/core/Body.h"
 
 #include <filesystem>
+#include <functional>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -26,7 +28,8 @@ namespace forge::file {
 //   6  oval sphere / cone / torus / tube (X / Y radii), pyramid
 //   7  split results (operation "split", planePoint, planeNormal)
 //   8  mirror results (operation "mirror", plane) and groups (operation "group")
-inline constexpr int kFormatVersion = 8;
+//   9  imported meshes (type "mesh", width / depth / height, "data": zip entry name)
+inline constexpr int kFormatVersion = 9;
 inline constexpr const char* kExtension = ".f3d";
 inline constexpr const char* kDocumentEntry = "document.json";
 
@@ -46,6 +49,13 @@ std::vector<Body> load(const std::filesystem::path& path);
 
 // The JSON part on its own (for tests and tools).
 std::string toJson(const Document& doc, const std::string& createdBy);
-std::vector<Body> fromJson(const std::string& json);
+// Imported meshes keep their triangles in separate zip entries ("meshes/7.bin");
+// `readEntry` returns an entry's bytes. Without it, a file with meshes is refused.
+std::vector<Body> fromJson(const std::string& json,
+                           const std::function<std::string(const std::string&)>& readEntry = {});
+
+// The binary form of an imported mesh's triangles (the "meshes/<id>.bin" entries).
+std::string meshToBytes(const MeshData& mesh);
+std::shared_ptr<const MeshData> meshFromBytes(const std::string& bytes);
 
 }  // namespace forge::file

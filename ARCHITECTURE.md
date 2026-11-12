@@ -251,6 +251,25 @@ Viewport (mouse)  --leftPressed(ray, handle)-->  MainWindow drag controller
   (`QProcess::startDetached`) or the .3mf file association (`QDesktopServices`).
   The choice is kept in QSettings (`slicer/path`; empty = file association).
 
+## Import (slice 5b)
+
+- An imported shape is a primitive like any other: `MeshSpec` holds a shared, never-
+  changed `MeshData` (welded triangles, centred like a primitive, natural size) plus
+  width / depth / height, so sizing, handles, Uniform and scaling all work unchanged.
+- Drawing, bounds, picking and export use the triangles directly (`displayMesh()`); a
+  B-rep (`makeMeshSolid()`: one plane face per triangle, vertices and edges shared, no
+  sewing) is only built when a boolean needs it. Open meshes give a shell and are kept
+  out of booleans and Split.
+- `repairMesh()`: weld on a grid of 1e-6 of the size, drop empty / repeated triangles,
+  orient each piece consistently through two-triangle edges, fill each simple boundary
+  loop with a fan around its centroid, turn pieces with negative volume, count what's
+  left open or non-manifold, then centre.
+- Readers: STL (binary if the size matches the triangle count, else text), OBJ (points
+  shared across objects are copied per object), 3MF (a small tag scanner; components
+  and build-item transforms composed; `unit` converted to mm).
+- .f3d (version 9): each mesh body's triangles are stored as `meshes/<id>.bin`
+  (`F3DMESH1`, counts, size, closed flag, floats, indices); the JSON names the entry.
+
 ## Rendering
 
 `Document::mesh()` → `forge::Mesh` (positions, normals, indices) → `DisplayItem`
