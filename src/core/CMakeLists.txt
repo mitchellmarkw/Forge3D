@@ -40,6 +40,8 @@ add_library(forge_core STATIC
     src/Scale.cpp
     src/Split.cpp
     src/Tessellator.cpp
+    src/Sketch.cpp
+    src/SketchShape.cpp
     src/Text.cpp
     src/Transform.cpp
 )

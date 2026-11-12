@@ -173,6 +173,11 @@ PrimitiveSpec scaledSpec(const PrimitiveSpec& spec, const Vec3& f)
                 p.outerRadiusY *= f[1];
                 p.innerRadiusY *= f[1];
                 p.height *= f[2];
+            } else if constexpr (std::is_same_v<T, PadSpec>) {
+                if (!sketch::scale(p.sketch, f[0], f[1]))
+                    throw NotScalable("This sketch has curves, slopes or angles, so it can only be resized evenly "
+                                      "across (its height can change freely)");
+                p.length *= f[2];
             } else {
                 static_assert(std::is_same_v<T, TorusSpec>, "scaledSpec: unhandled primitive");
                 if (std::abs(f[0] - f[1]) > 1e-12)

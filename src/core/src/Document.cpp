@@ -732,6 +732,11 @@ std::optional<std::pair<PrimitiveSpec, Transform>> Document::throughTool(ObjectI
         height = &t->height;
     else if (auto* x = std::get_if<TextSpec>(&spec))
         height = &x->height;
+    else if (auto* pad = std::get_if<PadSpec>(&spec)) {
+        pad->reversed = false;  // stretched from its base up, like the others
+        pad->midplane = false;
+        height = &pad->length;
+    }
     if (!height)
         return std::nullopt;
     // How far the first part reaches along the tool's own height (its local Z).

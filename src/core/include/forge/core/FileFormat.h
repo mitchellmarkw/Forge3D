@@ -33,7 +33,9 @@ namespace forge::file {
 //      "emboss", planePoint / planeNormal, "emboss": the words)
 //  11  edge finishes (operation "edges"; "edges": kind, size, angle, picks)
 //  12  steps switched off: "suppressed" / "rolledBack" on results (missing = false)
-inline constexpr int kFormatVersion = 12;
+//  13  sketch pads (type "pad": length, reversed, midplane, "sketch": points, radii,
+//      geos, rules)
+inline constexpr int kFormatVersion = 13;
 inline constexpr const char* kExtension = ".f3d";
 inline constexpr const char* kDocumentEntry = "document.json";
 
