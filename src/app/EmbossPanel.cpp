@@ -98,7 +98,7 @@ void EmbossPanel::start(const QString& title, bool editing, const EmbossText& wo
     m_title->setText(title);
     m_apply->setText(editing ? tr("Apply") : tr("Emboss"));
     m_apply->setToolTip(editing ? tr("Change the words on the shape") : tr("Put the words on the shape"));
-    m_words->setWords(words.text, words.font, words.bold, words.italic);
+    m_words->setWords(words.text, words.font, words.bold, words.italic, words.vertical);
     const QSignalBlocker b0(m_letterHeight), b1(m_depth), b2(m_angle), b3(m_raised), b4(m_engraved);
     m_letterHeight->setValue(words.letterHeight);
     m_depth->setValue(words.depth);
@@ -114,6 +114,7 @@ EmbossText EmbossPanel::words() const
     w.font = m_words->font();
     w.bold = m_words->bold();
     w.italic = m_words->italic();
+    w.vertical = m_words->vertical();
     w.letterHeight = m_letterHeight->value();
     w.depth = m_depth->value();
     w.angle = m_angle->value();

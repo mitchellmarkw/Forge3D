@@ -50,6 +50,9 @@ WordsEditor::WordsEditor(QWidget* parent) : QWidget(parent)
     style->addWidget(m_italic);
     style->addStretch(1);
     layout->addLayout(style);
+    m_vertical = new QCheckBox(tr("Stack the letters (top to bottom)"));
+    m_vertical->setToolTip(tr("Each letter under the one before, standing upright, like a sign on a post"));
+    layout->addWidget(m_vertical);
 
     connect(m_text, &QLineEdit::textEdited, this, &WordsEditor::textEdited);
     connect(m_text, &QLineEdit::editingFinished, this, [this] {
@@ -61,6 +64,7 @@ WordsEditor::WordsEditor(QWidget* parent) : QWidget(parent)
     connect(m_font, &QComboBox::currentIndexChanged, this, [this] { emit changed(); });
     connect(m_bold, &QCheckBox::toggled, this, [this] { emit changed(); });
     connect(m_italic, &QCheckBox::toggled, this, [this] { emit changed(); });
+    connect(m_vertical, &QCheckBox::toggled, this, [this] { emit changed(); });
 }
 
 void WordsEditor::ensureFonts()
@@ -76,10 +80,10 @@ void WordsEditor::ensureFonts()
         m_font->addItem(QString::fromStdString(f));
 }
 
-void WordsEditor::setWords(const std::string& text, const std::string& font, bool bold, bool italic)
+void WordsEditor::setWords(const std::string& text, const std::string& font, bool bold, bool italic, bool vertical)
 {
     ensureFonts();
-    const QSignalBlocker b0(m_text), b1(m_font), b2(m_bold), b3(m_italic);
+    const QSignalBlocker b0(m_text), b1(m_font), b2(m_bold), b3(m_italic), b4(m_vertical);
     if (!m_text->hasFocus() || this->text() != text)
         m_text->setText(QString::fromStdString(text));
     m_lastText = text;
@@ -92,6 +96,7 @@ void WordsEditor::setWords(const std::string& text, const std::string& font, boo
     m_font->setCurrentIndex(index);
     m_bold->setChecked(bold);
     m_italic->setChecked(italic);
+    m_vertical->setChecked(vertical);
 }
 
 std::string WordsEditor::text() const
@@ -112,6 +117,15 @@ bool WordsEditor::bold() const
 bool WordsEditor::italic() const
 {
     return m_italic->isChecked();
+}
+
+}  // namespace forge::app
+
+namespace forge::app {
+
+bool WordsEditor::vertical() const
+{
+    return m_vertical->isChecked();
 }
 
 }  // namespace forge::app

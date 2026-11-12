@@ -143,6 +143,10 @@ public:
     // is made: flat-shaded triangles in the result's coordinates. Kept, so making the
     // result straight after doesn't work it out again.
     std::shared_ptr<const Mesh> previewMesh(const BooleanSpec& spec) const;
+    // Just the embossed words of an Emboss recipe (result coordinates), without
+    // joining them to the shape: a quick preview for shapes too big to re-cut on
+    // every change.
+    std::shared_ptr<const Mesh> previewWords(const BooleanSpec& spec) const;
 
     // ---- Change notification ----
     int addListener(Listener listener);

@@ -158,6 +158,7 @@ struct TextSpec {
     std::string font;  // family name; empty = the default font
     bool bold = false;
     bool italic = false;
+    bool vertical = false;  // letters stacked top to bottom (each upright)
     double width = 30.0;   // X: the whole line(s)
     double depth = 10.0;   // Y: from the lowest to the highest letter
     double height = 3.0;   // Z: thickness
@@ -244,6 +245,7 @@ struct EmbossText {
     std::string font;  // empty = the default font
     bool bold = true;
     bool italic = false;
+    bool vertical = false;      // letters stacked top to bottom (each upright)
     double letterHeight = 8.0;  // height of a capital letter, mm
     double depth = 1.0;         // how far the letters stand out / go in, mm
     bool raised = true;         // false: engraved
@@ -280,7 +282,7 @@ struct BooleanSpec {
     std::array<double, 3> planePoint{0.0, 0.0, 0.0};
     std::array<double, 3> planeNormal{0.0, 0.0, 1.0};
     // Emboss: the words.
-    std::optional<EmbossText> emboss;
+    std::optional<EmbossText> emboss{};
 
     bool operator==(const BooleanSpec&) const = default;
 };

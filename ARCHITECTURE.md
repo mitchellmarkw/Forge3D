@@ -303,18 +303,23 @@ Viewport (mouse)  --leftPressed(ray, handle)-->  MainWindow drag controller
 - `TextSpec` is a primitive like a box: the laid-out words (font size 10, cached) are
   stretched to width x depth and pushed up `height`. Changing the words or font goes
   through `text::withText`, which keeps the letter size and stretch, so the block grows
-  with the words. Saved as type "text" with text / font / bold / italic (format 10).
+  with the words. Stacked (vertical) text puts a line break after every letter
+  (`text::stacked`, UTF-8 aware) and centres the lines. Saved as type "text" with text / font / bold / italic (format 10).
 - Emboss is a combine op (`BooleanOp::Emboss`, one part, `EmbossText` in the spec,
   planePoint / planeNormal = the spot and the way the surface faces there, in the
   result's coordinates). It always uses the mesh engine.
 - `emboss::letters` makes the letters' solid on the part's triangles:
   1. `text::flatLetters`: the letter faces triangulated flat, centred, turned, and every
      edge split until none is longer than letterHeight / 25, so letters can bend.
-  2. Wrapping: the surface is cut by a plane through the spot to get a line running "up"
-     the surface; at each step along it another cut runs "across". A letter point (u, v)
-     goes v along the up line and u along its row, both measured along the surface (like
-     smoothing on a sticker), so words keep their width round a cylinder. Running off
-     the end of the surface is an error ("would hang off the edge").
+  2. Wrapping, like smoothing on a sticker: a plane through the spot cuts the surface
+     along a baseline running "across"; from each step along it a second cut, square to
+     the baseline, runs "up". A letter point (u, v) goes u along the baseline, then v up
+     its column, both measured along the surface. Cuts are followed triangle to
+     neighbouring triangle (edge table of the triangles near the words), so each costs
+     only what it crosses. Running off the surface, or words longer than the way round
+     a closed shape, is an error.
+  Big shapes (over 150,000 triangles) preview the words alone (`previewWords`), drawn
+  over the shape; the cut happens on Apply.
   3. Each point stands out along the surface's facing there (corner normals averaged over
      faces bent less than 35°, so box faces stay square). Raised: depth out, a little in;
      engraved: depth in, a little out. Tops, bottoms and outline walls make a closed

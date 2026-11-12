@@ -778,6 +778,20 @@ std::shared_ptr<const Mesh> Document::previewMesh(const BooleanSpec& spec) const
     return std::make_shared<const Mesh>(meshkernel::displayMesh(solid));
 }
 
+std::shared_ptr<const Mesh> Document::previewWords(const BooleanSpec& spec) const
+{
+    if (spec.op != BooleanOp::Emboss || !spec.emboss || spec.operands.size() != 1)
+        throw std::invalid_argument("previewWords is for Emboss");
+    const ObjectId part = spec.operands.front();
+    if (!find(part))
+        throw std::out_of_range("No body with id " + std::to_string(part));
+    std::vector<float> pos;
+    std::vector<std::uint32_t> idx;
+    meshkernel::triangles(meshkernel::transformed(meshSolid(part), localTransform(part)), pos, idx);
+    const MeshSolid words = emboss::letters(pos, idx, spec.planePoint, spec.planeNormal, *spec.emboss);
+    return std::make_shared<const Mesh>(meshkernel::displayMesh(words));
+}
+
 Bounds shapeBounds(const TopoDS_Shape& shape, const Transform& t)
 {
     Bounds out;
