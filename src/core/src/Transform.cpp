@@ -120,6 +120,10 @@ Vec3 halfExtents(const PrimitiveSpec& spec)
 
 Vec3 pivotOf(const PrimitiveSpec& spec)
 {
+    // A pad turns about its sketch's origin, so changing its length never moves the
+    // sketch plane.
+    if (std::holds_alternative<PadSpec>(spec))
+        return {0.0, 0.0, 0.0};
     return {0.0, 0.0, halfExtents(spec)[2]};
 }
 

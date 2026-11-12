@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.16.0 — Slice 7: Sketches, Pad and Pocket (2026-11-12)
+
+- **Sketch** (new button): draw a flat outline and push it out (**Pad**) or cut it in
+  (**Pocket**). With nothing selected the sketch goes on the plate; with a shape
+  selected, click the flat face to draw on (its outline is shown dashed to snap to).
+- **Drawing**: Line (L, one after another; click the first point to close), Rectangle
+  (R), Circle (C), Arc (A), Slot (S). Points snap to other points, the face's corners
+  and the grid. Drag points, lines and circle edges to change them. **Helper** (G)
+  turns lines into dashed helper lines that rules can use but the shape ignores.
+- **Rules** on what's picked: Horizontal (H), Vertical (V), Parallel, Perpendicular,
+  Equal (E), Tangent (T), Coincident (O), Symmetric, Lock. Lines drawn nearly level or
+  upright get Horizontal / Vertical by themselves; rectangles and slots come with
+  theirs. A rule that fights the others is refused.
+- **Dimensions** (D): a line's length, two points' distance, a circle's radius, two
+  lines' angle; **Across** (Shift+H) and **Up** (Shift+V) measure one way only (one
+  point: from the sketch's origin). Typed when added; double-click one to change it,
+  and the sketch follows.
+- The sketch turns **green** when every size and place is set; the panel says how many
+  ways it can still move. Loose ends of an open outline show in red.
+- **Finish**: Pad (length, the other way, both ways) or, on a face, Pocket (depth,
+  the other way, Through all). On a face the pad is merged into the shape (or the
+  pocket subtracted), as one step in its history. Undo / Redo inside the sketch are
+  the sketch's own; one Undo afterwards takes the whole pad or pocket away.
+- **Change a sketch later**: double-click the pad (or its Pad / Pocket step) in Objects,
+  or right-click → Change.... Resizing a pad with the handles scales its sketch.
+- File format version 13 (sketches and pads). Older files still open.
+- 169 unit tests (8 new).
+
 ## 0.15.1 — Slice 6 fixes (2026-11-12)
 
 - **Rounded / chamfered edges survive resizing.** Each picked edge also remembers

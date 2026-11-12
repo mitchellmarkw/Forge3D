@@ -152,6 +152,35 @@ struct Residuals {
             }
             case Rule::Tangent: {
                 const Geo* line = ga->kind == GeoKind::Line ? ga : gb->kind == GeoKind::Line ? gb : nullptr;
+                // Joined at an end (a slot's corners): the distance form has its peak there
+                // (no slope to follow), so ask for the same thing another way: the line
+                // square to the radius at the joint, or the two centres in line with it.
+                const auto endsOf = [](const Geo& g) {
+                    return g.kind == GeoKind::Line  ? std::array<int, 2>{g.a, g.b}
+                           : g.kind == GeoKind::Arc ? std::array<int, 2>{g.b, g.c}
+                                                    : std::array<int, 2>{-1, -1};
+                };
+                int joint = -1;
+                for (int p : endsOf(*ga))
+                    for (int q : endsOf(*gb))
+                        if (p >= 0 && p == q)
+                            joint = p;
+                if (joint >= 0) {
+                    const auto [jx, jy] = P(joint);
+                    if (line) {
+                        const Geo* round = line == ga ? gb : ga;
+                        const auto [dx, dy] = dir(*line);
+                        const auto [cx, cy] = P(round->a);
+                        const double len = std::max(std::hypot(dx, dy), 1e-12);
+                        f.push_back((dx * (jx - cx) + dy * (jy - cy)) / len);
+                    } else {
+                        const auto [ax, ay] = P(ga->a);
+                        const auto [bx, by] = P(gb->a);
+                        const double n = std::max(std::hypot(ax - jx, ay - jy), 1e-12);
+                        f.push_back(((ax - jx) * (by - jy) - (ay - jy) * (bx - jx)) / n);
+                    }
+                    break;
+                }
                 if (line) {
                     const Geo* round = line == ga ? gb : ga;
                     const auto [dx, dy] = dir(*line);
@@ -680,6 +709,62 @@ void removeGeos(Sketch& s, std::vector<int> geos)
     for (Geo& g : s.geos)
         if (g.kind == GeoKind::Circle)
             g.r = radiusIndex[std::size_t(g.r)];
+}
+
+double measure(const Sketch& s, const Constraint& c)
+{
+    const auto P = [&s](int i) { return s.points[std::size_t(i)]; };
+    switch (c.rule) {
+    case Rule::Distance:
+        if (c.b < 0) {
+            const Geo& g = s.geos[std::size_t(c.a)];
+            return std::hypot(P(g.b).x - P(g.a).x, P(g.b).y - P(g.a).y);
+        }
+        return std::hypot(P(c.b).x - P(c.a).x, P(c.b).y - P(c.a).y);
+    case Rule::DistanceX: return P(c.b).x - P(c.a).x;
+    case Rule::DistanceY: return P(c.b).y - P(c.a).y;
+    case Rule::Radius: return radiusOf(s, s.geos[std::size_t(c.a)]);
+    case Rule::Angle: {
+        const Geo& ga = s.geos[std::size_t(c.a)];
+        const double a = std::atan2(P(ga.b).y - P(ga.a).y, P(ga.b).x - P(ga.a).x);
+        if (c.b < 0)
+            return a * 180.0 / pi;
+        const Geo& gb = s.geos[std::size_t(c.b)];
+        const double b = std::atan2(P(gb.b).y - P(gb.a).y, P(gb.b).x - P(gb.a).x);
+        return wrap(b - a) * 180.0 / pi;
+    }
+    default: return c.value;
+    }
+}
+
+Constraint makeRule(const Sketch& s, Rule rule, int a, int b, int c)
+{
+    Constraint out{rule, a, b, c, 0.0, 0.0};
+    if (isDimension(rule)) {
+        out.value = measure(s, out);
+    } else if (rule == Rule::Fixed) {
+        out.value = s.points[std::size_t(a)].x;
+        out.value2 = s.points[std::size_t(a)].y;
+    } else if (rule == Rule::Tangent) {
+        const Geo& ga = s.geos[std::size_t(a)];
+        const Geo& gb = s.geos[std::size_t(b)];
+        const Geo* line = ga.kind == GeoKind::Line ? &ga : gb.kind == GeoKind::Line ? &gb : nullptr;
+        if (line) {
+            // Which side of the line the circle is on now.
+            const Geo& round = line == &ga ? gb : ga;
+            const Point p = s.points[std::size_t(line->a)], q = s.points[std::size_t(line->b)];
+            const Point m = s.points[std::size_t(round.a)];
+            out.value2 = (q.x - p.x) * (m.y - p.y) - (q.y - p.y) * (m.x - p.x) >= 0 ? 1.0 : -1.0;
+            out.value = 1.0;
+        } else {
+            // Touching outside, or one inside the other.
+            const Point m1 = s.points[std::size_t(ga.a)], m2 = s.points[std::size_t(gb.a)];
+            const double d = std::hypot(m2.x - m1.x, m2.y - m1.y);
+            const double ra = radiusOf(s, ga), rb = radiusOf(s, gb);
+            out.value = std::abs(d - (ra + rb)) <= std::abs(d - std::abs(ra - rb)) ? 1.0 : -1.0;
+        }
+    }
+    return out;
 }
 
 bool scale(Sketch& s, double sx, double sy)

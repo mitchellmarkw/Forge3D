@@ -7,7 +7,9 @@
 #include "forge/core/Document.h"
 #include "forge/core/Edges.h"
 #include "forge/core/Emboss.h"
+#include "forge/core/Sketch.h"
 #include "forge/core/Split.h"
+#include "forge/core/Transform.h"
 #include "forge/core/Scale.h"
 #include "forge/view/Gizmo.h"
 
@@ -32,6 +34,8 @@ class QMenu;
 class QActionGroup;
 class QWidget;
 class QDockWidget;
+class QStackedWidget;
+class QToolBar;
 
 namespace forge::app {
 
@@ -39,6 +43,8 @@ class PropertiesPanel;
 class SplitPanel;
 class EmbossPanel;
 class EdgesPanel;
+class SketchPanel;
+class SketchView;
 struct DisplayItem;
 class Viewport;
 
@@ -147,6 +153,22 @@ private:
     std::optional<EdgeFinish> currentEdgeFinish() const;
     std::optional<BooleanSpec> currentEdgesSpec() const;
     void rebuildEdgeHighlights();
+
+    // Sketches (slice 7): drawn flat in the sketch view, then pushed out (Pad) or cut in
+    // (Pocket). On the plate, or on a flat face of the selected shape.
+    void createSketchBar();
+    void sketchClicked();                  // the Sketch button
+    void sketchFaceClick(const QVector3D& origin, const QVector3D& direction);
+    void openSketch(const sketch::Sketch& sketch, std::vector<std::vector<QPointF>> reference, const QString& title,
+                    bool pocketAllowed, bool pocket, double length, bool otherWay, bool bothWays, bool throughAll);
+    void startSketchEdit(ObjectId id);     // a pad, or the Merge / Subtract step holding one
+    void finishSketch();
+    void endSketch();
+    void updateSketchStatus();
+    void lockForSketch(bool on);  // every other command off while sketching
+    void relockForSketch();       // again, after commands were updated
+    // The pad a step or body is: the body itself, or a Merge / Subtract step's added shape.
+    ObjectId padOf(ObjectId id) const;
 
     // Files
     void newDocument();
@@ -318,6 +340,23 @@ private:
     QAction* m_modeResize = nullptr;
     QAction* m_snapAction = nullptr;
     QAction* m_uniformAction = nullptr;
+
+    QStackedWidget* m_central = nullptr;  // the 3D view, or the sketch view while sketching
+    SketchView* m_sketchView = nullptr;
+    SketchPanel* m_sketchPanel = nullptr;
+    QToolBar* m_sketchBar = nullptr;
+    QAction* m_sketchAction = nullptr;
+    std::vector<QAction*> m_sketchToolActions;  // Select, Line, Rectangle, Circle, Arc, Slot
+    std::vector<QAction*> m_lockedActions;      // switched off while sketching (to switch back on)
+    struct SketchMode {
+        bool picking = false;  // waiting for a click on the face to sketch on
+        bool active = false;   // the sketch view is open
+        ObjectId target = kInvalidId;  // the shape sketched on (kInvalidId: the plate)
+        ObjectId pad = kInvalidId;     // the pad being changed
+        ObjectId step = kInvalidId;    // the Merge / Subtract step holding it
+        Transform frame;               // sketch -> plate coordinates
+    };
+    SketchMode m_sketchMode;
 };
 
 }  // namespace forge::app

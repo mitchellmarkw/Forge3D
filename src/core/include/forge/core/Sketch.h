@@ -104,6 +104,12 @@ void removeConstraints(Sketch& s, std::vector<int> rules);
 // and angles only scale evenly.
 bool scale(Sketch& s, double sx, double sy);
 
+// A rule ready to add: dimensions take the current measurement, Tangent works out
+// which side, and Fixed the point's current place.
+Constraint makeRule(const Sketch& s, Rule rule, int a, int b = -1, int c = -1);
+// What a dimension measures now (mm or degrees).
+double measure(const Sketch& s, const Constraint& c);
+
 // ---- Outlines ----
 
 // Ends of lines and arcs not joined to anything (the outline isn't closed there).

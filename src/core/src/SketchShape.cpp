@@ -10,6 +10,10 @@
 #include <BRepBuilderAPI_MakeWire.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
 #include <BRepGProp.hxx>
+#include <BRepAdaptor_Surface.hxx>
+#include <BRepTools.hxx>
+#include <TopExp.hxx>
+#include <TopTools_IndexedMapOfShape.hxx>
 #include <BRepPrimAPI_MakePrism.hxx>
 #include <BRepTools_WireExplorer.hxx>
 #include <BRep_Builder.hxx>
@@ -246,6 +250,110 @@ TopoDS_Shape padShape(const PadSpec& pad)
     } catch (const Standard_Failure& e) {
         throw GeometryError(std::string("The sketch could not be pushed up: ") + e.GetMessageString());
     }
+}
+
+std::optional<FacePlane> planeOfFace(const TopoDS_Shape& shape, int face)
+{
+    TopTools_IndexedMapOfShape faces;
+    TopExp::MapShapes(shape, TopAbs_FACE, faces);
+    if (face < 0 || face >= faces.Extent())
+        return std::nullopt;
+    const TopoDS_Face f = TopoDS::Face(faces.FindKey(face + 1));
+    try {
+        BRepAdaptor_Surface surface(f, true);
+        if (surface.GetType() != GeomAbs_Plane)
+            return std::nullopt;
+        const gp_Pln plane = surface.Plane();
+        gp_Dir n = plane.Axis().Direction();
+        // Out of the solid: the plane's own direction, flipped for a reversed face.
+        if (f.Orientation() == TopAbs_REVERSED)
+            n.Reverse();
+        // Origin: the middle of the face (its centre of area).
+        GProp_GProps props;
+        BRepGProp::SurfaceProperties(f, props);
+        const gp_Pnt o = props.CentreOfMass();
+        // X: the plate's X on faces looking up or down; else level, to the right when
+        // looking at the face from outside.
+        gp_Dir x(1, 0, 0);
+        if (std::abs(n.Z()) < 0.9) {
+            const gp_Vec level = gp_Vec(0, 0, 1).Crossed(gp_Vec(n));
+            x = gp_Dir(level);
+        } else {
+            // Square to the normal (the face may lean a little).
+            const gp_Vec v = gp_Vec(1, 0, 0) - gp_Vec(n) * n.X();
+            x = gp_Dir(v);
+        }
+        const gp_Dir y = n.Crossed(x);
+        FacePlane out;
+        for (int r = 0; r < 3; ++r) {
+            out.frame.m[std::size_t(r)] = {x.Coord(r + 1), y.Coord(r + 1), n.Coord(r + 1), o.Coord(r + 1)};
+        }
+        // The outlines, flattened into sketch coordinates.
+        double diag = 1.0;
+        {
+            GProp_GProps p2;
+            BRepGProp::LinearProperties(f, p2);
+            diag = std::max(p2.Mass() / 40.0, 1e-3);
+        }
+        for (TopExp_Explorer w(f, TopAbs_WIRE); w.More(); w.Next()) {
+            for (TopExp_Explorer e(w.Current(), TopAbs_EDGE); e.More(); e.Next()) {
+                const TopoDS_Edge edge = TopoDS::Edge(e.Current());
+                if (BRep_Tool::Degenerated(edge))
+                    continue;
+                BRepAdaptor_Curve curve(edge);
+                std::vector<Point> line;
+                if (curve.GetType() == GeomAbs_Line) {
+                    for (const double t : {curve.FirstParameter(), curve.LastParameter()}) {
+                        const gp_Vec d(o, curve.Value(t));
+                        line.push_back({d.Dot(gp_Vec(x)), d.Dot(gp_Vec(y))});
+                    }
+                } else {
+                    GCPnts_QuasiUniformDeflection sampler(curve, diag * 0.01);
+                    if (!sampler.IsDone())
+                        continue;
+                    for (int k = 1; k <= sampler.NbPoints(); ++k) {
+                        const gp_Vec d(o, sampler.Value(k));
+                        line.push_back({d.Dot(gp_Vec(x)), d.Dot(gp_Vec(y))});
+                    }
+                }
+                if (line.size() >= 2)
+                    out.outlines.push_back(std::move(line));
+            }
+        }
+        return out;
+    } catch (const Standard_Failure&) {
+        return std::nullopt;
+    }
+}
+
+std::vector<std::vector<Point>> outlinesOnPlane(const TopoDS_Shape& shape, const Transform& frame)
+{
+    std::vector<std::vector<Point>> out;
+    TopTools_IndexedMapOfShape faces;
+    TopExp::MapShapes(shape, TopAbs_FACE, faces);
+    const Transform toSketch = frame.inverse();
+    const Vec3 n = frame.applyDirection({0, 0, 1});
+    const Vec3 o = frame.apply({0, 0, 0});
+    for (int f = 0; f < faces.Extent(); ++f) {
+        const auto plane = planeOfFace(shape, f);
+        if (!plane)
+            continue;
+        const auto& m = plane->frame.m;
+        const Vec3 fn{m[0][2], m[1][2], m[2][2]}, fo{m[0][3], m[1][3], m[2][3]};
+        const double facing = std::abs(fn[0] * n[0] + fn[1] * n[1] + fn[2] * n[2]);
+        const double off = (fo[0] - o[0]) * n[0] + (fo[1] - o[1]) * n[1] + (fo[2] - o[2]) * n[2];
+        if (facing < 1 - 1e-6 || std::abs(off) > 1e-4)
+            continue;
+        for (const auto& line : plane->outlines) {
+            std::vector<Point> q;
+            for (const Point& p : line) {
+                const Vec3 local = toSketch.apply(plane->frame.apply({p.x, p.y, 0}));
+                q.push_back({local[0], local[1]});
+            }
+            out.push_back(std::move(q));
+        }
+    }
+    return out;
 }
 
 }  // namespace forge::sketch

@@ -1114,7 +1114,8 @@ Vec3 Document::visibleCentre(ObjectId id) const
     const Body* body = find(id);
     if (!body)
         throw std::out_of_range("No body with id " + std::to_string(id));
-    if (!body->isBoolean())
+    // A pad's sketch can sit anywhere around its origin: the middle of its box.
+    if (!body->isBoolean() && !std::holds_alternative<PadSpec>(body->spec))
         return pivotOf(body->spec);
     const Bounds b = localBounds(id);
     if (!b.valid)

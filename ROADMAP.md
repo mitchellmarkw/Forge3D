@@ -28,9 +28,9 @@ Gate to Phase 2: a new user prints a customised part within 10 minutes.
 | 5d | Text shape; Emboss words that wrap round the surface; stacked letters | Done (0.13.1) |
 | 5e | Rounding / fillet / chamfer / bevel edges, picked in the view; coves | Done (0.14.1) |
 | — | Emboss an image or logo | Planned |
-| 6 | History (feature tree) with rollback bar, switching steps off, steps added at the bar | **Delivered for testing** |
-| 7 | 2D sketcher with constraints | Planned |
-| 8 | Pad, Pocket, Revolve, Shell, Hole | Planned |
+| 6 | History (feature tree) with rollback bar, switching steps off, steps added at the bar; Through all | Done (0.15.1) |
+| 7 | 2D sketcher with dimensions and rules, on the plate or a flat face; Pad and Pocket | **Delivered for testing** |
+| 8 | Revolve, Shell, Hole (Pad and Pocket came with slice 7) | Planned |
 | — | Ribbon UI with Build / Design / Sculpt / Print tabs (grows across slices) | Planned |
 
 Separate track: sculpt-engine prototype (one Draw brush on a 1M-triangle mesh at 60 fps).

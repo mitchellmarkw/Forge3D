@@ -3,8 +3,10 @@
 #include "forge/core/CommandStack.h"
 #include "forge/core/Commands.h"
 #include "forge/core/Document.h"
+#include "forge/core/Edges.h"
 #include "forge/core/FileFormat.h"
 #include "forge/core/History.h"
+#include "forge/core/Primitives.h"
 #include "forge/core/Sketch.h"
 #include "forge/core/SketchShape.h"
 
@@ -308,5 +310,160 @@ TEST_CASE("Pads: outlines pushed up", "[sketch][pad]")
         // Twice the size evenly.
         stack.execute(std::make_unique<SetSpecCommand>(b.id, scaled(PrimitiveSpec{pad}, 2.0)));
         CHECK_THAT(volumeOf(doc.shape(b.id)), WithinRel((600 - pi * 16) * 5 * 8, 1e-6));
+    }
+}
+
+TEST_CASE("A flat face gives a sketch plane; a round one doesn't", "[sketch]")
+{
+    using Catch::Matchers::WithinAbs;
+    const TopoDS_Shape box = primitives::makeBox(20, 10, 6);
+    int found = 0;
+    for (int f = 0; f < 6; ++f) {
+        const auto plane = sketch::planeOfFace(box, f);
+        REQUIRE(plane);
+        const auto& m = plane->frame.m;
+        // Z of the frame (third column) points out of the box.
+        const Vec3 z{m[0][2], m[1][2], m[2][2]}, o{m[0][3], m[1][3], m[2][3]};
+        CHECK_THAT(z[0] * (o[0] - 0) + z[1] * (o[1] - 0) + z[2] * (o[2] - 3), Catch::Matchers::WithinAbs(
+                                                                                    std::abs(z[0]) * 10 + std::abs(z[1]) * 5 + std::abs(z[2]) * 3, 1e-9));
+        CHECK(plane->outlines.size() == 4);
+        if (z[2] > 0.9) {
+            ++found;
+            CHECK_THAT(o[2], WithinAbs(6, 1e-9));
+            CHECK_THAT(m[0][0], WithinAbs(1, 1e-9));  // X along the plate's X
+            for (const auto& line : plane->outlines)
+                for (const auto& p : line) {
+                    CHECK_THAT(std::abs(p.x), WithinAbs(10, 1e-6));
+                    (void)p;
+                }
+        }
+        if (z[1] < -0.9) {  // the front: X to the right, Y up
+            CHECK_THAT(m[0][0], WithinAbs(1, 1e-9));
+            CHECK_THAT(m[2][1], WithinAbs(1, 1e-9));
+        }
+    }
+    CHECK(found == 1);
+    // Found again from the plane alone (a sketch on the top, 5 mm across from its middle).
+    Transform top = Transform::translation({5, 0, 6});
+    const auto again = sketch::outlinesOnPlane(box, top);
+    CHECK(again.size() == 4);
+    for (const auto& line : again)
+        for (const auto& p : line)
+            CHECK((std::abs(std::abs(p.x + 5) - 10) < 1e-6 || std::abs(std::abs(p.y) - 5) < 1e-6));
+    CHECK(sketch::outlinesOnPlane(box, Transform::translation({0, 0, 3})).empty());
+    const TopoDS_Shape cylinder = primitives::makeCylinder(5, 10);
+    int flat = 0;
+    for (int f = 0; f < 3; ++f)
+        flat += sketch::planeOfFace(cylinder, f) ? 1 : 0;
+    CHECK(flat == 2);
+    CHECK_FALSE(sketch::planeOfFace(cylinder, 7));
+}
+
+TEST_CASE("A slot (lines tangent to arcs at their ends) is held by the right number of rules", "[sketch]")
+{
+    using namespace sketch;
+    Sketch s;
+    const int k1 = addPoint(s, {0, 0.5}), k2 = addPoint(s, {20, 0});
+    const int a1 = addPoint(s, {0, 5.5}), b1 = addPoint(s, {20, 5});
+    const int a2 = addPoint(s, {20, -5}), b2 = addPoint(s, {0, -4.5});
+    s.geos.push_back({GeoKind::Line, a1, b1, -1, -1, false});
+    s.geos.push_back({GeoKind::Line, a2, b2, -1, -1, false});
+    s.geos.push_back({GeoKind::Arc, k2, a2, b1, -1, false});
+    s.geos.push_back({GeoKind::Arc, k1, a1, b2, -1, false});
+    for (auto [g1, g2] : {std::pair{0, 3}, std::pair{0, 2}, std::pair{1, 3}, std::pair{1, 2}})
+        s.constraints.push_back(makeRule(s, Rule::Tangent, g1, g2));
+    s.constraints.push_back(makeRule(s, Rule::Equal, 3, 2));
+    const Solved r = solve(s);
+    REQUIRE(r.ok);
+    CHECK(r.freedom == 5);  // two centres and the width
+    // The lines really are square to the radii at the corners.
+    const auto& p = s.points;
+    const double dx = p[b1].x - p[a1].x, dy = p[b1].y - p[a1].y;
+    CHECK(std::abs(dx * (p[a1].x - p[k1].x) + dy * (p[a1].y - p[k1].y)) < 1e-6);
+    CHECK(std::abs(radiusOf(s, s.geos[2]) - radiusOf(s, s.geos[3])) < 1e-6);
+    // Sizes then pin it down.
+    s.constraints.push_back(makeRule(s, Rule::Radius, 2));
+    s.constraints.push_back(makeRule(s, Rule::Fixed, k1));
+    s.constraints.push_back(makeRule(s, Rule::Fixed, k2));
+    CHECK(solve(s).freedom == 0);
+    PadSpec pad;
+    pad.sketch = s;
+    pad.length = 2;
+    CHECK_NOTHROW(padShape(pad));
+}
+
+TEST_CASE("A pad drawn on a face sits on that face", "[sketch]")
+{
+    using Catch::Matchers::WithinAbs;
+    const TopoDS_Shape box = primitives::makeBox(20, 20, 20);
+    for (int f = 0; f < 6; ++f) {
+        const auto plane = sketch::planeOfFace(box, f);
+        REQUIRE(plane);
+        sketch::Sketch s;
+        const int c = sketch::addPoint(s, {5, 3});
+        s.radii.push_back(1.0);
+        s.geos.push_back({sketch::GeoKind::Circle, c, -1, -1, 0, false});
+        PadSpec pad;
+        pad.sketch = s;
+        pad.length = 4;
+        Document doc;
+        Body b;
+        b.id = doc.allocateId();
+        b.spec = pad;
+        b.placement = placementFromTransform(plane->frame, pivotOf(b.spec));
+        doc.insertBody(b);
+        const auto centre = doc.worldBounds(b.id).center();
+        const Vec3 want = plane->frame.apply({5, 3, 2});
+        INFO("face " << f);
+        CHECK_THAT(centre[0], WithinAbs(want[0], 1e-3));
+        CHECK_THAT(centre[1], WithinAbs(want[1], 1e-3));
+        CHECK_THAT(centre[2], WithinAbs(want[2], 1e-3));
+        // ... and out of the box, not in it.
+        const Vec3 n = plane->frame.applyDirection({0, 0, 1});
+        CHECK((want[0] * n[0] + want[1] * n[1] + (want[2] - 10) * n[2]) > 10);
+    }
+}
+
+TEST_CASE("Pad on a face, merged, keeps its place", "[sketch]")
+{
+    using Catch::Matchers::WithinAbs;
+    Document doc;
+    CommandStack stack(doc);
+    Body box;
+    box.id = doc.allocateId();
+    box.spec = BoxSpec{20, 20, 20};
+    stack.execute(std::make_unique<AddBodyCommand>(box));
+    const TopoDS_Shape shape = pickableShape(doc, box.id);
+    for (int f = 0; f < 6; ++f) {
+        const auto plane = sketch::planeOfFace(shape, f);
+        REQUIRE(plane);
+        if (plane->frame.m[1][2] > -0.9)
+            continue;  // the front (-Y) only
+        sketch::Sketch s;
+        const int c = sketch::addPoint(s, {6, 4});
+        s.radii.push_back(1.0);
+        s.geos.push_back({sketch::GeoKind::Circle, c, -1, -1, 0, false});
+        PadSpec pad;
+        pad.sketch = s;
+        pad.length = 4;
+        Body b;
+        b.id = doc.allocateId();
+        b.spec = pad;
+        b.placement = placementFromTransform(plane->frame, pivotOf(b.spec));
+        stack.execute(std::make_unique<AddBodyCommand>(b));
+        Body result;
+        result.id = doc.allocateId();
+        BooleanSpec spec;
+        spec.op = BooleanOp::Merge;
+        spec.operands = {box.id, b.id};
+        spec.pivot = {0, 0, 10};
+        result.boolean = spec;
+        stack.execute(std::make_unique<CombineCommand>(result));
+        const Bounds all = doc.worldBounds(result.id);
+        CHECK_THAT(all.min[1], WithinAbs(-14, 1e-3));
+        const Bounds padBox = doc.worldBounds(b.id);
+        CHECK_THAT(padBox.center()[0], WithinAbs(6, 1e-3));
+        CHECK_THAT(padBox.center()[2], WithinAbs(14, 1e-3));
+        CHECK_THAT(padBox.center()[1], WithinAbs(-12, 1e-3));
     }
 }
