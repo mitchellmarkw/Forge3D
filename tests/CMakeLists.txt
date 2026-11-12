@@ -20,6 +20,7 @@ add_executable(forge_tests
     test_arrange.cpp
     test_export.cpp
     test_import.cpp
+    test_mesh_engine.cpp
 )
 target_link_libraries(forge_tests PRIVATE
     Forge3D::core

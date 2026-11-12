@@ -3,6 +3,7 @@
 
 #include "forge/core/Body.h"
 #include "forge/core/Mesh.h"
+#include "forge/core/MeshKernel.h"
 #include "forge/core/Transform.h"
 
 #include <TopoDS_Shape.hxx>
@@ -121,6 +122,24 @@ public:
     // since a new result starts with no placement).
     TopoDS_Shape previewCombine(const BooleanSpec& spec) const;
 
+    // ---- The mesh engine --------------------------------------------------------
+    // Imported meshes, and every combined shape with one inside, are worked out by the
+    // mesh engine (fast with many triangles); everything else by the B-rep engine.
+    bool usesMeshEngine(ObjectId id) const;
+    // The body as a triangle solid, in its own coordinates (cached like shape()).
+    // Throws MeshEngineError (e.g. an imported mesh that isn't watertight).
+    MeshSolid meshSolid(ObjectId id) const;
+    // Bounds of the body in its own coordinates, from whichever engine it uses.
+    Bounds localBounds(ObjectId id) const;
+
+    // What a combine would give, from whichever engine applies: empty or not, and its
+    // bounds (plate coordinates, for a new result with no placement).
+    struct Preview {
+        bool empty = true;
+        Bounds bounds;
+    };
+    Preview previewResult(const BooleanSpec& spec) const;
+
     // ---- Change notification ----
     int addListener(Listener listener);
     void removeListener(int handle);
@@ -132,6 +151,8 @@ private:
     void rebuildParents();
     void invalidate(ObjectId id, bool includeSelf);
     TopoDS_Shape combine(const BooleanSpec& spec) const;
+    MeshSolid combineMeshes(const BooleanSpec& spec) const;
+    bool specUsesMesh(const BooleanSpec& spec) const;
     void notify(ChangeKind kind, ObjectId id);
 
     std::vector<Body> m_bodies;
@@ -140,6 +161,16 @@ private:
 
     mutable std::map<ObjectId, TopoDS_Shape> m_shapeCache;
     mutable std::map<ObjectId, std::shared_ptr<const Mesh>> m_meshCache;
+    mutable std::map<ObjectId, MeshSolid> m_solidCache;
+    // The last mesh-engine preview, so making that result straight after doesn't
+    // work it out a second time. Kept only while its parts are unchanged.
+    struct LastPreview {
+        BooleanSpec spec;
+        std::vector<Body> parts;
+        MeshSolid solid;
+    };
+    mutable std::optional<LastPreview> m_lastPreview;
+    bool partsUnchanged(const LastPreview& p) const;
 
     std::map<int, Listener> m_listeners;
     int m_nextListener = 1;

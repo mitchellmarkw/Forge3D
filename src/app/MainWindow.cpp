@@ -364,8 +364,6 @@ void MainWindow::createActions()
                                          .arg(open));
             return;
         }
-        if (!confirmHeavyMesh({id}, tr("Split")))
-            return;
         startSplit(id, false);
     });
 
@@ -718,7 +716,7 @@ std::optional<view::GizmoTarget> MainWindow::gizmoTargetFor(ObjectId id) const
     target.bodyAxes = {axis(1, 0, 0), axis(0, 1, 0), axis(0, 0, 1)};
     if (body->isBoolean()) {
         // The box around what you see; resizing scales everything inside.
-        const Bounds b = shapeBounds(m_doc.shape(id));
+        const Bounds b = m_doc.localBounds(id);
         const auto size = b.size();
         target.halfExtents = QVector3D(size[0] / 2.0f, size[1] / 2.0f, size[2] / 2.0f);
         target.resizable = b.valid;
@@ -823,7 +821,7 @@ void MainWindow::onLeftPressed(const QVector3D& origin, const QVector3D& directi
                 m_dragState.beforeAll.push_back(*m_doc.find(id));
             m_dragState.snapshot = std::make_shared<Document>();
             m_dragState.snapshot->replaceAll(m_doc.bodies());
-            m_dragState.localBounds = shapeBounds(m_doc.shape(selected->id));
+            m_dragState.localBounds = m_doc.localBounds(selected->id);
         }
         const view::Gizmo gizmo(m_viewport->camera(), QSizeF(m_viewport->width(), m_viewport->height()),
                                 m_dragState.frame, m_gizmoMode);
@@ -1194,15 +1192,19 @@ void MainWindow::combineSelected(BooleanOp op)
         return;
     }
 
-    if (!confirmHeavyMesh(m_selection, name))
-        return;
-
     // Check the result first: an empty result (e.g. Intersect of shapes that don't
     // touch) would vanish from the plate, which looks like a bug.
-    TopoDS_Shape previewShape;
+    BooleanSpec spec;
+    spec.op = op;
+    spec.operands = m_selection;
+    Document::Preview preview;
     try {
-        previewShape = m_doc.previewCombine(op, m_selection);
-        if (isEmptySolid(previewShape)) {
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        struct RestoreCursor {
+            ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
+        } restore;
+        preview = m_doc.previewResult(spec);
+        if (preview.empty) {
             QMessageBox::information(this, tr("Forge3D"),
                                      op == BooleanOp::Intersect
                                          ? tr("These shapes don't overlap, so Intersect would leave nothing.")
@@ -1218,13 +1220,9 @@ void MainWindow::combineSelected(BooleanOp op)
     Body result;
     result.id = m_doc.allocateId();
     result.name = m_doc.uniqueName(toString(op));
-    BooleanSpec spec;
-    spec.op = op;
-    spec.operands = m_selection;
     // Turn around the middle of what you will see (cut-away parts don't count).
     // Rotation always uses the visible centre; this keeps the stored pivot the same.
-    const Bounds visible = shapeBounds(previewShape);
-    const auto centre = visible.center();
+    const auto centre = preview.bounds.center();
     spec.pivot = {centre[0], centre[1], centre[2]};
     result.boolean = spec;
     const ObjectId id = result.id;
@@ -1373,7 +1371,7 @@ void MainWindow::paste()
 
 void MainWindow::mirrorSelected(int axis)
 {
-    if (m_selection.empty() || !confirmHeavyMesh(m_selection, tr("Mirror")))
+    if (m_selection.empty())
         return;
     try {
         const auto made = mirrorBodies(m_stack, m_doc, m_selection, axis);
@@ -1390,8 +1388,6 @@ void MainWindow::groupSelected()
         statusBar()->showMessage(tr("Group: select two or more shapes (Ctrl+click)."), 5000);
         return;
     }
-    if (!confirmHeavyMesh(m_selection, tr("Group")))
-        return;
     try {
         const ObjectId id = groupBodies(m_stack, m_doc, m_selection);
         qInfo().noquote() << "Command:" << QString::fromStdString(m_stack.undoLabel());
@@ -1755,30 +1751,6 @@ bool MainWindow::save()
 }
 
 // ---- Import -----------------------------------------------------------------------
-
-bool MainWindow::confirmHeavyMesh(const std::vector<ObjectId>& ids, const QString& action)
-{
-    constexpr std::size_t kHeavy = 20000;
-    std::size_t triangles = 0;
-    for (ObjectId id : ids)
-        for (ObjectId part : m_doc.withDescendants(id))
-            if (const Body* b = m_doc.find(part); b && !b->isBoolean())
-                if (const auto* mesh = std::get_if<MeshSpec>(&b->spec))
-                    triangles += mesh->data->indices.size() / 3;
-    if (triangles < kHeavy)
-        return true;
-    qInfo().noquote() << action << "with imported meshes of" << triangles << "triangles: asking first";
-    const auto answer = QMessageBox::question(
-        this, tr("Forge3D"),
-        tr("%1 works on %2 triangles of imported mesh here. With this many it can take several minutes, and "
-           "Forge3D won't respond until it's done.\n\nGo ahead?")
-            .arg(action)
-            .arg(triangles),
-        QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
-    const bool go = answer == QMessageBox::Yes;
-    qInfo().noquote() << action << (go ? "started" : "cancelled by the user");
-    return go;
-}
 
 QString MainWindow::openMeshIn(const std::vector<ObjectId>& ids) const
 {

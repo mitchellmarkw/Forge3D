@@ -270,6 +270,30 @@ Viewport (mouse)  --leftPressed(ray, handle)-->  MainWindow drag controller
 - .f3d (version 9): each mesh body's triangles are stored as `meshes/<id>.bin`
   (`F3DMESH1`, counts, size, closed flag, floats, indices); the JSON names the entry.
 
+## Mesh engine (slice 5c)
+
+- Two geometry kernels. OCCT B-reps stay the kernel for primitives and their results.
+  Anything with an imported mesh in it uses **Manifold** (`MeshKernel.h`, wrapping
+  `manifold::Manifold` as a shared, immutable `MeshSolid`), because a B-rep boolean on a
+  million plane faces takes minutes and Manifold takes about a second.
+- `Document::usesMeshEngine(id)`: true for a `MeshSpec`, and for a result with any mesh-
+  engine part. `meshSolid(id)` builds (and caches, invalidated like the shape cache) the
+  solid: a `MeshSpec` from its welded triangles scaled to its size; a primitive taking
+  part from its export-quality triangles in its own coordinates; a result by combining
+  its parts' solids moved by their placements (`combineMeshes`: Merge = batch union,
+  Subtract, Intersect, Split = trim by plane, Mirror, Group = triangles side by side).
+- `previewResult(spec)` answers "empty?" and bounds before a result is made, for either
+  kernel. The last mesh-engine preview is kept (with copies of its parts) so making the
+  result straight after reuses it instead of working it out again.
+- Display, bounds, centre and export of mesh-engine results read the solid's triangles
+  (`meshkernel::displayMesh` / `triangles`); `shape(id)` still builds a B-rep from them
+  if something asks, but nothing on the normal paths does.
+- Repair (`repairMesh`) welds by sorting grid cells and matches edges with a sorted edge
+  table, not maps: 1.3M triangles in under 2 s. Export skips welding for meshes that
+  already share corners and counts open edges by sorting.
+- Manifold refuses meshes that aren't closed (`MeshEngineError`); open imports are
+  already kept out of combining and Split.
+
 ## Rendering
 
 `Document::mesh()` → `forge::Mesh` (positions, normals, indices) → `DisplayItem`

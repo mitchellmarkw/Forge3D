@@ -42,7 +42,7 @@ void asOneStep(CommandStack& stack, const std::string& label, Work&& work)
 
 Body resultAround(Document& doc, BooleanSpec spec, const std::string& name)
 {
-    const auto c = shapeBounds(doc.previewCombine(spec)).center();
+    const auto c = doc.previewResult(spec).bounds.center();
     spec.pivot = {c[0], c[1], c[2]};
     Body r;
     r.id = doc.allocateId();

@@ -83,14 +83,14 @@ std::vector<ObjectId> splitBody(CommandStack& stack, Document& doc, ObjectId id,
 
     // Work out both halves first: refuse before changing anything.
     const BooleanSpec front = splitSpec(id, plane, true), back = splitSpec(id, plane, false);
-    const TopoDS_Shape frontShape = doc.previewCombine(front), backShape = doc.previewCombine(back);
-    if (isEmptySolid(frontShape) || isEmptySolid(backShape))
+    const Document::Preview frontShape = doc.previewResult(front), backShape = doc.previewResult(back);
+    if (frontShape.empty || backShape.empty)
         throw std::invalid_argument("The plane doesn't cut through '" + body->name + "'. Move it so it crosses the shape.");
 
     const std::string baseName = body->name;
     const Vec3 n = unit(plane.normal);
-    const auto makeResult = [&](BooleanSpec spec, const TopoDS_Shape& preview, const Vec3& side) {
-        const auto c = shapeBounds(preview).center();
+    const auto makeResult = [&](BooleanSpec spec, const Document::Preview& preview, const Vec3& side) {
+        const auto c = preview.bounds.center();
         spec.pivot = {c[0], c[1], c[2]};
         Body r;
         r.id = doc.allocateId();
@@ -147,7 +147,7 @@ Body withSplitPlane(const Document& doc, ObjectId result, const SplitPlane& plan
     Body next = *body;
     next.boolean->planePoint = toLocal.apply(plane.point);
     next.boolean->planeNormal = unit(toLocal.applyDirection(plane.normal));
-    if (isEmptySolid(doc.previewCombine(*next.boolean)))
+    if (doc.previewResult(*next.boolean).empty)
         throw std::invalid_argument("The plane doesn't cut through '" + body->name + "'. Move it so it crosses the shape.");
     return next;
 }
