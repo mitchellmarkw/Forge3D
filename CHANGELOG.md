@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.11.0 — Slice 5b: Import with repair (2026-11-11)
+
+- **Import** (File menu, toolbar, Ctrl+I): adds shapes from **STL** (binary or text),
+  **3MF** (every object, with its name; components, transforms and units handled) and
+  **OBJ** (one shape per object / group; polygons split into triangles). Pick several
+  files at once, or **drag files onto the window** (dropping a .f3d opens it).
+- **Automatic repair** on the way in: duplicate points joined, empty and repeated
+  triangles removed, triangles turned to match their neighbours, inside-out pieces
+  turned the right way, holes filled. A message lists what was repaired.
+- Imported shapes land on the plate, to the right of what's there (several shapes from
+  one file keep their places relative to each other), named after the file or object.
+- They work like any shape: move, turn, **resize** (Width / Depth / Height, handles,
+  Uniform), Mirror, Duplicate, Group, Align, Export, and **Merge / Subtract / Intersect /
+  Split** with other shapes. One that can't be made watertight can be moved, resized
+  and exported, but not combined or split (Properties says so).
+- Saved inside the .f3d file (file format version 9). Older files still open.
+- Sample files for testing are in `test-sheets/samples`.
+- Core: `MeshSpec` / `MeshData`, Import.h (`readStl`, `readObj`, `read3mf`,
+  `repairMesh`, `importFile`), `makeMeshSolid()`.
+- 142 unit tests (4 new).
+
 ## 0.10.0 — Slice 5a: Export and Send to Slicer (2026-11-11)
 
 - **Export** (File menu, toolbar, Ctrl+E): saves the selected shapes, or everything if

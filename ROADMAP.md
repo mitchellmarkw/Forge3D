@@ -22,10 +22,10 @@ Gate to Phase 2: a new user prints a customised part within 10 minutes.
 | 4a+ | Drag the Split plane in the view; handles right after a split | Done (0.7.1) |
 | 4b | Handles on parts inside combined shapes; resize handles for combined shapes | Done (0.8.0) |
 | 4c | Mirror, Duplicate (copy / paste), Group, move / turn several shapes at once | Done (0.9.0) |
-| 5a | Export STL / 3MF / OBJ; "Send to Slicer" | **Delivered for testing** |
-| 5 | STL / 3MF / OBJ import with auto-repair | Next |
-| 5b | Text and Emboss | Planned |
-| 5c | Chamfer / fillet (round) / bevel edges, picked in the view | Planned |
+| 5a | Export STL / 3MF / OBJ; "Send to Slicer" | Done (0.10.0) |
+| 5b | STL / 3MF / OBJ import with auto-repair | **Delivered for testing** |
+| 5c | Text and Emboss | Next |
+| 5d | Chamfer / fillet (round) / bevel edges, picked in the view | Planned |
 | 6 | Feature tree panel with rollback bar | Planned |
 | 7 | 2D sketcher with constraints | Planned |
 | 8 | Pad, Pocket, Revolve, Shell, Hole | Planned |

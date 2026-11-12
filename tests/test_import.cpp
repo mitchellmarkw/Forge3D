@@ -291,7 +291,7 @@ TEST_CASE("Export, import again, combine, save and load", "[import]")
     const ImportResult result = importFile(stack, doc, stl);
     REQUIRE(result.bodies.size() == 1);
     const ObjectId mesh = result.bodies[0];
-    CHECK(doc.find(mesh)->name == "box 1");
+    CHECK(doc.find(mesh)->name == "box");
     CHECK(stack.undoLabel() == "Import box.stl");
     const Bounds b = doc.worldBounds(mesh);
     CHECK_THAT(b.min[0], WithinAbs(15, 1e-3));

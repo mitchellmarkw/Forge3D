@@ -21,6 +21,8 @@
 
 class QAction;
 class QCloseEvent;
+class QDragEnterEvent;
+class QDropEvent;
 class QLabel;
 class QTreeWidget;
 class QTreeWidgetItem;
@@ -53,6 +55,8 @@ signals:
 
 protected:
     void closeEvent(QCloseEvent* event) override;
+    void dragEnterEvent(QDragEnterEvent* event) override;
+    void dropEvent(QDropEvent* event) override;
 
 private:
     void createActions();
@@ -123,6 +127,10 @@ private:
     // ---- Export / print ----
     std::vector<ObjectId> exportTargets() const;  // the selected shapes on the plate, or all of them
     void exportShapes();
+    void importFiles(const QStringList& paths);
+    // A shape with an open (not watertight) imported mesh in it can't be combined or
+    // split; says so and returns its name, or returns empty.
+    QString openMeshIn(const std::vector<ObjectId>& ids) const;
     void sendToSlicer();
     bool chooseSlicer();  // asks which slicer to use; false if cancelled
     bool saveTo(const QString& path);
@@ -201,6 +209,7 @@ private:
     QAction* m_split = nullptr;
     QAction* m_duplicate = nullptr;
     QAction* m_export = nullptr;
+    QAction* m_import = nullptr;
     QAction* m_sendToSlicer = nullptr;
     QAction* m_chooseSlicer = nullptr;
     QAction* m_copy = nullptr;

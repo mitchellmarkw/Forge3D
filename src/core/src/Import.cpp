@@ -713,10 +713,16 @@ ImportResult importFile(CommandStack& stack, Document& doc, const std::filesyste
         Vec3 offset;
         const auto data = repairMesh(raw, report, offset);
         Body b;
-        b.name = doc.uniqueName(raw.name.empty() ? "Mesh" : raw.name);
-        for (const Body& earlier : bodies)  // names given to earlier meshes of this file aren't in the document yet
-            if (earlier.name == b.name)
-                b.name += " " + std::to_string(bodies.size() + 1);
+        // The name from the file ("bracket"), unless a shape already has it ("bracket 2").
+        const std::string base = raw.name.empty() ? "Mesh" : raw.name;
+        const auto taken = [&](const std::string& n) {
+            if (std::any_of(doc.bodies().begin(), doc.bodies().end(), [&](const Body& o) { return o.name == n; }))
+                return true;
+            return std::any_of(bodies.begin(), bodies.end(), [&](const Body& o) { return o.name == n; });
+        };
+        b.name = base;
+        for (int n = 2; taken(b.name); ++n)
+            b.name = base + " " + std::to_string(n);
         MeshSpec spec;
         spec.data = data;
         spec.width = data->size[0];

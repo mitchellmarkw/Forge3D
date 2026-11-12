@@ -9,6 +9,7 @@
 
 #include "forge/core/Export.h"
 #include "forge/core/FileFormat.h"
+#include "forge/core/Import.h"
 #include "forge/core/Picking.h"
 #include "forge/core/Primitives.h"
 #include "forge/core/Tessellator.h"
@@ -24,6 +25,9 @@
 #include <QDockWidget>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QDragEnterEvent>
+#include <QDropEvent>
+#include <QMimeData>
 #include <QInputDialog>
 #include <QProcess>
 #include <QKeySequence>
@@ -120,6 +124,7 @@ void rememberFolderOf(const QString& filePath)
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
 {
     resize(1400, 860);
+    setAcceptDrops(true);  // drop STL / 3MF / OBJ (import) or .f3d (open) files on the window
 
     m_viewport = new Viewport(this);
     setCentralWidget(m_viewport);
@@ -167,6 +172,22 @@ void MainWindow::createActions()
     m_save = new QAction(tr("&Save"), this);
     m_save->setShortcut(QKeySequence::Save);
     connect(m_save, &QAction::triggered, this, &MainWindow::save);
+
+    m_import = new QAction(tr("&Import..."), this);
+    m_import->setShortcut(Qt::CTRL | Qt::Key_I);
+    m_import->setToolTip(tr("Import (Ctrl+I): add shapes from STL, 3MF or OBJ files, repaired for printing. "
+                            "You can also drag files onto the window"));
+    connect(m_import, &QAction::triggered, this, [this] {
+        QSettings settings;
+        const QString folder = settings.value(QStringLiteral("import/folder"), startFolder()).toString();
+        const QStringList paths = QFileDialog::getOpenFileNames(
+            this, tr("Import shapes"), folder,
+            tr("3D models (*.stl *.3mf *.obj);;STL (*.stl);;3MF (*.3mf);;OBJ (*.obj)"));
+        if (paths.isEmpty())
+            return;
+        settings.setValue(QStringLiteral("import/folder"), QFileInfo(paths.front()).absolutePath());
+        importFiles(paths);
+    });
 
     m_export = new QAction(tr("&Export..."), this);
     m_export->setShortcut(Qt::CTRL | Qt::Key_E);
@@ -337,6 +358,12 @@ void MainWindow::createActions()
             statusBar()->showMessage(tr("Split: select one shape on the plate first."), 6000);
             return;
         }
+        if (const QString open = openMeshIn({id}); !open.isEmpty()) {
+            QMessageBox::information(this, tr("Forge3D"),
+                                     tr("'%1' has gaps in its surface (it isn't watertight), so it can't be split.")
+                                         .arg(open));
+            return;
+        }
         startSplit(id, false);
     });
 
@@ -384,6 +411,7 @@ void MainWindow::createMenus()
     file->addAction(m_save);
     file->addAction(m_saveAs);
     file->addSeparator();
+    file->addAction(m_import);
     file->addAction(m_export);
     file->addAction(m_sendToSlicer);
     file->addAction(m_chooseSlicer);
@@ -443,6 +471,7 @@ void MainWindow::createToolBar()
     bar->setToolButtonStyle(Qt::ToolButtonTextOnly);
     bar->addAction(m_open);
     bar->addAction(m_save);
+    bar->addAction(m_import);
     bar->addAction(m_export);
     bar->addAction(m_sendToSlicer);
     bar->addSeparator();
@@ -1156,6 +1185,13 @@ void MainWindow::combineSelected(BooleanOp op)
         }
     }
 
+    if (const QString open = openMeshIn(m_selection); !open.isEmpty()) {
+        QMessageBox::information(this, tr("Forge3D"),
+                                 tr("'%1' has gaps in its surface (it isn't watertight), so it can't be combined. "
+                                    "It can still be moved, resized and exported.").arg(open));
+        return;
+    }
+
     // Check the result first: an empty result (e.g. Intersect of shapes that don't
     // touch) would vanish from the plate, which looks like a bug.
     TopoDS_Shape previewShape;
@@ -1711,6 +1747,98 @@ bool MainWindow::save()
     return m_filePath.isEmpty() ? saveAs() : saveTo(m_filePath);
 }
 
+// ---- Import -----------------------------------------------------------------------
+
+QString MainWindow::openMeshIn(const std::vector<ObjectId>& ids) const
+{
+    for (ObjectId id : ids)
+        for (ObjectId part : m_doc.withDescendants(id))
+            if (const Body* b = m_doc.find(part); b && !b->isBoolean())
+                if (const auto* mesh = std::get_if<MeshSpec>(&b->spec); mesh && !mesh->data->closed)
+                    return QString::fromStdString(b->name);
+    return {};
+}
+
+void MainWindow::importFiles(const QStringList& paths)
+{
+    std::vector<ObjectId> made;
+    QStringList notes;
+    std::size_t biggest = 0;
+    for (const QString& path : paths) {
+        const QString file = QFileInfo(path).fileName();
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        try {
+            const ImportResult result = importFile(m_stack, m_doc, toPath(path));
+            QApplication::restoreOverrideCursor();
+            qInfo().noquote() << "Imported" << path << "-" << result.bodies.size() << "shape(s)";
+            for (std::size_t i = 0; i < result.bodies.size(); ++i) {
+                made.push_back(result.bodies[i]);
+                const RepairReport& r = result.reports[i];
+                biggest = std::max(biggest, r.trianglesOut);
+                qInfo().noquote() << "  " << QString::fromStdString(m_doc.find(result.bodies[i])->name) << ":"
+                                  << r.trianglesOut << "triangles." << QString::fromStdString(r.summary());
+                if (r.changedAnything() || r.openEdges > 0 || r.nonManifoldEdges > 0)
+                    notes << QStringLiteral("%1: %2").arg(QString::fromStdString(m_doc.find(result.bodies[i])->name),
+                                                          QString::fromStdString(r.summary()));
+            }
+        } catch (const std::exception& e) {
+            QApplication::restoreOverrideCursor();
+            qWarning() << "Import failed:" << path << e.what();
+            QMessageBox::warning(this, tr("Forge3D"),
+                                 tr("Could not import %1:\n%2").arg(file, QString::fromUtf8(e.what())));
+        }
+    }
+    if (made.empty())
+        return;
+    setSelection(made);
+    m_viewport->fitView();
+    QString status = made.size() == 1 ? tr("Imported 1 shape") : tr("Imported %1 shapes").arg(made.size());
+    status += notes.isEmpty() ? tr(" (no repairs needed)") : QString();
+    if (biggest > 200000)
+        status += tr(". It has many triangles: combining it with other shapes can take a while");
+    statusBar()->showMessage(status, 8000);
+    if (!notes.isEmpty())
+        QMessageBox::information(this, tr("Forge3D"), tr("Imported, with repairs:\n\n%1").arg(notes.join(QStringLiteral("\n\n"))));
+}
+
+namespace {
+bool droppable(const QString& path)
+{
+    const QString s = path.toLower();
+    return s.endsWith(QLatin1String(".stl")) || s.endsWith(QLatin1String(".3mf")) ||
+           s.endsWith(QLatin1String(".obj")) || s.endsWith(QLatin1String(".f3d"));
+}
+}  // namespace
+
+void MainWindow::dragEnterEvent(QDragEnterEvent* event)
+{
+    for (const QUrl& url : event->mimeData()->urls())
+        if (url.isLocalFile() && droppable(url.toLocalFile())) {
+            event->acceptProposedAction();
+            return;
+        }
+}
+
+void MainWindow::dropEvent(QDropEvent* event)
+{
+    QStringList models;
+    QString document;
+    for (const QUrl& url : event->mimeData()->urls()) {
+        if (!url.isLocalFile() || !droppable(url.toLocalFile()))
+            continue;
+        const QString path = url.toLocalFile();
+        if (path.toLower().endsWith(QLatin1String(".f3d")))
+            document = path;
+        else
+            models << path;
+    }
+    event->acceptProposedAction();
+    if (!document.isEmpty() && confirmDiscardChanges())
+        openFile(document);
+    if (!models.isEmpty())
+        importFiles(models);
+}
+
 // ---- Export / print -------------------------------------------------------------
 
 std::vector<ObjectId> MainWindow::exportTargets() const
@@ -2082,6 +2210,10 @@ void MainWindow::refreshScene()
             case BooleanOp::Group: context = tr("A group of: %1").arg(names.join(QStringLiteral(", "))); break;
             default: context = tr("Made from: %1").arg(names.join(joiner)); break;
             }
+        } else if (const auto* mesh = std::get_if<MeshSpec>(&selected->spec);
+                   mesh && m_doc.isTopLevel(selected->id)) {
+            context = tr("Imported: %1 triangles.").arg(mesh->data->indices.size() / 3) +
+                      (mesh->data->closed ? QString() : tr(" Not watertight: it can't be combined or split."));
         } else if (const ObjectId owner = m_doc.parentOf(selected->id); owner != kInvalidId) {
             context = tr("Part of '%1'. Its position is measured inside that shape.")
                           .arg(QString::fromStdString(m_doc.find(owner)->name));
