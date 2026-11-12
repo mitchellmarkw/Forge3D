@@ -19,6 +19,7 @@ add_executable(forge_tests
     test_handles.cpp
     test_arrange.cpp
     test_export.cpp
+    test_import.cpp
 )
 target_link_libraries(forge_tests PRIVATE
     Forge3D::core

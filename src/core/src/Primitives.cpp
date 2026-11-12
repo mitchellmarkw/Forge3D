@@ -6,6 +6,13 @@
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_MakeWire.hxx>
 #include <BRepBuilderAPI_GTransform.hxx>
+#include <BRep_Builder.hxx>
+#include <TopoDS_Shell.hxx>
+#include <TopoDS_Solid.hxx>
+#include <TopoDS_Vertex.hxx>
+#include <gp_Pln.hxx>
+#include <map>
+#include <utility>
 #include <BRepBuilderAPI_MakePolygon.hxx>
 #include <BRepBuilderAPI_MakeSolid.hxx>
 #include <BRepBuilderAPI_MakeVertex.hxx>
@@ -350,6 +357,60 @@ TopoDS_Shape makePyramid(double baseWidth, double baseDepth, double topWidth, do
     return result;
 }
 
+TopoDS_Shape makeMeshSolid(const MeshData& data, const std::array<double, 3>& scale)
+{
+    if (data.indices.empty())
+        throw std::invalid_argument("mesh has no triangles");
+    // Build the faces sharing vertices and edges directly (no sewing): one plane
+    // face per triangle, one straight edge per pair of neighbouring points.
+    BRep_Builder builder;
+    const std::size_t pointCount = data.positions.size() / 3;
+    std::vector<TopoDS_Vertex> vertices(pointCount);
+    std::vector<gp_Pnt> points(pointCount);
+    for (std::size_t i = 0; i < pointCount; ++i) {
+        points[i] = gp_Pnt(data.positions[i * 3] * scale[0], data.positions[i * 3 + 1] * scale[1],
+                           data.positions[i * 3 + 2] * scale[2]);
+        builder.MakeVertex(vertices[i], points[i], 1e-7);
+    }
+    std::map<std::pair<std::uint32_t, std::uint32_t>, TopoDS_Edge> edges;
+    const auto edgeBetween = [&](std::uint32_t a, std::uint32_t b) {
+        const auto key = std::minmax(a, b);
+        auto it = edges.find({key.first, key.second});
+        if (it == edges.end()) {
+            const TopoDS_Edge e = BRepBuilderAPI_MakeEdge(vertices[key.first], vertices[key.second]).Edge();
+            it = edges.emplace(std::pair{key.first, key.second}, e).first;
+        }
+        // The edge runs from the smaller index to the larger: reverse it if going the other way.
+        return a < b ? it->second : TopoDS::Edge(it->second.Reversed());
+    };
+
+    TopoDS_Shell shell;
+    builder.MakeShell(shell);
+    for (std::size_t t = 0; t + 2 < data.indices.size(); t += 3) {
+        const std::uint32_t a = data.indices[t], b = data.indices[t + 1], c = data.indices[t + 2];
+        const gp_Vec ab(points[a], points[b]), ac(points[a], points[c]);
+        const gp_Vec normal = ab.Crossed(ac);
+        if (normal.Magnitude() < 1e-12)
+            continue;  // a sliver with no area
+        TopoDS_Wire wire;
+        builder.MakeWire(wire);
+        builder.Add(wire, edgeBetween(a, b));
+        builder.Add(wire, edgeBetween(b, c));
+        builder.Add(wire, edgeBetween(c, a));
+        const gp_Pln plane(points[a], gp_Dir(normal));
+        BRepBuilderAPI_MakeFace face(plane, wire, /*Inside=*/true);
+        if (face.IsDone())
+            builder.Add(shell, face.Face());
+    }
+    shell.Closed(data.closed);
+    if (!data.closed)
+        return shell;  // an open surface: it can be shown and exported, not combined
+    TopoDS_Solid solid;
+    builder.MakeSolid(solid);
+    builder.Add(solid, shell);
+    return solid;
+}
+
 TopoDS_Shape buildShape(const PrimitiveSpec& spec)
 {
     return std::visit(
@@ -369,6 +430,9 @@ TopoDS_Shape buildShape(const PrimitiveSpec& spec)
                 return makeTube(p.outerRadiusX, p.outerRadiusY, p.innerRadiusX, p.innerRadiusY, p.height);
             else if constexpr (std::is_same_v<T, WedgeSpec>)
                 return makeWedge(p.width, p.depth, p.height);
+            else if constexpr (std::is_same_v<T, MeshSpec>)
+                return makeMeshSolid(*p.data, {p.width / p.data->size[0], p.depth / p.data->size[1],
+                                               p.height / p.data->size[2]});
             else {
                 static_assert(std::is_same_v<T, PyramidSpec>, "buildShape: unhandled primitive");
                 return makePyramid(p.baseWidth, p.baseDepth, p.topWidth, p.topDepth, p.height);

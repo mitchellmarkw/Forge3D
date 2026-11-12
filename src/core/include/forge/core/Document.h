@@ -153,6 +153,8 @@ void validate(const PrimitiveSpec& spec);
 // moving it by t.
 Bounds shapeBounds(const TopoDS_Shape& shape, const Transform& t = Transform::identity());
 bool isEmptySolid(const TopoDS_Shape& shape);
+// Triangles to draw an imported mesh (flat shaded), stretched to its size.
+Mesh displayMesh(const MeshSpec& spec);
 
 // Where to put a new body of the given footprint so it does not overlap the
 // existing ones: to the right of everything, with a gap. Empty plate: the centre.

@@ -34,6 +34,10 @@ TopoDS_Shape makeWedge(double width, double depth, double height);
 // Rectangular base and top, both centred; a top size of 0 makes a point or ridge.
 TopoDS_Shape makePyramid(double baseWidth, double baseDepth, double topWidth, double topDepth, double height);
 
+// A solid from triangles (an imported mesh), stretched by scale along X / Y / Z: one
+// flat face per triangle. An open mesh (data.closed false) gives a shell instead.
+TopoDS_Shape makeMeshSolid(const MeshData& data, const std::array<double, 3>& scale);
+
 // Builds whichever primitive the spec describes.
 TopoDS_Shape buildShape(const PrimitiveSpec& spec);
 

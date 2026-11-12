@@ -146,6 +146,21 @@ struct Traits<PyramidSpec> {
     }
 };
 
+template <>
+struct Traits<MeshSpec> {
+    static constexpr const char* name = "Mesh";
+    static constexpr const char* file = "mesh";
+    static const std::vector<Field<MeshSpec>>& fields()
+    {
+        static const std::vector<Field<MeshSpec>> f{
+            {&MeshSpec::width, {"width", "Width (X)", "Size along X", false, 0}},
+            {&MeshSpec::depth, {"depth", "Depth (Y)", "Size along Y", false, 0}},
+            {&MeshSpec::height, {"height", "Height (Z)", "Size along Z (up)", false, 0}},
+        };
+        return f;
+    }
+};
+
 template <class T>
 const std::vector<SpecField>& infos()
 {
