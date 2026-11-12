@@ -15,6 +15,10 @@
 #include <TopExp.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
 #include <BRepPrimAPI_MakePrism.hxx>
+#include <BRepPrimAPI_MakeRevol.hxx>
+#include <BRepBuilderAPI_MakePolygon.hxx>
+#include <BRepCheck_Analyzer.hxx>
+#include <gp_Ax1.hxx>
 #include <BRepTools_WireExplorer.hxx>
 #include <BRep_Builder.hxx>
 #include <BRep_Tool.hxx>
@@ -250,6 +254,186 @@ TopoDS_Shape padShape(const PadSpec& pad)
     } catch (const Standard_Failure& e) {
         throw GeometryError(std::string("The sketch could not be pushed up: ") + e.GetMessageString());
     }
+}
+
+TopoDS_Shape revolveShape(const RevolveSpec& revolve)
+{
+    const Sketch& s = revolve.sketch;
+    if (revolve.axis < 0 || std::size_t(revolve.axis) >= s.geos.size() ||
+        s.geos[std::size_t(revolve.axis)].kind != GeoKind::Line)
+        throw GeometryError("Pick the helper line to spin the outline around.");
+    if (!(revolve.angle > 0.0) || revolve.angle > 360.0)
+        throw std::invalid_argument("The angle must be more than 0 and at most 360 degrees");
+    const Geo& axisLine = s.geos[std::size_t(revolve.axis)];
+    const Point a = s.points[std::size_t(axisLine.a)], b = s.points[std::size_t(axisLine.b)];
+    const double len = std::hypot(b.x - a.x, b.y - a.y);
+    if (len < 1e-9)
+        throw GeometryError("The axis line has no length.");
+    const double ux = (b.x - a.x) / len, uy = (b.y - a.y) / len;
+    // Everything spun must stay on one side of the axis.
+    double lo = 0.0, hi = 0.0, size = len;
+    const auto side = [&](double x, double y) {
+        const double d = ux * (y - a.y) - uy * (x - a.x);
+        lo = std::min(lo, d);
+        hi = std::max(hi, d);
+        size = std::max(size, std::abs(d));
+    };
+    for (std::size_t i = 0; i < s.geos.size(); ++i) {
+        const Geo& g = s.geos[i];
+        if (g.construction || int(i) == revolve.axis)
+            continue;
+        if (g.kind == GeoKind::Line) {
+            side(s.points[std::size_t(g.a)].x, s.points[std::size_t(g.a)].y);
+            side(s.points[std::size_t(g.b)].x, s.points[std::size_t(g.b)].y);
+            continue;
+        }
+        const Point c = s.points[std::size_t(g.a)];
+        const double r = radiusOf(s, g);
+        double a0 = 0.0, span = 2 * std::numbers::pi;
+        if (g.kind == GeoKind::Arc) {
+            const Point p0 = s.points[std::size_t(g.b)], p1 = s.points[std::size_t(g.c)];
+            a0 = std::atan2(p0.y - c.y, p0.x - c.x);
+            span = std::atan2(p1.y - c.y, p1.x - c.x) - a0;
+            while (span <= 0)
+                span += 2 * std::numbers::pi;
+        }
+        for (int k = 0; k <= 64; ++k)
+            side(c.x + r * std::cos(a0 + span * k / 64), c.y + r * std::sin(a0 + span * k / 64));
+    }
+    const double tol = 1e-6 * std::max(size, 1.0);
+    if (lo < -tol && hi > tol)
+        throw GeometryError("The outline crosses the axis it spins around. Keep it all on one side.");
+    Sketch without = s;
+    without.geos[std::size_t(revolve.axis)].construction = true;
+    const TopoDS_Shape flat = faces(without);
+    const double angle = revolve.angle * std::numbers::pi / 180.0;
+    gp_Ax1 axis(gp_Pnt(a.x, a.y, 0), gp_Dir(ux, uy, 0));
+    try {
+        TopoDS_Shape start = flat;
+        double sweepBy = revolve.reversed ? -angle : angle;
+        if (revolve.midplane && revolve.angle < 360.0) {
+            gp_Trsf back;
+            back.SetRotation(axis, -angle / 2);
+            start = BRepBuilderAPI_Transform(flat, back, true).Shape();
+            sweepBy = angle;
+        }
+        TopoDS_Shape result;
+        bool first = true;
+        for (TopExp_Explorer it(start, TopAbs_FACE); it.More(); it.Next()) {
+            BRepPrimAPI_MakeRevol revol(it.Current(), axis, sweepBy, Standard_True);
+            if (!revol.IsDone())
+                throw GeometryError("The outline could not be spun round.");
+            if (first) {
+                result = revol.Shape();
+                first = false;
+            } else {
+                BRepAlgoAPI_Fuse fuse(result, revol.Shape());
+                if (!fuse.IsDone() || fuse.HasErrors())
+                    throw GeometryError("Outlines in the sketch overlap in a way that can't be joined");
+                result = fuse.Shape();
+            }
+        }
+        if (first)
+            throw GeometryError("Draw a closed outline to make a shape.");
+        ShapeUpgrade_UnifySameDomain unify(result, true, true, false);
+        unify.Build();
+        result = unify.Shape();
+        if (!BRepCheck_Analyzer(result).IsValid())
+            throw GeometryError("The spun shape came out broken (does the outline touch the axis at a point?)");
+        return result;
+    } catch (const Standard_Failure& e) {
+        throw GeometryError(std::string("The sketch could not be spun round: ") + e.GetMessageString());
+    }
+}
+
+const std::vector<HoleSize>& holeSizes()
+{
+    static const std::vector<HoleSize> sizes{
+        {"M2", 2.4, 1.6, 4.3, 2.4, 4.4},      {"M2.5", 2.9, 2.05, 5.0, 2.9, 5.5},
+        {"M3", 3.4, 2.5, 6.0, 3.4, 6.72},     {"M4", 4.5, 3.3, 8.0, 4.4, 8.96},
+        {"M5", 5.5, 4.2, 10.0, 5.4, 11.2},    {"M6", 6.6, 5.0, 11.0, 6.4, 13.44},
+        {"M8", 9.0, 6.8, 15.0, 8.6, 17.92},   {"M10", 11.0, 8.5, 18.0, 10.6, 22.4},
+        {"M12", 13.5, 10.2, 20.0, 12.6, 26.88},
+    };
+    return sizes;
+}
+
+HoleSpec sizedAs(HoleSpec hole, const std::string& size, bool tapped)
+{
+    hole.size = size;
+    hole.tapped = tapped;
+    for (const HoleSize& h : holeSizes())
+        if (size == h.name) {
+            hole.diameter = tapped ? h.tapDrill : h.clearance;
+            hole.headDiameter = h.headDiameter;
+            hole.headDepth = h.headDepth;
+            hole.countersinkDiameter = h.countersinkDiameter;
+            hole.countersinkAngle = 90.0;
+        }
+    return hole;
+}
+
+TopoDS_Shape holeShape(const HoleSpec& hole)
+{
+    if (!(hole.diameter > 0.0) || !(hole.depth > 0.0))
+        throw std::invalid_argument("A hole needs a diameter and a depth greater than zero");
+    const double r = hole.diameter / 2;
+    const double above = std::max(0.5, hole.diameter * 0.1);  // starts a little above the face
+    // The cutter's outline, as (radius, height) going down one side, spun around Z.
+    std::vector<std::pair<double, double>> outline;
+    switch (hole.kind) {
+    case HoleKind::Plain: outline = {{r, above}, {r, -hole.depth}}; break;
+    case HoleKind::Counterbored: {
+        const double R = hole.headDiameter / 2;
+        if (!(R > r))
+            throw GeometryError("The counterbore must be wider than the hole");
+        if (!(hole.headDepth > 0.0) || hole.headDepth >= hole.depth)
+            throw GeometryError("The counterbore must be less deep than the hole");
+        outline = {{R, above}, {R, -hole.headDepth}, {r, -hole.headDepth}, {r, -hole.depth}};
+        break;
+    }
+    case HoleKind::Countersunk: {
+        const double R = hole.countersinkDiameter / 2;
+        if (!(R > r))
+            throw GeometryError("The countersink must be wider than the hole");
+        if (!(hole.countersinkAngle > 1.0) || !(hole.countersinkAngle < 179.0))
+            throw GeometryError("The countersink angle must be between 1 and 179 degrees");
+        const double sink = (R - r) / std::tan(hole.countersinkAngle * std::numbers::pi / 360.0);
+        if (sink >= hole.depth)
+            throw GeometryError("The countersink is deeper than the hole");
+        outline = {{R, above}, {R, 0.0}, {r, -sink}, {r, -hole.depth}};
+        break;
+    }
+    }
+    BRepBuilderAPI_MakePolygon polygon;
+    polygon.Add(gp_Pnt(0, 0, above));
+    for (const auto& [x, z] : outline)
+        polygon.Add(gp_Pnt(x, 0, z));
+    polygon.Add(gp_Pnt(0, 0, -hole.depth));
+    polygon.Close();
+    const TopoDS_Face profile = BRepBuilderAPI_MakeFace(polygon.Wire(), /*OnlyPlane=*/true).Face();
+    const TopoDS_Shape one = BRepPrimAPI_MakeRevol(profile, gp_Ax1(gp::Origin(), gp::DZ()), 2 * std::numbers::pi).Shape();
+    const std::vector<int> spots = loosePoints(hole.sketch);
+    if (spots.empty())
+        throw GeometryError("Click on the face to put a hole there.");
+    TopoDS_Shape result;
+    bool first = true;
+    for (int p : spots) {
+        gp_Trsf at;
+        const Point q = hole.sketch.points[std::size_t(p)];
+        at.SetTranslation(gp_Vec(q.x, q.y, 0));
+        const TopoDS_Shape placed = BRepBuilderAPI_Transform(one, at, true).Shape();
+        if (first) {
+            result = placed;
+            first = false;
+        } else {
+            BRepAlgoAPI_Fuse fuse(result, placed);
+            if (!fuse.IsDone() || fuse.HasErrors())
+                throw GeometryError("Holes overlap in a way that can't be joined");
+            result = fuse.Shape();
+        }
+    }
+    return result;
 }
 
 std::optional<FacePlane> planeOfFace(const TopoDS_Shape& shape, int face)

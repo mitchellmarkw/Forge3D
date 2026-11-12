@@ -175,6 +175,32 @@ struct Traits<PadSpec> {
 };
 
 template <>
+struct Traits<RevolveSpec> {
+    static constexpr const char* name = "Revolve";
+    static constexpr const char* file = "revolve";
+    static const std::vector<Field<RevolveSpec>>& fields()
+    {
+        // Its size is all in the sketch (the angle isn't a length).
+        static const std::vector<Field<RevolveSpec>> f{};
+        return f;
+    }
+};
+
+template <>
+struct Traits<HoleSpec> {
+    static constexpr const char* name = "Hole";
+    static constexpr const char* file = "hole";
+    static const std::vector<Field<HoleSpec>>& fields()
+    {
+        static const std::vector<Field<HoleSpec>> f{
+            {&HoleSpec::diameter, {"diameter", "Diameter", "How wide the holes are", false, 0}},
+            {&HoleSpec::depth, {"depth", "Depth", "How deep the holes go", false, 0}},
+        };
+        return f;
+    }
+};
+
+template <>
 struct Traits<MeshSpec> {
     static constexpr const char* name = "Mesh";
     static constexpr const char* file = "mesh";
@@ -265,7 +291,33 @@ PrimitiveSpec scaled(const PrimitiveSpec& spec, double factor)
         setSpecValue(out, i, specValue(spec, i) * factor);
     if (auto* pad = std::get_if<PadSpec>(&out))
         sketch::scale(pad->sketch, factor, factor);
+    if (auto* revolve = std::get_if<RevolveSpec>(&out))
+        sketch::scale(revolve->sketch, factor, factor);
+    if (auto* hole = std::get_if<HoleSpec>(&out)) {
+        sketch::scale(hole->sketch, factor, factor);
+        hole->headDiameter *= factor;
+        hole->headDepth *= factor;
+        hole->countersinkDiameter *= factor;
+        if (factor != 1.0)
+            hole->size.clear();  // no longer a standard size
+    }
     return out;
+}
+
+bool isSketched(const PrimitiveSpec& spec)
+{
+    return sketchOf(spec) != nullptr;
+}
+
+const sketch::Sketch* sketchOf(const PrimitiveSpec& spec)
+{
+    if (const auto* p = std::get_if<PadSpec>(&spec))
+        return &p->sketch;
+    if (const auto* r = std::get_if<RevolveSpec>(&spec))
+        return &r->sketch;
+    if (const auto* h = std::get_if<HoleSpec>(&spec))
+        return &h->sketch;
+    return nullptr;
 }
 
 bool isRoundFromAbove(const PrimitiveSpec& spec)
@@ -328,6 +380,7 @@ std::string toString(BooleanOp op)
     case BooleanOp::Group: return "Group";
     case BooleanOp::Emboss: return "Emboss";
     case BooleanOp::Edges: return "Edges";
+    case BooleanOp::Shell: return "Shell";
     }
     return "Combine";
 }

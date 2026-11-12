@@ -178,6 +178,35 @@ struct PadSpec {
     bool operator==(const PadSpec&) const = default;
 };
 
+// A sketch spun around one of its own lines (`axis`: a helper line of the sketch) by
+// `angle` degrees, anticlockwise looking down the line from its first point (the other
+// way when reversed; half each way for midplane).
+struct RevolveSpec {
+    sketch::Sketch sketch;
+    int axis = -1;  // index of the line in sketch.geos
+    double angle = 360.0;
+    bool reversed = false;
+    bool midplane = false;
+    bool operator==(const RevolveSpec&) const = default;
+};
+
+// Holes drilled down (-Z) from the sketch plane at every loose point of the sketch
+// (points not used by any line or circle). The tool body of a Hole step (a Subtract).
+enum class HoleKind { Plain, Counterbored, Countersunk };
+struct HoleSpec {
+    sketch::Sketch sketch;  // where the holes go
+    HoleKind kind = HoleKind::Plain;
+    std::string size;        // "M3", "M4", ... or empty for sizes typed by hand
+    bool tapped = false;     // sized for cutting a thread (tap drill), else for a bolt to pass
+    double diameter = 3.4;
+    double depth = 10.0;
+    double headDiameter = 6.5;       // counterbore
+    double headDepth = 3.4;          // counterbore
+    double countersinkDiameter = 6.7;
+    double countersinkAngle = 90.0;  // degrees, the cone's full angle
+    bool operator==(const HoleSpec&) const = default;
+};
+
 // Triangles read from a file (STL / 3MF / OBJ), after repair. Shared between copies
 // and never changed once made. Points are centred on X and Y with the lowest at Z = 0,
 // like every primitive.
@@ -202,11 +231,14 @@ struct MeshSpec {
 
 using PrimitiveSpec =
     std::variant<BoxSpec, CylinderSpec, SphereSpec, ConeSpec, TorusSpec, TubeSpec, WedgeSpec, PyramidSpec, TextSpec,
-                 PadSpec, MeshSpec>;
+                 PadSpec, RevolveSpec, HoleSpec, MeshSpec>;
 
-// The kinds of primitive the Add Shape menu offers (every kind but a sketch pad and an
-// imported mesh, the last two), and a new one of each.
-inline constexpr std::size_t kPrimitiveKindCount = std::variant_size_v<PrimitiveSpec> - 2;
+// The kinds of primitive the Add Shape menu offers (every kind but those made from a
+// sketch (pad, revolve, hole) and an imported mesh, the last four), and a new one of each.
+inline constexpr std::size_t kPrimitiveKindCount = std::variant_size_v<PrimitiveSpec> - 4;
+// Made from a sketch: a pad, revolve or hole.
+bool isSketched(const PrimitiveSpec& spec);
+const sketch::Sketch* sketchOf(const PrimitiveSpec& spec);
 PrimitiveSpec defaultSpec(std::size_t kind);  // kind = variant index
 
 // "Box", "Cylinder", "Sphere", ...: used for default names and command labels.
@@ -248,7 +280,7 @@ PrimitiveSpec madeRound(const PrimitiveSpec& spec);
 
 // ---- Combine results ------------------------------------------------------------
 
-enum class BooleanOp { Merge, Subtract, Intersect, Split, Mirror, Group, Emboss, Edges };
+enum class BooleanOp { Merge, Subtract, Intersect, Split, Mirror, Group, Emboss, Edges, Shell };
 
 // What happens to the picked edges of a shape.
 enum class EdgeFinishKind {
@@ -295,6 +327,25 @@ struct EmbossText {
     bool operator==(const EmbossText&) const = default;
 };
 
+// One picked face, found again by place (like EdgeRef): a point on it, which way it
+// faces there, and (once located) where that point sits in the part's box.
+struct FaceRef {
+    std::array<double, 3> point{0.0, 0.0, 0.0};
+    std::array<double, 3> normal{0.0, 0.0, 1.0};
+    bool located = false;
+    std::array<double, 3> relative{0.0, 0.0, 0.0};
+    bool operator==(const FaceRef&) const = default;
+};
+
+// A solid hollowed out: walls `thickness` thick (inside the old surface, or outside it
+// when outward), with the picked faces left open.
+struct ShellFinish {
+    double thickness = 2.0;
+    bool outward = false;
+    std::vector<FaceRef> open;
+    bool operator==(const ShellFinish&) const = default;
+};
+
 // "Merge", "Subtract", "Intersect", "Split", "Mirror", "Group"
 std::string toString(BooleanOp op);
 
@@ -310,6 +361,7 @@ std::string toString(BooleanOp op);
 //              merging: they may overlap or be far apart).
 //   Edges:     one solid part with some edges rounded, filleted, chamfered or
 //              bevelled; see `edges`.
+//   Shell:     one solid part hollowed out; see `shell`.
 //   Emboss:    one part with words raised from or engraved into its surface,
 //              centred on planePoint (on the surface) and facing out along
 //              planeNormal; see `emboss`.
@@ -329,6 +381,8 @@ struct BooleanSpec {
     std::optional<EmbossText> emboss{};
     // Edges: what to do to which edges.
     std::optional<EdgeFinish> edges{};
+    // Shell: how thick, and which faces are left open.
+    std::optional<ShellFinish> shell{};
     // Subtract: straight tools (box, cylinder, tube, text) are stretched along their own
     // height to go right through the first part, whatever its size ("through all").
     bool throughAll = false;

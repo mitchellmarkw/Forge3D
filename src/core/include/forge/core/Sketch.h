@@ -95,7 +95,12 @@ int addPoint(Sketch& s, Point p);
 // is removed. Returns the index `into` has afterwards.
 int mergePoints(Sketch& s, int into, int from);
 // Removes geometry (and rules that refer to it, and points nothing uses any more).
+// Removes curves, and the points only they used (points on their own stay).
 void removeGeos(Sketch& s, std::vector<int> geos);
+// Removes points (not the origin), with the curves and rules using them.
+void removePoints(Sketch& s, std::vector<int> points);
+// Points on their own: not part of any line, circle or arc (a Hole's spots).
+std::vector<int> loosePoints(const Sketch& s);
 // Removes rules.
 void removeConstraints(Sketch& s, std::vector<int> rules);
 

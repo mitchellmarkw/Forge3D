@@ -49,6 +49,18 @@ std::string names(const Document& doc, const std::vector<ObjectId>& ids, std::si
     return out;
 }
 
+std::string describeHoles(const HoleSpec& h)
+{
+    const std::size_t n = sketch::loosePoints(h.sketch).size();
+    std::string out = n == 1 ? "1 hole " : std::to_string(n) + " holes ";
+    out += h.size.empty() ? "\xC3\x98" + num(h.diameter) : h.size + (h.tapped ? " tap drill" : "");
+    if (h.kind == HoleKind::Counterbored)
+        out += " counterbored";
+    else if (h.kind == HoleKind::Countersunk)
+        out += " countersunk";
+    return out + ", " + num(h.depth) + " mm deep";
+}
+
 }  // namespace
 
 std::vector<ObjectId> steps(const Document& doc, ObjectId top)
@@ -143,6 +155,10 @@ std::string describe(const Document& doc, ObjectId id)
                 else if constexpr (std::is_same_v<T, PadSpec>)
                     return std::string("sketch, ") + num(p.length) + " mm" +
                            (p.reversed ? " down" : p.midplane ? " both ways" : "");
+                else if constexpr (std::is_same_v<T, RevolveSpec>)
+                    return std::string("sketch, spun ") + num(p.angle) + "\xC2\xB0";
+                else if constexpr (std::is_same_v<T, HoleSpec>)
+                    return describeHoles(p);
                 else if constexpr (std::is_same_v<T, MeshSpec>)
                     return p.data ? std::to_string(p.data->indices.size() / 3) + " triangles" : std::string();
                 else
@@ -154,6 +170,10 @@ std::string describe(const Document& doc, ObjectId id)
     switch (spec.op) {
     case BooleanOp::Merge: return "with " + names(doc, spec.operands, 1);
     case BooleanOp::Subtract:
+        if (spec.operands.size() == 2)
+            if (const Body* tool = doc.find(spec.operands[1]); tool && !tool->isBoolean())
+                if (const auto* hole = std::get_if<HoleSpec>(&tool->spec))
+                    return describeHoles(*hole) + (spec.throughAll ? ", through all" : "");
         return "minus " + names(doc, spec.operands, 1) + (spec.throughAll ? " (through all)" : "");
     case BooleanOp::Intersect: return "overlap with " + names(doc, spec.operands, 1);
     case BooleanOp::Split: return "cut in two";
@@ -176,6 +196,14 @@ std::string describe(const Document& doc, ObjectId id)
         case EdgeFinishKind::Bevel: return count + " bevelled " + num(f.size) + " mm at " + num(f.angle) + "\xC2\xB0";
         }
         return count;
+    }
+    case BooleanOp::Shell: {
+        if (!spec.shell)
+            return {};
+        const std::size_t n = spec.shell->open.size();
+        return "hollowed, walls " + num(spec.shell->thickness) + " mm" + (spec.shell->outward ? " outside" : "") +
+               (n == 0 ? std::string(", closed") : n == 1 ? std::string(", 1 face open")
+                                                         : ", " + std::to_string(n) + " faces open");
     }
     }
     return {};

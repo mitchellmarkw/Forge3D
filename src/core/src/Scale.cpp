@@ -104,6 +104,18 @@ void scaleInto(const Document& doc, ObjectId id, const Vec3& factors, const Vec3
         out.push_back(std::move(next));
         return;
     }
+    if (body->boolean->op == BooleanOp::Shell && body->boolean->shell) {
+        // The open faces' picks move with the shape; evenly scaled, the walls grow too.
+        Body next = *body;
+        for (FaceRef& r : next.boolean->shell->open)
+            r.point = {factors[0] * (r.point[0] - anchor[0]) + anchor[0],
+                       factors[1] * (r.point[1] - anchor[1]) + anchor[1],
+                       factors[2] * (r.point[2] - anchor[2]) + anchor[2]};
+        if (even(factors))
+            next.boolean->shell->thickness *= factors[0];
+        out.push_back(std::move(next));
+        return;
+    }
     if (body->boolean->op == BooleanOp::Split || body->boolean->op == BooleanOp::Mirror ||
         body->boolean->op == BooleanOp::Emboss) {
         // The cutting / mirror plane (or the words' spot) stretches with everything else.
@@ -178,6 +190,25 @@ PrimitiveSpec scaledSpec(const PrimitiveSpec& spec, const Vec3& f)
                     throw NotScalable("This sketch has curves, slopes or angles, so it can only be resized evenly "
                                       "across (its height can change freely)");
                 p.length *= f[2];
+            } else if constexpr (std::is_same_v<T, RevolveSpec>) {
+                // Spun round: only even resizing keeps it what it is.
+                if (std::abs(f[0] - f[1]) > 1e-12 || std::abs(f[0] - f[2]) > 1e-12)
+                    throw NotScalable("A spun (revolved) shape can only be resized evenly");
+                sketch::scale(p.sketch, f[0], f[0]);
+            } else if constexpr (std::is_same_v<T, HoleSpec>) {
+                // The spots follow the stretch; the holes stay round (and get deeper with Z).
+                if (!sketch::scale(p.sketch, f[0], f[1])) {
+                    // Rules that can't stretch (angles): keep the spots, drop the rules.
+                    p.sketch.constraints.clear();
+                    for (std::size_t i = 1; i < p.sketch.points.size(); ++i) {
+                        p.sketch.points[i].x *= f[0];
+                        p.sketch.points[i].y *= f[1];
+                    }
+                }
+                p.depth *= f[2];
+                p.headDepth *= f[2];
+                if (f[0] != 1.0 || f[1] != 1.0 || f[2] != 1.0)
+                    p.size.clear();
             } else {
                 static_assert(std::is_same_v<T, TorusSpec>, "scaledSpec: unhandled primitive");
                 if (std::abs(f[0] - f[1]) > 1e-12)

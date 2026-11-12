@@ -28,6 +28,7 @@ add_library(forge_core STATIC
     src/Commands.cpp
     src/Document.cpp
     src/Edges.cpp
+    src/Shell.cpp
     src/Emboss.cpp
     src/Export.cpp
     src/History.cpp

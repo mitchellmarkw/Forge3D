@@ -35,7 +35,10 @@ namespace forge::file {
 //  12  steps switched off: "suppressed" / "rolledBack" on results (missing = false)
 //  13  sketch pads (type "pad": length, reversed, midplane, "sketch": points, radii,
 //      geos, rules)
-inline constexpr int kFormatVersion = 13;
+//  14  revolves (type "revolve": axis, angle, sketch), holes (type "hole": kind, size,
+//      diameters, sketch) and shells (operation "shell"; "shell": thickness, outward,
+//      open faces)
+inline constexpr int kFormatVersion = 14;
 inline constexpr const char* kExtension = ".f3d";
 inline constexpr const char* kDocumentEntry = "document.json";
 

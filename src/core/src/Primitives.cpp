@@ -437,6 +437,10 @@ TopoDS_Shape buildShape(const PrimitiveSpec& spec)
                 return text::makeText(p);
             else if constexpr (std::is_same_v<T, PadSpec>)
                 return sketch::padShape(p);
+            else if constexpr (std::is_same_v<T, RevolveSpec>)
+                return sketch::revolveShape(p);
+            else if constexpr (std::is_same_v<T, HoleSpec>)
+                return sketch::holeShape(p);
             else if constexpr (std::is_same_v<T, MeshSpec>)
                 return makeMeshSolid(*p.data, {p.width / p.data->size[0], p.depth / p.data->size[1],
                                                p.height / p.data->size[2]});
