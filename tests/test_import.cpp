@@ -242,7 +242,7 @@ f 1 2 3
     mz_zip_archive zip{};
     REQUIRE(mz_zip_writer_init_heap(&zip, 0, 0));
     const std::string m = model.str();
-    REQUIRE(mz_zip_writer_add_mem(&zip, "3D/3dmodel.model", m.data(), m.size(), MZ_DEFAULT_COMPRESSION));
+    REQUIRE(mz_zip_writer_add_mem(&zip, "3D/3dmodel.model", m.data(), m.size(), static_cast<mz_uint>(MZ_DEFAULT_COMPRESSION)));
     void* buf = nullptr;
     size_t size = 0;
     REQUIRE(mz_zip_writer_finalize_heap_archive(&zip, &buf, &size));
