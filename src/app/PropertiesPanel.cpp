@@ -235,7 +235,7 @@ void PropertiesPanel::setBody(const Body* body, const QString& context, bool isP
     const auto* textSpec = body->isBoolean() ? nullptr : std::get_if<TextSpec>(&body->spec);
     m_textGroup->setVisible(textSpec != nullptr);
     if (textSpec) {
-        m_words->setWords(textSpec->text, textSpec->font, textSpec->bold, textSpec->italic);
+        m_words->setWords(textSpec->text, textSpec->font, textSpec->bold, textSpec->italic, textSpec->vertical);
         const QSignalBlocker block(m_letterHeight);
         try {
             m_letterHeight->setValue(text::letterHeightOf(*textSpec));
@@ -385,10 +385,11 @@ void PropertiesPanel::commitWords()
         return;
     TextSpec next;
     try {
-        next = text::withText(*old, m_words->text(), m_words->font(), m_words->bold(), m_words->italic());
+        next = text::withText(*old, m_words->text(), m_words->font(), m_words->bold(), m_words->italic(),
+                              m_words->vertical());
     } catch (const std::exception&) {
         // No letters (e.g. the box was emptied): show the words it still has.
-        m_words->setWords(old->text, old->font, old->bold, old->italic);
+        m_words->setWords(old->text, old->font, old->bold, old->italic, old->vertical);
         return;
     }
     if (!(next == *old))

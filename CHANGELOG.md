@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.13.1 — Slice 5d fixes: Emboss on balls and big models; stacked letters (2026-11-12)
+
+- **Words keep their size on a ball.** Embossed words used to squeeze together and
+  break up towards the ends of a long line on a sphere. The baseline now runs round the
+  surface first and each letter stands straight up from it, like a sticker smoothed on.
+- **Emboss on big models is quick.** Finding where the letters go only looks at the
+  triangles near them and follows the surface from triangle to triangle. On shapes over
+  150,000 triangles the preview shows the words in orange on top of the shape, and the
+  cut is made once, when you click Emboss / Apply.
+- Words longer than the way round a shape (e.g. right round a small box) are refused
+  instead of running into themselves.
+- **Stack the letters (top to bottom)**: a new tick box for the Text shape and Emboss.
+  Each letter stands upright under the one before, like a sign on a post.
+- Saved files keep the stacked setting (older files open as before).
+- 151 unit tests.
+
 ## 0.13.0 — Slice 5d: Text and Emboss (2026-11-11)
 
 - **Text shape** (Add → Text): 3D letters lying flat on the plate, in any font installed

@@ -26,8 +26,12 @@ std::string resolvedFont(const std::string& name);
 
 // The words as flat faces in the XY plane, read from +Z: the left end of the first
 // line's baseline at the origin, lines going down (-Y). emSize: the font size in mm.
+// vertical: each letter on its own line, centred under the one before (a space leaves a gap).
 // Throws std::invalid_argument for text with nothing to draw (empty or spaces only).
-TopoDS_Shape letterFaces(const std::string& text, const std::string& font, bool bold, bool italic, double emSize);
+TopoDS_Shape letterFaces(const std::string& text, const std::string& font, bool bold, bool italic, double emSize,
+                         bool vertical = false);
+// The words with a line break between every letter (UTF-8 aware), as stacked text is laid out.
+std::string stacked(const std::string& text);
 
 // How tall a capital letter is for each mm of font size (about 0.7).
 double capitalRatio(const std::string& font, bool bold, bool italic);
@@ -41,7 +45,8 @@ TopoDS_Shape makeText(const TextSpec& spec);
 TextSpec sizedForLetters(TextSpec spec, double letterHeight);
 // The spec after changing the words, font or style: the letters keep the size and
 // stretch they had, so the block grows or shrinks with the text.
-TextSpec withText(const TextSpec& old, const std::string& text, const std::string& font, bool bold, bool italic);
+TextSpec withText(const TextSpec& old, const std::string& text, const std::string& font, bool bold, bool italic,
+                  bool vertical = false);
 // Capital-letter height of a text shape as it is (stretch included), mm.
 double letterHeightOf(const TextSpec& spec);
 

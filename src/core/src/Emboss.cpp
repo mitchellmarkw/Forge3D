@@ -156,23 +156,24 @@ MeshSolid letters(const std::vector<float>& positions, const std::vector<std::ui
     // Each point's surface facing, blended across the triangle from its corners. A
     // corner's facing averages the faces around it that bend smoothly from this one,
     // so letters wrap around curves but stay square to the faces of a box.
-    std::vector<std::vector<std::uint32_t>> facesAt;  // built on first need
-    const auto buildFacesAt = [&] {
-        facesAt.assign(positions.size() / 3, {});
-        for (std::size_t t = 0; t < s.triangles(); ++t)
-            for (int k = 0; k < 3; ++k)
-                facesAt[indices[3 * t + k]].push_back(std::uint32_t(t));
-    };
+    // (vertex, triangle) pairs of the nearby triangles, sorted: the faces round a corner.
+    std::vector<std::pair<std::uint32_t, std::uint32_t>> facesAt;
+    facesAt.reserve(nearby.size() * 3);
+    for (std::uint32_t t : nearby)
+        for (int k = 0; k < 3; ++k)
+            facesAt.emplace_back(indices[3 * t + k], t);
+    std::sort(facesAt.begin(), facesAt.end());
     std::unordered_map<std::uint64_t, Vec3> cornerNormals;
     const auto cornerNormal = [&](std::uint32_t t, int k) {
         const std::uint64_t key = std::uint64_t(t) * 3 + std::uint64_t(k);
         if (const auto it = cornerNormals.find(key); it != cornerNormals.end())
             return it->second;
-        if (facesAt.empty())
-            buildFacesAt();
         const Vec3 own = unit(s.areaNormal(t));
         Vec3 sum{0, 0, 0};
-        for (std::uint32_t g : facesAt[indices[3 * t + k]]) {
+        const std::uint32_t corner = indices[3 * t + k];
+        const auto first = std::lower_bound(facesAt.begin(), facesAt.end(), std::make_pair(corner, std::uint32_t(0)));
+        for (auto it = first; it != facesAt.end() && it->first == corner; ++it) {
+            const std::uint32_t g = it->second;
             const Vec3 an = s.areaNormal(g);
             const double l = length(an);
             if (l > 0.0 && dot(mul(an, 1.0 / l), own) > kCrease)
@@ -188,7 +189,10 @@ MeshSolid letters(const std::vector<float>& positions, const std::vector<std::ui
     struct Curve {
         std::vector<double> s;
         std::vector<Vec3> p, n;
-        bool at(double x, Vec3& outP, Vec3& outN) const
+        std::vector<std::uint32_t> segTri;  // segTri[j]: the triangle the piece from point j-1 to j crosses
+        double loop = 0.0;                   // the length of the way round, if the cut closes on itself
+        // Where the line is `x` along, its facing, and the triangle there.
+        bool at(double x, Vec3& outP, Vec3& outN, std::uint32_t* tri = nullptr) const
         {
             if (s.size() < 2 || x < s.front() - 1e-9 || x > s.back() + 1e-9)
                 return false;
@@ -198,6 +202,8 @@ MeshSolid letters(const std::vector<float>& positions, const std::vector<std::ui
             const double f = span > 0.0 ? std::clamp((x - s[j - 1]) / span, 0.0, 1.0) : 0.0;
             outP = add(mul(p[j - 1], 1.0 - f), mul(p[j], f));
             outN = add(mul(n[j - 1], 1.0 - f), mul(n[j], f));
+            if (tri)
+                *tri = segTri[j];
             return true;
         }
     };
@@ -205,96 +211,137 @@ MeshSolid letters(const std::vector<float>& positions, const std::vector<std::ui
         const std::uint32_t x = indices[3 * t + a], y = indices[3 * t + b];
         return x < y ? (std::uint64_t(x) << 32 | y) : (std::uint64_t(y) << 32 | x);
     };
-    // Cuts the surface near q with the plane through q facing planeN and walks the cut
-    // from q both ways (positive along dir) until `limit` is covered or the surface ends.
-    const auto slice = [&](const Vec3& q, const Vec3& planeN, const Vec3& dir, double limit) -> Curve {
-        struct Seg {
-            std::uint64_t e[2];
+    // Which nearby triangles share each edge (sorted, for lookups).
+    std::vector<std::pair<std::uint64_t, std::uint32_t>> edgeTris;
+    edgeTris.reserve(nearby.size() * 3);
+    for (std::uint32_t t : nearby)
+        for (int k = 0; k < 3; ++k)
+            edgeTris.emplace_back(edgeKey(t, k, (k + 1) % 3), t);
+    std::sort(edgeTris.begin(), edgeTris.end());
+    const auto across = [&](std::uint64_t edge, std::uint32_t from) -> std::int64_t {
+        auto it = std::lower_bound(edgeTris.begin(), edgeTris.end(), std::make_pair(edge, std::uint32_t(0)));
+        for (; it != edgeTris.end() && it->first == edge; ++it)
+            if (it->second != from)
+                return it->second;
+        return -1;  // the surface ends (or leaves the nearby part)
+    };
+
+    // Cuts the surface with the plane through q facing planeN and follows the cut from q
+    // both ways (positive along dir), triangle to neighbouring triangle, until `limit`
+    // is covered or the surface ends. startTri: a triangle at q, if known.
+    const auto slice = [&](const Vec3& q, const Vec3& planeN, const Vec3& dir, double limit,
+                           std::int64_t startTri) -> Curve {
+        const auto side = [&](std::uint32_t t, int k) {
+            const double d = dot(sub(s.corner(t, k), q), planeN);
+            return d == 0.0 ? 1e-12 : d;  // a corner exactly on the plane counts as just above it
+        };
+        // The cut through triangle t: crossing edges (as corner pairs) and points.
+        struct Cross {
+            int count = 0;
+            int a[2]{}, b[2]{};
             Vec3 p[2], n[2];
         };
-        std::vector<Seg> segs;
-        std::unordered_map<std::uint64_t, std::array<int, 2>> byEdge;
-        for (std::uint32_t t : nearby) {
-            double d[3];
-            for (int k = 0; k < 3; ++k) {
-                d[k] = dot(sub(s.corner(t, k), q), planeN);
-                if (d[k] == 0.0)
-                    d[k] = 1e-12;  // a corner exactly on the plane counts as just above it
-            }
-            Seg sg{};
-            int count = 0;
-            for (int k = 0; k < 3 && count < 2; ++k) {
+        const auto cut = [&](std::uint32_t t) {
+            Cross c;
+            const double d[3] = {side(t, 0), side(t, 1), side(t, 2)};
+            for (int k = 0; k < 3 && c.count < 2; ++k) {
                 const int a = k, b = (k + 1) % 3;
                 if ((d[a] < 0.0) == (d[b] < 0.0))
                     continue;
                 const double f = d[a] / (d[a] - d[b]);
-                sg.e[count] = edgeKey(t, a, b);
-                sg.p[count] = add(mul(s.corner(t, a), 1.0 - f), mul(s.corner(t, b), f));
-                sg.n[count] = add(mul(cornerNormal(t, a), 1.0 - f), mul(cornerNormal(t, b), f));
-                ++count;
+                c.a[c.count] = a;
+                c.b[c.count] = b;
+                c.p[c.count] = add(mul(s.corner(t, a), 1.0 - f), mul(s.corner(t, b), f));
+                c.n[c.count] = add(mul(cornerNormal(t, a), 1.0 - f), mul(cornerNormal(t, b), f));
+                ++c.count;
             }
-            if (count != 2)
-                continue;
-            const int index = int(segs.size());
-            segs.push_back(sg);
-            for (int k = 0; k < 2; ++k) {
-                auto [it, fresh] = byEdge.try_emplace(sg.e[k], std::array<int, 2>{-1, -1});
-                (it->second[0] < 0 ? it->second[0] : it->second[1]) = index;
-            }
-        }
-        Curve curve;
-        // The piece of the cut nearest q (the sheet that was clicked).
-        int start = -1;
-        double bestD = 1e300, bestF = 0.0;
-        for (std::size_t i = 0; i < segs.size(); ++i) {
-            const Vec3 ab = sub(segs[i].p[1], segs[i].p[0]);
+            return c;
+        };
+        const auto distanceToCut = [&](std::uint32_t t, double& fOut) {
+            const Cross c = cut(t);
+            if (c.count != 2)
+                return 1e300;
+            const Vec3 ab = sub(c.p[1], c.p[0]);
             const double l2 = dot(ab, ab);
-            const double f = l2 > 0.0 ? std::clamp(dot(sub(q, segs[i].p[0]), ab) / l2, 0.0, 1.0) : 0.0;
-            const Vec3 c = add(segs[i].p[0], mul(ab, f));
-            const double dd = dot(sub(q, c), sub(q, c));
-            if (dd < bestD) {
-                bestD = dd;
-                start = int(i);
-                bestF = f;
+            const double f = l2 > 0.0 ? std::clamp(dot(sub(q, c.p[0]), ab) / l2, 0.0, 1.0) : 0.0;
+            fOut = f;
+            const Vec3 d = sub(q, add(c.p[0], mul(ab, f)));
+            return dot(d, d);
+        };
+        Curve curve;
+        // The triangle to start in: the one given, or else the nearest one the plane cuts.
+        double f0 = 0.0;
+        std::int64_t start = -1;
+        if (startTri >= 0 && distanceToCut(std::uint32_t(startTri), f0) < 1e299)
+            start = startTri;
+        if (start < 0) {
+            double best = 1e300;
+            for (std::uint32_t t : nearby) {
+                double f = 0.0;
+                const double d = distanceToCut(t, f);
+                if (d < best) {
+                    best = d;
+                    start = t;
+                    f0 = f;
+                }
             }
+            if (start < 0)
+                return curve;
         }
-        if (start < 0)
-            return curve;
-        const Seg& first = segs[std::size_t(start)];
-        const Vec3 s0 = add(mul(first.p[0], 1.0 - bestF), mul(first.p[1], bestF));
-        const Vec3 n0 = add(mul(first.n[0], 1.0 - bestF), mul(first.n[1], bestF));
-        std::vector<std::tuple<double, Vec3, Vec3>> points{{0.0, s0, n0}};
+        const auto t0 = std::uint32_t(start);
+        const Cross c0 = cut(t0);
+        const Vec3 s0 = add(mul(c0.p[0], 1.0 - f0), mul(c0.p[1], f0));
+        const Vec3 n0 = add(mul(c0.n[0], 1.0 - f0), mul(c0.n[1], f0));
+        struct Pt {
+            double s;
+            Vec3 p, n;
+            std::uint32_t via;  // the triangle crossed to get here from the point nearer q
+        };
+        std::vector<Pt> points{{0.0, s0, n0, t0}};
+        double loop = 0.0;
         for (const double sign : {1.0, -1.0}) {
-            int seg = start;
-            // Leave by the end that lies the way we're walking.
-            int end = dot(sub(first.p[1], first.p[0]), dir) * sign >= 0.0 ? 1 : 0;
+            std::uint32_t t = t0;
+            Cross c = c0;
+            int exit = dot(sub(c0.p[1], c0.p[0]), dir) * sign >= 0.0 ? 1 : 0;
             Vec3 cur = s0;
             double walked = 0.0;
-            for (std::size_t guard = 0; guard < segs.size() + 2; ++guard) {
-                const Seg& sg = segs[std::size_t(seg)];
-                walked += length(sub(sg.p[end], cur));
-                cur = sg.p[end];
-                points.emplace_back(sign * walked, cur, sg.n[end]);
+            for (std::size_t guard = 0; guard < nearby.size() + 2; ++guard) {
+                walked += length(sub(c.p[exit], cur));
+                cur = c.p[exit];
+                points.push_back({sign * walked, cur, c.n[exit], t});
                 if (walked >= limit)
                     break;
-                const auto it = byEdge.find(sg.e[end]);
-                const int other = it->second[0] == seg ? it->second[1] : it->second[0];
-                if (other < 0)
-                    break;  // the surface ends here
-                const std::uint64_t via = sg.e[end];
-                seg = other;
-                end = segs[std::size_t(seg)].e[0] == via ? 1 : 0;
+                const std::uint64_t edge = edgeKey(t, c.a[exit], c.b[exit]);
+                const std::int64_t next = across(edge, t);
+                if (next < 0)
+                    break;
+                t = std::uint32_t(next);
+                if (t == t0) {
+                    // All the way round, back where it started.
+                    loop = walked + length(sub(s0, cur));
+                    break;
+                }
+                c = cut(t);
+                if (c.count != 2)
+                    break;
+                // Leave by the other crossing edge.
+                exit = edgeKey(t, c.a[0], c.b[0]) == edge ? 1 : 0;
             }
         }
-        std::sort(points.begin(), points.end(),
-                  [](const auto& x, const auto& y) { return std::get<0>(x) < std::get<0>(y); });
-        for (const auto& [ds, pp, nn] : points) {
-            if (!curve.s.empty() && ds - curve.s.back() < 1e-12)
+        std::sort(points.begin(), points.end(), [](const Pt& x, const Pt& y) { return x.s < y.s; });
+        for (std::size_t i = 0; i < points.size(); ++i) {
+            const Pt& pt = points[i];
+            if (!curve.s.empty() && pt.s - curve.s.back() < 1e-12)
                 continue;
-            curve.s.push_back(ds);
-            curve.p.push_back(pp);
-            curve.n.push_back(nn);
+            // The piece from the previous point to this one: crossed on the way out to
+            // this point (ahead of q), or on the way out to the previous one (behind q).
+            const std::uint32_t seg = pt.s > 0.0 ? pt.via : (i > 0 ? points[i - 1].via : pt.via);
+            curve.s.push_back(pt.s);
+            curve.p.push_back(pt.p);
+            curve.n.push_back(pt.n);
+            curve.segTri.push_back(seg);
         }
+        curve.loop = loop;
         return curve;
     };
 
@@ -311,39 +358,49 @@ MeshSolid letters(const std::vector<float>& positions, const std::vector<std::ui
             v0 = std::min(v0, q[1]);
             v1 = std::max(v1, q[1]);
         }
-    // Up the surface from the spot, then a line across it at every step up: a letter
-    // point (u, v) goes v along the first and u along its row, like a sticker smoothed on.
-    const Curve upward = slice(point, right, up, std::max(std::abs(v0), std::abs(v1)) + maxEdge);
+    // Like smoothing on a sticker: the baseline runs across the surface through the spot,
+    // measured along it; from each step along it a line runs straight up the surface
+    // (square to the baseline). A letter point (u, v) goes u along the baseline, then v up
+    // that line. Long words follow curves round; the short way (up) bends with the
+    // surface too, so letters keep their size on a ball as well as on a cylinder.
+    const Curve baseline = slice(point, up, right, std::max(std::abs(u0), std::abs(u1)) + maxEdge, -1);
+    const auto tooLongForLoop = [](const Curve& c, double span) { return c.loop > 0.0 && span > c.loop - 1e-6; };
+    if (tooLongForLoop(baseline, u1 - u0))
+        throw GeometryError("The words are longer than the way round the shape, so they would run into "
+                            "themselves. Make them smaller or shorter.");
     const double step = maxEdge;
-    const int rowCount = std::max(2, int(std::ceil((v1 - v0) / step)) + 1);
-    const double limitAcross = std::max(std::abs(u0), std::abs(u1)) + maxEdge;
-    std::vector<Curve> rows;
-    rows.reserve(std::size_t(rowCount));
-    for (int k = 0; k < rowCount; ++k) {
-        const double v = v0 + k * step;
+    const int columnCount = std::max(2, int(std::ceil((u1 - u0) / step)) + 1);
+    const double limitUp = std::max(std::abs(v0), std::abs(v1)) + maxEdge;
+    std::vector<Curve> columns;
+    columns.reserve(std::size_t(columnCount));
+    for (int k = 0; k < columnCount; ++k) {
+        const double u = u0 + k * step;
         Vec3 q, qn, a, an, b, bn;
-        if (!upward.at(v, q, qn))
+        std::uint32_t tri = 0;
+        if (!baseline.at(u, q, qn, &tri))
             throw hangsOff();
         const double h = step * 0.25;
-        Vec3 tangent = up;
-        if (upward.at(v + h, b, bn) && upward.at(v - h, a, an))
+        Vec3 tangent = right;
+        if (baseline.at(u + h, b, bn) && baseline.at(u - h, a, an))
             tangent = sub(b, a);
-        else if (upward.at(v + h, b, bn))
+        else if (baseline.at(u + h, b, bn))
             tangent = sub(b, q);
-        else if (upward.at(v - h, a, an))
+        else if (baseline.at(u - h, a, an))
             tangent = sub(q, a);
-        tangent = length(tangent) > 0.0 ? unit(tangent) : up;
+        tangent = length(tangent) > 0.0 ? unit(tangent) : right;
         const Vec3 qnUnit = length(qn) > 0.0 ? unit(qn) : n;
-        Vec3 across = cross(tangent, qnUnit);
-        across = length(across) > 1e-9 ? unit(across) : right;
-        rows.push_back(slice(q, tangent, across, limitAcross));
+        Vec3 upHere = cross(qnUnit, tangent);
+        upHere = length(upHere) > 1e-9 ? unit(upHere) : up;
+        columns.push_back(slice(q, tangent, upHere, limitUp, tri));
+        if (tooLongForLoop(columns.back(), v1 - v0))
+            throw GeometryError("The letters are taller than the way round the shape. Make them smaller.");
     }
     const auto place = [&](double u, double v, Vec3& at, Vec3& facing) {
-        const double x = (v - v0) / step;
-        const int k = std::clamp(int(std::floor(x)), 0, rowCount - 2);
+        const double x = (u - u0) / step;
+        const int k = std::clamp(int(std::floor(x)), 0, columnCount - 2);
         const double f = std::clamp(x - k, 0.0, 1.0);
         Vec3 pa, na, pb, nb;
-        if (!rows[std::size_t(k)].at(u, pa, na) || !rows[std::size_t(k) + 1].at(u, pb, nb))
+        if (!columns[std::size_t(k)].at(v, pa, na) || !columns[std::size_t(k) + 1].at(v, pb, nb))
             throw hangsOff();
         at = add(mul(pa, 1.0 - f), mul(pb, f));
         facing = add(mul(na, 1.0 - f), mul(nb, f));

@@ -10,6 +10,8 @@
 #include "forge/core/Scale.h"
 #include "forge/core/Text.h"
 
+#include "forge/core/Transform.h"
+
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
@@ -115,6 +117,17 @@ TEST_CASE("Text shapes", "[text]")
         const TextSpec lines = text::withText(t, "AB\nCD", "", false, false);
         CHECK(lines.depth > t.depth * 1.8);
     }
+    SECTION("stacked letters run top to bottom")
+    {
+        const TextSpec down = text::withText(t, "ABCD", t.font, false, false, true);
+        CHECK(down.vertical);
+        CHECK(down.depth > 3.5 * down.width);  // four letters tall, one wide
+        CHECK_THAT(text::letterHeightOf(down), WithinRel(10.0, 0.05));
+        CHECK(text::stacked("AB C") == "A\nB\n \nC");
+        CHECK(text::stacked("\xC3\xA9t\xC3\xA9") == "\xC3\xA9\nt\n\xC3\xA9");  // é t é: letters kept whole
+        const ObjectId id2 = add(stack, doc, down, 80);
+        CHECK_THAT(doc.worldBounds(id2).size()[1], WithinAbs(down.depth, 0.05));
+    }
     SECTION("exports watertight")
     {
         const ExportMesh m = exportMeshes(doc, {id}).front();
@@ -184,6 +197,43 @@ TEST_CASE("Emboss on flat and curved faces", "[emboss]")
         CHECK(b.max[1] > 0.0);
         CHECK(exportMeshes(doc, {e}).front().openEdges == 0);
     }
+    SECTION("stacked words on the side of a box")
+    {
+        const ObjectId box = add(stack, doc, BoxSpec{30, 30, 60});
+        words.text = "ABC";
+        words.vertical = true;
+        const ObjectId e = embossed(stack, doc, box, {0, -50, 30}, {0, 1, 0}, words);
+        const Bounds b = doc.worldBounds(e);
+        CHECK_THAT(b.min[1], WithinAbs(-16.0, 1e-3));
+        // The letters stand in a column: taller than wide. Measure the words alone.
+        std::vector<float> pos;
+        std::vector<std::uint32_t> idx;
+        meshkernel::triangles(doc.meshSolid(box), pos, idx);
+        const auto spot = surfaceUnder(doc, box, {0, -50, 30}, {0, 1, 0}, 4);
+        const MeshSolid w = emboss::letters(pos, idx, spot->point, spot->normal, words);
+        const Bounds wb = meshkernel::bounds(w, Transform{});
+        CHECK(wb.size()[2] > 2.5 * wb.size()[0]);
+    }
+    SECTION("letters keep their size on a ball")
+    {
+        // Each letter "I" of a long row should take the same room wherever it is.
+        const ObjectId ball = add(stack, doc, SphereSpec{10});
+        words.text = "IIIIIIIIIII";
+        words.letterHeight = 4.0;
+        std::vector<float> pos;
+        std::vector<std::uint32_t> idx;
+        meshkernel::triangles(doc.meshSolid(ball), pos, idx);
+        const auto spot = surfaceUnder(doc, ball, {0, -50, 10}, {0, 1, 0}, 2);
+        REQUIRE(spot);
+        const double onBall = meshkernel::volume(emboss::letters(pos, idx, spot->point, spot->normal, words));
+        const ObjectId box = add(stack, doc, BoxSpec{80, 80, 10}, 100);
+        std::vector<float> pos2;
+        std::vector<std::uint32_t> idx2;
+        meshkernel::triangles(meshkernel::transformed(doc.meshSolid(box), doc.worldTransform(box)), pos2, idx2);
+        const double onFlat =
+            meshkernel::volume(emboss::letters(pos2, idx2, {100, 0, 10}, {0, 0, 1}, words));
+        CHECK_THAT(onBall, WithinRel(onFlat, 0.15));  // the same letters, just bent
+    }
     SECTION("raised on a ball")
     {
         const ObjectId ball = add(stack, doc, SphereSpec{15});
@@ -231,12 +281,14 @@ TEST_CASE("Emboss saves, loads and scales", "[emboss]")
     words.text = "Ok";
     words.font = text::defaultFont();
     words.italic = true;
+    words.vertical = true;
     words.angle = 15;
     const ObjectId box = add(stack, doc, BoxSpec{40, 40, 10});
     const ObjectId e = embossed(stack, doc, box, {0, 0, 50}, {0, 0, -1}, words);
     TextSpec t;
     t.text = "Name";
     t.bold = true;
+    t.vertical = true;
     const ObjectId label = add(stack, doc, text::sizedForLetters(t, 6), 60);
 
     file::save(doc, dir / "e.f3d", "test");

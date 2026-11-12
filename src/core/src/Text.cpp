@@ -22,6 +22,7 @@
 #include <TopoDS_Face.hxx>
 #include <gp_GTrsf.hxx>
 #include <gp_Trsf.hxx>
+#include <gp_Ax3.hxx>
 #include <gp_Vec.hxx>
 
 #include <algorithm>
@@ -116,17 +117,17 @@ Box2 boundsOf(const TopoDS_Shape& shape)
 }
 
 // Natural size of the words at font size 10 mm (cached: the same text is laid out often).
-Box2 naturalBox(const std::string& text, const std::string& font, bool bold, bool italic)
+Box2 naturalBox(const std::string& text, const std::string& font, bool bold, bool italic, bool vertical = false)
 {
     static std::mutex cacheMutex;
-    static std::map<std::tuple<std::string, std::string, bool, bool>, Box2> cache;
-    const auto key = std::make_tuple(text, resolvedFont(font), bold, italic);
+    static std::map<std::tuple<std::string, std::string, bool, bool, bool>, Box2> cache;
+    const auto key = std::make_tuple(text, resolvedFont(font), bold, italic, vertical);
     {
         std::lock_guard lock(cacheMutex);
         if (const auto it = cache.find(key); it != cache.end())
             return it->second;
     }
-    const Box2 b = boundsOf(letterFaces(text, font, bold, italic, 10.0));
+    const Box2 b = boundsOf(letterFaces(text, font, bold, italic, 10.0, vertical));
     std::lock_guard lock(cacheMutex);
     if (cache.size() > 2000)
         cache.clear();
@@ -237,7 +238,21 @@ std::string resolvedFont(const std::string& name)
     return resolvedLocked(name);
 }
 
-TopoDS_Shape letterFaces(const std::string& text, const std::string& font, bool bold, bool italic, double emSize)
+std::string stacked(const std::string& text)
+{
+    std::string out;
+    for (std::size_t i = 0; i < text.size(); ++i) {
+        const auto c = static_cast<unsigned char>(text[i]);
+        const bool continuation = (c & 0xC0) == 0x80;  // the rest of a multi-byte letter
+        if (!continuation && !out.empty() && c != '\n' && out.back() != '\n')
+            out += '\n';
+        out += text[i];
+    }
+    return out;
+}
+
+TopoDS_Shape letterFaces(const std::string& text, const std::string& font, bool bold, bool italic, double emSize,
+                         bool vertical)
 {
     if (!(emSize > 0.0))
         throw std::invalid_argument("The letters must be bigger than zero");
@@ -248,7 +263,10 @@ TopoDS_Shape letterFaces(const std::string& text, const std::string& font, bool 
                               Font_StrictLevel_Any))
         throw GeometryError("The font '" + name + "' could not be loaded");
     StdPrs_BRepTextBuilder builder;
-    const TopoDS_Shape faces = builder.Perform(brepFont, NCollection_String(text.c_str()));
+    const TopoDS_Shape faces =
+        vertical ? builder.Perform(brepFont, NCollection_String(stacked(text).c_str()), gp_Ax3(),
+                                   Graphic3d_HTA_CENTER, Graphic3d_VTA_BOTTOM)
+                 : builder.Perform(brepFont, NCollection_String(text.c_str()));
     if (faces.IsNull() || !TopExp_Explorer(faces, TopAbs_FACE).More())
         throw std::invalid_argument("Type some text to make letters");
     return faces;
@@ -264,7 +282,7 @@ TopoDS_Shape makeText(const TextSpec& spec)
 {
     if (!(spec.width > 0.0) || !(spec.depth > 0.0) || !(spec.height > 0.0))
         throw std::invalid_argument("The text's width, depth and thickness must be greater than zero");
-    const TopoDS_Shape faces = letterFaces(spec.text, spec.font, spec.bold, spec.italic, 10.0);
+    const TopoDS_Shape faces = letterFaces(spec.text, spec.font, spec.bold, spec.italic, 10.0, spec.vertical);
     const Box2 b = boundsOf(faces);
     if (!(b.width() > 0.0) || !(b.height() > 0.0))
         throw std::invalid_argument("Type some text to make letters");
@@ -292,24 +310,26 @@ TextSpec sizedForLetters(TextSpec spec, double letterHeight)
 {
     if (!(letterHeight > 0.0))
         throw std::invalid_argument("The letters must be bigger than zero");
-    const Box2 b = naturalBox(spec.text, spec.font, spec.bold, spec.italic);
+    const Box2 b = naturalBox(spec.text, spec.font, spec.bold, spec.italic, spec.vertical);
     const double em = letterHeight / capitalRatio(spec.font, spec.bold, spec.italic);
     spec.width = b.width() * em / 10.0;
     spec.depth = b.height() * em / 10.0;
     return spec;
 }
 
-TextSpec withText(const TextSpec& old, const std::string& text, const std::string& font, bool bold, bool italic)
+TextSpec withText(const TextSpec& old, const std::string& text, const std::string& font, bool bold, bool italic,
+                  bool vertical)
 {
     TextSpec next = old;
     next.text = text;
     next.font = font;
     next.bold = bold;
     next.italic = italic;
-    const Box2 now = naturalBox(text, font, bold, italic);  // throws for empty text
+    next.vertical = vertical;
+    const Box2 now = naturalBox(text, font, bold, italic, vertical);  // throws for empty text
     double sx = 0.0, sy = 0.0;
     try {
-        const Box2 was = naturalBox(old.text, old.font, old.bold, old.italic);
+        const Box2 was = naturalBox(old.text, old.font, old.bold, old.italic, old.vertical);
         sx = old.width / was.width();
         sy = old.depth / was.height();
     } catch (const std::exception&) {
@@ -323,7 +343,7 @@ TextSpec withText(const TextSpec& old, const std::string& text, const std::strin
 
 double letterHeightOf(const TextSpec& spec)
 {
-    const Box2 b = naturalBox(spec.text, spec.font, spec.bold, spec.italic);
+    const Box2 b = naturalBox(spec.text, spec.font, spec.bold, spec.italic, spec.vertical);
     return capitalRatio(spec.font, spec.bold, spec.italic) * 10.0 * spec.depth / b.height();
 }
 
@@ -334,7 +354,7 @@ std::vector<FlatPiece> flatLetters(const EmbossText& words, double maxEdge)
     if (!(maxEdge > 0.0))
         throw std::invalid_argument("flatLetters: maxEdge must be above zero");
     const double em = words.letterHeight / capitalRatio(words.font, words.bold, words.italic);
-    const TopoDS_Shape faces = letterFaces(words.text, words.font, words.bold, words.italic, em);
+    const TopoDS_Shape faces = letterFaces(words.text, words.font, words.bold, words.italic, em, words.vertical);
     const Box2 b = boundsOf(faces);
     const double cx = (b.x0 + b.x1) / 2.0, cy = (b.y0 + b.y1) / 2.0;
     const double a = words.angle * std::numbers::pi / 180.0, ca = std::cos(a), sa = std::sin(a);

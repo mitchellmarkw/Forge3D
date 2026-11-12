@@ -64,7 +64,7 @@ json bodyToJson(const Body& b)
         }
         if (const auto& e = b.boolean->emboss) {
             j["emboss"] = json{{"text", e->text},     {"font", e->font},   {"bold", e->bold},
-                               {"italic", e->italic}, {"letterHeight", e->letterHeight},
+                               {"italic", e->italic}, {"vertical", e->vertical}, {"letterHeight", e->letterHeight},
                                {"depth", e->depth},   {"raised", e->raised}, {"angle", e->angle}};
         }
         return j;
@@ -77,6 +77,7 @@ json bodyToJson(const Body& b)
         j["font"] = t->font;
         j["bold"] = t->bold;
         j["italic"] = t->italic;
+        j["vertical"] = t->vertical;
     }
     json params = json::object();
     const auto& fields = specFields(b.spec);
@@ -185,6 +186,7 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
             words.font = e->value("font", std::string());
             words.bold = e->value("bold", true);
             words.italic = e->value("italic", false);
+            words.vertical = e->value("vertical", false);
             words.letterHeight = number(*e, "letterHeight", where);
             words.depth = number(*e, "depth", where);
             words.raised = e->value("raised", true);
@@ -238,6 +240,7 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
                 text->font = j.value("font", std::string());
                 text->bold = j.value("bold", false);
                 text->italic = j.value("italic", false);
+                text->vertical = j.value("vertical", false);
             }
             b.spec = spec;
             known = true;

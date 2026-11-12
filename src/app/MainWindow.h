@@ -253,6 +253,7 @@ private:
         ObjectId target = kInvalidId;  // the shape being embossed, or the Emboss result being edited
         std::optional<emboss::SurfacePoint> spot;  // where the words go (plate coordinates)
         std::shared_ptr<const Mesh> preview;      // the result as it would be (result coordinates)
+        bool wordsOnly = false;                   // big shape: preview draws just the words over it
     };
     EmbossMode m_embossMode;
     EmbossText m_lastWords;          // the words used last, offered next time

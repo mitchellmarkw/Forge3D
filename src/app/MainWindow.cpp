@@ -10,6 +10,7 @@
 
 #include "forge/core/Emboss.h"
 #include "forge/core/Export.h"
+#include "forge/core/MeshKernel.h"
 #include "forge/core/FileFormat.h"
 #include "forge/core/Import.h"
 #include "forge/core/Picking.h"
@@ -1458,6 +1459,9 @@ namespace {
 constexpr std::uint64_t kSplitPlaneItem = ~std::uint64_t{0} - 1;  // ids no body will reach
 constexpr std::uint64_t kSplitShaftItem = ~std::uint64_t{0} - 2;
 constexpr std::uint64_t kSplitHeadItem = ~std::uint64_t{0} - 3;
+constexpr std::uint64_t kEmbossWordsItem = ~std::uint64_t{0} - 4;
+// Shapes bigger than this get a words-only preview: re-cutting them on every change is slow.
+constexpr std::size_t kQuickEmbossTriangles = 150'000;
 
 // A 2 x 2 square in the XY plane, centred, facing both ways.
 std::shared_ptr<const Mesh> splitPlaneMesh()
@@ -1729,6 +1733,14 @@ void MainWindow::startEmboss(ObjectId target, bool editing)
     mode.active = true;
     mode.editing = editing;
     mode.target = target;
+    try {
+        const ObjectId surface = editing && body->isBoolean() ? body->boolean->operands.front() : target;
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        mode.wordsOnly = meshkernel::triangleCount(m_doc.meshSolid(surface)) > kQuickEmbossTriangles;
+        QApplication::restoreOverrideCursor();
+    } catch (const std::exception&) {
+        QApplication::restoreOverrideCursor();
+    }
     EmbossText words = m_lastWords;
     try {
         if (editing) {
@@ -1806,9 +1818,17 @@ void MainWindow::updateEmbossPreview()
             struct RestoreCursor {
                 ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
             } restore;
-            m_embossMode.preview = m_doc.previewMesh(*spec);
-            m_embossPanel->setStatus(tr("This is how it will look. Click elsewhere on the shape to move the words."),
-                                     false);
+            if (m_embossMode.wordsOnly) {
+                m_embossMode.preview = m_doc.previewWords(*spec);
+                m_embossPanel->setStatus(tr("A big shape: the words are shown in orange and are cut in or joined on "
+                                            "when you click %1. Click elsewhere on the shape to move them.")
+                                             .arg(m_embossMode.editing ? tr("Apply") : tr("Emboss")),
+                                         false);
+            } else {
+                m_embossMode.preview = m_doc.previewMesh(*spec);
+                m_embossPanel->setStatus(
+                    tr("This is how it will look. Click elsewhere on the shape to move the words."), false);
+            }
             ok = true;
         }
     } catch (const std::exception& e) {
@@ -2401,7 +2421,15 @@ void MainWindow::refreshScene()
             item.id = id;
             item.mesh = m_doc.mesh(id);  // rebuilt only if the shape changed
             item.model = toQMatrix(m_doc.worldTransform(id));
-            if (m_embossMode.active && id == m_embossMode.target && m_embossMode.preview) {
+            if (m_embossMode.active && id == m_embossMode.target && m_embossMode.preview && m_embossMode.wordsOnly) {
+                // A big shape stays as it is; the words are drawn over it (see below).
+                DisplayItem words;
+                words.id = kEmbossWordsItem;
+                words.mesh = m_embossMode.preview;
+                words.model = m_embossMode.editing ? item.model : QMatrix4x4();
+                words.color = QVector3D(1.0f, 0.55f, 0.1f);
+                items.push_back(words);
+            } else if (m_embossMode.active && id == m_embossMode.target && m_embossMode.preview) {
                 // The shape with the words on, as it would be. A new result's coordinates
                 // are the plate's; an edited one keeps its placement.
                 item.mesh = m_embossMode.preview;
