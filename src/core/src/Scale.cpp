@@ -88,6 +88,22 @@ void scaleInto(const Document& doc, ObjectId id, const Vec3& factors, const Vec3
     }
     for (ObjectId part : body->boolean->operands)
         scaleChild(doc, part, factors, anchor, out);
+    if (body->boolean->op == BooleanOp::Edges && body->boolean->edges) {
+        // The picks move with the shape; evenly scaled, the rounding grows with it.
+        Body next = *body;
+        const auto move = [&](std::array<double, 3>& q) {
+            q = {factors[0] * (q[0] - anchor[0]) + anchor[0], factors[1] * (q[1] - anchor[1]) + anchor[1],
+                 factors[2] * (q[2] - anchor[2]) + anchor[2]};
+        };
+        for (EdgeRef& r : next.boolean->edges->edges) {
+            move(r.point);
+            move(r.facePoint);
+        }
+        if (even(factors))
+            next.boolean->edges->size *= factors[0];
+        out.push_back(std::move(next));
+        return;
+    }
     if (body->boolean->op == BooleanOp::Split || body->boolean->op == BooleanOp::Mirror ||
         body->boolean->op == BooleanOp::Emboss) {
         // The cutting / mirror plane (or the words' spot) stretches with everything else.

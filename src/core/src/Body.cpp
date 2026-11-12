@@ -312,6 +312,7 @@ std::string toString(BooleanOp op)
     case BooleanOp::Mirror: return "Mirror";
     case BooleanOp::Group: return "Group";
     case BooleanOp::Emboss: return "Emboss";
+    case BooleanOp::Edges: return "Edges";
     }
     return "Combine";
 }

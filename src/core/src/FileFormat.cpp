@@ -45,6 +45,7 @@ const char* opName(BooleanOp op)
     case BooleanOp::Mirror: return "mirror";
     case BooleanOp::Group: return "group";
     case BooleanOp::Emboss: return "emboss";
+    case BooleanOp::Edges: return "edges";
     }
     return "merge";
 }
@@ -61,6 +62,13 @@ json bodyToJson(const Body& b)
             b.boolean->op == BooleanOp::Emboss) {
             j["planePoint"] = b.boolean->planePoint;
             j["planeNormal"] = b.boolean->planeNormal;
+        }
+        if (const auto& f = b.boolean->edges) {
+            static const char* kinds[] = {"rounding", "fillet", "chamfer", "bevel"};
+            json picks = json::array();
+            for (const EdgeRef& r : f->edges)
+                picks.push_back(json{{"point", r.point}, {"facePoint", r.facePoint}});
+            j["edges"] = json{{"kind", kinds[int(f->kind)]}, {"size", f->size}, {"angle", f->angle}, {"picks", picks}};
         }
         if (const auto& e = b.boolean->emboss) {
             j["emboss"] = json{{"text", e->text},     {"font", e->font},   {"bold", e->bold},
@@ -145,6 +153,8 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
             spec.op = BooleanOp::Group;
         else if (op == "emboss" && version >= 10)
             spec.op = BooleanOp::Emboss;
+        else if (op == "edges" && version >= 11)
+            spec.op = BooleanOp::Edges;
         else
             damaged(where + ": unknown combine operation '" + op + "'");
         const auto operands = j.find("operands");
@@ -176,6 +186,42 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
             };
             readVec("planePoint", spec.planePoint);
             readVec("planeNormal", spec.planeNormal);
+        }
+        if (spec.op == BooleanOp::Edges) {
+            const auto e = j.find("edges");
+            if (e == j.end() || !e->is_object())
+                damaged(where + ": missing the edges");
+            EdgeFinish f;
+            const std::string kind = e->value("kind", std::string());
+            if (kind == "rounding")
+                f.kind = EdgeFinishKind::Rounding;
+            else if (kind == "fillet")
+                f.kind = EdgeFinishKind::Fillet;
+            else if (kind == "chamfer")
+                f.kind = EdgeFinishKind::Chamfer;
+            else if (kind == "bevel")
+                f.kind = EdgeFinishKind::Bevel;
+            else
+                damaged(where + ": unknown edge finish '" + kind + "'");
+            f.size = number(*e, "size", where);
+            f.angle = e->value("angle", 45.0);
+            const auto picks = e->find("picks");
+            if (picks == e->end() || !picks->is_array())
+                damaged(where + ": missing the picked edges");
+            for (const auto& p : *picks) {
+                EdgeRef r;
+                const auto readPoint = [&](const char* key, std::array<double, 3>& out) {
+                    const auto v = p.find(key);
+                    if (v == p.end() || !v->is_array() || v->size() != 3)
+                        damaged(where + ": a picked edge is damaged");
+                    for (std::size_t i = 0; i < 3; ++i)
+                        out[i] = (*v)[i].get<double>();
+                };
+                readPoint("point", r.point);
+                readPoint("facePoint", r.facePoint);
+                f.edges.push_back(r);
+            }
+            spec.edges = std::move(f);
         }
         if (spec.op == BooleanOp::Emboss) {
             const auto e = j.find("emboss");

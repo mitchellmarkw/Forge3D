@@ -31,7 +31,8 @@ namespace forge::file {
 //   9  imported meshes (type "mesh", width / depth / height, "data": zip entry name)
 //  10  text (type "text": text, font, bold, italic) and emboss results (operation
 //      "emboss", planePoint / planeNormal, "emboss": the words)
-inline constexpr int kFormatVersion = 10;
+//  11  edge finishes (operation "edges"; "edges": kind, size, angle, picks)
+inline constexpr int kFormatVersion = 11;
 inline constexpr const char* kExtension = ".f3d";
 inline constexpr const char* kDocumentEntry = "document.json";
 

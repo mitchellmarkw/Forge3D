@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.14.0 — Slice 5e: Edges (2026-11-12)
+
+- **Edges tool** (toolbar, Edit menu) for solid shapes, with four kinds:
+  - **Rounding**: outside edges turned into a curve of a set radius (R1, R2...).
+  - **Fillet**: inside corners filled with a curve of a set radius.
+  - **Chamfer**: the corner cut off flat, the same distance back on both faces.
+  - **Bevel**: a flat slope a set width across the face you pick, at a set angle to it.
+- Pick edges in the view: they light up as the mouse passes; click to pick or drop
+  one. Click a face to pick all its edges (click again to drop them). **All edges**
+  picks every edge the kind can go on. Rounding only offers outside edges and Fillet
+  only inside corners.
+- The view shows the result as you pick and change sizes; sizes too big for the
+  shape get a plain message instead.
+- The result stays editable: **Change the edges...** in Properties (kind, size, other
+  edges), or **Sharp edges again** to get the plain shape back. Picks follow the shape
+  when it is moved, resized, or the shape under it is changed.
+- Not for imported meshes (or shapes made with them): a message says so.
+- File format version 11. Older files still open.
+- 154 unit tests (3 new).
+
 ## 0.13.1 — Slice 5d fixes: Emboss on balls and big models; stacked letters (2026-11-12)
 
 - **Words keep their size on a ball.** Embossed words used to squeeze together and

@@ -105,6 +105,11 @@ PropertiesPanel::PropertiesPanel(QWidget* parent) : QWidget(parent)
     connect(editEmboss, &QPushButton::clicked, this, &PropertiesPanel::editEmbossRequested);
     general->addRow(editEmboss);
     m_editEmbossButton = editEmboss;
+    auto* editEdges = new QPushButton(tr("Change the edges..."));
+    editEdges->setToolTip(tr("Change the kind or size, or pick other edges"));
+    connect(editEdges, &QPushButton::clicked, this, &PropertiesPanel::editEdgesRequested);
+    general->addRow(editEdges);
+    m_editEdgesButton = editEdges;
     layout->addLayout(general);
 
     // A Text shape's words
@@ -232,6 +237,7 @@ void PropertiesPanel::setBody(const Body* body, const QString& context, bool isP
     m_editCutButton->setVisible(split && !isPart);
     const bool embossed = body->isBoolean() && body->boolean->op == BooleanOp::Emboss;
     m_editEmbossButton->setVisible(embossed && !isPart);
+    m_editEdgesButton->setVisible(body->isBoolean() && body->boolean->op == BooleanOp::Edges && !isPart);
     const auto* textSpec = body->isBoolean() ? nullptr : std::get_if<TextSpec>(&body->spec);
     m_textGroup->setVisible(textSpec != nullptr);
     if (textSpec) {
@@ -251,6 +257,10 @@ void PropertiesPanel::setBody(const Body* body, const QString& context, bool isP
         case BooleanOp::Mirror:
             button->setText(tr("Remove the mirror"));
             button->setToolTip(tr("Give back the shape the right way round, where it is"));
+            break;
+        case BooleanOp::Edges:
+            button->setText(tr("Sharp edges again"));
+            button->setToolTip(tr("Give back the shape with its edges as they were"));
             break;
         case BooleanOp::Emboss:
             button->setText(tr("Remove the words"));

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "forge/core/Document.h"
 
+#include "forge/core/Edges.h"
 #include "forge/core/Emboss.h"
 
 #include "forge/core/Export.h"
@@ -195,7 +196,12 @@ void Document::validateBoolean(const Body& body, const std::map<ObjectId, Object
 {
     const auto& ops = body.boolean->operands;
     const BooleanOp op = body.boolean->op;
-    if (op == BooleanOp::Split || op == BooleanOp::Mirror || op == BooleanOp::Emboss) {
+    if (op == BooleanOp::Edges) {
+        if (ops.size() != 1)
+            throw std::invalid_argument("Edges works on exactly one shape");
+        if (!body.boolean->edges || body.boolean->edges->edges.empty())
+            throw std::invalid_argument("Pick at least one edge");
+    } else if (op == BooleanOp::Split || op == BooleanOp::Mirror || op == BooleanOp::Emboss) {
         if (op == BooleanOp::Emboss && !body.boolean->emboss)
             throw std::invalid_argument("Emboss needs words");
         if (ops.size() != 1)
@@ -439,6 +445,14 @@ TopoDS_Shape Document::combine(const BooleanSpec& spec) const
     try {
         if (op == BooleanOp::Emboss)
             throw GeometryError("Emboss is worked out by the mesh engine");
+        if (op == BooleanOp::Edges) {
+            if (!spec.edges)
+                throw GeometryError("No edges were picked");
+            const ObjectId part = operands.at(0);
+            const TopoDS_Shape placed =
+                BRepBuilderAPI_Transform(shape(part), toTrsf(localTransform(part)), /*copy=*/true).Shape();
+            return edges::apply(placed, *spec.edges);
+        }
         if (op == BooleanOp::Mirror) {
             const ObjectId part = operands.at(0);
             gp_Trsf mirror;
@@ -517,6 +531,7 @@ TopoDS_Shape Document::combine(const BooleanSpec& spec) const
             case BooleanOp::Mirror:
             case BooleanOp::Group:
             case BooleanOp::Emboss:
+            case BooleanOp::Edges:
                 break;  // handled above / by the mesh engine
             }
         }
@@ -593,7 +608,8 @@ TopoDS_Shape Document::previewCombine(const BooleanSpec& spec) const
     for (ObjectId part : spec.operands)
         if (!find(part))
             throw std::out_of_range("No body with id " + std::to_string(part));
-    if ((spec.op == BooleanOp::Split || spec.op == BooleanOp::Mirror || spec.op == BooleanOp::Emboss) &&
+    if ((spec.op == BooleanOp::Split || spec.op == BooleanOp::Mirror || spec.op == BooleanOp::Emboss ||
+         spec.op == BooleanOp::Edges) &&
         spec.operands.size() != 1)
         throw std::invalid_argument(toString(spec.op) + " works on exactly one shape");
     return combine(spec);
@@ -712,6 +728,9 @@ MeshSolid Document::combineMeshes(const BooleanSpec& spec) const
     case BooleanOp::Split: return meshkernel::trimmed(parts.front(), spec.planePoint, spec.planeNormal);
     case BooleanOp::Mirror: return meshkernel::mirrored(parts.front(), spec.planePoint, spec.planeNormal);
     case BooleanOp::Group: return meshkernel::together(parts);
+    case BooleanOp::Edges:
+        throw GeometryError("Rounding and chamfering work on solid shapes, not on imported meshes or shapes made "
+                            "with them.");
     case BooleanOp::Emboss: {
         if (!spec.emboss)
             throw GeometryError("Emboss has no words");
@@ -764,7 +783,7 @@ std::shared_ptr<const Mesh> Document::previewMesh(const BooleanSpec& spec) const
         if (!find(part))
             throw std::out_of_range("No body with id " + std::to_string(part));
     if (!specUsesMesh(spec))
-        throw std::invalid_argument("previewMesh is for mesh-engine results");
+        return std::make_shared<const Mesh>(tessellate(previewCombine(spec)));
     MeshSolid solid;
     if (m_lastPreview && m_lastPreview->spec == spec && partsUnchanged(*m_lastPreview)) {
         solid = m_lastPreview->solid;
