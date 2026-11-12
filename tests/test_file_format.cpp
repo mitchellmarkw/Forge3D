@@ -118,7 +118,7 @@ TEST_CASE("the JSON names its format and version", "[file]")
     fill(doc);
     const std::string json = file::toJson(doc, "Forge3D 9.9");
     CHECK_THAT(json, ContainsSubstring("\"format\": \"forge3d-document\""));
-    CHECK_THAT(json, ContainsSubstring("\"formatVersion\": 7"));
+    CHECK_THAT(json, ContainsSubstring("\"formatVersion\": 8"));
     CHECK_THAT(json, ContainsSubstring("\"radiusY\""));
     CHECK_THAT(json, ContainsSubstring("\"rotationX\""));
     CHECK_THAT(json, ContainsSubstring("\"createdBy\": \"Forge3D 9.9\""));

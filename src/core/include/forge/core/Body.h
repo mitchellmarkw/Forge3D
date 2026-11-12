@@ -195,9 +195,9 @@ PrimitiveSpec madeRound(const PrimitiveSpec& spec);
 
 // ---- Combine results ------------------------------------------------------------
 
-enum class BooleanOp { Merge, Subtract, Intersect, Split };
+enum class BooleanOp { Merge, Subtract, Intersect, Split, Mirror, Group };
 
-// "Merge", "Subtract", "Intersect", "Split"
+// "Merge", "Subtract", "Intersect", "Split", "Mirror", "Group"
 std::string toString(BooleanOp op);
 
 // A body made by combining other bodies (its parts, or "operands").
@@ -207,6 +207,9 @@ std::string toString(BooleanOp op);
 //   Split:     one part, cut by a plane; only the side the plane's normal points
 //              to is kept. (Keeping both halves makes two Split results, one on a
 //              copy of the part.)
+//   Mirror:    one part, reflected in the plane (planePoint / planeNormal).
+//   Group:     the parts kept as they are, side by side, moving as one (no
+//              merging: they may overlap or be far apart).
 // The parts stay in the document, hidden inside the result and still editable;
 // their placements are relative to the result. A part belongs to at most one result.
 struct BooleanSpec {
@@ -215,8 +218,8 @@ struct BooleanSpec {
     // The point the result turns around, in its own coordinates. Fixed when the
     // result is made, so editing a part never makes the result jump.
     std::array<double, 3> pivot{0.0, 0.0, 0.0};
-    // Split only: the cutting plane in the result's own coordinates, as a point on
-    // it and a unit normal pointing into the half that is kept.
+    // Split: the cutting plane in the result's own coordinates, as a point on it and
+    // a unit normal pointing into the half that is kept. Mirror: the mirror plane.
     std::array<double, 3> planePoint{0.0, 0.0, 0.0};
     std::array<double, 3> planeNormal{0.0, 0.0, 1.0};
 

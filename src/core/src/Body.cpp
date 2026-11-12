@@ -279,6 +279,8 @@ std::string toString(BooleanOp op)
     case BooleanOp::Subtract: return "Subtract";
     case BooleanOp::Intersect: return "Intersect";
     case BooleanOp::Split: return "Split";
+    case BooleanOp::Mirror: return "Mirror";
+    case BooleanOp::Group: return "Group";
     }
     return "Combine";
 }

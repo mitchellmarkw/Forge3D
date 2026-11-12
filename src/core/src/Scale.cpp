@@ -88,9 +88,18 @@ void scaleInto(const Document& doc, ObjectId id, const Vec3& factors, const Vec3
     }
     for (ObjectId part : body->boolean->operands)
         scaleChild(doc, part, factors, anchor, out);
-    if (body->boolean->op == BooleanOp::Split) {
-        // The cutting plane stretches with everything else.
+    if (body->boolean->op == BooleanOp::Split || body->boolean->op == BooleanOp::Mirror) {
+        // The cutting / mirror plane stretches with everything else.
         Body next = *body;
+        if (body->boolean->op == BooleanOp::Mirror && !even(factors)) {
+            // A reflection only survives a stretch along or across its mirror.
+            const Vec3& n0 = body->boolean->planeNormal;
+            int axes = 0;
+            for (double v : n0)
+                axes += std::abs(v) > 1e-9 ? 1 : 0;
+            if (axes > 1)
+                throw NotScalable("'" + body->name + "' is mirrored at an angle, so it can only be scaled evenly");
+        }
         Vec3& q = next.boolean->planePoint;
         q = {factors[0] * (q[0] - anchor[0]) + anchor[0], factors[1] * (q[1] - anchor[1]) + anchor[1],
              factors[2] * (q[2] - anchor[2]) + anchor[2]};

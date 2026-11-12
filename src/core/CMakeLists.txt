@@ -5,6 +5,7 @@
 
 add_library(forge_core STATIC
     include/forge/core/Align.h
+    include/forge/core/Arrange.h
     include/forge/core/Body.h
     include/forge/core/CommandStack.h
     include/forge/core/Commands.h
@@ -18,6 +19,7 @@ add_library(forge_core STATIC
     include/forge/core/Tessellator.h
     include/forge/core/Transform.h
     src/Align.cpp
+    src/Arrange.cpp
     src/Body.cpp
     src/CommandStack.cpp
     src/Commands.cpp

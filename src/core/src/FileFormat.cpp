@@ -41,6 +41,8 @@ const char* opName(BooleanOp op)
     case BooleanOp::Subtract: return "subtract";
     case BooleanOp::Intersect: return "intersect";
     case BooleanOp::Split: return "split";
+    case BooleanOp::Mirror: return "mirror";
+    case BooleanOp::Group: return "group";
     }
     return "merge";
 }
@@ -53,7 +55,7 @@ json bodyToJson(const Body& b)
         j["operation"] = opName(b.boolean->op);
         j["operands"] = b.boolean->operands;
         j["pivot"] = b.boolean->pivot;
-        if (b.boolean->op == BooleanOp::Split) {
+        if (b.boolean->op == BooleanOp::Split || b.boolean->op == BooleanOp::Mirror) {
             j["planePoint"] = b.boolean->planePoint;
             j["planeNormal"] = b.boolean->planeNormal;
         }
@@ -119,6 +121,10 @@ Body bodyFromJson(const json& j, std::size_t index, int version)
             spec.op = BooleanOp::Intersect;
         else if (op == "split" && version >= 7)
             spec.op = BooleanOp::Split;
+        else if (op == "mirror" && version >= 8)
+            spec.op = BooleanOp::Mirror;
+        else if (op == "group" && version >= 8)
+            spec.op = BooleanOp::Group;
         else
             damaged(where + ": unknown combine operation '" + op + "'");
         const auto operands = j.find("operands");
@@ -137,7 +143,7 @@ Body bodyFromJson(const json& j, std::size_t index, int version)
                 damaged(where + ": bad pivot");
             spec.pivot[i] = (*pivot)[i].get<double>();
         }
-        if (spec.op == BooleanOp::Split) {
+        if (spec.op == BooleanOp::Split || spec.op == BooleanOp::Mirror) {
             const auto readVec = [&](const char* key, std::array<double, 3>& out) {
                 const auto v = j.find(key);
                 if (v == j.end() || !v->is_array() || v->size() != 3)
