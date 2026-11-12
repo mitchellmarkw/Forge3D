@@ -25,8 +25,8 @@ Gate to Phase 2: a new user prints a customised part within 10 minutes.
 | 5a | Export STL / 3MF / OBJ; "Send to Slicer" | Done (0.10.0) |
 | 5b | STL / 3MF / OBJ import with auto-repair | Done (0.11.0) |
 | 5c | Mesh engine: fast Merge / Subtract / Intersect / Split / Mirror / Group on big imported meshes | Done (0.12.0) |
-| 5d | Text shape; Emboss words that wrap round the surface | **Delivered for testing** |
-| 5e | Chamfer / fillet (round) / bevel edges, picked in the view | Next |
+| 5d | Text shape; Emboss words that wrap round the surface; stacked letters | Done (0.13.1) |
+| 5e | Rounding / fillet / chamfer / bevel edges, picked in the view | **Delivered for testing** |
 | — | Emboss an image or logo | Planned |
 | 6 | Feature tree panel with rollback bar | Planned |
 | 7 | 2D sketcher with constraints | Planned |

@@ -2,12 +2,14 @@
 #include "MainWindow.h"
 
 #include "BuildInfo.h"
+#include "EdgesPanel.h"
 #include "EmbossPanel.h"
 #include "Log.h"
 #include "PropertiesPanel.h"
 #include "SplitPanel.h"
 #include "Viewport.h"
 
+#include "forge/core/Edges.h"
 #include "forge/core/Emboss.h"
 #include "forge/core/Export.h"
 #include "forge/core/MeshKernel.h"
@@ -134,6 +136,10 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
     setCentralWidget(m_viewport);
     connect(m_viewport, &Viewport::firstFrameRendered, this, &MainWindow::firstFrameRendered);
     connect(m_viewport, &Viewport::clicked, this, &MainWindow::onViewportClicked);
+    connect(m_viewport, &Viewport::hovered, this, [this](const QVector3D& o, const QVector3D& d, const QPointF& px) {
+        if (m_edgesMode.active)
+            edgesHover(o, d, px);
+    });
     connect(m_viewport, &Viewport::leftPressed, this, &MainWindow::onLeftPressed);
     connect(m_viewport, &Viewport::leftDragged, this, &MainWindow::onLeftDragged);
     connect(m_viewport, &Viewport::leftReleased, this, &MainWindow::onLeftReleased);
@@ -277,6 +283,8 @@ void MainWindow::createActions()
             endSplit();  // Esc leaves the Split tool without cutting
         else if (m_embossMode.active)
             endEmboss();
+        else if (m_edgesMode.active)
+            endEdges();
         else
             setSelection(std::vector<ObjectId>{});
     });
@@ -391,6 +399,23 @@ void MainWindow::createActions()
         startEmboss(id, false);
     });
 
+    m_edgesAction = new QAction(tr("Edges"), this);
+    m_edgesAction->setToolTip(tr("Edges: round, fillet, chamfer or bevel the edges of the selected shape"));
+    connect(m_edgesAction, &QAction::triggered, this, [this] {
+        const ObjectId id = selectedOne();
+        if (id == kInvalidId || m_selection.size() != 1 || !m_doc.isTopLevel(id)) {
+            statusBar()->showMessage(tr("Edges: select one shape on the plate first."), 6000);
+            return;
+        }
+        if (m_doc.usesMeshEngine(id)) {
+            QMessageBox::information(this, tr("Forge3D"),
+                                     tr("Rounding and chamfering work on solid shapes made in Forge3D, not on "
+                                        "imported meshes or shapes made with them."));
+            return;
+        }
+        startEdges(id, false);
+    });
+
     // Align Shapes: the first shape selected stays put; the others move to it.
     m_alignMenu = new QMenu(tr("Align Shapes"), this);
     m_alignMenu->setToolTipsVisible(true);
@@ -465,6 +490,7 @@ void MainWindow::createMenus()
     edit->addAction(m_separate);
     edit->addAction(m_split);
     edit->addAction(m_emboss);
+    edit->addAction(m_edgesAction);
     edit->addMenu(m_alignMenu);
     edit->addMenu(m_mirrorMenu);
     edit->addAction(m_group);
@@ -524,6 +550,7 @@ void MainWindow::createToolBar()
     bar->addAction(m_separate);
     bar->addAction(m_split);
     bar->addAction(m_emboss);
+    bar->addAction(m_edgesAction);
     bar->addSeparator();
     {
         auto* alignButton = new QToolButton(bar);
@@ -584,6 +611,9 @@ void MainWindow::createDocks()
     m_embossPanel = new EmbossPanel;
     stackLayout->addWidget(m_embossPanel);
     m_embossPanel->hide();
+    m_edgesPanel = new EdgesPanel;
+    stackLayout->addWidget(m_edgesPanel);
+    m_edgesPanel->hide();
     // Long hint texts wrap instead of widening the dock.
     m_propsStack->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     propsDock->setWidget(m_propsStack);
@@ -598,6 +628,19 @@ void MainWindow::createDocks()
     connect(m_embossPanel, &EmbossPanel::typing, this, [this] { m_embossTimer->start(400); });
     connect(m_embossPanel, &EmbossPanel::applyRequested, this, &MainWindow::applyEmboss);
     connect(m_embossPanel, &EmbossPanel::cancelRequested, this, &MainWindow::endEmboss);
+    m_edgesTimer = new QTimer(this);
+    m_edgesTimer->setSingleShot(true);
+    connect(m_edgesTimer, &QTimer::timeout, this, &MainWindow::updateEdgesPreview);
+    connect(m_edgesPanel, &EdgesPanel::kindChanged, this, &MainWindow::edgesKindChanged);
+    connect(m_edgesPanel, &EdgesPanel::sizeChanged, this, [this] { m_edgesTimer->start(0); });
+    connect(m_edgesPanel, &EdgesPanel::allRequested, this, &MainWindow::pickAllEdges);
+    connect(m_edgesPanel, &EdgesPanel::clearRequested, this, [this] {
+        m_edgesMode.picks.clear();
+        rebuildEdgeHighlights();
+        m_edgesTimer->start(0);
+    });
+    connect(m_edgesPanel, &EdgesPanel::applyRequested, this, &MainWindow::applyEdges);
+    connect(m_edgesPanel, &EdgesPanel::cancelRequested, this, &MainWindow::endEdges);
     propsDock->setMinimumWidth(320);
     addDockWidget(Qt::RightDockWidgetArea, propsDock);
 
@@ -611,6 +654,7 @@ void MainWindow::createDocks()
     connect(m_properties, &PropertiesPanel::separateRequested, this, &MainWindow::separateSelected);
     connect(m_properties, &PropertiesPanel::editCutRequested, this, [this] { startSplit(selectedOne(), true); });
     connect(m_properties, &PropertiesPanel::editEmbossRequested, this, [this] { startEmboss(selectedOne(), true); });
+    connect(m_properties, &PropertiesPanel::editEdgesRequested, this, [this] { startEdges(selectedOne(), true); });
     connect(m_properties, &PropertiesPanel::keepRoundChanged, this, [this](bool on) { m_keepRound = on; });
     connect(m_properties, &PropertiesPanel::sitOnPlateRequested, this, [this](ObjectId id) {
         try {
@@ -688,6 +732,8 @@ void MainWindow::setSelection(std::vector<ObjectId> ids)
         endSplit();  // picking something else leaves the Split tool
     if (m_embossMode.active)
         endEmboss();
+    if (m_edgesMode.active)
+        endEdges();
     const ObjectId previousOne = selectedOne();
     m_selection = std::move(ids);
     if (const Body* body = m_doc.find(selectedOne()); body && body->id != previousOne) {
@@ -723,6 +769,10 @@ void MainWindow::onViewportClicked(const QVector3D& origin, const QVector3D& dir
         return;  // while splitting, clicks don't change what is selected (Cancel or Esc leaves)
     if (m_embossMode.active) {
         placeEmboss(origin, direction);  // a click on the shape moves the words there
+        return;
+    }
+    if (m_edgesMode.active) {
+        edgesClick(origin, direction);
         return;
     }
     Ray ray;
@@ -813,8 +863,8 @@ void MainWindow::onLeftPressed(const QVector3D& origin, const QVector3D& directi
             m_pressOnHandle = true;
         return;
     }
-    if (m_embossMode.active)
-        return;  // shapes stay put while the words are placed
+    if (m_embossMode.active || m_edgesMode.active)
+        return;  // shapes stay put while the tool is open
 
     if (handle.valid() && multiSelection()) {
         // Several shapes: move or turn them together about their shared middle.
@@ -1460,6 +1510,44 @@ constexpr std::uint64_t kSplitPlaneItem = ~std::uint64_t{0} - 1;  // ids no body
 constexpr std::uint64_t kSplitShaftItem = ~std::uint64_t{0} - 2;
 constexpr std::uint64_t kSplitHeadItem = ~std::uint64_t{0} - 3;
 constexpr std::uint64_t kEmbossWordsItem = ~std::uint64_t{0} - 4;
+constexpr std::uint64_t kEdgesPickedItem = ~std::uint64_t{0} - 5;
+constexpr std::uint64_t kEdgesHoverItem = ~std::uint64_t{0} - 6;
+
+// Thin six-sided tubes along lines: how picked edges are drawn.
+std::shared_ptr<const Mesh> tubes(const std::vector<const std::vector<Vec3>*>& lines, float radius)
+{
+    auto mesh = std::make_shared<Mesh>();
+    constexpr int sides = 6;
+    for (const auto* line : lines) {
+        for (std::size_t i = 0; i + 1 < line->size(); ++i) {
+            const QVector3D a((*line)[i][0], (*line)[i][1], (*line)[i][2]);
+            const QVector3D b((*line)[i + 1][0], (*line)[i + 1][1], (*line)[i + 1][2]);
+            const QVector3D along = (b - a).normalized();
+            if (along.isNull())
+                continue;
+            QVector3D side = QVector3D::crossProduct(along, QVector3D(0, 0, 1));
+            if (side.length() < 0.1f)
+                side = QVector3D::crossProduct(along, QVector3D(1, 0, 0));
+            side.normalize();
+            const QVector3D other = QVector3D::crossProduct(along, side);
+            const auto base = std::uint32_t(mesh->positions.size() / 3);
+            for (const QVector3D& end : {a, b})
+                for (int k = 0; k < sides; ++k) {
+                    const float t = float(k) * 2.0f * float(M_PI) / sides;
+                    const QVector3D n = side * std::cos(t) + other * std::sin(t);
+                    const QVector3D p = end + n * radius;
+                    mesh->positions.insert(mesh->positions.end(), {p.x(), p.y(), p.z()});
+                    mesh->normals.insert(mesh->normals.end(), {n.x(), n.y(), n.z()});
+                }
+            for (int k = 0; k < sides; ++k) {
+                const std::uint32_t a0 = base + std::uint32_t(k), a1 = base + std::uint32_t((k + 1) % sides);
+                const std::uint32_t b0 = a0 + sides, b1 = a1 + sides;
+                mesh->indices.insert(mesh->indices.end(), {a0, a1, b1, a0, b1, b0});
+            }
+        }
+    }
+    return mesh;
+}
 // Shapes bigger than this get a words-only preview: re-cutting them on every change is slow.
 constexpr std::size_t kQuickEmbossTriangles = 150'000;
 
@@ -1714,9 +1802,320 @@ void MainWindow::applySplit()
     setSelection(made.front());
 }
 
+void MainWindow::startEdges(ObjectId target, bool editing)
+{
+    const Body* body = m_doc.find(target);
+    if (!body || !m_doc.isTopLevel(target))
+        return;
+    if (m_dragState.kind != Drag::Kind::None)
+        cancelDrag();
+    if (m_splitMode.active)
+        endSplit();
+    if (m_embossMode.active)
+        endEmboss();
+    EdgesMode mode;
+    mode.active = true;
+    mode.editing = editing;
+    mode.target = target;
+    EdgeFinish finish;
+    try {
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        struct RestoreCursor {
+            ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
+        } restore;
+        mode.shape = pickableShape(m_doc, target);
+        mode.found = edges::analyse(mode.shape);
+        mode.finder = std::make_shared<edges::FaceFinder>(mode.shape);
+        const auto size = m_doc.worldBounds(target).size();
+        mode.size = std::sqrt(double(size[0]) * size[0] + double(size[1]) * size[1] + double(size[2]) * size[2]);
+        if (editing) {
+            if (!body->isBoolean() || body->boolean->op != BooleanOp::Edges)
+                return;
+            finish = edgesInPlate(m_doc, target);
+            for (const EdgeRef& ref : finish.edges) {
+                const int e = edges::edgeFor(mode.found, ref, std::max(mode.size * 2e-3, 1e-3));
+                if (e >= 0)
+                    mode.picks.push_back({e, ref});
+            }
+        } else {
+            // A size to suit the shape: about a twentieth of its smallest side.
+            auto sides = m_doc.worldBounds(target).size();
+            std::sort(sides.begin(), sides.end());
+            finish.size = std::clamp(std::round(double(sides[0]) * 0.1 * 2.0) / 2.0, 0.5, 5.0);
+        }
+    } catch (const std::exception& e) {
+        QMessageBox::information(this, tr("Forge3D"), QString::fromUtf8(e.what()));
+        return;
+    }
+    m_edgesMode = std::move(mode);
+    const QString name = QString::fromStdString(body->name);
+    m_edgesPanel->start(editing ? tr("Change the edges of '%1'").arg(name) : tr("Edges of '%1'").arg(name), editing,
+                        finish.kind, finish.size, finish.angle);
+    m_propsDockWidth = m_propsDock->width();
+    m_properties->hide();
+    m_edgesPanel->show();
+    statusBar()->showMessage(tr("Edges: click edges (or faces) to pick them, then click Apply. Esc cancels."));
+    rebuildEdgeHighlights();
+    updateEdgesPreview();
+    refreshCommandState();
+}
+
+void MainWindow::endEdges()
+{
+    if (!m_edgesMode.active)
+        return;
+    m_edgesTimer->stop();
+    m_edgesMode = EdgesMode{};
+    m_edgesPanel->hide();
+    m_properties->show();
+    QTimer::singleShot(0, this, [this] { resizeDocks({m_propsDock}, {m_propsDockWidth}, Qt::Horizontal); });
+    statusBar()->clearMessage();
+    refreshScene();
+    refreshCommandState();
+}
+
+std::optional<EdgeFinish> MainWindow::currentEdgeFinish() const
+{
+    if (!m_edgesMode.active || m_edgesMode.picks.empty())
+        return std::nullopt;
+    EdgeFinish f;
+    f.kind = m_edgesPanel->kind();
+    f.size = m_edgesPanel->size();
+    f.angle = m_edgesPanel->angle();
+    for (const auto& pick : m_edgesMode.picks)
+        f.edges.push_back(pick.ref);
+    return f;
+}
+
+std::optional<BooleanSpec> MainWindow::currentEdgesSpec() const
+{
+    const auto f = currentEdgeFinish();
+    if (!f)
+        return std::nullopt;
+    if (m_edgesMode.editing)
+        return withEdges(m_doc, m_edgesMode.target, *f).boolean;
+    return edgesSpec(m_doc, m_edgesMode.target, *f);
+}
+
+void MainWindow::updateEdgesPreview()
+{
+    if (!m_edgesMode.active)
+        return;
+    m_edgesMode.preview.reset();
+    m_edgesPanel->setPickedCount(int(m_edgesMode.picks.size()));
+    bool ok = false;
+    try {
+        const auto spec = currentEdgesSpec();
+        if (!spec) {
+            m_edgesPanel->setStatus(tr("Click the edges to change."), false);
+        } else {
+            QApplication::setOverrideCursor(Qt::WaitCursor);
+            struct RestoreCursor {
+                ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
+            } restore;
+            m_edgesMode.preview = m_doc.previewMesh(*spec);
+            m_edgesPanel->setStatus(tr("This is how it will look."), false);
+            ok = true;
+        }
+    } catch (const std::exception& e) {
+        m_edgesPanel->setStatus(QString::fromUtf8(e.what()), true);
+    }
+    m_edgesPanel->setApplyEnabled(ok);
+    refreshScene();
+}
+
+void MainWindow::rebuildEdgeHighlights()
+{
+    const float radius = std::max(0.02f, m_viewport->camera().distance() * 0.0022f);
+    std::vector<const std::vector<Vec3>*> picked;
+    for (const auto& pick : m_edgesMode.picks)
+        picked.push_back(&m_edgesMode.found.edges[std::size_t(pick.edge)].polyline);
+    m_edgesMode.pickedLines = picked.empty() ? nullptr : tubes(picked, radius);
+    const int h = m_edgesMode.hover;
+    m_edgesMode.hoverLine =
+        h >= 0 ? tubes({&m_edgesMode.found.edges[std::size_t(h)].polyline}, radius * 1.4f) : nullptr;
+}
+
+void MainWindow::edgesHover(const QVector3D& origin, const QVector3D& direction, const QPointF& pixel)
+{
+    // The suitable edge drawn nearest the mouse (within a few pixels), if not hidden.
+    const EdgeFinishKind kind = m_edgesPanel->kind();
+    const QVector3D dir = direction.normalized();
+    std::optional<double> hitDistance;
+    if (const auto hit = m_edgesMode.finder->under({origin.x(), origin.y(), origin.z()}, {dir.x(), dir.y(), dir.z()}))
+        hitDistance = hit->distance;
+    const double slack = std::max(m_edgesMode.size * 0.01, 0.2);
+    int best = -1;
+    double bestPx = 9.0;
+    for (std::size_t i = 0; i < m_edgesMode.found.edges.size(); ++i) {
+        const auto& e = m_edgesMode.found.edges[i];
+        if (!edges::suits(kind, e.bend))
+            continue;
+        for (std::size_t k = 0; k + 1 < e.polyline.size(); ++k) {
+            const QVector3D a(e.polyline[k][0], e.polyline[k][1], e.polyline[k][2]);
+            const QVector3D b(e.polyline[k + 1][0], e.polyline[k + 1][1], e.polyline[k + 1][2]);
+            const auto pa = m_viewport->projectToScreen(a), pb = m_viewport->projectToScreen(b);
+            if (!pa || !pb)
+                continue;
+            const QPointF ab = *pb - *pa, ap = pixel - *pa;
+            const double l2 = QPointF::dotProduct(ab, ab);
+            const double t = l2 > 0 ? std::clamp(QPointF::dotProduct(ap, ab) / l2, 0.0, 1.0) : 0.0;
+            const QPointF d = ap - ab * t;
+            const double px = std::hypot(d.x(), d.y());
+            if (px >= bestPx)
+                continue;
+            // Hidden behind the shape?
+            const QVector3D p = a + (b - a) * float(t);
+            const double along = QVector3D::dotProduct(p - origin, dir);
+            if (hitDistance && along > *hitDistance + slack)
+                continue;
+            bestPx = px;
+            best = int(i);
+        }
+    }
+    if (best != m_edgesMode.hover) {
+        m_edgesMode.hover = best;
+        rebuildEdgeHighlights();
+        refreshScene();
+    }
+}
+
+void MainWindow::edgesClick(const QVector3D& origin, const QVector3D& direction)
+{
+    const QVector3D dir = direction.normalized();
+    const auto hit = m_edgesMode.finder->under({origin.x(), origin.y(), origin.z()}, {dir.x(), dir.y(), dir.z()});
+    const EdgeFinishKind kind = m_edgesPanel->kind();
+    auto& picks = m_edgesMode.picks;
+    const auto pickedAt = [&picks](int e) {
+        return std::find_if(picks.begin(), picks.end(), [e](const auto& p) { return p.edge == e; });
+    };
+    const auto pick = [&](int e, int face) {
+        picks.push_back({e, edges::refFor(m_edgesMode.shape, m_edgesMode.found, e, face)});
+    };
+    try {
+        if (const int e = m_edgesMode.hover; e >= 0) {
+            // An edge: picked from the face clicked next to it, if that's one of its faces.
+            if (const auto it = pickedAt(e); it != picks.end()) {
+                picks.erase(it);
+            } else {
+                const auto& faces = m_edgesMode.found.edges[std::size_t(e)].faces;
+                const int face = hit && (hit->face == faces[0] || hit->face == faces[1]) ? hit->face : -1;
+                pick(e, face);
+            }
+        } else if (hit) {
+            // A face: all its edges this kind can go on (or, if all are picked, none).
+            std::vector<int> suitable;
+            for (int e : m_edgesMode.found.faceEdges[std::size_t(hit->face)])
+                if (edges::suits(kind, m_edgesMode.found.edges[std::size_t(e)].bend))
+                    suitable.push_back(e);
+            if (suitable.empty()) {
+                statusBar()->showMessage(tr("That face has no edges this can go on."), 4000);
+                return;
+            }
+            const bool allPicked = std::all_of(suitable.begin(), suitable.end(),
+                                               [&](int e) { return pickedAt(e) != picks.end(); });
+            for (int e : suitable) {
+                const auto it = pickedAt(e);
+                if (allPicked)
+                    picks.erase(it);
+                else if (it == picks.end())
+                    pick(e, hit->face);
+            }
+        } else {
+            return;
+        }
+    } catch (const std::exception& e) {
+        qWarning() << "Picking an edge failed:" << e.what();
+        return;
+    }
+    rebuildEdgeHighlights();
+    m_edgesTimer->start(0);
+}
+
+void MainWindow::edgesKindChanged()
+{
+    // Drop picks this kind can't go on (inside corners when rounding, say).
+    const EdgeFinishKind kind = m_edgesPanel->kind();
+    auto& picks = m_edgesMode.picks;
+    const auto before = picks.size();
+    picks.erase(std::remove_if(picks.begin(), picks.end(),
+                               [&](const auto& p) {
+                                   return !edges::suits(kind, m_edgesMode.found.edges[std::size_t(p.edge)].bend);
+                               }),
+                picks.end());
+    if (picks.size() != before)
+        statusBar()->showMessage(before - picks.size() == 1
+                                     ? tr("1 picked edge dropped: it doesn't suit this kind.")
+                                     : tr("%1 picked edges dropped: they don't suit this kind.")
+                                           .arg(int(before - picks.size())),
+                                 5000);
+    m_edgesMode.hover = -1;
+    rebuildEdgeHighlights();
+    m_edgesTimer->start(0);
+}
+
+void MainWindow::pickAllEdges()
+{
+    const EdgeFinishKind kind = m_edgesPanel->kind();
+    try {
+        for (std::size_t i = 0; i < m_edgesMode.found.edges.size(); ++i) {
+            if (!edges::suits(kind, m_edgesMode.found.edges[i].bend))
+                continue;
+            if (std::any_of(m_edgesMode.picks.begin(), m_edgesMode.picks.end(),
+                            [i](const auto& p) { return p.edge == int(i); }))
+                continue;
+            m_edgesMode.picks.push_back({int(i), edges::refFor(m_edgesMode.shape, m_edgesMode.found, int(i), -1)});
+        }
+    } catch (const std::exception& e) {
+        qWarning() << "Picking all edges failed:" << e.what();
+    }
+    if (m_edgesMode.picks.empty())
+        statusBar()->showMessage(tr("This shape has no edges this kind can go on."), 5000);
+    rebuildEdgeHighlights();
+    m_edgesTimer->start(0);
+}
+
+void MainWindow::applyEdges()
+{
+    if (!m_edgesMode.active)
+        return;
+    std::optional<BooleanSpec> spec;
+    try {
+        spec = currentEdgesSpec();
+        if (!spec)
+            return;
+        m_doc.previewMesh(*spec);  // fails here (with its message) rather than in the command
+    } catch (const std::exception& e) {
+        QMessageBox::warning(this, tr("Forge3D"), tr("The edges could not be changed:\n%1").arg(QString::fromUtf8(e.what())));
+        return;
+    }
+    const ObjectId target = m_edgesMode.target;
+    if (m_edgesMode.editing) {
+        const Body* now = m_doc.find(target);
+        if (!now)
+            return endEdges();
+        const Body before = *now;
+        Body after = before;
+        after.boolean = *spec;
+        endEdges();
+        run(std::make_unique<EditBodyCommand>(before, after, "Change edges"));
+        setSelection(target);
+        return;
+    }
+    Body result;
+    result.id = m_doc.allocateId();
+    static const char* names[] = {"Rounded", "Filleted", "Chamfered", "Bevelled"};
+    result.name = m_doc.uniqueName(names[int(spec->edges->kind)]);
+    result.boolean = *spec;
+    const ObjectId id = result.id;
+    endEdges();
+    if (run(std::make_unique<CombineCommand>(std::move(result))))
+        setSelection(id);
+}
+
 bool MainWindow::toolOpen() const
 {
-    return m_splitMode.active || m_embossMode.active;
+    return m_splitMode.active || m_embossMode.active || m_edgesMode.active;
 }
 
 void MainWindow::startEmboss(ObjectId target, bool editing)
@@ -2416,11 +2815,33 @@ void MainWindow::refreshScene()
         // Everything on the plate...
         if (m_embossMode.active && !m_doc.find(m_embossMode.target))
             endEmboss();  // e.g. Undo removed the shape
+        if (m_edgesMode.active && !m_doc.find(m_edgesMode.target))
+            endEdges();
         for (ObjectId id : m_doc.topLevelIds()) {
             DisplayItem item;
             item.id = id;
             item.mesh = m_doc.mesh(id);  // rebuilt only if the shape changed
             item.model = toQMatrix(m_doc.worldTransform(id));
+            if (m_edgesMode.active && id == m_edgesMode.target) {
+                if (m_edgesMode.preview) {
+                    item.mesh = m_edgesMode.preview;
+                    if (!m_edgesMode.editing)
+                        item.model = QMatrix4x4();
+                }
+                // Picked edges in red, the one under the mouse in orange, seen through the shape.
+                for (const auto& [lines, colour, tag] :
+                     {std::tuple{m_edgesMode.pickedLines, QVector3D(0.9f, 0.15f, 0.1f), kEdgesPickedItem},
+                      std::tuple{m_edgesMode.hoverLine, QVector3D(1.0f, 0.6f, 0.0f), kEdgesHoverItem}}) {
+                    if (!lines || lines->empty())
+                        continue;
+                    DisplayItem line;
+                    line.id = tag;
+                    line.mesh = lines;
+                    line.color = colour;
+                    line.ghost = true;
+                    items.push_back(line);
+                }
+            }
             if (m_embossMode.active && id == m_embossMode.target && m_embossMode.preview && m_embossMode.wordsOnly) {
                 // A big shape stays as it is; the words are drawn over it (see below).
                 DisplayItem words;
@@ -2489,6 +2910,21 @@ void MainWindow::refreshScene()
             case BooleanOp::Split: context = tr("Made from: %1, cut by a plane").arg(names.join(QString())); break;
             case BooleanOp::Mirror: context = tr("Made from: %1, mirrored").arg(names.join(QString())); break;
             case BooleanOp::Group: context = tr("A group of: %1").arg(names.join(QStringLiteral(", "))); break;
+            case BooleanOp::Edges: {
+                const auto& f = selected->boolean->edges;
+                const int n = f ? int(f->edges.size()) : 0;
+                QString what;
+                if (f)
+                    switch (f->kind) {
+                    case EdgeFinishKind::Rounding: what = tr("rounded R%1").arg(f->size); break;
+                    case EdgeFinishKind::Fillet: what = tr("filleted R%1").arg(f->size); break;
+                    case EdgeFinishKind::Chamfer: what = tr("chamfered %1 mm").arg(f->size); break;
+                    case EdgeFinishKind::Bevel: what = tr("bevelled %1 mm at %2°").arg(f->size).arg(f->angle); break;
+                    }
+                const QString count = n == 1 ? tr("1 edge") : tr("%1 edges").arg(n);
+                context = tr("Made from: %1, with %2 %3").arg(names.join(QString()), count, what);
+                break;
+            }
             case BooleanOp::Emboss:
                 context = tr("Made from: %1, with the words \"%2\" %3")
                               .arg(names.join(QString()),
@@ -2538,6 +2974,7 @@ void MainWindow::refreshScene()
     m_sendToSlicer->setEnabled(!m_doc.empty());
     m_split->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_emboss->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
+    m_edgesAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_clear->setEnabled(!m_doc.empty());
 }
 

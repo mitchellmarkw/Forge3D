@@ -235,7 +235,31 @@ PrimitiveSpec madeRound(const PrimitiveSpec& spec);
 
 // ---- Combine results ------------------------------------------------------------
 
-enum class BooleanOp { Merge, Subtract, Intersect, Split, Mirror, Group, Emboss };
+enum class BooleanOp { Merge, Subtract, Intersect, Split, Mirror, Group, Emboss, Edges };
+
+// What happens to the picked edges of a shape.
+enum class EdgeFinishKind {
+    Rounding,  // outside (convex) edges turned into a curve of `size` radius
+    Fillet,    // inside (concave) corners filled with a curve of `size` radius
+    Chamfer,   // the corner cut off flat, `size` back along both faces
+    Bevel,     // a flat slope `size` wide on the picked face, at `angle` to that face
+};
+
+// One picked edge, found again by place: a point on it, and a point on the face it
+// was picked from (Bevel measures from that face). Result coordinates.
+struct EdgeRef {
+    std::array<double, 3> point{0.0, 0.0, 0.0};
+    std::array<double, 3> facePoint{0.0, 0.0, 0.0};
+    bool operator==(const EdgeRef&) const = default;
+};
+
+struct EdgeFinish {
+    EdgeFinishKind kind = EdgeFinishKind::Rounding;
+    double size = 1.0;    // radius (Rounding / Fillet), distance (Chamfer), width on the face (Bevel)
+    double angle = 45.0;  // Bevel: degrees between the slope and the picked face
+    std::vector<EdgeRef> edges;
+    bool operator==(const EdgeFinish&) const = default;
+};
 
 // Words raised from (or engraved into) a shape's surface. Each letter follows the
 // surface: every point of it stands `depth` out from (or sinks `depth` into) the
@@ -266,6 +290,8 @@ std::string toString(BooleanOp op);
 //   Mirror:    one part, reflected in the plane (planePoint / planeNormal).
 //   Group:     the parts kept as they are, side by side, moving as one (no
 //              merging: they may overlap or be far apart).
+//   Edges:     one solid part with some edges rounded, filleted, chamfered or
+//              bevelled; see `edges`.
 //   Emboss:    one part with words raised from or engraved into its surface,
 //              centred on planePoint (on the surface) and facing out along
 //              planeNormal; see `emboss`.
@@ -283,6 +309,8 @@ struct BooleanSpec {
     std::array<double, 3> planeNormal{0.0, 0.0, 1.0};
     // Emboss: the words.
     std::optional<EmbossText> emboss{};
+    // Edges: what to do to which edges.
+    std::optional<EdgeFinish> edges{};
 
     bool operator==(const BooleanSpec&) const = default;
 };

@@ -521,10 +521,15 @@ void Viewport::mouseMoveEvent(QMouseEvent* event)
         m_camera.pan(static_cast<float>(delta.x()), static_cast<float>(delta.y()), static_cast<float>(height()));
         update();
         break;
-    case DragMode::None:
+    case DragMode::None: {
         updateHover(event->position());
+        QVector3D origin, direction;
+        m_camera.rayThroughPixel(static_cast<float>(event->position().x()), static_cast<float>(event->position().y()),
+                                 static_cast<float>(width()), static_cast<float>(height()), origin, direction);
+        emit hovered(origin, direction, event->position());
         QOpenGLWidget::mouseMoveEvent(event);
         break;
+    }
     }
 }
 

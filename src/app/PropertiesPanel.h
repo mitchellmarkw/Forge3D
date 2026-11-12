@@ -51,6 +51,7 @@ signals:
     void separateRequested();
     void editCutRequested();
     void editEmbossRequested();
+    void editEdgesRequested();
 
 private:
     QDoubleSpinBox* makeLength(const QString& tip);
@@ -74,6 +75,7 @@ private:
     QWidget* m_separateButton = nullptr;
     QWidget* m_editCutButton = nullptr;
     QWidget* m_editEmbossButton = nullptr;
+    QWidget* m_editEdgesButton = nullptr;
     QWidget* m_textGroup = nullptr;  // the words of a Text shape
     WordsEditor* m_words = nullptr;
     QDoubleSpinBox* m_letterHeight = nullptr;

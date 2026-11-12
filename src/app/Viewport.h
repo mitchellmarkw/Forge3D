@@ -78,6 +78,8 @@ signals:
     void leftDragged(const QVector3D& origin, const QVector3D& direction, const QPointF& pixel,
                      Qt::KeyboardModifiers modifiers);
     void leftReleased(bool wasDrag);
+    // The mouse moved with no button held (for tools that highlight what's under it).
+    void hovered(const QVector3D& origin, const QVector3D& direction, const QPointF& pixel);
     void glInfoReady(const QString& summary);
     void firstFrameRendered();
 

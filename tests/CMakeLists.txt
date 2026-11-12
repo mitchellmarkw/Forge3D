@@ -22,6 +22,7 @@ add_executable(forge_tests
     test_import.cpp
     test_mesh_engine.cpp
     test_text_emboss.cpp
+    test_edges.cpp
 )
 target_link_libraries(forge_tests PRIVATE
     Forge3D::core

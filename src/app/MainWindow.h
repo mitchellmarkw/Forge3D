@@ -5,6 +5,7 @@
 #include "forge/core/Arrange.h"
 #include "forge/core/CommandStack.h"
 #include "forge/core/Document.h"
+#include "forge/core/Edges.h"
 #include "forge/core/Emboss.h"
 #include "forge/core/Split.h"
 #include "forge/core/Scale.h"
@@ -37,6 +38,7 @@ namespace forge::app {
 class PropertiesPanel;
 class SplitPanel;
 class EmbossPanel;
+class EdgesPanel;
 struct DisplayItem;
 class Viewport;
 
@@ -130,7 +132,21 @@ private:
     void placeEmboss(const QVector3D& origin, const QVector3D& direction);
     void updateEmbossPreview();
     std::optional<BooleanSpec> currentEmbossSpec() const;
-    bool toolOpen() const;  // Split or Emboss
+    bool toolOpen() const;  // Split, Emboss or Edges
+
+    // ---- Edges tool (rounding / fillet / chamfer / bevel) ----
+    // target: a solid shape on the plate, or (editing) an Edges result.
+    void startEdges(ObjectId target, bool editing);
+    void endEdges();
+    void applyEdges();
+    void updateEdgesPreview();
+    void edgesHover(const QVector3D& origin, const QVector3D& direction, const QPointF& pixel);
+    void edgesClick(const QVector3D& origin, const QVector3D& direction);
+    void edgesKindChanged();
+    void pickAllEdges();
+    std::optional<EdgeFinish> currentEdgeFinish() const;
+    std::optional<BooleanSpec> currentEdgesSpec() const;
+    void rebuildEdgeHighlights();
 
     // Files
     void newDocument();
@@ -258,6 +274,27 @@ private:
     EmbossMode m_embossMode;
     EmbossText m_lastWords;          // the words used last, offered next time
     QTimer* m_embossTimer = nullptr;  // previews a moment after typing stops
+    QAction* m_edgesAction = nullptr;
+    EdgesPanel* m_edgesPanel = nullptr;
+    struct EdgesMode {
+        bool active = false;
+        bool editing = false;
+        ObjectId target = kInvalidId;
+        TopoDS_Shape shape;  // what is picked on, in plate coordinates
+        edges::ShapeEdges found;
+        std::shared_ptr<edges::FaceFinder> finder;
+        double size = 1.0;  // of the shape (its diagonal), for tolerances
+        struct Pick {
+            int edge = -1;
+            EdgeRef ref;
+        };
+        std::vector<Pick> picks;
+        int hover = -1;  // the edge under the mouse, or -1
+        std::shared_ptr<const Mesh> preview;  // the result as it would be (result coordinates)
+        std::shared_ptr<const Mesh> pickedLines, hoverLine;
+    };
+    EdgesMode m_edgesMode;
+    QTimer* m_edgesTimer = nullptr;
     QMenu* m_alignMenu = nullptr;  // Align Shapes (toolbar dropdown and Edit submenu)
     QAction* m_fit = nullptr;
     QAction* m_resetView = nullptr;

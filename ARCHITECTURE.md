@@ -327,6 +327,24 @@ Viewport (mouse)  --leftPressed(ray, handle)-->  MainWindow drag controller
 - `Document::previewMesh` draws the result before it is made (the Emboss tool's live
   preview); the last preview is kept, so applying doesn't work it out again.
 
+## Edges: rounding, fillets, chamfers, bevels (slice 5e)
+
+- A combine op (`BooleanOp::Edges`, one solid part, `EdgeFinish` in the spec: kind,
+  size, angle, picked edges). Worked out by OCCT: `BRepFilletAPI_MakeFillet` for
+  Rounding / Fillet, `BRepFilletAPI_MakeChamfer` (`Add` for Chamfer, `AddDA` for Bevel:
+  width on the picked face, angle to it). Not for mesh-engine shapes.
+- `edges::analyse` lists the edges two faces meet at (no seams), with a polyline each
+  and how they bend: Convex (rounding), Concave (fillet), Smooth (nothing to do).
+  Concave = walking off the edge across one face heads the way the other face points.
+- Picks are stored by place (`EdgeRef`: a point on the edge, a point on the face it was
+  picked from), in the result's coordinates, so they survive saving and moving. If the
+  part under them changes (a box made taller), each pick goes to the nearest suitable
+  edge within a fifth of the shape's size.
+- The tool: `Viewport::hovered` gives the ray under the mouse; the window finds the
+  suitable edge drawn within 9 px that the shape doesn't hide (`edges::FaceFinder`),
+  draws picks and hover as thin tubes, and previews the result via
+  `Document::previewMesh` (now for OCCT combines too).
+
 ## Rendering
 
 `Document::mesh()` → `forge::Mesh` (positions, normals, indices) → `DisplayItem`

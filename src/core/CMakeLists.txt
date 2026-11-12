@@ -27,6 +27,7 @@ add_library(forge_core STATIC
     src/CommandStack.cpp
     src/Commands.cpp
     src/Document.cpp
+    src/Edges.cpp
     src/Emboss.cpp
     src/Export.cpp
     src/FileFormat.cpp
@@ -50,7 +51,7 @@ target_include_directories(forge_core SYSTEM PUBLIC ${OpenCASCADE_INCLUDE_DIR})
 target_link_libraries(forge_core PUBLIC
     TKernel TKMath TKG2d TKG3d TKGeomBase TKBRep
     TKGeomAlgo TKTopAlgo TKPrim TKMesh
-    TKBO TKBool TKShHealing TKOffset
+    TKBO TKBool TKShHealing TKOffset TKFillet
     TKService TKV3d  # fonts: Font_FontMgr, StdPrs_BRepFont / StdPrs_BRepTextBuilder
 )
 
