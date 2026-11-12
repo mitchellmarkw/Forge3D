@@ -24,8 +24,9 @@ Gate to Phase 2: a new user prints a customised part within 10 minutes.
 | 4c | Mirror, Duplicate (copy / paste), Group, move / turn several shapes at once | Done (0.9.0) |
 | 5a | Export STL / 3MF / OBJ; "Send to Slicer" | Done (0.10.0) |
 | 5b | STL / 3MF / OBJ import with auto-repair | **Delivered for testing** |
-| 5c | Text and Emboss | Next |
-| 5d | Chamfer / fillet (round) / bevel edges, picked in the view | Planned |
+| 5c | Mesh engine: fast Merge / Subtract / Intersect / Split / Mirror / Group on big imported meshes | **Delivered for testing** |
+| 5d | Text and Emboss | Next |
+| 5e | Chamfer / fillet (round) / bevel edges, picked in the view | Planned |
 | 6 | Feature tree panel with rollback bar | Planned |
 | 7 | 2D sketcher with constraints | Planned |
 | 8 | Pad, Pocket, Revolve, Shell, Hole | Planned |

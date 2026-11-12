@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "forge/core/Document.h"
 
+#include "forge/core/Export.h"
 #include "forge/core/Primitives.h"
 #include "forge/core/Tessellator.h"
 
@@ -325,7 +326,9 @@ void Document::replaceAll(std::vector<Body> bodies)
     m_bodies.clear();
     m_parentOf.clear();
     m_shapeCache.clear();
+    m_solidCache.clear();
     m_meshCache.clear();
+    m_lastPreview.reset();
     for (ObjectId id : oldIds)
         notify(ChangeKind::Removed, id);
 
@@ -393,14 +396,33 @@ void Document::invalidate(ObjectId id, bool includeSelf)
     if (includeSelf) {
         m_shapeCache.erase(id);
         m_meshCache.erase(id);
+        m_solidCache.erase(id);
     }
     // Every result above this body depends on it.
     std::set<ObjectId> visited{id};
     for (ObjectId p = parentOf(id); p != kInvalidId && visited.insert(p).second; p = parentOf(p)) {
         m_shapeCache.erase(p);
         m_meshCache.erase(p);
+        m_solidCache.erase(p);
         notify(ChangeKind::Modified, p);
     }
+    if (m_lastPreview)
+        for (ObjectId part : m_lastPreview->spec.operands)
+            if (visited.count(part)) {
+                m_lastPreview.reset();
+                break;
+            }
+}
+
+bool Document::partsUnchanged(const LastPreview& p) const
+{
+    for (const Body& was : p.parts) {
+        const Body* now = find(was.id);
+        if (!now || !(now->spec == was.spec) || !(now->boolean == was.boolean)
+            || !(now->placement == was.placement))
+            return false;
+    }
+    return true;
 }
 
 // ---- Document: geometry ---------------------------------------------------------
@@ -519,7 +541,17 @@ TopoDS_Shape Document::shape(ObjectId id) const
     if (!body)
         throw std::out_of_range("No body with id " + std::to_string(id));
 
-    TopoDS_Shape built = body->isBoolean() ? combine(*body->boolean) : primitives::buildShape(body->spec);
+    TopoDS_Shape built;
+    if (body->isBoolean() && usesMeshEngine(id)) {
+        // Rarely needed (everything else asks the mesh engine directly): faces from its triangles.
+        auto data = std::make_shared<MeshData>();
+        meshkernel::triangles(meshSolid(id), data->positions, data->indices);
+        if (data->indices.empty())
+            return TopoDS_Shape();
+        built = primitives::makeMeshSolid(*data, {1.0, 1.0, 1.0});
+    } else {
+        built = body->isBoolean() ? combine(*body->boolean) : primitives::buildShape(body->spec);
+    }
     m_shapeCache[id] = built;
     return built;
 }
@@ -533,6 +565,8 @@ std::shared_ptr<const Mesh> Document::mesh(ObjectId id) const
     std::shared_ptr<const Mesh> built;
     if (body && !body->isBoolean() && std::holds_alternative<MeshSpec>(body->spec))
         built = std::make_shared<const Mesh>(displayMesh(std::get<MeshSpec>(body->spec)));  // no B-rep needed
+    else if (body && body->isBoolean() && usesMeshEngine(id))
+        built = std::make_shared<const Mesh>(meshkernel::displayMesh(meshSolid(id)));
     else
         built = std::make_shared<const Mesh>(tessellate(shape(id)));
     m_meshCache[id] = built;
@@ -596,6 +630,113 @@ bool hasFreeFormFaces(const TopoDS_Shape& shape)
 }
 
 }  // namespace
+
+// ---- Document: the mesh engine -------------------------------------------------------
+
+bool Document::usesMeshEngine(ObjectId id) const
+{
+    const Body* body = find(id);
+    if (!body)
+        return false;
+    if (!body->isBoolean())
+        return std::holds_alternative<MeshSpec>(body->spec);
+    return specUsesMesh(*body->boolean);
+}
+
+bool Document::specUsesMesh(const BooleanSpec& spec) const
+{
+    for (ObjectId part : spec.operands)
+        if (usesMeshEngine(part))
+            return true;
+    return false;
+}
+
+MeshSolid Document::meshSolid(ObjectId id) const
+{
+    if (const auto cached = m_solidCache.find(id); cached != m_solidCache.end())
+        return cached->second;
+    const Body* body = find(id);
+    if (!body)
+        throw std::out_of_range("No body with id " + std::to_string(id));
+    MeshSolid built;
+    if (body->isBoolean()) {
+        if (m_lastPreview && m_lastPreview->spec == *body->boolean && partsUnchanged(*m_lastPreview))
+            built = m_lastPreview->solid;
+        else
+            built = combineMeshes(*body->boolean);
+        m_lastPreview.reset();
+    } else if (const auto* mesh = std::get_if<MeshSpec>(&body->spec)) {
+        built = meshkernel::fromMeshData(*mesh->data, {mesh->width / mesh->data->size[0],
+                                                       mesh->depth / mesh->data->size[1],
+                                                       mesh->height / mesh->data->size[2]});
+    } else {
+        // A primitive working with a mesh: its shape as fine, shared-point triangles.
+        const ExportMesh tri = exportMeshes(*this, {id}, exportQuality()).front();
+        // exportMeshes places it on the plate; bring it back to its own coordinates.
+        const Transform back = worldTransform(id).inverse();
+        std::vector<float> local(tri.positions.size());
+        for (std::size_t i = 0; i < tri.positions.size(); i += 3) {
+            const Vec3 p = back.apply({tri.positions[i], tri.positions[i + 1], tri.positions[i + 2]});
+            local[i] = float(p[0]);
+            local[i + 1] = float(p[1]);
+            local[i + 2] = float(p[2]);
+        }
+        built = meshkernel::fromTriangles(local, tri.indices);
+    }
+    m_solidCache[id] = built;
+    return built;
+}
+
+MeshSolid Document::combineMeshes(const BooleanSpec& spec) const
+{
+    std::vector<MeshSolid> parts;
+    for (ObjectId part : spec.operands)
+        parts.push_back(meshkernel::transformed(meshSolid(part), localTransform(part)));
+    if (parts.empty())
+        throw GeometryError("Nothing to combine");
+    switch (spec.op) {
+    case BooleanOp::Merge: return meshkernel::merged(parts);
+    case BooleanOp::Subtract:
+        return meshkernel::subtracted(parts.front(), std::vector<MeshSolid>(parts.begin() + 1, parts.end()));
+    case BooleanOp::Intersect: return meshkernel::intersected(parts);
+    case BooleanOp::Split: return meshkernel::trimmed(parts.front(), spec.planePoint, spec.planeNormal);
+    case BooleanOp::Mirror: return meshkernel::mirrored(parts.front(), spec.planePoint, spec.planeNormal);
+    case BooleanOp::Group: return meshkernel::together(parts);
+    }
+    throw GeometryError("Unknown combine");
+}
+
+Bounds Document::localBounds(ObjectId id) const
+{
+    const Body* body = find(id);
+    if (!body)
+        throw std::out_of_range("No body with id " + std::to_string(id));
+    if (usesMeshEngine(id))
+        return body->isBoolean() ? meshkernel::bounds(meshSolid(id)) : mesh(id)->bounds();
+    return shapeBounds(shape(id));
+}
+
+Document::Preview Document::previewResult(const BooleanSpec& spec) const
+{
+    Preview out;
+    if (specUsesMesh(spec)) {
+        for (ObjectId part : spec.operands)
+            if (!find(part))
+                throw std::out_of_range("No body with id " + std::to_string(part));
+        const MeshSolid solid = combineMeshes(spec);
+        LastPreview keep{spec, {}, solid};
+        for (ObjectId part : spec.operands)
+            keep.parts.push_back(*find(part));
+        m_lastPreview = std::move(keep);
+        out.empty = meshkernel::isEmpty(solid);
+        out.bounds = meshkernel::bounds(solid);
+    } else {
+        const TopoDS_Shape s = previewCombine(spec);
+        out.empty = isEmptySolid(s);
+        out.bounds = shapeBounds(s);
+    }
+    return out;
+}
 
 Bounds shapeBounds(const TopoDS_Shape& shape, const Transform& t)
 {
@@ -673,6 +814,8 @@ Mesh displayMesh(const MeshSpec& spec)
 
 Bounds Document::worldBounds(ObjectId id) const
 {
+    if (const Body* body = find(id); body && body->isBoolean() && usesMeshEngine(id))
+        return meshkernel::bounds(meshSolid(id), worldTransform(id));
     if (const Body* body = find(id); body && !body->isBoolean() && std::holds_alternative<MeshSpec>(body->spec)) {
         // Exact and quick: the corners of a flat-faced shape are its points.
         const MeshSpec& spec = std::get<MeshSpec>(body->spec);
@@ -696,7 +839,7 @@ Vec3 Document::visibleCentre(ObjectId id) const
         throw std::out_of_range("No body with id " + std::to_string(id));
     if (!body->isBoolean())
         return pivotOf(body->spec);
-    const Bounds b = shapeBounds(shape(id), Transform::identity());
+    const Bounds b = localBounds(id);
     if (!b.valid)
         return pivotOf(*body);
     const auto c = b.center();

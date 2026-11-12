@@ -30,6 +30,7 @@
       "name": "pcre2",
       "default-features": false
     },
+    "manifold",
     "miniz",
     "nlohmann-json",
     "opencascade",

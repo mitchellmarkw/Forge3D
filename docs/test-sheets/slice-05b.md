@@ -22,6 +22,9 @@ check, download the artifact, unzip and run `Forge3D.exe`. **Help → About** sa
 | 6 | Select several files in the Import dialog at once | All of them come in | |
 | 7 | Import one of your own STL files (a real print) | It appears at the right size; note how long it took if it has many triangles | |
 | 8 | Drag a .f3d file onto the window | It opens (asks about unsaved changes first) | |
+| 8a | Import an STL or OBJ that came in small before | Forge3D asks what units it was made in, suggesting one, and shows the size each choice gives. Pick the right one: it comes in at the right size | |
+| 8b | Select it and type a new Width, Depth or Height | The value you typed sticks | |
+| 8c | Select an organic import (lots of triangles) and a box, click Subtract | It asks first, saying how many triangles and that it may take minutes. Click No: nothing happens | |
 
 ### Working with imported shapes
 

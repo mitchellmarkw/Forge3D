@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.12.0 — Slice 5c: Mesh engine (2026-11-11)
+
+- **Big imported meshes now combine quickly.** Merge, Subtract, Intersect, Split,
+  Mirror and Group on an imported shape (or anything made with one) use a mesh engine
+  (Manifold) instead of the solid-modelling kernel. Subtracting a box from a 1.3 million
+  triangle scan takes about 4 seconds the first time (most of that is reading the mesh
+  in once) and about 1 second after; it used to freeze.
+- Moving a shape inside such a result re-cuts it in about a second.
+- The "this may take minutes" question from 0.11.0 is gone: it's no longer needed.
+- Import repair is about 2.5x faster on big meshes (1.3M triangles: under 2 s).
+- Exporting big meshes is about 5x faster.
+- Primitives combined with a mesh are turned into fine triangles (within 0.01 mm), so
+  results are watertight and export cleanly.
+- Core: `MeshKernel.h` (`MeshSolid`, `meshkernel::` operations),
+  `Document::usesMeshEngine()`, `meshSolid()`, `localBounds()`, `previewResult()`.
+  New dependency: Manifold 3 (Apache-2.0).
+- 147 unit tests (4 new).
+
 ## 0.11.0 — Slice 5b: Import with repair (2026-11-11)
 
 - **Import** (File menu, toolbar, Ctrl+I): adds shapes from **STL** (binary or text),
@@ -16,6 +34,14 @@
   Split** with other shapes. One that can't be made watertight can be moved, resized
   and exported, but not combined or split (Properties says so).
 - Saved inside the .f3d file (file format version 9). Older files still open.
+- **Units**: STL and OBJ files don't record their units. If one comes in under 2 mm
+  across (usually saved in metres, e.g. from Blender, or in inches), Forge3D asks
+  which units it was made in and scales it (metres x1000, inches x25.4, cm x10, or keep).
+- Typing a size now always changes the field you typed in. (Before, a size the box
+  couldn't show exactly, such as 0.003 mm, could be changed instead, and your number
+  seemed to reset.)
+- Combining, splitting, mirroring or grouping more than 20,000 triangles of imported
+  mesh asks first, since it can take minutes, and logs when it starts.
 - Sample files for testing are in `test-sheets/samples`.
 - Core: `MeshSpec` / `MeshData`, Import.h (`readStl`, `readObj`, `read3mf`,
   `repairMesh`, `importFile`), `makeMeshSolid()`.

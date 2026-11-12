@@ -2,6 +2,7 @@
 #include "forge/core/Export.h"
 
 #include "forge/core/Document.h"
+#include "forge/core/MeshKernel.h"
 #include "forge/core/Transform.h"
 
 #include <BRepBuilderAPI_Copy.hxx>
@@ -52,18 +53,26 @@ struct Welder {
 
 std::size_t countOpenEdges(const std::vector<std::uint32_t>& indices)
 {
-    std::map<std::pair<std::uint32_t, std::uint32_t>, int> uses;
+    // Sorting is far quicker than a map for the million-triangle meshes people import.
+    std::vector<std::uint64_t> edges;
+    edges.reserve(indices.size());
     for (std::size_t t = 0; t + 2 < indices.size(); t += 3)
         for (int e = 0; e < 3; ++e) {
-            std::uint32_t a = indices[t + e], b = indices[t + (e + 1) % 3];
+            std::uint64_t a = indices[t + e], b = indices[t + (e + 1) % 3];
             if (a > b)
                 std::swap(a, b);
-            ++uses[{a, b}];
+            edges.push_back(a << 32 | b);
         }
+    std::sort(edges.begin(), edges.end());
     std::size_t open = 0;
-    for (const auto& [edge, n] : uses)
-        if (n != 2)
+    for (std::size_t i = 0; i < edges.size();) {
+        std::size_t j = i;
+        while (j < edges.size() && edges[j] == edges[i])
+            ++j;
+        if (j - i != 2)
             ++open;
+        i = j;
+    }
     return open;
 }
 
@@ -260,29 +269,58 @@ std::vector<ExportMesh> exportMeshes(const Document& doc, const std::vector<Obje
         const Body* body = doc.find(id);
         if (!body)
             throw std::out_of_range("No body with id " + std::to_string(id));
-        Mesh mesh;
+        const Transform toPlate = doc.worldTransform(id);
+        ExportMesh m;
+        m.name = body->name;
+        // Imported meshes and mesh-engine results already share their corners: just move
+        // them onto the plate. Everything else is tessellated and welded.
+        std::vector<float> shared;
+        std::vector<std::uint32_t> sharedIndices;
+        Vec3 scale{1, 1, 1};
+        bool indexed = false;
         if (!body->isBoolean() && std::holds_alternative<MeshSpec>(body->spec)) {
-            mesh = displayMesh(std::get<MeshSpec>(body->spec));  // already triangles: use them as they are
+            const MeshSpec& spec = std::get<MeshSpec>(body->spec);
+            scale = {spec.width / spec.data->size[0], spec.depth / spec.data->size[1],
+                     spec.height / spec.data->size[2]};
+            shared = spec.data->positions;
+            sharedIndices = spec.data->indices;
+            indexed = true;
+        } else if (body->isBoolean() && doc.usesMeshEngine(id)) {
+            meshkernel::triangles(doc.meshSolid(id), shared, sharedIndices);
+            indexed = true;
+        }
+        if (indexed) {
+            m.positions.resize(shared.size());
+            for (std::size_t i = 0; i + 2 < shared.size(); i += 3) {
+                const Vec3 p = toPlate.apply({shared[i] * scale[0], shared[i + 1] * scale[1], shared[i + 2] * scale[2]});
+                m.positions[i] = float(p[0]);
+                m.positions[i + 1] = float(p[1]);
+                m.positions[i + 2] = float(p[2]);
+            }
+            m.indices.reserve(sharedIndices.size());
+            for (std::size_t t = 0; t + 2 < sharedIndices.size(); t += 3) {
+                const std::uint32_t a = sharedIndices[t], b = sharedIndices[t + 1], c = sharedIndices[t + 2];
+                if (a == b || b == c || a == c)
+                    continue;
+                m.indices.insert(m.indices.end(), {a, b, c});
+            }
         } else {
             // A fresh copy, so the finer triangles don't replace the ones used for display.
             const TopoDS_Shape shape =
                 BRepBuilderAPI_Copy(doc.shape(id), /*copyGeom=*/true, /*copyMesh=*/false).Shape();
-            mesh = tessellate(shape, quality);
-        }
-        const Transform toPlate = doc.worldTransform(id);
-        ExportMesh m;
-        m.name = body->name;
-        Welder welder(m.positions);
-        for (std::size_t t = 0; t + 2 < mesh.indices.size(); t += 3) {
-            std::array<std::uint32_t, 3> tri{};
-            for (int k = 0; k < 3; ++k) {
-                const std::uint32_t i = mesh.indices[t + k];
-                tri[k] = welder.add(toPlate.apply(
-                    {mesh.positions[i * 3], mesh.positions[i * 3 + 1], mesh.positions[i * 3 + 2]}));
+            const Mesh mesh = tessellate(shape, quality);
+            Welder welder(m.positions);
+            for (std::size_t t = 0; t + 2 < mesh.indices.size(); t += 3) {
+                std::array<std::uint32_t, 3> tri{};
+                for (int k = 0; k < 3; ++k) {
+                    const std::uint32_t i = mesh.indices[t + k];
+                    tri[k] = welder.add(toPlate.apply(
+                        {mesh.positions[i * 3], mesh.positions[i * 3 + 1], mesh.positions[i * 3 + 2]}));
+                }
+                if (tri[0] == tri[1] || tri[1] == tri[2] || tri[0] == tri[2])
+                    continue;  // a sliver that collapsed to a line
+                m.indices.insert(m.indices.end(), tri.begin(), tri.end());
             }
-            if (tri[0] == tri[1] || tri[1] == tri[2] || tri[0] == tri[2])
-                continue;  // a sliver that collapsed to a line
-            m.indices.insert(m.indices.end(), tri.begin(), tri.end());
         }
         m.openEdges = countOpenEdges(m.indices);
         out.push_back(std::move(m));

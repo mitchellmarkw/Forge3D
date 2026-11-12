@@ -6,6 +6,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -73,6 +74,13 @@ struct ImportResult {
 // Reads, repairs and adds a file's meshes as one undo step ("Import <file>"). Shapes
 // from one file keep their places relative to each other; together they sit on the
 // plate, to the right of anything already there.
-ImportResult importFile(CommandStack& stack, Document& doc, const std::filesystem::path& path);
+//
+// STL and OBJ files don't say what units they use; Forge3D reads them as millimetres.
+// If the whole file comes out under kTinyImport mm across (often a file saved in metres,
+// e.g. from Blender, or in inches), `askScale` is asked what to multiply it by (1 keeps
+// it); without it, nothing is scaled.
+inline constexpr double kTinyImport = 2.0;
+ImportResult importFile(CommandStack& stack, Document& doc, const std::filesystem::path& path,
+                        const std::function<double(double largestSide)>& askScale = {});
 
 }  // namespace forge

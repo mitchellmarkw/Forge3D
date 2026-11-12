@@ -14,6 +14,7 @@ add_library(forge_core STATIC
     include/forge/core/FileFormat.h
     include/forge/core/Import.h
     include/forge/core/Mesh.h
+    include/forge/core/MeshKernel.h
     include/forge/core/Picking.h
     include/forge/core/Primitives.h
     include/forge/core/Scale.h
@@ -29,6 +30,7 @@ add_library(forge_core STATIC
     src/Export.cpp
     src/FileFormat.cpp
     src/Import.cpp
+    src/MeshKernel.cpp
     src/Mesh.cpp
     src/Picking.cpp
     src/Primitives.cpp
@@ -50,4 +52,4 @@ target_link_libraries(forge_core PUBLIC
 )
 
 # File format libraries are an implementation detail of FileFormat.cpp.
-target_link_libraries(forge_core PRIVATE miniz::miniz nlohmann_json::nlohmann_json)
+target_link_libraries(forge_core PRIVATE miniz::miniz nlohmann_json::nlohmann_json manifold::manifold)

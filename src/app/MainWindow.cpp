@@ -716,7 +716,7 @@ std::optional<view::GizmoTarget> MainWindow::gizmoTargetFor(ObjectId id) const
     target.bodyAxes = {axis(1, 0, 0), axis(0, 1, 0), axis(0, 0, 1)};
     if (body->isBoolean()) {
         // The box around what you see; resizing scales everything inside.
-        const Bounds b = shapeBounds(m_doc.shape(id));
+        const Bounds b = m_doc.localBounds(id);
         const auto size = b.size();
         target.halfExtents = QVector3D(size[0] / 2.0f, size[1] / 2.0f, size[2] / 2.0f);
         target.resizable = b.valid;
@@ -821,7 +821,7 @@ void MainWindow::onLeftPressed(const QVector3D& origin, const QVector3D& directi
                 m_dragState.beforeAll.push_back(*m_doc.find(id));
             m_dragState.snapshot = std::make_shared<Document>();
             m_dragState.snapshot->replaceAll(m_doc.bodies());
-            m_dragState.localBounds = shapeBounds(m_doc.shape(selected->id));
+            m_dragState.localBounds = m_doc.localBounds(selected->id);
         }
         const view::Gizmo gizmo(m_viewport->camera(), QSizeF(m_viewport->width(), m_viewport->height()),
                                 m_dragState.frame, m_gizmoMode);
@@ -1194,10 +1194,17 @@ void MainWindow::combineSelected(BooleanOp op)
 
     // Check the result first: an empty result (e.g. Intersect of shapes that don't
     // touch) would vanish from the plate, which looks like a bug.
-    TopoDS_Shape previewShape;
+    BooleanSpec spec;
+    spec.op = op;
+    spec.operands = m_selection;
+    Document::Preview preview;
     try {
-        previewShape = m_doc.previewCombine(op, m_selection);
-        if (isEmptySolid(previewShape)) {
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        struct RestoreCursor {
+            ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
+        } restore;
+        preview = m_doc.previewResult(spec);
+        if (preview.empty) {
             QMessageBox::information(this, tr("Forge3D"),
                                      op == BooleanOp::Intersect
                                          ? tr("These shapes don't overlap, so Intersect would leave nothing.")
@@ -1213,13 +1220,9 @@ void MainWindow::combineSelected(BooleanOp op)
     Body result;
     result.id = m_doc.allocateId();
     result.name = m_doc.uniqueName(toString(op));
-    BooleanSpec spec;
-    spec.op = op;
-    spec.operands = m_selection;
     // Turn around the middle of what you will see (cut-away parts don't count).
     // Rotation always uses the visible centre; this keeps the stored pivot the same.
-    const Bounds visible = shapeBounds(previewShape);
-    const auto centre = visible.center();
+    const auto centre = preview.bounds.center();
     spec.pivot = {centre[0], centre[1], centre[2]};
     result.boolean = spec;
     const ObjectId id = result.id;
@@ -1768,7 +1771,30 @@ void MainWindow::importFiles(const QStringList& paths)
         const QString file = QFileInfo(path).fileName();
         QApplication::setOverrideCursor(Qt::WaitCursor);
         try {
-            const ImportResult result = importFile(m_stack, m_doc, toPath(path));
+            const auto askUnits = [this, &file](double largest) {
+                QApplication::restoreOverrideCursor();
+                const QStringList choices{
+                    tr("Metres: x1000, making it %1 mm across").arg(largest * 1000.0, 0, 'f', 1),
+                    tr("Inches: x25.4, making it %1 mm across").arg(largest * 25.4, 0, 'f', 1),
+                    tr("Centimetres: x10, making it %1 mm across").arg(largest * 10.0, 0, 'f', 1),
+                    tr("Keep it: %1 mm across").arg(largest, 0, 'g', 3)};
+                const int suggested = largest * 1000.0 <= 2000.0 ? 0 : 1;
+                bool ok = false;
+                const QString picked = QInputDialog::getItem(
+                    this, tr("Import %1").arg(file),
+                    tr("This model is only %1 mm across.\nSTL and OBJ files don't record their units: it was "
+                       "probably\nsaved in metres (Blender does this) or inches.\n\nWhat units was it made in?")
+                        .arg(largest, 0, 'g', 3),
+                    choices, suggested, false, &ok);
+                QApplication::setOverrideCursor(Qt::WaitCursor);
+                if (!ok)
+                    return 1.0;
+                const int i = static_cast<int>(choices.indexOf(picked));
+                const double scale = i == 0 ? 1000.0 : i == 1 ? 25.4 : i == 2 ? 10.0 : 1.0;
+                qInfo().noquote() << "Import units: x" << scale;
+                return scale;
+            };
+            const ImportResult result = importFile(m_stack, m_doc, toPath(path), askUnits);
             QApplication::restoreOverrideCursor();
             qInfo().noquote() << "Imported" << path << "-" << result.bodies.size() << "shape(s)";
             for (std::size_t i = 0; i < result.bodies.size(); ++i) {

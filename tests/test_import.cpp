@@ -328,3 +328,40 @@ TEST_CASE("Export, import again, combine, save and load", "[import]")
     CHECK_THAT(volumeOf(loaded.shape(cut.id)), WithinRel(volumeOf(doc.shape(cut.id)), 1e-9));
     CHECK_THROWS(file::fromJson(file::toJson(doc, "test")));  // the triangles live outside the JSON
 }
+
+TEST_CASE("Tiny STL files can be scaled up on import", "[import]")
+{
+    TempDir dir;
+    // A 0.02-unit cube: a 20 mm cube saved in metres.
+    RawMesh m = cube();
+    for (float& v : m.positions)
+        v *= 0.002f;
+    std::string stl = "solid t\n";
+    for (std::size_t t = 0; t < m.indices.size(); t += 3) {
+        stl += "facet normal 0 0 0\nouter loop\n";
+        for (int k = 0; k < 3; ++k) {
+            const float* p = &m.positions[m.indices[t + k] * 3];
+            stl += "vertex " + std::to_string(p[0]) + " " + std::to_string(p[1]) + " " + std::to_string(p[2]) + "\n";
+        }
+        stl += "endloop\nendfacet\n";
+    }
+    stl += "endsolid t\n";
+    const fs::path path = dir.path / "metres.stl";
+    std::ofstream(path) << stl;
+
+    Document doc;
+    CommandStack stack(doc);
+    double asked = 0.0;
+    const auto result = importFile(stack, doc, path, [&asked](double largest) {
+        asked = largest;
+        return 1000.0;
+    });
+    CHECK_THAT(asked, WithinAbs(0.02, 1e-6));
+    const Bounds b = doc.worldBounds(result.bodies.front());
+    CHECK_THAT(b.size()[0], WithinAbs(20, 1e-2));
+    CHECK_THAT(b.min[2], WithinAbs(0, 1e-4));
+
+    // Keeping it as it is (1) leaves it tiny.
+    const auto kept = importFile(stack, doc, path, [](double) { return 1.0; });
+    CHECK_THAT(doc.worldBounds(kept.bodies.front()).size()[0], WithinAbs(0.02, 1e-4));
+}

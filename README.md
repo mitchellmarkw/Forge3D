@@ -56,7 +56,7 @@ Attach both when reporting a problem.
 
 | Folder | What lives there |
 | --- | --- |
-| `src/core` | Geometry and document logic (OpenCASCADE, no Qt) |
+| `src/core` | Geometry and document logic (OpenCASCADE for solids, Manifold for meshes; no Qt) |
 | `src/view` | Camera and viewport maths (Qt GUI types, no window) |
 | `src/app` | The Windows application: main window, menus, OpenGL viewport |
 | `tests` | Catch2 unit tests |

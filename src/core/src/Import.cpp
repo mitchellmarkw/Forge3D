@@ -412,27 +412,6 @@ std::vector<RawMesh> readMeshFile(const std::filesystem::path& path)
 
 namespace {
 
-using Edge = std::pair<std::uint32_t, std::uint32_t>;  // directed: a -> b
-
-Edge undirected(std::uint32_t a, std::uint32_t b)
-{
-    return a < b ? Edge{a, b} : Edge{b, a};
-}
-
-struct EdgeHash {
-    std::size_t operator()(const Edge& e) const { return std::hash<std::uint64_t>()((std::uint64_t(e.first) << 32) | e.second); }
-};
-struct Key3Hash {
-    template <class T>
-    std::size_t operator()(const std::array<T, 3>& k) const
-    {
-        std::size_t h = 0;
-        for (const T& v : k)
-            h = h * 1000003u ^ std::hash<T>()(v);
-        return h;
-    }
-};
-
 }  // namespace
 
 std::string RepairReport::summary() const
@@ -465,6 +444,48 @@ std::string RepairReport::summary() const
     return s;
 }
 
+namespace {
+
+// Every triangle edge, sorted so that the uses of one edge sit together.
+// For corner k of triangle t (edge from corner k to corner k+1), `slot` = t*3+k.
+struct EdgeTable {
+    std::vector<std::pair<std::uint64_t, std::uint32_t>> uses;  // (undirected edge key, slot), sorted
+    std::vector<std::int64_t> neighbour;  // per slot: the other slot sharing the edge (exactly two uses), else -1
+    std::vector<std::uint32_t> useCount;  // per slot: how many triangles use its edge
+
+    static std::uint64_t key(std::uint32_t a, std::uint32_t b)
+    {
+        return a < b ? (std::uint64_t(a) << 32) | b : (std::uint64_t(b) << 32) | a;
+    }
+
+    void build(const std::vector<std::array<std::uint32_t, 3>>& tris)
+    {
+        uses.clear();
+        uses.reserve(tris.size() * 3);
+        for (std::size_t t = 0; t < tris.size(); ++t)
+            for (int k = 0; k < 3; ++k)
+                uses.emplace_back(key(tris[t][k], tris[t][(k + 1) % 3]), static_cast<std::uint32_t>(t * 3 + k));
+        std::sort(uses.begin(), uses.end());
+        neighbour.assign(tris.size() * 3, -1);
+        useCount.assign(tris.size() * 3, 0);
+        for (std::size_t i = 0; i < uses.size();) {
+            std::size_t j = i;
+            while (j < uses.size() && uses[j].first == uses[i].first)
+                ++j;
+            const auto n = static_cast<std::uint32_t>(j - i);
+            for (std::size_t k = i; k < j; ++k)
+                useCount[uses[k].second] = n;
+            if (n == 2) {
+                neighbour[uses[i].second] = uses[i + 1].second;
+                neighbour[uses[i + 1].second] = uses[i].second;
+            }
+            i = j;
+        }
+    }
+};
+
+}  // namespace
+
 std::shared_ptr<const MeshData> repairMesh(const RawMesh& raw, RepairReport& report, Vec3& offset)
 {
     report = RepairReport{};
@@ -476,7 +497,7 @@ std::shared_ptr<const MeshData> repairMesh(const RawMesh& raw, RepairReport& rep
         if (i >= rawPoints)
             throw ImportError("'" + raw.name + "' refers to a point that doesn't exist.");
 
-    // 1. Join points closer than a millionth of the size.
+    // 1. Join points closer than a millionth of the size (sort by grid cell).
     std::array<double, 3> lo{1e300, 1e300, 1e300}, hi{-1e300, -1e300, -1e300};
     for (std::size_t p = 0; p < rawPoints; ++p)
         for (int c = 0; c < 3; ++c) {
@@ -486,92 +507,110 @@ std::shared_ptr<const MeshData> repairMesh(const RawMesh& raw, RepairReport& rep
     const double diag = std::sqrt((hi[0] - lo[0]) * (hi[0] - lo[0]) + (hi[1] - lo[1]) * (hi[1] - lo[1]) +
                                   (hi[2] - lo[2]) * (hi[2] - lo[2]));
     const double grid = std::max(diag * 1e-6, 1e-7);
-    std::unordered_map<std::array<long long, 3>, std::uint32_t, Key3Hash> weld;
-    weld.reserve(rawPoints);
+    std::vector<std::pair<std::array<long long, 3>, std::uint32_t>> cells(rawPoints);
+    for (std::size_t p = 0; p < rawPoints; ++p)
+        cells[p] = {{std::llround(raw.positions[p * 3] / grid), std::llround(raw.positions[p * 3 + 1] / grid),
+                     std::llround(raw.positions[p * 3 + 2] / grid)},
+                    static_cast<std::uint32_t>(p)};
+    std::sort(cells.begin(), cells.end());
     std::vector<double> pts;  // welded points
+    pts.reserve(rawPoints * 3);
     std::vector<std::uint32_t> remap(rawPoints);
-    for (std::size_t p = 0; p < rawPoints; ++p) {
-        const std::array<long long, 3> key{std::llround(raw.positions[p * 3] / grid),
-                                           std::llround(raw.positions[p * 3 + 1] / grid),
-                                           std::llround(raw.positions[p * 3 + 2] / grid)};
-        const auto [it, added] = weld.try_emplace(key, static_cast<std::uint32_t>(pts.size() / 3));
-        if (added)
+    for (std::size_t i = 0; i < cells.size(); ++i) {
+        if (i == 0 || cells[i].first != cells[i - 1].first) {
+            const std::uint32_t p = cells[i].second;
             pts.insert(pts.end(), {raw.positions[p * 3], raw.positions[p * 3 + 1], raw.positions[p * 3 + 2]});
-        remap[p] = it->second;
+        }
+        remap[cells[i].second] = static_cast<std::uint32_t>(pts.size() / 3 - 1);
     }
+    cells = {};
     // Only count points that really were shared between triangles (STL repeats every corner).
-    std::unordered_set<std::uint32_t> usedRaw(raw.indices.begin(), raw.indices.end());
-    report.pointsMerged = usedRaw.size() > pts.size() / 3 ? usedRaw.size() - pts.size() / 3 : 0;
+    std::vector<char> usedRaw(rawPoints, 0);
+    std::size_t usedCount = 0;
+    for (std::uint32_t i : raw.indices)
+        if (!usedRaw[i]) {
+            usedRaw[i] = 1;
+            ++usedCount;
+        }
     const bool stlLike = rawPoints == raw.indices.size();  // every corner its own point: joining is normal
-    if (stlLike)
-        report.pointsMerged = 0;
+    report.pointsMerged = !stlLike && usedCount > pts.size() / 3 ? usedCount - pts.size() / 3 : 0;
 
     const auto point = [&pts](std::uint32_t i) { return std::array<double, 3>{pts[i * 3], pts[i * 3 + 1], pts[i * 3 + 2]}; };
     const auto areaTwice = [&](std::uint32_t a, std::uint32_t b, std::uint32_t c) {
         const auto A = point(a), B = point(b), C = point(c);
         const double ux = B[0] - A[0], uy = B[1] - A[1], uz = B[2] - A[2];
         const double vx = C[0] - A[0], vy = C[1] - A[1], vz = C[2] - A[2];
-        return std::sqrt(std::pow(uy * vz - uz * vy, 2) + std::pow(uz * vx - ux * vz, 2) +
-                         std::pow(ux * vy - uy * vx, 2));
+        const double nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+        return std::sqrt(nx * nx + ny * ny + nz * nz);
     };
 
-    // 2. Drop triangles with no area and repeated triangles.
+    // 2. Drop triangles with no area, then repeated triangles (same three corners).
     std::vector<std::array<std::uint32_t, 3>> tris;
-    std::unordered_set<std::array<std::uint32_t, 3>, Key3Hash> seen;
-    seen.reserve(raw.indices.size() / 3);
+    tris.reserve(raw.indices.size() / 3);
     for (std::size_t t = 0; t + 2 < raw.indices.size(); t += 3) {
         const std::uint32_t a = remap[raw.indices[t]], b = remap[raw.indices[t + 1]], c = remap[raw.indices[t + 2]];
         if (a == b || b == c || a == c || areaTwice(a, b, c) < grid * grid) {
             ++report.degenerateRemoved;
             continue;
         }
-        std::array<std::uint32_t, 3> key{a, b, c};
-        std::sort(key.begin(), key.end());
-        if (!seen.insert(key).second) {
-            ++report.duplicatesRemoved;
-            continue;
-        }
         tris.push_back({a, b, c});
+    }
+    {
+        std::vector<std::pair<std::array<std::uint32_t, 3>, std::uint32_t>> keys(tris.size());
+        for (std::size_t t = 0; t < tris.size(); ++t) {
+            auto k = tris[t];
+            std::sort(k.begin(), k.end());
+            keys[t] = {k, static_cast<std::uint32_t>(t)};
+        }
+        std::sort(keys.begin(), keys.end());
+        std::vector<char> keep(tris.size(), 1);
+        for (std::size_t i = 1; i < keys.size(); ++i)
+            if (keys[i].first == keys[i - 1].first) {
+                keep[keys[i].second] = 0;  // keeps the first of each kind (sort is stable on the index)
+                ++report.duplicatesRemoved;
+            }
+        std::size_t w = 0;
+        for (std::size_t t = 0; t < tris.size(); ++t)
+            if (keep[t])
+                tris[w++] = tris[t];
+        tris.resize(w);
     }
     if (tris.empty())
         throw ImportError("'" + raw.name + "' has no usable triangles.");
 
     // 3. Make neighbours face the same way, piece by piece (through edges shared by two).
-    std::unordered_map<Edge, std::vector<std::size_t>, EdgeHash> byEdge;
-    const auto rebuildEdges = [&] {
-        byEdge.clear();
-        byEdge.reserve(tris.size() * 2);
-        for (std::size_t t = 0; t < tris.size(); ++t)
-            for (int e = 0; e < 3; ++e)
-                byEdge[undirected(tris[t][e], tris[t][(e + 1) % 3])].push_back(t);
-    };
-    rebuildEdges();
-    const auto hasDirected = [&tris](std::size_t t, std::uint32_t a, std::uint32_t b) {
-        for (int e = 0; e < 3; ++e)
-            if (tris[t][e] == a && tris[t][(e + 1) % 3] == b)
-                return true;
-        return false;
+    EdgeTable edges;
+    edges.build(tris);
+    const auto directedAt = [&tris](std::uint32_t slot) {
+        const auto& t = tris[slot / 3];
+        return std::pair{t[slot % 3], t[(slot % 3 + 1) % 3]};
     };
     std::vector<int> piece(tris.size(), -1);
+    std::vector<char> flipped(tris.size(), 0);
     int pieces = 0;
+    std::vector<std::size_t> stack;
     for (std::size_t start = 0; start < tris.size(); ++start) {
         if (piece[start] >= 0)
             continue;
-        std::vector<std::size_t> stack{start};
+        stack.assign(1, start);
         piece[start] = pieces;
         while (!stack.empty()) {
             const std::size_t t = stack.back();
             stack.pop_back();
-            for (int e = 0; e < 3; ++e) {
-                const std::uint32_t a = tris[t][e], b = tris[t][(e + 1) % 3];
-                const auto& users = byEdge[undirected(a, b)];
-                if (users.size() != 2)
+            for (int k = 0; k < 3; ++k) {
+                const std::int64_t other = edges.neighbour[t * 3 + k];
+                if (other < 0)
                     continue;  // an edge of a hole, or shared by too many
-                const std::size_t n = users[0] == t ? users[1] : users[0];
+                const std::size_t n = std::size_t(other) / 3;
                 if (piece[n] >= 0)
                     continue;
-                if (hasDirected(n, a, b)) {  // runs the same way: facing the other way
-                    std::swap(tris[n][1], tris[n][2]);
+                // Both run the same way (as they are now, after earlier flips)?
+                auto mine = directedAt(static_cast<std::uint32_t>(t * 3 + k));
+                if (flipped[t])
+                    std::swap(mine.first, mine.second);
+                const auto theirs = directedAt(static_cast<std::uint32_t>(other));
+                if (mine == theirs) {
+                    flipped[n] = 1;
                     ++report.trianglesFlipped;
                 }
                 piece[n] = pieces;
@@ -580,24 +619,26 @@ std::shared_ptr<const MeshData> repairMesh(const RawMesh& raw, RepairReport& rep
         }
         ++pieces;
     }
+    for (std::size_t t = 0; t < tris.size(); ++t)
+        if (flipped[t])
+            std::swap(tris[t][1], tris[t][2]);
 
     // 4. Fill holes: walk each loop of edges used once, and close it with a fan.
-    std::map<std::uint32_t, std::vector<std::uint32_t>> next;  // hole edge b -> a (reverse of the triangle's a -> b)
-    for (const auto& [edge, users] : byEdge) {
-        if (users.size() != 1)
-            continue;
-        const auto& tri = tris[users[0]];
-        for (int e = 0; e < 3; ++e)
-            if (undirected(tri[e], tri[(e + 1) % 3]) == edge)
-                next[tri[(e + 1) % 3]].push_back(tri[e]);
-    }
-    std::set<std::uint32_t> visited;
+    edges.build(tris);
+    std::unordered_map<std::uint32_t, std::vector<std::uint32_t>> next;  // hole edge b -> a (reverse of a -> b)
+    for (std::size_t slot = 0; slot < tris.size() * 3; ++slot)
+        if (edges.useCount[slot] == 1) {
+            const auto [a, b] = directedAt(static_cast<std::uint32_t>(slot));
+            next[b].push_back(a);
+        }
+    std::unordered_set<std::uint32_t> visited;
+    const std::size_t before = tris.size();
     for (const auto& [start, outs] : next) {
         if (visited.count(start) || outs.size() != 1)
             continue;
         std::vector<std::uint32_t> loop{start};
         bool closed = false;
-        for (std::uint32_t at = outs[0]; loop.size() <= next.size(); ) {
+        for (std::uint32_t at = outs[0]; loop.size() <= next.size();) {
             if (at == start) {
                 closed = true;
                 break;
@@ -626,48 +667,52 @@ std::shared_ptr<const MeshData> repairMesh(const RawMesh& raw, RepairReport& rep
         }
         ++report.holesFilled;
     }
-    rebuildEdges();
-
-    // 5. Each piece faces outwards: turn over any that encloses a negative volume.
-    if (report.holesFilled > 0) {  // pieces may have changed: label them again (filled triangles join)
+    if (tris.size() != before) {
+        edges.build(tris);
+        // Pieces may have joined: label them again.
         piece.assign(tris.size(), -1);
         pieces = 0;
-        for (std::size_t s = 0; s < tris.size(); ++s) {
-            if (piece[s] >= 0)
+        for (std::size_t s0 = 0; s0 < tris.size(); ++s0) {
+            if (piece[s0] >= 0)
                 continue;
-            std::vector<std::size_t> stack{s};
-            piece[s] = pieces;
+            stack.assign(1, s0);
+            piece[s0] = pieces;
             while (!stack.empty()) {
                 const std::size_t t = stack.back();
                 stack.pop_back();
-                for (int e = 0; e < 3; ++e)
-                    for (std::size_t n : byEdge[undirected(tris[t][e], tris[t][(e + 1) % 3])])
-                        if (piece[n] < 0) {
-                            piece[n] = pieces;
-                            stack.push_back(n);
-                        }
+                for (int k = 0; k < 3; ++k)
+                    if (const std::int64_t o = edges.neighbour[t * 3 + k]; o >= 0 && piece[std::size_t(o) / 3] < 0) {
+                        piece[std::size_t(o) / 3] = pieces;
+                        stack.push_back(std::size_t(o) / 3);
+                    }
             }
             ++pieces;
         }
     }
+
+    // 5. Each piece faces outwards: turn over any that encloses a negative volume.
     std::vector<double> volume(static_cast<std::size_t>(pieces), 0.0);
     for (std::size_t t = 0; t < tris.size(); ++t) {
         const auto A = point(tris[t][0]), B = point(tris[t][1]), C = point(tris[t][2]);
         volume[static_cast<std::size_t>(piece[t])] +=
             (A[0] * (B[1] * C[2] - B[2] * C[1]) - A[1] * (B[0] * C[2] - B[2] * C[0]) + A[2] * (B[0] * C[1] - B[1] * C[0])) / 6.0;
     }
-    for (std::size_t p = 0; p < volume.size(); ++p)
-        if (volume[p] < 0.0)
+    for (double v : volume)
+        if (v < 0.0)
             ++report.partsTurnedOut;
     for (std::size_t t = 0; t < tris.size(); ++t)
         if (volume[static_cast<std::size_t>(piece[t])] < 0.0)
             std::swap(tris[t][1], tris[t][2]);
 
-    for (const auto& [edge, users] : byEdge) {
-        if (users.size() == 1)
+    for (std::size_t i = 0; i < edges.uses.size();) {
+        std::size_t j = i;
+        while (j < edges.uses.size() && edges.uses[j].first == edges.uses[i].first)
+            ++j;
+        if (j - i == 1)
             ++report.openEdges;
-        else if (users.size() > 2)
+        else if (j - i > 2)
             ++report.nonManifoldEdges;
+        i = j;
     }
     report.trianglesOut = tris.size();
 
@@ -687,6 +732,7 @@ std::shared_ptr<const MeshData> repairMesh(const RawMesh& raw, RepairReport& rep
     offset = {(lo[0] + hi[0]) / 2.0, (lo[1] + hi[1]) / 2.0, lo[2]};
     auto out = std::make_shared<MeshData>();
     std::vector<std::uint32_t> compact(used.size(), 0);
+    out->positions.reserve(used.size() * 3);
     for (std::size_t p = 0; p < used.size(); ++p) {
         if (!used[p])
             continue;
@@ -694,6 +740,7 @@ std::shared_ptr<const MeshData> repairMesh(const RawMesh& raw, RepairReport& rep
         out->positions.insert(out->positions.end(), {float(pts[p * 3] - offset[0]), float(pts[p * 3 + 1] - offset[1]),
                                                      float(pts[p * 3 + 2] - offset[2])});
     }
+    out->indices.reserve(tris.size() * 3);
     for (const auto& t : tris)
         out->indices.insert(out->indices.end(), {compact[t[0]], compact[t[1]], compact[t[2]]});
     out->size = {float(std::max(hi[0] - lo[0], 1e-6)), float(std::max(hi[1] - lo[1], 1e-6)),
@@ -702,7 +749,8 @@ std::shared_ptr<const MeshData> repairMesh(const RawMesh& raw, RepairReport& rep
     return out;
 }
 
-ImportResult importFile(CommandStack& stack, Document& doc, const std::filesystem::path& path)
+ImportResult importFile(CommandStack& stack, Document& doc, const std::filesystem::path& path,
+                        const std::function<double(double largestSide)>& askScale)
 {
     const std::vector<RawMesh> raws = readMeshFile(path);
     ImportResult result;
@@ -738,6 +786,32 @@ ImportResult importFile(CommandStack& stack, Document& doc, const std::filesyste
         result.reports.push_back(report);
         result.names.push_back(raw.name);
     }
+    // No units in STL / OBJ: a tiny result was probably saved in metres or inches.
+    const std::string ext = lower(path.extension().string());
+    const double largest = std::max({all.size()[0], all.size()[1], all.size()[2]});
+    if (askScale && ext != ".3mf" && largest < kTinyImport) {
+        const double s = askScale(largest);
+        if (s > 0.0 && s != 1.0) {
+            for (Body& b : bodies) {
+                auto& spec = std::get<MeshSpec>(b.spec);
+                spec.width *= s;
+                spec.depth *= s;
+                spec.height *= s;
+                b.placement.x *= s;
+                b.placement.y *= s;
+                b.placement.z *= s;
+            }
+            all = Bounds{};
+            for (const Body& b : bodies) {
+                const auto& spec = std::get<MeshSpec>(b.spec);
+                all.expand(float(b.placement.x - spec.width / 2), float(b.placement.y - spec.depth / 2),
+                           float(b.placement.z));
+                all.expand(float(b.placement.x + spec.width / 2), float(b.placement.y + spec.depth / 2),
+                           float(b.placement.z + spec.height));
+            }
+        }
+    }
+
     // Together: lowest point on the plate; centred on the plate if it's empty, else to
     // the right of what's there.
     Vec3 shift{-(all.min[0] + all.max[0]) / 2.0, -(all.min[1] + all.max[1]) / 2.0, -double(all.min[2])};

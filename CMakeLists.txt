@@ -2,7 +2,7 @@
 cmake_minimum_required(VERSION 3.21)
 
 project(Forge3D
-    VERSION 0.11.0
+    VERSION 0.12.0
     DESCRIPTION "Parametric 3D modeling with sculpting"
     LANGUAGES CXX)
 
@@ -30,6 +30,7 @@ find_package(OpenCASCADE CONFIG REQUIRED)
 message(STATUS "OpenCASCADE ${OpenCASCADE_VERSION} headers: ${OpenCASCADE_INCLUDE_DIR}")
 find_package(miniz CONFIG REQUIRED)
 find_package(nlohmann_json 3 CONFIG REQUIRED)
+find_package(manifold CONFIG REQUIRED)  # the mesh engine (imported meshes)
 
 if(FORGE3D_BUILD_APP OR FORGE3D_BUILD_TESTS)
     find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets OpenGLWidgets)
