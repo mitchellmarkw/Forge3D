@@ -36,7 +36,9 @@ EdgesPanel::EdgesPanel(QWidget* parent) : QWidget(parent)
         QString tip;
     } kinds[] = {
         {EdgeFinishKind::Rounding, tr("Rounding (outside edges)"), tr("Turn sharp outside edges into a curve")},
-        {EdgeFinishKind::Fillet, tr("Fillet (inside corners)"), tr("Fill inside corners with a curve")},
+        {EdgeFinishKind::Fillet, tr("Fillet (inside corners, or a cove)"),
+         tr("Fill inside corners with a curve. On an outside edge it cuts a curved hollow instead, as if a "
+            "cylinder centred on the edge were taken away")},
         {EdgeFinishKind::Chamfer, tr("Chamfer"), tr("Cut the corner off flat, the same distance back on both faces")},
         {EdgeFinishKind::Bevel, tr("Bevel"), tr("A flat slope across the edge at an angle to the face you pick")},
     };
@@ -176,8 +178,10 @@ void EdgesPanel::updateLabels()
         break;
     case EdgeFinishKind::Fillet:
         m_sizeLabel->setText(tr("Radius:"));
-        m_size->setToolTip(tr("How big the curve filling the corner is"));
-        m_kindHelp->setText(tr("Only inside corners can be picked."));
+        m_size->setToolTip(tr("How big the curve is: the radius filling an inside corner, or of the cylinder "
+                              "taken away along an outside edge"));
+        m_kindHelp->setText(tr("Inside corners are filled with a curve. Outside edges get a curved hollow (a "
+                               "cove), as if a cylinder of this radius centred on the edge were subtracted."));
         break;
     case EdgeFinishKind::Chamfer:
         m_sizeLabel->setText(tr("Distance:"));

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.14.1 — Fillets on outside edges (coves) (2026-11-12)
+
+- **Fillet now works on outside edges too:** it cuts a curved hollow (a cove), as if a
+  cylinder of the radius, centred on the edge, were subtracted. Inside corners are
+  filled as before; one Fillet can do both.
+- Straight edges, round rims (a cylinder's top) and other curves all work. Picked edges
+  that meet at a corner join smoothly.
+- 154 unit tests.
+
 ## 0.14.0 — Slice 5e: Edges (2026-11-12)
 
 - **Edges tool** (toolbar, Edit menu) for solid shapes, with four kinds:

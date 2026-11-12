@@ -4,6 +4,18 @@
 #include "forge/core/Document.h"
 
 #include <BRepAdaptor_Curve.hxx>
+#include <BRepAlgoAPI_Cut.hxx>
+#include <BRepBuilderAPI_MakeEdge.hxx>
+#include <BRepBuilderAPI_MakeFace.hxx>
+#include <BRepBuilderAPI_MakeWire.hxx>
+#include <BRepOffsetAPI_MakePipe.hxx>
+#include <BRepPrimAPI_MakeCylinder.hxx>
+#include <BRepPrimAPI_MakeSphere.hxx>
+#include <BRepPrimAPI_MakeTorus.hxx>
+#include <ShapeUpgrade_UnifySameDomain.hxx>
+#include <TopoDS_Wire.hxx>
+#include <gp_Ax2.hxx>
+#include <gp_Circ.hxx>
 #include <BRepBndLib.hxx>
 #include <BRepBuilderAPI_MakeVertex.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
@@ -195,6 +207,79 @@ ShapeEdges analyseWith(const TopoDS_Shape& shape, Maps& maps)
     return out;
 }
 
+
+// Everything within `radius` of the edges, cut out of the shape: a tube along each edge
+// (a cylinder for a straight one, part of a ring for an arc, a swept circle otherwise)
+// and a ball at each end, so edges meeting at a corner join smoothly.
+TopoDS_Shape cutCoves(const TopoDS_Shape& shape, const std::vector<TopoDS_Edge>& along, double radius)
+{
+    TopTools_ListOfShape tools;
+    std::vector<gp_Pnt> ends;
+    const auto addEnd = [&](const gp_Pnt& p) {
+        for (const gp_Pnt& q : ends)
+            if (q.Distance(p) < 1e-7)
+                return;
+        ends.push_back(p);
+        tools.Append(BRepPrimAPI_MakeSphere(p, radius).Shape());
+    };
+    for (const TopoDS_Edge& edge : along) {
+        BRepAdaptor_Curve curve(edge);
+        const double f = curve.FirstParameter(), l = curve.LastParameter();
+        const gp_Pnt a = curve.Value(f), b = curve.Value(l);
+        switch (curve.GetType()) {
+        case GeomAbs_Line: {
+            const double length = a.Distance(b);
+            if (length < 1e-9)
+                continue;
+            tools.Append(BRepPrimAPI_MakeCylinder(gp_Ax2(a, gp_Dir(gp_Vec(a, b))), radius, length).Shape());
+            break;
+        }
+        case GeomAbs_Circle: {
+            const gp_Circ circle = curve.Circle();
+            if (radius >= circle.Radius())
+                throw GeometryError("The cove radius must be smaller than the round edge's own radius");
+            // The ring starts where the arc does and runs the same way round.
+            gp_Ax2 axes = circle.Position();
+            const double span = std::min(l - f, 2.0 * std::numbers::pi);
+            axes.Rotate(axes.Axis(), f);
+            tools.Append(BRepPrimAPI_MakeTorus(axes, circle.Radius(), radius, span).Shape());
+            break;
+        }
+        default: {
+            const TopoDS_Wire spine = BRepBuilderAPI_MakeWire(edge).Wire();
+            gp_Pnt start;
+            gp_Vec tangent;
+            curve.D1(f, start, tangent);
+            const TopoDS_Face profile = BRepBuilderAPI_MakeFace(
+                BRepBuilderAPI_MakeWire(BRepBuilderAPI_MakeEdge(gp_Circ(gp_Ax2(start, gp_Dir(tangent)), radius)))
+                    .Wire())
+                                            .Face();
+            BRepOffsetAPI_MakePipe pipe(spine, profile);
+            pipe.Build();
+            if (!pipe.IsDone())
+                throw GeometryError("");
+            tools.Append(pipe.Shape());
+            break;
+        }
+        }
+        if (!BRep_Tool::IsClosed(edge)) {
+            addEnd(a);
+            addEnd(b);
+        }
+    }
+    TopTools_ListOfShape arguments;
+    arguments.Append(shape);
+    BRepAlgoAPI_Cut cut;
+    cut.SetArguments(arguments);
+    cut.SetTools(tools);
+    cut.Build();
+    if (!cut.IsDone() || cut.HasErrors())
+        throw GeometryError("");
+    ShapeUpgrade_UnifySameDomain unify(cut.Shape(), true, true, false);
+    unify.Build();
+    return unify.Shape();
+}
+
 }  // namespace
 
 namespace edges {
@@ -209,7 +294,7 @@ bool suits(EdgeFinishKind kind, Bend bend)
 {
     switch (kind) {
     case EdgeFinishKind::Rounding: return bend == Bend::Convex;
-    case EdgeFinishKind::Fillet: return bend == Bend::Concave;
+    case EdgeFinishKind::Fillet: return bend != Bend::Smooth;  // inside: filled; outside: a cove cut in
     case EdgeFinishKind::Chamfer:
     case EdgeFinishKind::Bevel: return bend != Bend::Smooth;
     }
@@ -342,7 +427,29 @@ TopoDS_Shape apply(const TopoDS_Shape& shape, const EdgeFinish& finish)
     }
     try {
         TopoDS_Shape result;
-        if (finish.kind == EdgeFinishKind::Rounding || finish.kind == EdgeFinishKind::Fillet) {
+        if (finish.kind == EdgeFinishKind::Fillet) {
+            // Inside corners are filled; outside edges get a cove: everything within the
+            // radius of the edge is cut away, as if a cylinder centred on it were subtracted.
+            std::vector<int> inside, outside;
+            for (const auto& [e, f] : picks)
+                (found.edges[std::size_t(e)].bend == Bend::Concave ? inside : outside).push_back(e);
+            result = shape;
+            if (!inside.empty()) {
+                BRepFilletAPI_MakeFillet fillet(shape);
+                for (int e : inside)
+                    fillet.Add(finish.size, maps.edges[std::size_t(e)]);
+                fillet.Build();
+                if (!fillet.IsDone())
+                    throw GeometryError("");
+                result = fillet.Shape();
+            }
+            if (!outside.empty()) {
+                std::vector<TopoDS_Edge> along;
+                for (int e : outside)
+                    along.push_back(maps.edges[std::size_t(e)]);
+                result = cutCoves(result, along, finish.size);
+            }
+        } else if (finish.kind == EdgeFinishKind::Rounding) {
             BRepFilletAPI_MakeFillet fillet(shape);
             for (const auto& [e, f] : picks)
                 fillet.Add(finish.size, maps.edges[std::size_t(e)]);
@@ -368,12 +475,16 @@ TopoDS_Shape apply(const TopoDS_Shape& shape, const EdgeFinish& finish)
             throw GeometryError("");
         return result;
     } catch (const Standard_Failure&) {
-    } catch (const GeometryError&) {
+    } catch (const GeometryError& e) {
+        if (*e.what() != '\0')
+            throw;  // already says what's wrong
     }
     switch (finish.kind) {
     case EdgeFinishKind::Rounding:
-    case EdgeFinishKind::Fillet:
         throw GeometryError("Those edges could not be rounded at that radius. Try a smaller radius, or fewer "
+                            "edges at once.");
+    case EdgeFinishKind::Fillet:
+        throw GeometryError("Those edges could not be filleted at that radius. Try a smaller radius, or fewer "
                             "edges at once.");
     case EdgeFinishKind::Chamfer:
         throw GeometryError("Those edges could not be chamfered that far. Try a smaller size.");
