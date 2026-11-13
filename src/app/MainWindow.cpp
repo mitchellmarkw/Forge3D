@@ -8,6 +8,7 @@
 #include "PropertiesPanel.h"
 #include "FollowPanel.h"
 #include "HolePanel.h"
+#include "PatternPanel.h"
 #include "ShellPanel.h"
 #include "SketchPanel.h"
 #include "SketchView.h"
@@ -26,6 +27,7 @@
 #include "forge/core/SketchShape.h"
 #include "forge/core/Shell.h"
 #include "forge/core/Follow.h"
+#include "forge/core/Pattern.h"
 #include "forge/core/Tessellator.h"
 #include "forge/core/Tessellator.h"
 #include "forge/core/Text.h"
@@ -322,6 +324,8 @@ void MainWindow::createActions()
             endShell();
         else if (m_followMode.active)
             endFollow();
+        else if (m_patternMode.active)
+            endPattern();
         else if (m_sketchMode.picking) {
             m_sketchMode.picking = false;
             statusBar()->clearMessage();
@@ -503,6 +507,17 @@ void MainWindow::createActions()
         }
         startFollow(target, false);
     });
+    m_patternAction = new QAction(tr("Pattern"), this);
+    m_patternAction->setToolTip(tr("Pattern: linked copies in a row, a grid or round a circle, of the selected shape "
+                                   "or of the hole / pocket / groove its last step made"));
+    connect(m_patternAction, &QAction::triggered, this, [this] {
+        const ObjectId id = selectedOne();
+        if (id == kInvalidId || m_selection.size() != 1 || !m_doc.isTopLevel(id)) {
+            statusBar()->showMessage(tr("Pattern: select one shape on the plate first."), 6000);
+            return;
+        }
+        startPattern(history::tip(m_doc, id), false);
+    });
     m_shellAction = new QAction(tr("Shell"), this);
     m_shellAction->setToolTip(tr("Shell: hollow the selected shape out to walls of a set thickness, leaving the "
                                  "faces you click open"));
@@ -602,6 +617,7 @@ void MainWindow::createMenus()
     edit->addAction(m_holeAction);
     edit->addAction(m_shellAction);
     edit->addAction(m_followAction);
+    edit->addAction(m_patternAction);
     edit->addMenu(m_alignMenu);
     edit->addMenu(m_mirrorMenu);
     edit->addAction(m_group);
@@ -711,7 +727,8 @@ void MainWindow::createToolBar()
     {
         QWidget* align = menuButton(m_alignMenu);
         align->setObjectName(QStringLiteral("AlignShapesButton"));
-        group(build, tr("Arrange"), {align, menuButton(m_mirrorMenu), button(m_group), button(m_duplicate)});
+        group(build, tr("Arrange"),
+              {align, menuButton(m_mirrorMenu), button(m_patternAction), button(m_group), button(m_duplicate)});
     }
     group(build, tr("Remove"), {button(m_delete), button(m_clear)});
     build.row->addStretch(1);
@@ -728,7 +745,8 @@ void MainWindow::createToolBar()
         group(design, tr("Sketch"), {sketchButton});
     }
     group(design, tr("Features"),
-          {button(m_holeAction), button(m_shellAction), button(m_followAction), button(m_edgesAction)});
+          {button(m_holeAction), button(m_shellAction), button(m_followAction), button(m_patternAction),
+           button(m_edgesAction)});
     group(design, tr("Change"), {button(m_split), button(m_emboss)});
     group(design, tr("Undo"), {button(m_undo), button(m_redo)});
     design.row->addStretch(1);
@@ -947,6 +965,25 @@ void MainWindow::createDocks()
     connect(m_shellPanel, &ShellPanel::applyRequested, this, &MainWindow::applyShell);
     connect(m_shellPanel, &ShellPanel::cancelRequested, this, &MainWindow::endShell);
 
+    m_patternPanel = new PatternPanel;
+    stackLayout->addWidget(m_patternPanel);
+    m_patternPanel->hide();
+    m_patternTimer = new QTimer(this);
+    m_patternTimer->setSingleShot(true);
+    m_patternTimer->setInterval(200);
+    connect(m_patternTimer, &QTimer::timeout, this, &MainWindow::updatePatternPreview);
+    connect(m_patternPanel, &PatternPanel::changed, this, [this] { m_patternTimer->start(); });
+    connect(m_patternPanel, &PatternPanel::repeatChanged, this, [this](bool feature) {
+        // Copies of a hole sit closer together than copies of the whole shape.
+        PatternFinish f = startingPattern(m_doc, m_patternMode.target, feature);
+        const PatternFinish now = m_patternPanel->finish();
+        f.kind = now.kind;
+        m_patternPanel->setNumbers(f);
+        m_patternTimer->start(0);
+    });
+    connect(m_patternPanel, &PatternPanel::applyRequested, this, &MainWindow::applyPattern);
+    connect(m_patternPanel, &PatternPanel::cancelRequested, this, &MainWindow::endPattern);
+
     m_followPanel = new FollowPanel;
     stackLayout->addWidget(m_followPanel);
     m_followPanel->hide();
@@ -1066,6 +1103,8 @@ void MainWindow::setSelection(std::vector<ObjectId> ids)
         endShell();
     if (m_followMode.active && m_followMode.sketching == 0)
         endFollow();
+    if (m_patternMode.active)
+        endPattern();
     if (m_sketchMode.picking) {
         m_sketchMode.picking = false;  // picking something else leaves the face picking
         statusBar()->clearMessage();
@@ -1217,7 +1256,8 @@ void MainWindow::onLeftPressed(const QVector3D& origin, const QVector3D& directi
             m_pressOnHandle = true;
         return;
     }
-    if (m_embossMode.active || m_edgesMode.active || m_holeMode.active || m_shellMode.active || m_followMode.active)
+    if (m_embossMode.active || m_edgesMode.active || m_holeMode.active || m_shellMode.active || m_followMode.active ||
+        m_patternMode.active)
         return;  // shapes stay put while the tool is open
 
     if (handle.valid() && multiSelection()) {
@@ -2494,7 +2534,8 @@ void MainWindow::applyEdges()
 bool MainWindow::toolOpen() const
 {
     return m_splitMode.active || m_embossMode.active || m_edgesMode.active || m_sketchMode.picking ||
-           m_sketchMode.active || m_holeMode.active || m_shellMode.active || m_followMode.active;
+           m_sketchMode.active || m_holeMode.active || m_shellMode.active || m_followMode.active ||
+           m_patternMode.active;
 }
 
 void MainWindow::startEmboss(ObjectId target, bool editing)
@@ -3213,6 +3254,8 @@ void MainWindow::refreshScene()
             endShell();
         if (m_followMode.active && !m_doc.find(m_followMode.target))
             endFollow();
+        if (m_patternMode.active && !m_doc.find(m_patternMode.target))
+            endPattern();
         for (ObjectId id : m_doc.topLevelIds()) {
             DisplayItem item;
             item.id = id;
@@ -3241,6 +3284,11 @@ void MainWindow::refreshScene()
             if (m_holeMode.active && m_holeMode.preview && id == history::objectOf(m_doc, m_holeMode.target)) {
                 item.mesh = m_holeMode.preview;  // drilled, as it will be (plate coordinates)
                 item.model = QMatrix4x4();
+            }
+            if (m_patternMode.active && m_patternMode.preview &&
+                id == history::objectOf(m_doc, m_patternMode.target)) {
+                item.mesh = m_patternMode.preview;
+                item.model = previewFrame(m_patternMode.target, m_patternMode.editing);
             }
             if (m_followMode.active && id == history::objectOf(m_doc, m_followMode.target)) {
                 if (m_followMode.preview) {
@@ -3415,6 +3463,7 @@ void MainWindow::refreshScene()
     m_holeAction->setEnabled(m_selection.size() == 1 && allTopLevel && !rolled && !toolOpen());
     m_shellAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_followAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
+    m_patternAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_clear->setEnabled(!m_doc.empty());
     relockForSketch();
 }
@@ -3566,6 +3615,7 @@ void MainWindow::editStep(ObjectId id)
     case BooleanOp::Edges: startEdges(id, true); break;
     case BooleanOp::Shell: startShell(id, true); break;
     case BooleanOp::Follow: startFollow(id, true); break;
+    case BooleanOp::Pattern: startPattern(id, true); break;
     case BooleanOp::Emboss: startEmboss(id, true); break;
     case BooleanOp::Split:
         if (m_doc.isTopLevel(id))
@@ -5043,6 +5093,139 @@ void MainWindow::endFollow()
     m_followTimer->stop();
     m_followMode = FollowMode{};
     m_followPanel->hide();
+    m_properties->show();
+    QTimer::singleShot(0, this, [this] { resizeDocks({m_propsDock}, {m_propsDockWidth}, Qt::Horizontal); });
+    statusBar()->clearMessage();
+    refreshScene();
+    refreshCommandState();
+}
+
+// ---- Pattern ----------------------------------------------------------------------
+
+void MainWindow::startPattern(ObjectId target, bool editing)
+{
+    const Body* body = m_doc.find(target);
+    if (!body)
+        return;
+    if (m_dragState.kind != Drag::Kind::None)
+        cancelDrag();
+    PatternMode mode;
+    mode.active = true;
+    mode.editing = editing;
+    mode.target = target;
+    PatternFinish finish;
+    std::optional<QString> feature;
+    try {
+        if (editing) {
+            if (!body->isBoolean() || body->boolean->op != BooleanOp::Pattern)
+                return;
+            finish = patternInPlate(m_doc, target);
+            if (const auto name = pattern::featureName(m_doc, body->boolean->operands.front()))
+                feature = QString::fromStdString(*name);
+        } else {
+            if (const auto name = pattern::featureName(m_doc, target))
+                feature = QString::fromStdString(*name);
+            // A shape whose last step drilled or cut something: repeat that, to begin with.
+            finish = startingPattern(m_doc, target, feature.has_value());
+        }
+    } catch (const std::exception& e) {
+        QMessageBox::information(this, tr("Forge3D"), QString::fromUtf8(e.what()));
+        return;
+    }
+    m_patternMode = mode;
+    const QString name = QString::fromStdString(m_doc.find(history::objectOf(m_doc, target))->name);
+    m_patternPanel->start(editing ? tr("Change the pattern of '%1'").arg(name) : tr("Pattern '%1'").arg(name),
+                          feature, finish, editing);
+    m_propsDockWidth = m_propsDock->width();
+    m_properties->hide();
+    m_patternPanel->show();
+    statusBar()->showMessage(tr("Pattern: set the copies, then Apply. Esc cancels."));
+    updatePatternPreview();
+    refreshCommandState();
+}
+
+void MainWindow::updatePatternPreview()
+{
+    if (!m_patternMode.active)
+        return;
+    m_patternTimer->stop();
+    m_patternMode.preview.reset();
+    bool ok = false;
+    const PatternFinish f = m_patternPanel->finish();
+    if (f.kind == PatternKind::Grid && f.dir1 == f.dir2) {
+        m_patternPanel->setStatus(tr("Pick two different directions for the grid."), true);
+    } else {
+        try {
+            QApplication::setOverrideCursor(Qt::WaitCursor);
+            struct RestoreCursor {
+                ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
+            } restore;
+            const BooleanSpec spec = m_patternMode.editing
+                                         ? *withPattern(m_doc, m_patternMode.target, f).boolean
+                                         : patternSpec(m_doc, m_patternMode.target, f);
+            m_patternMode.preview = m_doc.previewMesh(spec);
+            const int n = pattern::copies(f);
+            m_patternPanel->setStatus(n == 1 ? tr("Just the original: add more copies.")
+                                             : tr("%1 in all. This is how it will look.").arg(n),
+                                      false);
+            ok = n > 1;
+        } catch (const std::exception& e) {
+            m_patternPanel->setStatus(QString::fromUtf8(e.what()), true);
+        }
+    }
+    m_patternPanel->setApplyEnabled(ok);
+    refreshScene();
+}
+
+void MainWindow::applyPattern()
+{
+    if (!m_patternMode.active)
+        return;
+    const PatternFinish f = m_patternPanel->finish();
+    const ObjectId target = m_patternMode.target;
+    const bool editing = m_patternMode.editing;
+    std::optional<BooleanSpec> spec;
+    try {
+        spec = editing ? *withPattern(m_doc, target, f).boolean : patternSpec(m_doc, target, f);
+        m_doc.previewMesh(*spec);
+    } catch (const std::exception& e) {
+        QMessageBox::warning(this, tr("Forge3D"), tr("That did not work:\n%1").arg(QString::fromUtf8(e.what())));
+        return;
+    }
+    endPattern();
+    if (editing) {
+        const Body* now = m_doc.find(target);
+        if (!now)
+            return;
+        Body after = *now;
+        after.boolean = *spec;
+        run(std::make_unique<EditBodyCommand>(*now, after, "Change pattern"));
+        setSelection(history::objectOf(m_doc, target));
+        return;
+    }
+    Body result;
+    result.id = m_doc.allocateId();
+    result.name = m_doc.uniqueName("Pattern");
+    result.boolean = *spec;
+    const ObjectId id = result.id;
+    if (!m_doc.isTopLevel(target)) {
+        // Rolled back: the step goes in at the bar.
+        const ObjectId object = history::objectOf(m_doc, target);
+        if (run(std::make_unique<InsertStepCommand>(std::move(result), m_doc.parentOf(target))))
+            setSelection(object);
+        return;
+    }
+    if (run(std::make_unique<CombineCommand>(std::move(result))))
+        setSelection(id);
+}
+
+void MainWindow::endPattern()
+{
+    if (!m_patternMode.active)
+        return;
+    m_patternTimer->stop();
+    m_patternMode = PatternMode{};
+    m_patternPanel->hide();
     m_properties->show();
     QTimer::singleShot(0, this, [this] { resizeDocks({m_propsDock}, {m_propsDockWidth}, Qt::Horizontal); });
     statusBar()->clearMessage();

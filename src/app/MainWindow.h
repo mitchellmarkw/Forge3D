@@ -48,6 +48,7 @@ class EmbossPanel;
 class EdgesPanel;
 class FollowPanel;
 class HolePanel;
+class PatternPanel;
 class ShellPanel;
 class SketchPanel;
 class SketchView;
@@ -201,6 +202,11 @@ private:
     void endFollow();
     // The sketch view is open for a tool (hole spots, a path, a cross-section).
     bool sketchingForTool() const { return m_holeMode.positioning || m_followMode.sketching != 0; }
+    // Pattern (slice 11): linked copies of a shape or its last feature.
+    void startPattern(ObjectId target, bool editing);
+    void updatePatternPreview();
+    void applyPattern();
+    void endPattern();
     // Shell (slice 8): hollow out, faces clicked to leave open.
     void startShell(ObjectId target, bool editing);
     void shellClick(const QVector3D& origin, const QVector3D& direction);
@@ -455,6 +461,17 @@ private:
         std::shared_ptr<const Mesh> pathLines;
     };
     FollowMode m_followMode;
+
+    QAction* m_patternAction = nullptr;
+    PatternPanel* m_patternPanel = nullptr;
+    QTimer* m_patternTimer = nullptr;
+    struct PatternMode {
+        bool active = false;
+        bool editing = false;
+        ObjectId target = kInvalidId;  // the shape (editing: the Pattern step)
+        std::shared_ptr<const Mesh> preview;  // result coordinates (like Edges)
+    };
+    PatternMode m_patternMode;
 };
 
 }  // namespace forge::app
