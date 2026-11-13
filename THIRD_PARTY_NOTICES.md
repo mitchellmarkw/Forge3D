@@ -26,7 +26,8 @@ against are pinned in `vcpkg.json` (through vcpkg's `builtin-baseline`).
 ## Libraries those depend on
 
 Qt, Open CASCADE and Manifold bring in further libraries, such as FreeType, HarfBuzz,
-libpng, libjpeg-turbo, PCRE2, double-conversion, zstd, zlib and oneTBB. Their licenses
+libpng, libjpeg-turbo, PCRE2, double-conversion, zstd, zlib, Brotli, bzip2 and
+Clipper2. Their licenses
 are in the `licenses` folder of the download too.
 
 ## Microsoft Visual C++ runtime
