@@ -31,6 +31,7 @@
 #include <gp_Pnt.hxx>
 #include <gp_Vec.hxx>
 #include <ShapeUpgrade_UnifySameDomain.hxx>
+#include <TopTools_ListOfShape.hxx>
 #include <Standard_Failure.hxx>
 #include <Standard_Version.hxx>
 #include <TopAbs_ShapeEnum.hxx>
