@@ -49,6 +49,7 @@ target_link_libraries(Forge3D PRIVATE
     Forge3D::view
     Qt6::Widgets
     Qt6::OpenGLWidgets
+    Qt6::Svg
 )
 
 if(WIN32)

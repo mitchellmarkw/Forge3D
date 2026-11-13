@@ -15,7 +15,8 @@ in one document with one undo history.
 - **Combine:** Merge, Subtract, Intersect, Split by a plane, Mirror, Group, Align.
   Results stay editable: change any part later and the result follows.
 - **Edges and surfaces:** rounded, chamfered and bevelled edges; Emboss words that wrap
-  round a surface; Shell (hollow out, with open faces).
+  round a surface, or a picture (a logo traced to an outline, or a photo as a
+  relief); Shell (hollow out, with open faces).
 - **Parametric design:** a history of steps with a rollback bar; a 2D sketcher with
   dimensions and rules; Pad, Pocket, Revolve, Groove; Holes (plain, counterbored,
   countersunk, tapped, metric sizes); Follow grooves and ridges along a path drawn on

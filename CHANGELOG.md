@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.21.0 — Slice 12: Emboss a picture (2026-11-13)
+
+- **Emboss** now takes a picture as well as words: choose **Emboss: A picture (logo or
+  photo)** at the top of the panel, then **Choose a picture...** (PNG, JPG, BMP, GIF or
+  SVG).
+  - **Logo (one height)**: the dark parts are traced to a clean, smooth outline (holes
+    kept) and raised or engraved all at one depth. **Where dark ends** (a slider) sets
+    which greys count; **Invert** makes the light parts the shape instead.
+  - **Photo (shades become heights)**: every shade becomes a height, darkest standing
+    out the full depth and white not at all (a carved / lithophane look). **Invert**
+    makes the light parts stand highest.
+  - **Width** (the height follows the picture's shape), **Depth**, **Turn**, Raised or
+    Engraved, and **Center on the face**, as for words. Live preview.
+- Like words, a picture follows the surface: flat faces, round cylinders and spheres,
+  and over edges onto the next face. Too wide to go round the shape is refused with a
+  message.
+- It's a step in the history: double-click it (or **Change the picture...** in
+  Properties) to change the picture or its settings, or click to move it. Resizing the
+  shape evenly grows the picture with it.
+- The picture is kept inside the `.f3d` file (as grey, at most 1000 pixels on its longest
+  side), so the file opens anywhere. File format version 17. Older files still open.
+- Emboss (words too) now notices when something would wrap all the way round a shape and
+  run into itself, instead of making a broken shape.
+- 187 unit tests (5 new: tracing logos, holes and inverting; photo reliefs; pictures on
+  a box and round a cylinder, raised and engraved; too wide to go round; saving, opening
+  and resizing).
+
 ## 0.20.2 — Long Follow grooves cut cleanly (2026-11-13)
 
 - Changing a Follow groove's path to a longer line round a cylinder could make it look

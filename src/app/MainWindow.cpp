@@ -28,6 +28,7 @@
 #include "forge/core/Shell.h"
 #include "forge/core/Follow.h"
 #include "forge/core/Pattern.h"
+#include "forge/core/Picture.h"
 #include "forge/core/Tessellator.h"
 #include "forge/core/Tessellator.h"
 #include "forge/core/Text.h"
@@ -70,6 +71,10 @@
 #include <QToolButton>
 #include <QMenu>
 #include <QUrl>
+#include <QImage>
+#include <QPainter>
+#include <QSvgRenderer>
+#include <cstring>
 #include <QtDebug>
 
 #include <Standard_Version.hxx>
@@ -856,6 +861,7 @@ void MainWindow::createDocks()
     connect(m_embossPanel, &EmbossPanel::typing, this, [this] { m_embossTimer->start(400); });
     connect(m_embossPanel, &EmbossPanel::applyRequested, this, &MainWindow::applyEmboss);
     connect(m_embossPanel, &EmbossPanel::cancelRequested, this, &MainWindow::endEmboss);
+    connect(m_embossPanel, &EmbossPanel::pictureRequested, this, &MainWindow::choosePicture);
     connect(m_embossPanel, &EmbossPanel::centerRequested, this, [this](int how) {
         if (!m_embossMode.active)
             return;
@@ -866,9 +872,12 @@ void MainWindow::createDocks()
         std::optional<emboss::SurfacePoint> moved;
         try {
             QApplication::setOverrideCursor(Qt::WaitCursor);
-            moved = centeredSpot(m_doc, m_embossMode.target, *m_embossMode.spot, m_embossPanel->words(),
-                                 how == 0 ? emboss::Center::Both
-                                          : how == 1 ? emboss::Center::TopBottom : emboss::Center::LeftRight);
+            const emboss::Center c = how == 0   ? emboss::Center::Both
+                                     : how == 1 ? emboss::Center::TopBottom
+                                                : emboss::Center::LeftRight;
+            moved = m_embossPanel->usingPicture()
+                        ? centeredSpot(m_doc, m_embossMode.target, *m_embossMode.spot, m_embossPanel->picture(), c)
+                        : centeredSpot(m_doc, m_embossMode.target, *m_embossMode.spot, m_embossPanel->words(), c);
             QApplication::restoreOverrideCursor();
         } catch (const std::exception& e) {
             QApplication::restoreOverrideCursor();
@@ -2561,17 +2570,26 @@ void MainWindow::startEmboss(ObjectId target, bool editing)
         QApplication::restoreOverrideCursor();
     }
     EmbossText words = m_lastWords;
+    EmbossPicture picture = m_lastPicture;
+    bool usePicture = m_lastUsedPicture;
     try {
         if (editing) {
-            if (!body->isBoolean() || body->boolean->op != BooleanOp::Emboss || !body->boolean->emboss)
+            if (!body->isBoolean() || body->boolean->op != BooleanOp::Emboss ||
+                (!body->boolean->emboss && !body->boolean->picture))
                 return;
-            words = *body->boolean->emboss;
+            usePicture = body->boolean->picture.has_value();
+            if (usePicture)
+                picture = *body->boolean->picture;
+            else
+                words = *body->boolean->emboss;
             mode.spot = embossSpot(m_doc, target);
         } else {
-            // Letters to suit the shape: about a fifth of its middle size.
+            // Letters to suit the shape: about a fifth of its middle size; a picture about
+            // half of it.
             auto size = m_doc.worldBounds(target).size();
             std::sort(size.begin(), size.end());
             words.letterHeight = std::clamp(std::round(double(size[1]) * 0.2 * 2.0) / 2.0, 2.0, 20.0);
+            picture.width = std::clamp(std::round(double(size[1]) * 0.5), 5.0, 200.0);
             // Start on the side facing you, in the middle.
             const QVector3D eye = m_viewport->camera().eyePosition();
             const auto c = m_doc.worldTransform(target).apply(m_doc.visibleCentre(target));
@@ -2580,7 +2598,9 @@ void MainWindow::startEmboss(ObjectId target, bool editing)
                                      words.letterHeight / 2.0);
             // ...in the middle of that face.
             if (mode.spot)
-                if (const auto middle = centeredSpot(m_doc, target, *mode.spot, words, emboss::Center::Both))
+                if (const auto middle = usePicture
+                                            ? centeredSpot(m_doc, target, *mode.spot, picture, emboss::Center::Both)
+                                            : centeredSpot(m_doc, target, *mode.spot, words, emboss::Center::Both))
                     mode.spot = middle;
         }
     } catch (const std::exception& e) {
@@ -2590,13 +2610,15 @@ void MainWindow::startEmboss(ObjectId target, bool editing)
     }
     m_embossMode = mode;
     const QString name = QString::fromStdString(body->name);
-    m_embossPanel->start(editing ? tr("Change the words on '%1'").arg(name) : tr("Emboss '%1'").arg(name),
-                         editing, words);
+    m_embossPanel->start(editing ? (usePicture ? tr("Change the picture on '%1'") : tr("Change the words on '%1'"))
+                                         .arg(name)
+                                 : tr("Emboss '%1'").arg(name),
+                         editing, words, picture, usePicture);
     m_propsDockWidth = m_propsDock->width();
     m_properties->hide();
     m_embossPanel->show();
-    statusBar()->showMessage(tr("Emboss: type the words in the panel on the right and click the shape where they "
-                                "go, then click %1. Esc cancels.")
+    statusBar()->showMessage(tr("Emboss: type the words (or choose a picture) in the panel on the right and click "
+                                "the shape where they go, then click %1. Esc cancels.")
                                  .arg(editing ? tr("Apply") : tr("Emboss")));
     updateEmbossPreview();
     refreshCommandState();
@@ -2620,6 +2642,14 @@ std::optional<BooleanSpec> MainWindow::currentEmbossSpec() const
 {
     if (!m_embossMode.active || !m_embossMode.spot)
         return std::nullopt;
+    if (m_embossPanel->usingPicture()) {
+        const EmbossPicture picture = m_embossPanel->picture();
+        if (!picture.image)
+            throw GeometryError(tr("Choose a picture (Choose a picture...).").toStdString());
+        if (m_embossMode.editing)
+            return withEmboss(m_doc, m_embossMode.target, *m_embossMode.spot, picture).boolean;
+        return embossSpec(m_doc, m_embossMode.target, *m_embossMode.spot, picture);
+    }
     const EmbossText words = m_embossPanel->words();
     if (m_embossMode.editing)
         return withEmboss(m_doc, m_embossMode.target, *m_embossMode.spot, words).boolean;
@@ -2633,9 +2663,17 @@ void MainWindow::updateEmbossPreview()
     m_embossMode.preview.reset();
     bool ok = false;
     try {
+        if (m_embossPanel->usingPicture() && !m_embossPanel->picture().image) {
+            m_embossPanel->setStatus(tr("Choose a picture: a logo, or a photo (Choose a picture...)."), false);
+            m_embossPanel->setApplyEnabled(false);
+            refreshScene();
+            return;
+        }
         const auto spec = currentEmbossSpec();
         if (!spec) {
-            m_embossPanel->setStatus(tr("Click on the shape where the words should go."), false);
+            m_embossPanel->setStatus(m_embossPanel->usingPicture() ? tr("Click on the shape where the picture should go.")
+                                                                   : tr("Click on the shape where the words should go."),
+                                     false);
         } else {
             QApplication::setOverrideCursor(Qt::WaitCursor);
             struct RestoreCursor {
@@ -2643,14 +2681,14 @@ void MainWindow::updateEmbossPreview()
             } restore;
             if (m_embossMode.wordsOnly) {
                 m_embossMode.preview = m_doc.previewWords(*spec);
-                m_embossPanel->setStatus(tr("A big shape: the words are shown in orange and are cut in or joined on "
-                                            "when you click %1. Click elsewhere on the shape to move them.")
+                m_embossPanel->setStatus(tr("A big shape: what you emboss is shown in orange and is cut in or joined "
+                                            "on when you click %1. Click elsewhere on the shape to move it.")
                                              .arg(m_embossMode.editing ? tr("Apply") : tr("Emboss")),
                                          false);
             } else {
                 m_embossMode.preview = m_doc.previewMesh(*spec);
                 m_embossPanel->setStatus(
-                    tr("This is how it will look. Click elsewhere on the shape to move the words."), false);
+                    tr("This is how it will look. Click elsewhere on the shape to move it."), false);
             }
             ok = true;
         }
@@ -2666,7 +2704,9 @@ void MainWindow::placeEmboss(const QVector3D& origin, const QVector3D& direction
     try {
         const auto spot = surfaceUnder(m_doc, m_embossMode.target, {origin.x(), origin.y(), origin.z()},
                                        {direction.x(), direction.y(), direction.z()},
-                                       m_embossPanel->words().letterHeight / 2.0);
+                                       m_embossPanel->usingPicture()
+                                           ? std::max(0.5, m_embossPanel->picture().width / 8.0)
+                                           : m_embossPanel->words().letterHeight / 2.0);
         if (!spot) {
             statusBar()->showMessage(tr("Click on the shape itself to put the words there."), 4000);
             return;
@@ -2693,7 +2733,11 @@ void MainWindow::applyEmboss()
         QMessageBox::warning(this, tr("Forge3D"), tr("Emboss did not work:\n%1").arg(QString::fromUtf8(e.what())));
         return;
     }
-    m_lastWords = *spec->emboss;
+    m_lastUsedPicture = spec->picture.has_value();
+    if (spec->picture)
+        m_lastPicture = *spec->picture;
+    else
+        m_lastWords = *spec->emboss;
     const ObjectId target = m_embossMode.target;
     if (m_embossMode.editing) {
         const Body* now = m_doc.find(target);
@@ -2703,7 +2747,7 @@ void MainWindow::applyEmboss()
         Body after = before;
         after.boolean = *spec;
         endEmboss();
-        run(std::make_unique<EditBodyCommand>(before, after, "Change words"));
+        run(std::make_unique<EditBodyCommand>(before, after, spec->picture ? "Change picture" : "Change words"));
         setSelection(target);
         return;
     }
@@ -2722,6 +2766,54 @@ void MainWindow::applyEmboss()
     }
     if (run(std::make_unique<CombineCommand>(std::move(result))))
         setSelection(id);
+}
+
+void MainWindow::choosePicture()
+{
+    if (!m_embossMode.active)
+        return;
+    const QString path = QFileDialog::getOpenFileName(
+        this, tr("Choose a picture"), startFolder(),
+        tr("Pictures (*.png *.jpg *.jpeg *.bmp *.gif *.svg);;All files (*)"));
+    if (path.isEmpty())
+        return;
+    rememberFolderOf(path);
+    QImage image;
+    if (path.endsWith(QStringLiteral(".svg"), Qt::CaseInsensitive)) {
+        // Drawn at the size kept (its longest side picture::kMaxSide), on white.
+        QSvgRenderer svg(path);
+        if (svg.isValid()) {
+            QSizeF size = svg.defaultSize();
+            if (size.isEmpty())
+                size = QSizeF(picture::kMaxSide, picture::kMaxSide);
+            size.scale(picture::kMaxSide, picture::kMaxSide, Qt::KeepAspectRatio);
+            image = QImage(size.toSize(), QImage::Format_RGBA8888);
+            image.fill(Qt::transparent);
+            QPainter painter(&image);
+            svg.render(&painter);
+        }
+    } else {
+        image.load(path);
+    }
+    if (image.isNull()) {
+        QMessageBox::warning(this, tr("Forge3D"),
+                             tr("Could not read %1 as a picture.").arg(QFileInfo(path).fileName()));
+        return;
+    }
+    image = image.convertToFormat(QImage::Format_RGBA8888);
+    std::vector<std::uint8_t> rgba(std::size_t(image.width()) * image.height() * 4);
+    for (int y = 0; y < image.height(); ++y)
+        std::memcpy(rgba.data() + std::size_t(y) * image.width() * 4, image.constScanLine(y),
+                    std::size_t(image.width()) * 4);
+    try {
+        m_embossPanel->setPicture(QFileInfo(path).fileName().toStdString(),
+                                  picture::fromRgba(image.width(), image.height(), rgba));
+    } catch (const std::exception& e) {
+        QMessageBox::warning(this, tr("Forge3D"), QString::fromUtf8(e.what()));
+        return;
+    }
+    qInfo().noquote() << "Emboss picture:" << path << image.width() << "x" << image.height();
+    updateEmbossPreview();
 }
 
 void MainWindow::separateSelected()
@@ -3402,6 +3494,14 @@ void MainWindow::refreshScene()
                 break;
             }
             case BooleanOp::Emboss:
+                if (const auto& pic = selected->boolean->picture) {
+                    context = tr("Made from: %1, with %2 %3")
+                                  .arg(names.join(QString()),
+                                       pic->relief ? tr("the photo %1").arg(QString::fromStdString(pic->name))
+                                                   : tr("the picture %1").arg(QString::fromStdString(pic->name)),
+                                       pic->raised ? tr("raised") : tr("engraved"));
+                    break;
+                }
                 context = tr("Made from: %1, with the words \"%2\" %3")
                               .arg(names.join(QString()),
                                    QString::fromStdString(selected->boolean->emboss ? selected->boolean->emboss->text

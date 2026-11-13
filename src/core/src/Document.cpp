@@ -115,6 +115,15 @@ Placement sitOnPlate(const Document& doc, ObjectId id)
 
 namespace {
 
+// The words' or picture's solid for an Emboss step, on the surface (pos / idx).
+MeshSolid embossTool(const std::vector<float>& pos, const std::vector<std::uint32_t>& idx, const BooleanSpec& spec)
+{
+    if (spec.picture)
+        return emboss::pictureSolid(pos, idx, spec.planePoint, spec.planeNormal, *spec.picture);
+    return emboss::letters(pos, idx, spec.planePoint, spec.planeNormal, *spec.emboss);
+}
+
+
 void requireFinite(const Placement& p, const std::string& who)
 {
     for (double v : {p.x, p.y, p.z, p.rotationX, p.rotationY, p.rotationZ})
@@ -225,8 +234,8 @@ void Document::validateBoolean(const Body& body, const std::map<ObjectId, Object
         if (!body.boolean->edges || body.boolean->edges->edges.empty())
             throw std::invalid_argument("Pick at least one edge");
     } else if (op == BooleanOp::Split || op == BooleanOp::Mirror || op == BooleanOp::Emboss) {
-        if (op == BooleanOp::Emboss && !body.boolean->emboss)
-            throw std::invalid_argument("Emboss needs words");
+        if (op == BooleanOp::Emboss && !body.boolean->emboss && !body.boolean->picture)
+            throw std::invalid_argument("Emboss needs words or a picture");
         if (ops.size() != 1)
             throw std::invalid_argument(toString(op) + " works on exactly one shape");
         const auto& n = body.boolean->planeNormal;
@@ -745,6 +754,7 @@ BooleanSpec Document::passThrough(const BooleanSpec& spec)
     BooleanSpec pass = spec;
     pass.op = BooleanOp::Group;
     pass.emboss.reset();
+    pass.picture.reset();
     pass.edges.reset();
     pass.shell.reset();
     pass.follow.reset();
@@ -1152,14 +1162,14 @@ MeshSolid Document::combineMeshes(const BooleanSpec& spec) const
         throw GeometryError("Follow works on solid shapes, not on imported meshes or shapes made with them.");
     case BooleanOp::Pattern: return patternMeshes(spec);
     case BooleanOp::Emboss: {
-        if (!spec.emboss)
+        if (!spec.emboss && !spec.picture)
             throw GeometryError("Emboss has no words");
         std::vector<float> pos;
         std::vector<std::uint32_t> idx;
         meshkernel::triangles(parts.front(), pos, idx);
-        const MeshSolid words = emboss::letters(pos, idx, spec.planePoint, spec.planeNormal, *spec.emboss);
-        return spec.emboss->raised ? meshkernel::merged({parts.front(), words})
-                                   : meshkernel::subtracted(parts.front(), {words});
+        const MeshSolid tool = embossTool(pos, idx, spec);
+        const bool raised = spec.emboss ? spec.emboss->raised : spec.picture->raised;
+        return raised ? meshkernel::merged({parts.front(), tool}) : meshkernel::subtracted(parts.front(), {tool});
     }
     }
     throw GeometryError("Unknown combine");
@@ -1219,7 +1229,7 @@ std::shared_ptr<const Mesh> Document::previewMesh(const BooleanSpec& spec) const
 
 std::shared_ptr<const Mesh> Document::previewWords(const BooleanSpec& spec) const
 {
-    if (spec.op != BooleanOp::Emboss || !spec.emboss || spec.operands.size() != 1)
+    if (spec.op != BooleanOp::Emboss || (!spec.emboss && !spec.picture) || spec.operands.size() != 1)
         throw std::invalid_argument("previewWords is for Emboss");
     const ObjectId part = spec.operands.front();
     if (!find(part))
@@ -1227,8 +1237,7 @@ std::shared_ptr<const Mesh> Document::previewWords(const BooleanSpec& spec) cons
     std::vector<float> pos;
     std::vector<std::uint32_t> idx;
     meshkernel::triangles(meshkernel::transformed(meshSolid(part), localTransform(part)), pos, idx);
-    const MeshSolid words = emboss::letters(pos, idx, spec.planePoint, spec.planeNormal, *spec.emboss);
-    return std::make_shared<const Mesh>(meshkernel::displayMesh(words));
+    return std::make_shared<const Mesh>(meshkernel::displayMesh(embossTool(pos, idx, spec)));
 }
 
 Bounds shapeBounds(const TopoDS_Shape& shape, const Transform& t)

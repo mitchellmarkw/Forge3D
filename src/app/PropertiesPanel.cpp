@@ -245,6 +245,14 @@ void PropertiesPanel::setBody(const Body* body, const QString& context, bool isP
     m_editCutButton->setVisible(split && !isPart);
     const bool embossed = body->isBoolean() && body->boolean->op == BooleanOp::Emboss;
     m_editEmbossButton->setVisible(embossed && !isPart);
+    if (auto* editEmboss = qobject_cast<QPushButton*>(m_editEmbossButton); embossed && editEmboss) {
+        const bool picture = body->boolean->picture.has_value();
+        editEmboss->setText(picture ? tr("Change the picture...") : tr("Change the words..."));
+        editEmboss->setToolTip(picture ? tr("Change the embossed picture, its size or depth, or click to "
+                                                    "move it")
+                                               : tr("Change the embossed words, their size or depth, or click to "
+                                                    "move them"));
+    }
     m_editEdgesButton->setVisible(body->isBoolean() && body->boolean->op == BooleanOp::Edges && !isPart);
     const bool subtract = body->isBoolean() && body->boolean->op == BooleanOp::Subtract;
     m_throughAll->setVisible(subtract);
@@ -277,8 +285,13 @@ void PropertiesPanel::setBody(const Body* body, const QString& context, bool isP
             button->setToolTip(tr("Give back the shape with its edges as they were"));
             break;
         case BooleanOp::Emboss:
-            button->setText(tr("Remove the words"));
-            button->setToolTip(tr("Give back the shape without the embossed words, where it is"));
+            if (body->boolean->picture) {
+                button->setText(tr("Remove the picture"));
+                button->setToolTip(tr("Give back the shape without the embossed picture, where it is"));
+            } else {
+                button->setText(tr("Remove the words"));
+                button->setToolTip(tr("Give back the shape without the embossed words, where it is"));
+            }
             break;
         case BooleanOp::Group:
             button->setText(tr("Ungroup"));

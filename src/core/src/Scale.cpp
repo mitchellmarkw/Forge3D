@@ -155,6 +155,10 @@ void scaleInto(const Document& doc, ObjectId id, const Vec3& factors, const Vec3
             next.boolean->emboss->letterHeight *= factors[0];
             next.boolean->emboss->depth *= factors[0];
         }
+        if (next.boolean->picture && even(factors)) {
+            next.boolean->picture->width *= factors[0];
+            next.boolean->picture->depth *= factors[0];
+        }
         if (body->boolean->op == BooleanOp::Mirror && !even(factors)) {
             // A reflection only survives a stretch along or across its mirror.
             const Vec3& n0 = body->boolean->planeNormal;

@@ -347,19 +347,13 @@ double letterHeightOf(const TextSpec& spec)
     return capitalRatio(spec.font, spec.bold, spec.italic) * 10.0 * spec.depth / b.height();
 }
 
-std::vector<FlatPiece> flatLetters(const EmbossText& words, double maxEdge)
+std::vector<FlatPiece> flatPieces(const TopoDS_Shape& faces, double cx, double cy, double angleDegrees,
+                                  double maxEdge, double deflection)
 {
-    if (!(words.letterHeight > 0.0))
-        throw std::invalid_argument("The letters must be bigger than zero");
     if (!(maxEdge > 0.0))
-        throw std::invalid_argument("flatLetters: maxEdge must be above zero");
-    const double em = words.letterHeight / capitalRatio(words.font, words.bold, words.italic);
-    const TopoDS_Shape faces = letterFaces(words.text, words.font, words.bold, words.italic, em, words.vertical);
-    const Box2 b = boundsOf(faces);
-    const double cx = (b.x0 + b.x1) / 2.0, cy = (b.y0 + b.y1) / 2.0;
-    const double a = words.angle * std::numbers::pi / 180.0, ca = std::cos(a), sa = std::sin(a);
-
-    BRepMesh_IncrementalMesh mesher(faces, words.letterHeight / 400.0, /*relative=*/false, 0.2, /*parallel=*/false);
+        throw std::invalid_argument("flatPieces: maxEdge must be above zero");
+    const double a = angleDegrees * std::numbers::pi / 180.0, ca = std::cos(a), sa = std::sin(a);
+    BRepMesh_IncrementalMesh mesher(faces, deflection, /*relative=*/false, 0.2, /*parallel=*/false);
     std::vector<FlatPiece> out;
     for (TopExp_Explorer e(faces, TopAbs_FACE); e.More(); e.Next()) {
         const TopoDS_Face face = TopoDS::Face(e.Current());
@@ -394,9 +388,28 @@ std::vector<FlatPiece> flatLetters(const EmbossText& words, double maxEdge)
             p = {p[0] * ca - p[1] * sa, p[0] * sa + p[1] * ca};
         out.push_back(std::move(piece));
     }
+    return out;
+}
+
+std::vector<FlatPiece> flatLetters(const EmbossText& words, double maxEdge)
+{
+    if (!(words.letterHeight > 0.0))
+        throw std::invalid_argument("The letters must be bigger than zero");
+    if (!(maxEdge > 0.0))
+        throw std::invalid_argument("flatLetters: maxEdge must be above zero");
+    const double em = words.letterHeight / capitalRatio(words.font, words.bold, words.italic);
+    const TopoDS_Shape faces = letterFaces(words.text, words.font, words.bold, words.italic, em, words.vertical);
+    const Box2 b = boundsOf(faces);
+    std::vector<FlatPiece> out = flatPieces(faces, (b.x0 + b.x1) / 2.0, (b.y0 + b.y1) / 2.0, words.angle, maxEdge,
+                                            words.letterHeight / 400.0);
     if (out.empty())
         throw std::invalid_argument("Type some text to make letters");
     return out;
+}
+
+void refineFlat(FlatPiece& piece, double maxEdge)
+{
+    refine(piece.points, piece.triangles, maxEdge);
 }
 
 }  // namespace forge::text

@@ -12,7 +12,7 @@ so it always matches what's shipped). This file is a summary.
 
 | Library | What Forge3D uses it for | License | Source |
 | --- | --- | --- | --- |
-| Qt 6 (Qt Base) | Windows, menus, panels, OpenGL view | LGPL-3.0 | <https://www.qt.io/download-open-source> |
+| Qt 6 (Qt Base, Qt SVG) | Windows, menus, panels, OpenGL view; reading SVG pictures | LGPL-3.0 | <https://www.qt.io/download-open-source> |
 | Open CASCADE Technology | Solid geometry (shapes, booleans, fillets, sweeps) | LGPL-2.1 with the Open CASCADE exception | <https://dev.opencascade.org> |
 | Manifold | Mesh booleans for imported models | Apache-2.0 | <https://github.com/elalish/manifold> |
 | miniz | Reading and writing 3MF (zip) files | MIT | <https://github.com/richgel999/miniz> |

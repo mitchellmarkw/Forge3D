@@ -144,6 +144,7 @@ private:
     // Puts the words where the ray meets the shape.
     void placeEmboss(const QVector3D& origin, const QVector3D& direction);
     void updateEmbossPreview();
+    void choosePicture();
     std::optional<BooleanSpec> currentEmbossSpec() const;
     bool toolOpen() const;  // Split, Emboss or Edges
 
@@ -356,6 +357,8 @@ private:
     };
     EmbossMode m_embossMode;
     EmbossText m_lastWords;          // the words used last, offered next time
+    EmbossPicture m_lastPicture;     // likewise the picture
+    bool m_lastUsedPicture = false;  // the last Emboss was a picture
     QTimer* m_embossTimer = nullptr;  // previews a moment after typing stops
     QAction* m_edgesAction = nullptr;
     EdgesPanel* m_edgesPanel = nullptr;

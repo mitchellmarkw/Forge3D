@@ -39,6 +39,12 @@ Vec3 upFor(const Vec3& normal);
 MeshSolid letters(const std::vector<float>& positions, const std::vector<std::uint32_t>& indices, const Vec3& point,
                   const Vec3& normal, const EmbossText& words);
 
+// The picture laid on the surface the same way (see EmbossPicture).
+MeshSolid pictureSolid(const std::vector<float>& positions, const std::vector<std::uint32_t>& indices,
+                       const Vec3& point, const Vec3& normal, const EmbossPicture& picture);
+// How finely a picture is split to bend with a surface (its longest edge), mm.
+double pictureEdge(const EmbossPicture& picture);
+
 // Centring the words on the face they're on: across, up and down, or both, as the
 // words read (their turn included).
 enum class Center { Both, TopBottom, LeftRight };
@@ -61,14 +67,22 @@ Body embossBody(Document& doc, ObjectId target, const emboss::SurfacePoint& wher
 // with the spot in plate coordinates.
 std::optional<emboss::SurfacePoint> centeredSpot(const Document& doc, ObjectId id, const emboss::SurfacePoint& spot,
                                                  const EmbossText& words, emboss::Center how);
+std::optional<emboss::SurfacePoint> centeredSpot(const Document& doc, ObjectId id, const emboss::SurfacePoint& spot,
+                                                 const EmbossPicture& picture, emboss::Center how);
+// Turned `angle` degrees; radius: how wide an area sets the surface's facing.
+std::optional<emboss::SurfacePoint> centeredSpot(const Document& doc, ObjectId id, const emboss::SurfacePoint& spot,
+                                                 double angle, double radius, emboss::Center how);
 // Just its recipe (for previews): changes nothing in the document.
 BooleanSpec embossSpec(const Document& doc, ObjectId target, const emboss::SurfacePoint& where,
                        const EmbossText& words);
+BooleanSpec embossSpec(const Document& doc, ObjectId target, const emboss::SurfacePoint& where,
+                       const EmbossPicture& picture);
 
 // Where the words of an Emboss result are, in plate coordinates.
 emboss::SurfacePoint embossSpot(const Document& doc, ObjectId result);
 // The Emboss result with new words and / or a new spot (plate coordinates).
 Body withEmboss(const Document& doc, ObjectId result, const emboss::SurfacePoint& where, const EmbossText& words);
+Body withEmboss(const Document& doc, ObjectId result, const emboss::SurfacePoint& where, const EmbossPicture& picture);
 
 // Where a ray from the plate meets the surface of `id` (a shape, or the part being
 // embossed in an Emboss result), in plate coordinates.

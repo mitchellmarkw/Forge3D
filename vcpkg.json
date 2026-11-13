@@ -26,6 +26,7 @@
         "windeployqt"
       ]
     },
+    "qtsvg",
     {
       "name": "pcre2",
       "default-features": false

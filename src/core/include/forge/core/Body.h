@@ -327,6 +327,39 @@ struct EmbossText {
     bool operator==(const EmbossText&) const = default;
 };
 
+// A picture's pixels as shades of grey, 0 black to 255 white, row by row from the top
+// (transparent parts already turned white). Shared, never changed once made.
+struct PictureData {
+    int width = 0;
+    int height = 0;
+    std::vector<std::uint8_t> grey;  // width * height
+    bool operator==(const PictureData&) const = default;
+};
+
+// A picture raised from (or engraved into) a shape's surface, following it like words.
+//   Logo:  the dark parts (darker than `threshold`; the light ones if `invert`) traced
+//          to a clean outline at one height, `depth`.
+//   Photo (relief): every shade a height, black `depth` and white nothing (the other
+//          way round if `invert`).
+struct EmbossPicture {
+    std::string name;  // the file it came from, for showing
+    std::shared_ptr<const PictureData> image;
+    bool relief = false;    // true: photo relief; false: logo
+    int threshold = 128;    // logo: shades darker than this make the shape (1..254)
+    bool invert = false;    // light parts make the shape / stand highest
+    double width = 30.0;    // across the surface, mm (the height follows the picture's shape)
+    double depth = 1.0;     // how far it stands out / goes in, mm (the most, for a relief)
+    bool raised = true;     // false: engraved
+    double angle = 0.0;     // turn on the surface, degrees (anticlockwise)
+    bool operator==(const EmbossPicture& o) const
+    {
+        const bool sameImage = image == o.image || (image && o.image && *image == *o.image);
+        return sameImage && name == o.name && relief == o.relief && threshold == o.threshold &&
+               invert == o.invert && width == o.width && depth == o.depth && raised == o.raised &&
+               angle == o.angle;
+    }
+};
+
 // One picked face, found again by place (like EdgeRef): a point on it, which way it
 // faces there, and (once located) where that point sits in the part's box.
 struct FaceRef {
@@ -407,9 +440,9 @@ std::string toString(BooleanOp op);
 //   Shell:     one solid part hollowed out; see `shell`.
 //   Follow:    one solid part with a groove or ridge along a path; see `follow`.
 //   Pattern:   one part repeated (or its last feature repeated on it); see `pattern`.
-//   Emboss:    one part with words raised from or engraved into its surface,
-//              centred on planePoint (on the surface) and facing out along
-//              planeNormal; see `emboss`.
+//   Emboss:    one part with words (or a picture) raised from or engraved into its
+//              surface, centred on planePoint (on the surface) and facing out along
+//              planeNormal; see `emboss` / `picture`.
 // The parts stay in the document, hidden inside the result and still editable;
 // their placements are relative to the result. A part belongs to at most one result.
 struct BooleanSpec {
@@ -422,8 +455,9 @@ struct BooleanSpec {
     // a unit normal pointing into the half that is kept. Mirror: the mirror plane.
     std::array<double, 3> planePoint{0.0, 0.0, 0.0};
     std::array<double, 3> planeNormal{0.0, 0.0, 1.0};
-    // Emboss: the words.
+    // Emboss: the words, or (instead) a picture.
     std::optional<EmbossText> emboss{};
+    std::optional<EmbossPicture> picture{};
     // Edges: what to do to which edges.
     std::optional<EdgeFinish> edges{};
     // Shell: how thick, and which faces are left open.

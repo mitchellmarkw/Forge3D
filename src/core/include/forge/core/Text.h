@@ -57,7 +57,16 @@ double letterHeightOf(const TextSpec& spec);
 struct FlatPiece {
     std::vector<std::array<double, 2>> points;
     std::vector<std::uint32_t> triangles;
+    // How high each point stands, as a share of the depth (0..1); empty: all the way.
+    std::vector<double> heights;
 };
 std::vector<FlatPiece> flatLetters(const EmbossText& words, double maxEdge);
+
+// Flat faces in the XY plane as FlatPieces: moved by (-cx, -cy), meshed (to within
+// `deflection`), split so no edge is longer than maxEdge, then turned angleDegrees.
+std::vector<FlatPiece> flatPieces(const TopoDS_Shape& faces, double cx, double cy, double angleDegrees,
+                                  double maxEdge, double deflection);
+// Splits the piece's edges longer than maxEdge (no heights: call before setting them).
+void refineFlat(FlatPiece& piece, double maxEdge);
 
 }  // namespace forge::text

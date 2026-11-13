@@ -181,6 +181,10 @@ std::string describe(const Document& doc, ObjectId id)
     case BooleanOp::Mirror: return "mirrored";
     case BooleanOp::Group: return "group of " + std::to_string(spec.operands.size());
     case BooleanOp::Emboss:
+        if (spec.picture)
+            return std::string(spec.picture->relief ? "photo" : "picture") +
+                   (spec.picture->name.empty() ? "" : " " + spec.picture->name) + " " +
+                   (spec.picture->raised ? "raised" : "engraved");
         if (!spec.emboss)
             return {};
         return "\"" + spec.emboss->text + "\" " + (spec.emboss->raised ? "raised" : "engraved");

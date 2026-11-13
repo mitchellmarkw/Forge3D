@@ -18,6 +18,55 @@ using nlohmann::json;
 
 namespace {
 
+// Pictures go in document.json as base64 of their deflated grey bytes.
+std::string toBase64(const std::string& bytes)
+{
+    static const char* table = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string out;
+    out.reserve((bytes.size() + 2) / 3 * 4);
+    for (std::size_t i = 0; i < bytes.size(); i += 3) {
+        const std::uint32_t a = std::uint8_t(bytes[i]);
+        const std::uint32_t b = i + 1 < bytes.size() ? std::uint8_t(bytes[i + 1]) : 0;
+        const std::uint32_t c = i + 2 < bytes.size() ? std::uint8_t(bytes[i + 2]) : 0;
+        const std::uint32_t v = a << 16 | b << 8 | c;
+        out += table[v >> 18 & 63];
+        out += table[v >> 12 & 63];
+        out += i + 1 < bytes.size() ? table[v >> 6 & 63] : '=';
+        out += i + 2 < bytes.size() ? table[v & 63] : '=';
+    }
+    return out;
+}
+
+std::string fromBase64(const std::string& text)
+{
+    std::string out;
+    std::uint32_t v = 0;
+    int bits = 0;
+    for (char ch : text) {
+        int d = -1;
+        if (ch >= 'A' && ch <= 'Z')
+            d = ch - 'A';
+        else if (ch >= 'a' && ch <= 'z')
+            d = ch - 'a' + 26;
+        else if (ch >= '0' && ch <= '9')
+            d = ch - '0' + 52;
+        else if (ch == '+')
+            d = 62;
+        else if (ch == '/')
+            d = 63;
+        else
+            continue;  // '=' and anything else
+        v = v << 6 | std::uint32_t(d);
+        bits += 6;
+        if (bits >= 8) {
+            bits -= 8;
+            out += char(v >> bits & 0xFF);
+        }
+    }
+    return out;
+}
+
+
 const char* const kGeoKinds[] = {"line", "circle", "arc"};
 const char* const kRules[] = {"horizontal", "vertical", "parallel", "perpendicular", "equal",  "tangent",
                               "pointOn",    "coincident", "symmetric", "midpoint", "fixed", "distance",
@@ -182,6 +231,21 @@ json bodyToJson(const Body& b)
             if (f->profile == FollowProfile::Custom)
                 fj["custom"] = sketchToJson(f->custom);
             j["follow"] = fj;
+        }
+        if (const auto& p = b.boolean->picture) {
+            json pj{{"name", p->name},   {"relief", p->relief}, {"threshold", p->threshold}, {"invert", p->invert},
+                    {"width", p->width}, {"depth", p->depth},   {"raised", p->raised},       {"angle", p->angle}};
+            if (p->image) {
+                const auto& g = p->image->grey;
+                std::vector<unsigned char> packed(mz_compressBound(mz_ulong(g.size())));
+                mz_ulong packedSize = mz_ulong(packed.size());
+                if (mz_compress2(packed.data(), &packedSize, g.data(), mz_ulong(g.size()), MZ_BEST_COMPRESSION) != MZ_OK)
+                    throw FileError("Could not store a picture (out of memory?).");
+                pj["image"] = json{{"width", p->image->width},
+                                   {"height", p->image->height},
+                                   {"grey", toBase64(std::string(reinterpret_cast<const char*>(packed.data()), packedSize))}};
+            }
+            j["picture"] = pj;
         }
         if (const auto& e = b.boolean->emboss) {
             j["emboss"] = json{{"text", e->text},     {"font", e->font},   {"bold", e->bold},
@@ -460,7 +524,36 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
                 }
             spec.shell = std::move(f);
         }
-        if (spec.op == BooleanOp::Emboss) {
+        if (spec.op == BooleanOp::Emboss && j.contains("picture") && version >= 17) {
+            const json& p = j.at("picture");
+            if (!p.is_object())
+                damaged(where + ": the picture is unreadable");
+            EmbossPicture pic;
+            pic.name = p.value("name", std::string());
+            pic.relief = p.value("relief", false);
+            pic.threshold = p.value("threshold", 128);
+            pic.invert = p.value("invert", false);
+            pic.width = number(p, "width", where);
+            pic.depth = number(p, "depth", where);
+            pic.raised = p.value("raised", true);
+            pic.angle = p.value("angle", 0.0);
+            if (const auto im = p.find("image"); im != p.end() && im->is_object()) {
+                auto data = std::make_shared<PictureData>();
+                data->width = im->value("width", 0);
+                data->height = im->value("height", 0);
+                if (data->width <= 0 || data->height <= 0 || data->width > 100000 || data->height > 100000)
+                    damaged(where + ": the picture's size is unreadable");
+                const std::string packed = fromBase64(im->value("grey", std::string()));
+                data->grey.resize(std::size_t(data->width) * std::size_t(data->height));
+                mz_ulong size = mz_ulong(data->grey.size());
+                if (mz_uncompress(data->grey.data(), &size, reinterpret_cast<const unsigned char*>(packed.data()),
+                                  mz_ulong(packed.size())) != MZ_OK ||
+                    size != data->grey.size())
+                    damaged(where + ": the picture is damaged");
+                pic.image = std::move(data);
+            }
+            spec.picture = std::move(pic);
+        } else if (spec.op == BooleanOp::Emboss) {
             const auto e = j.find("emboss");
             if (e == j.end() || !e->is_object())
                 damaged(where + ": missing emboss words");
