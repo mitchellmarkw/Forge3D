@@ -197,6 +197,14 @@ std::string describe(const Document& doc, ObjectId id)
         }
         return count;
     }
+    case BooleanOp::Follow: {
+        if (!spec.follow)
+            return {};
+        static const char* shapes[] = {"round", "square", "V", "own"};
+        const auto& f = *spec.follow;
+        return std::string(shapes[int(f.profile)]) + (f.ridge ? " ridge" : " groove") +
+               (f.profile == FollowProfile::Custom ? std::string() : ", " + num(f.width) + " x " + num(f.depth) + " mm");
+    }
     case BooleanOp::Shell: {
         if (!spec.shell)
             return {};

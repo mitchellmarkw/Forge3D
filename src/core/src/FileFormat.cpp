@@ -111,6 +111,7 @@ const char* opName(BooleanOp op)
     case BooleanOp::Emboss: return "emboss";
     case BooleanOp::Edges: return "edges";
     case BooleanOp::Shell: return "shell";
+    case BooleanOp::Follow: return "follow";
     }
     return "merge";
 }
@@ -157,6 +158,22 @@ json bodyToJson(const Body& b)
                 open.push_back(pick);
             }
             j["shell"] = json{{"thickness", sh->thickness}, {"outward", sh->outward}, {"open", open}};
+        }
+        if (const auto& f = b.boolean->follow) {
+            static const char* profiles[] = {"round", "square", "v", "custom"};
+            json fj{{"path", sketchToJson(f->path)},
+                    {"origin", f->origin},
+                    {"xAxis", f->xAxis},
+                    {"normal", f->normal},
+                    {"ridge", f->ridge},
+                    {"profile", profiles[int(f->profile)]},
+                    {"width", f->width},
+                    {"depth", f->depth}};
+            if (f->located)
+                fj["relative"] = f->relative;
+            if (f->profile == FollowProfile::Custom)
+                fj["custom"] = sketchToJson(f->custom);
+            j["follow"] = fj;
         }
         if (const auto& e = b.boolean->emboss) {
             j["emboss"] = json{{"text", e->text},     {"font", e->font},   {"bold", e->bold},
@@ -268,6 +285,8 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
             spec.op = BooleanOp::Edges;
         else if (op == "shell" && version >= 14)
             spec.op = BooleanOp::Shell;
+        else if (op == "follow" && version >= 15)
+            spec.op = BooleanOp::Follow;
         else
             damaged(where + ": unknown combine operation '" + op + "'");
         const auto operands = j.find("operands");
@@ -340,6 +359,41 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
                 f.edges.push_back(r);
             }
             spec.edges = std::move(f);
+        }
+        if (spec.op == BooleanOp::Follow) {
+            const auto fj = j.find("follow");
+            if (fj == j.end() || !fj->is_object())
+                damaged(where + ": missing the path to follow");
+            FollowFinish f;
+            const auto readVec = [&](const char* key, std::array<double, 3>& out) {
+                const auto v = fj->find(key);
+                if (v == fj->end() || !v->is_array() || v->size() != 3)
+                    damaged(where + ": the path's place is damaged");
+                for (std::size_t i = 0; i < 3; ++i)
+                    out[i] = (*v)[i].get<double>();
+            };
+            readVec("origin", f.origin);
+            readVec("xAxis", f.xAxis);
+            readVec("normal", f.normal);
+            if (fj->contains("relative")) {
+                readVec("relative", f.relative);
+                f.located = true;
+            }
+            const auto path = fj->find("path");
+            if (path == fj->end() || !path->is_object())
+                damaged(where + ": missing the path");
+            f.path = sketchFromJson(*path, where);
+            f.ridge = fj->value("ridge", false);
+            const std::string profile = fj->value("profile", std::string("square"));
+            f.profile = profile == "round"    ? FollowProfile::Round
+                        : profile == "v"      ? FollowProfile::V
+                        : profile == "custom" ? FollowProfile::Custom
+                                              : FollowProfile::Square;
+            f.width = number(*fj, "width", where);
+            f.depth = number(*fj, "depth", where);
+            if (const auto custom = fj->find("custom"); custom != fj->end() && custom->is_object())
+                f.custom = sketchFromJson(*custom, where);
+            spec.follow = std::move(f);
         }
         if (spec.op == BooleanOp::Shell) {
             const auto sh = j.find("shell");

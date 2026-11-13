@@ -5,6 +5,7 @@
 #include "forge/core/Document.h"
 #include "forge/core/Edges.h"
 #include "forge/core/FileFormat.h"
+#include "forge/core/Follow.h"
 #include "forge/core/History.h"
 #include "forge/core/Primitives.h"
 #include "forge/core/Scale.h"
@@ -332,4 +333,136 @@ TEST_CASE("Middle planes: a groove round a cylinder", "[planes]")
     stack.execute(std::make_unique<CombineCommand>(result));
     // The ring removed: radius 9..10, 2 high.
     CHECK_THAT(volumeOf(doc.shape(result.id)), WithinRel(pi * 100 * 30 - pi * (100 - 81) * 2, 1e-6));
+}
+
+namespace {
+
+FollowFinish onTop(double z)
+{
+    FollowFinish f;
+    f.origin = {0, 0, z};
+    f.xAxis = {1, 0, 0};
+    f.normal = {0, 0, 1};
+    return f;
+}
+
+double removed(Document& doc, CommandStack& stack, ObjectId target, const FollowFinish& f, ObjectId* resultOut = nullptr)
+{
+    const double before = volumeOf(doc.shape(target));
+    Body result;
+    result.id = doc.allocateId();
+    result.name = "Followed";
+    result.boolean = followSpec(doc, target, f);
+    stack.execute(std::make_unique<CombineCommand>(result));
+    if (resultOut)
+        *resultOut = result.id;
+    return before - volumeOf(doc.shape(result.id));
+}
+
+}  // namespace
+
+TEST_CASE("Follow: grooves and ridges along a path on a flat face", "[follow]")
+{
+    Document doc;
+    CommandStack stack(doc);
+    const ObjectId box = addBox(stack, doc, 40, 40, 10);
+    FollowFinish f = onTop(10);
+    f.width = 2;
+    f.depth = 1;
+
+    SECTION("A straight square groove")
+    {
+        line(f.path, sketch::addPoint(f.path, {-10, 0}), sketch::addPoint(f.path, {10, 0}));
+        ObjectId id = kInvalidId;
+        CHECK_THAT(removed(doc, stack, box, f, &id), WithinRel(2 * 1 * 20, 1e-4));
+        CHECK(history::describe(doc, id) == "square groove, 2 x 1 mm");
+        // Saved and read back.
+        const auto back = roundTrip(doc);
+        CHECK(back->find(id)->boolean == doc.find(id)->boolean);
+        // A taller box: the groove is still in its top.
+        Body taller = *doc.find(box);
+        std::get<BoxSpec>(taller.spec).height = 25;
+        stack.execute(std::make_unique<EditBodyCommand>(*doc.find(box), taller, "Taller"));
+        CHECK(doc.problemWith(id).value_or("") == "");
+        CHECK_THAT(40 * 40 * 25 - volumeOf(doc.shape(id)), WithinRel(40.0, 1e-4));
+    }
+    SECTION("A ring: a circle")
+    {
+        const int c = sketch::addPoint(f.path, {0, 0});
+        f.path.radii.push_back(10);
+        f.path.geos.push_back({sketch::GeoKind::Circle, c, -1, -1, 0, false});
+        CHECK_THAT(removed(doc, stack, box, f), WithinRel(pi * (11 * 11 - 9 * 9) * 1, 2e-3));
+    }
+    SECTION("A round ridge and a V groove")
+    {
+        line(f.path, sketch::addPoint(f.path, {-10, 0}), sketch::addPoint(f.path, {10, 0}));
+        f.ridge = true;
+        f.profile = FollowProfile::Round;  // 2 wide, 1 high: a half-round bead
+        CHECK_THAT(-removed(doc, stack, box, f), WithinRel(pi / 2 * 20, 1e-3));
+        FollowFinish v = f;
+        v.ridge = false;
+        v.profile = FollowProfile::V;
+        const ObjectId other = addBox(stack, doc, 40, 40, 10);
+        CHECK_THAT(removed(doc, stack, other, v), WithinRel(1.0 * 20, 1e-3));  // a 2 x 1 triangle, 20 long
+    }
+    SECTION("Its own cross-section, and a closed outline with corners")
+    {
+        // A 3-wide, 1.5-deep triangle drawn as the cross-section.
+        const int a = sketch::addPoint(f.custom, {-1.5, 0.5}), b = sketch::addPoint(f.custom, {1.5, 0.5}),
+                  c = sketch::addPoint(f.custom, {0, -1.5});
+        line(f.custom, a, b);
+        line(f.custom, b, c);
+        line(f.custom, c, a);
+        f.profile = FollowProfile::Custom;
+        const int p = sketch::addPoint(f.path, {-10, -10}), q = sketch::addPoint(f.path, {10, -10}),
+                  r = sketch::addPoint(f.path, {10, 10}), t = sketch::addPoint(f.path, {-10, 10});
+        line(f.path, p, q);
+        line(f.path, q, r);
+        line(f.path, r, t);
+        line(f.path, t, p);
+        const double cut = removed(doc, stack, box, f);
+        // Below the surface the triangle is 2.25 wide and 1.5 deep: 1.6875; 80 long (the
+        // corners add and take a little).
+        CHECK_THAT(cut, WithinRel(1.6875 * 80, 0.05));
+    }
+    SECTION("Nothing drawn, or too deep a round one, is refused")
+    {
+        CHECK_THROWS_WITH(doc.previewCombine(followSpec(doc, box, f)),
+                          Catch::Matchers::ContainsSubstring("Draw the path"));
+        line(f.path, sketch::addPoint(f.path, {-10, 0}), sketch::addPoint(f.path, {10, 0}));
+        f.profile = FollowProfile::Round;
+        f.depth = 3;
+        Body result;
+        result.id = doc.allocateId();
+        result.boolean = followSpec(doc, box, f);
+        CHECK_THROWS_WITH(doc.previewCombine(*result.boolean), Catch::Matchers::ContainsSubstring("deeper"));
+    }
+}
+
+TEST_CASE("Follow: a path on a curved surface bends round with it", "[follow]")
+{
+    Document doc;
+    CommandStack stack(doc);
+    Body cylinder;
+    cylinder.id = doc.allocateId();
+    cylinder.name = "Cylinder";
+    cylinder.spec = CylinderSpec{10, 10, 30};
+    stack.execute(std::make_unique<AddBodyCommand>(cylinder));
+    // On the front (facing -Y), halfway up; a 10 mm line across.
+    FollowFinish f;
+    f.origin = {0, -10, 15};
+    f.xAxis = {1, 0, 0};
+    f.normal = {0, -1, 0};
+    f.width = 2;
+    f.depth = 1;
+    line(f.path, sketch::addPoint(f.path, {-5, 0}), sketch::addPoint(f.path, {5, 0}));
+    const auto laid = followPathInPlate(doc, cylinder.id, f, false);
+    REQUIRE(laid.size() == 1);
+    for (const Vec3& p : laid.front())  // on the surface all the way
+        CHECK_THAT(std::hypot(p[0], p[1]), WithinAbs(10, 1e-3));
+    // 10 mm round the surface: 1 radian of the cylinder.
+    const Vec3 end = laid.front().back();
+    CHECK_THAT(std::atan2(end[0], -end[1]), WithinAbs(0.5, 0.02));
+    // An annular sector 2 high, 1 deep, 1 radian.
+    CHECK_THAT(removed(doc, stack, cylinder.id, f), WithinRel(0.5 * (100 - 81) * 2, 0.03));
 }

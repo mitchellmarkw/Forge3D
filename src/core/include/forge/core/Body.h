@@ -280,7 +280,7 @@ PrimitiveSpec madeRound(const PrimitiveSpec& spec);
 
 // ---- Combine results ------------------------------------------------------------
 
-enum class BooleanOp { Merge, Subtract, Intersect, Split, Mirror, Group, Emboss, Edges, Shell };
+enum class BooleanOp { Merge, Subtract, Intersect, Split, Mirror, Group, Emboss, Edges, Shell, Follow };
 
 // What happens to the picked edges of a shape.
 enum class EdgeFinishKind {
@@ -346,6 +346,28 @@ struct ShellFinish {
     bool operator==(const ShellFinish&) const = default;
 };
 
+// Follow: a groove cut along (or a ridge raised along) a path drawn on the surface.
+// The path is a sketch drawn at a spot on the surface (`origin`, facing `normal`, its X
+// along `xAxis`) and laid over the surface from there: on a flat face it stays as
+// drawn, on a curved one it bends round with the surface. The cross-section is a
+// ready-made shape `width` across and `depth` deep (high), or one drawn in `custom`
+// (X across the path, Y up from the surface).
+enum class FollowProfile { Round, Square, V, Custom };
+struct FollowFinish {
+    sketch::Sketch path;
+    std::array<double, 3> origin{0.0, 0.0, 0.0};
+    std::array<double, 3> xAxis{1.0, 0.0, 0.0};
+    std::array<double, 3> normal{0.0, 0.0, 1.0};
+    bool located = false;  // relative: where the origin sits in the part's box
+    std::array<double, 3> relative{0.0, 0.0, 0.0};
+    bool ridge = false;    // raised instead of cut
+    FollowProfile profile = FollowProfile::Square;
+    double width = 2.0;
+    double depth = 1.0;
+    sketch::Sketch custom;
+    bool operator==(const FollowFinish&) const = default;
+};
+
 // "Merge", "Subtract", "Intersect", "Split", "Mirror", "Group"
 std::string toString(BooleanOp op);
 
@@ -362,6 +384,7 @@ std::string toString(BooleanOp op);
 //   Edges:     one solid part with some edges rounded, filleted, chamfered or
 //              bevelled; see `edges`.
 //   Shell:     one solid part hollowed out; see `shell`.
+//   Follow:    one solid part with a groove or ridge along a path; see `follow`.
 //   Emboss:    one part with words raised from or engraved into its surface,
 //              centred on planePoint (on the surface) and facing out along
 //              planeNormal; see `emboss`.
@@ -383,6 +406,8 @@ struct BooleanSpec {
     std::optional<EdgeFinish> edges{};
     // Shell: how thick, and which faces are left open.
     std::optional<ShellFinish> shell{};
+    // Follow: the path, its cross-section, groove or ridge.
+    std::optional<FollowFinish> follow{};
     // Subtract: straight tools (box, cylinder, tube, text) are stretched along their own
     // height to go right through the first part, whatever its size ("through all").
     bool throughAll = false;
