@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.19.1 — Follow no longer hangs off the edge (2026-11-12)
+
+- A Follow path that runs off the edge of the face it's drawn on (a circle bigger than
+  the box, or a shape made smaller than its groove) froze Forge3D. Now the path is
+  checked as it's laid: where the surface turns a sharp corner, or the path can go no
+  further, it stops at once with "The path runs off the edge of the surface…". In the
+  Follow panel that shows as the message (Apply greyed); after resizing, the shape
+  shows without the groove and the step is marked ⚠ with the reason, as other
+  steps that can't be made. Rounded edges are still crossed.
+- Long paths are laid faster (fewer points in each fitted curve).
+- 178 unit tests (1 new).
+
 ## 0.19.0 — Slice 10: Follow (grooves and ridges along a path) (2026-11-12)
 
 - **Follow** (Design tab → Features): pick a shape, click the spot on its surface
