@@ -469,6 +469,16 @@ Viewport (mouse)  --leftPressed(ray, handle)-->  MainWindow drag controller
   the result and the laid path as orange tubes.
 - File format 15: `"follow"` steps.
 
+### Follow: checks (0.20.2)
+
+- `follow::apply` cuts / fuses with a fuzzy value (1e-5 × the part's box diagonal): a
+  round groove's tube is centred on the surface, and without it some cuts removed
+  nothing. The result must be valid, have one shell per solid, and lose (groove) or
+  gain (ridge) volume, else `GeometryError`.
+- `checkNotOverItself` (in `swept`, so patterns get it too): a run that comes back
+  within 0.9 × the cross-section's width of itself, more than 1.6 × the width further
+  along (cyclic if closed), is refused.
+
 ## Patterns (slice 11)
 
 - `BooleanOp::Pattern` + `PatternFinish{kind, feature, directions, counts, spacings,
