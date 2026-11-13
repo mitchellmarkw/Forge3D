@@ -541,7 +541,16 @@ TopoDS_Shape sweepRun(const std::vector<std::vector<Vec3>>& pts, const std::vect
     ahead = unit(sub(ahead, mul(up, dot(ahead, up))));
     const Vec3 across = cross(ahead, up);
     BRepOffsetAPI_MakePipeShell pipe(spine);
-    pipe.SetMode(guide, Standard_True, BRepFill_NoContact);
+    // On a flat face the surface faces one way all along: hold the cross-section to it
+    // directly (exact); elsewhere the guide path above keeps it upright.
+    bool flat = true;
+    for (const auto& piece : nrm)
+        for (const Vec3& n : piece)
+            flat = flat && dot(n, up) > 1.0 - 1e-9;
+    if (flat)
+        pipe.SetMode(dir(up));
+    else
+        pipe.SetMode(guide, Standard_True, BRepFill_NoContact);
     pipe.SetTransitionMode(BRepBuilderAPI_RoundCorner);
     pipe.Add(profileAt(f, p0, across, up), Standard_False, Standard_False);
     pipe.Build();

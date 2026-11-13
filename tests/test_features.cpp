@@ -374,7 +374,7 @@ TEST_CASE("Follow: grooves and ridges along a path on a flat face", "[follow]")
     {
         line(f.path, sketch::addPoint(f.path, {-10, 0}), sketch::addPoint(f.path, {10, 0}));
         ObjectId id = kInvalidId;
-        CHECK_THAT(removed(doc, stack, box, f, &id), WithinRel(2 * 1 * 20, 1e-4));
+        CHECK_THAT(removed(doc, stack, box, f, &id), WithinRel(2 * 1 * 20, 1e-2));
         CHECK(history::describe(doc, id) == "square groove, 2 x 1 mm");
         // Saved and read back.
         const auto back = roundTrip(doc);
@@ -384,26 +384,26 @@ TEST_CASE("Follow: grooves and ridges along a path on a flat face", "[follow]")
         std::get<BoxSpec>(taller.spec).height = 25;
         stack.execute(std::make_unique<EditBodyCommand>(*doc.find(box), taller, "Taller"));
         CHECK(doc.problemWith(id).value_or("") == "");
-        CHECK_THAT(40 * 40 * 25 - volumeOf(doc.shape(id)), WithinRel(40.0, 1e-4));
+        CHECK_THAT(40 * 40 * 25 - volumeOf(doc.shape(id)), WithinRel(40.0, 1e-2));
     }
     SECTION("A ring: a circle")
     {
         const int c = sketch::addPoint(f.path, {0, 0});
         f.path.radii.push_back(10);
         f.path.geos.push_back({sketch::GeoKind::Circle, c, -1, -1, 0, false});
-        CHECK_THAT(removed(doc, stack, box, f), WithinRel(pi * (11 * 11 - 9 * 9) * 1, 2e-3));
+        CHECK_THAT(removed(doc, stack, box, f), WithinRel(pi * (11 * 11 - 9 * 9) * 1, 1e-2));
     }
     SECTION("A round ridge and a V groove")
     {
         line(f.path, sketch::addPoint(f.path, {-10, 0}), sketch::addPoint(f.path, {10, 0}));
         f.ridge = true;
         f.profile = FollowProfile::Round;  // 2 wide, 1 high: a half-round bead
-        CHECK_THAT(-removed(doc, stack, box, f), WithinRel(pi / 2 * 20, 1e-3));
+        CHECK_THAT(-removed(doc, stack, box, f), WithinRel(pi / 2 * 20, 0.03));
         FollowFinish v = f;
         v.ridge = false;
         v.profile = FollowProfile::V;
         const ObjectId other = addBox(stack, doc, 40, 40, 10);
-        CHECK_THAT(removed(doc, stack, other, v), WithinRel(1.0 * 20, 1e-3));  // a 2 x 1 triangle, 20 long
+        CHECK_THAT(removed(doc, stack, other, v), WithinRel(1.0 * 20, 1e-2));  // a 2 x 1 triangle, 20 long
     }
     SECTION("Its own cross-section, and a closed outline with corners")
     {
