@@ -469,6 +469,27 @@ Viewport (mouse)  --leftPressed(ray, handle)-->  MainWindow drag controller
   the result and the laid path as orange tubes.
 - File format 15: `"follow"` steps.
 
+## Emboss pictures (slice 12)
+
+- `EmbossPicture` (in `BooleanSpec::picture`, instead of `emboss`): the name, a shared
+  `PictureData` (grey bytes, at most `picture::kMaxSide` = 1000 px; the app converts any
+  picture with `picture::fromRgba`, transparent as white; SVG drawn by QSvgRenderer
+  first), logo or relief, threshold, invert, width, depth, raised, angle.
+- `picture::flatPieces` turns it into `text::FlatPiece`s, the same flat triangles words
+  use. Logo: `picture::outlines` (marching squares at the threshold, so outlines run
+  smoothly between pixels; Douglas–Peucker to 0.35 px; specks under 4 px² dropped; at
+  most 5000 loops / 200000 points), nested by containment into OCCT faces with holes,
+  meshed by `text::flatPieces`. Relief: one sheet of at most 200 squares along the long
+  side, each point carrying a height share (`FlatPiece::heights`, the shade averaged
+  over its square).
+- `emboss::onSurface` (was the body of `letters`) lays any pieces on the surface and
+  makes them solid; a point with a height share stands out (or sinks) that share of the
+  depth (at least 0.02 mm). `emboss::pictureSolid` is the picture's way in. The walks
+  across the surface now go the whole span each way, so a loop round the shape is
+  always noticed.
+- File format 17: `"picture"` with `"image": {width, height, grey}`, grey deflated
+  (miniz) and base64, inside document.json.
+
 ### Follow: checks (0.20.2)
 
 - `follow::apply` cuts / fuses with a fuzzy value (1e-5 × the part's box diagonal): a

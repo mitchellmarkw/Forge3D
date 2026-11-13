@@ -27,13 +27,13 @@ Gate to Phase 2: a new user prints a customised part within 10 minutes.
 | 5c | Mesh engine: fast Merge / Subtract / Intersect / Split / Mirror / Group on big imported meshes | Done (0.12.0) |
 | 5d | Text shape; Emboss words that wrap round the surface; stacked letters | Done (0.13.1) |
 | 5e | Rounding / fillet / chamfer / bevel edges, picked in the view; coves | Done (0.14.1) |
-| — | Emboss an image or logo | Planned |
 | 6 | History (feature tree) with rollback bar, switching steps off, steps added at the bar; Through all | Done (0.15.1) |
 | 7 | 2D sketcher with dimensions and rules, on the plate or a flat face; Pad and Pocket | Done (0.16.0) |
 | 8 | Revolve / Groove, Hole (plain, counterbored, countersunk, metric sizes), Shell | Done (0.17.0) |
 | 9 | Sketch on middle planes (grooves round parts); ribbon with Build / Design / Sculpt / Print tabs | Done (0.18.0) |
 | 10 | Follow: grooves and ridges along a path drawn on the surface (flat or curved); round / square / V / drawn cross-sections | Done (0.19.1) |
-| 11 | Patterns: linked rows, grids and circles of a shape or its last feature | Done (0.20.1) |
+| 11 | Patterns: linked rows, grids and circles of a shape or its last feature | Done (0.20.2) |
+| 12 | Emboss a picture: logos traced to an outline, photos as reliefs; flat and curved surfaces | **Delivered for testing** |
 
 Separate track: sculpt-engine prototype (one Draw brush on a 1M-triangle mesh at 60 fps).
 

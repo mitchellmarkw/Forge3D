@@ -3,6 +3,7 @@
 
 #include "forge/core/Document.h"
 #include "forge/core/Export.h"
+#include "forge/core/Picture.h"
 #include "forge/core/Text.h"
 
 #include <algorithm>
@@ -116,18 +117,38 @@ Vec3 upFor(const Vec3& normal)
     return unit(sub(pick, mul(n, dot(pick, n))));
 }
 
-MeshSolid letters(const std::vector<float>& positions, const std::vector<std::uint32_t>& indices, const Vec3& point,
-                  const Vec3& normal, const EmbossText& words)
+namespace {
+
+// What to say when it doesn't fit.
+struct Misfit {
+    const char* hangsOff;
+    const char* tooLong;
+    const char* tooTall;
+};
+
+const Misfit kWordsMisfit{
+    "Some of the letters would hang off the edge of the surface. Make the text smaller or shorter, or move it.",
+    "The words are longer than the way round the shape, so they would run into themselves. Make them smaller or "
+    "shorter.",
+    "The letters are taller than the way round the shape. Make them smaller."};
+const Misfit kPictureMisfit{
+    "Some of the picture would hang off the edge of the surface. Make it smaller, or move it.",
+    "The picture is wider than the way round the shape, so it would run into itself. Make it smaller.",
+    "The picture is taller than the way round the shape. Make it smaller."};
+
+// Flat pieces laid on the surface like a sticker (see letters()), made solid: raised
+// pieces stand out `depth` (times each point's height, if it has one), engraved ones go
+// that far in.
+MeshSolid onSurface(const std::vector<float>& positions, const std::vector<std::uint32_t>& indices,
+                    const Vec3& point, const Vec3& normal, const std::vector<text::FlatPiece>& pieces,
+                    double maxEdge, double depth, bool raised, const Misfit& misfit)
 {
-    if (!(words.depth > 0.0))
+    if (!(depth > 0.0))
         throw std::invalid_argument("The depth must be greater than zero");
     const Surface s{positions, indices};
     const Vec3 n = unit(normal);
     const Vec3 up = upFor(n);
     const Vec3 right = cross(up, n);
-
-    const double maxEdge = std::max(words.letterHeight / 25.0, 0.05);
-    const std::vector<text::FlatPiece> pieces = text::flatLetters(words, maxEdge);
     double reach = 0.0;
     for (const auto& piece : pieces)
         for (const auto& q : piece.points)
@@ -346,10 +367,7 @@ MeshSolid letters(const std::vector<float>& positions, const std::vector<std::ui
         return curve;
     };
 
-    const auto hangsOff = [] {
-        return GeometryError("Some of the letters would hang off the edge of the surface. Make the text smaller "
-                             "or shorter, or move it.");
-    };
+    const auto hangsOff = [&misfit] { return GeometryError(misfit.hangsOff); };
     // The letters' extent.
     double u0 = 1e300, u1 = -1e300, v0 = 1e300, v1 = -1e300;
     for (const auto& piece : pieces)
@@ -364,14 +382,14 @@ MeshSolid letters(const std::vector<float>& positions, const std::vector<std::ui
     // (square to the baseline). A letter point (u, v) goes u along the baseline, then v up
     // that line. Long words follow curves round; the short way (up) bends with the
     // surface too, so letters keep their size on a ball as well as on a cylinder.
-    const Curve baseline = slice(point, up, right, std::max(std::abs(u0), std::abs(u1)) + maxEdge, -1);
+    // Walked far enough each way to come all the way round if the whole span would.
+    const Curve baseline = slice(point, up, right, (u1 - u0) + maxEdge, -1);
     const auto tooLongForLoop = [](const Curve& c, double span) { return c.loop > 0.0 && span > c.loop - 1e-6; };
     if (tooLongForLoop(baseline, u1 - u0))
-        throw GeometryError("The words are longer than the way round the shape, so they would run into "
-                            "themselves. Make them smaller or shorter.");
+        throw GeometryError(misfit.tooLong);
     const double step = maxEdge;
     const int columnCount = std::max(2, int(std::ceil((u1 - u0) / step)) + 1);
-    const double limitUp = std::max(std::abs(v0), std::abs(v1)) + maxEdge;
+    const double limitUp = (v1 - v0) + maxEdge;
     std::vector<Curve> columns;
     columns.reserve(std::size_t(columnCount));
     for (int k = 0; k < columnCount; ++k) {
@@ -394,7 +412,7 @@ MeshSolid letters(const std::vector<float>& positions, const std::vector<std::ui
         upHere = length(upHere) > 1e-9 ? unit(upHere) : up;
         columns.push_back(slice(q, tangent, upHere, limitUp, tri));
         if (tooLongForLoop(columns.back(), v1 - v0))
-            throw GeometryError("The letters are taller than the way round the shape. Make them smaller.");
+            throw GeometryError(misfit.tooTall);
     }
     const auto place = [&](double u, double v, Vec3& at, Vec3& facing) {
         const double x = (u - u0) / step;
@@ -407,9 +425,13 @@ MeshSolid letters(const std::vector<float>& positions, const std::vector<std::ui
         facing = add(mul(na, 1.0 - f), mul(nb, f));
     };
 
-    const double overlap = std::clamp(words.depth * 0.3, 0.05, 0.5);
-    const double out = words.raised ? words.depth : overlap;
-    const double in = words.raised ? overlap : words.depth;
+    const double overlap = std::clamp(depth * 0.3, 0.05, 0.5);
+    // A point's height: all the way, or its share (but never quite flat, so the solid
+    // keeps some thickness where it stands out or goes in least).
+    const double least = std::min(0.02, depth);
+    const auto heightAt = [&](const text::FlatPiece& piece, std::size_t i) {
+        return piece.heights.empty() ? depth : std::max(depth * std::clamp(piece.heights[i], 0.0, 1.0), least);
+    };
 
     std::vector<MeshSolid> solids;
     for (const auto& piece : pieces) {
@@ -420,6 +442,8 @@ MeshSolid letters(const std::vector<float>& positions, const std::vector<std::ui
             Vec3 at{}, facing{};
             place(u, v, at, facing);
             const Vec3 f = length(facing) > 0.0 ? unit(facing) : n;
+            const double h = heightAt(piece, i);
+            const double out = raised ? h : overlap, in = raised ? overlap : h;
             const Vec3 top = add(at, mul(f, out)), bottom = sub(at, mul(f, in));
             for (int k = 0; k < 3; ++k) {
                 pos[3 * i + k] = float(top[k]);
@@ -463,6 +487,33 @@ MeshSolid letters(const std::vector<float>& positions, const std::vector<std::ui
         solids.push_back(meshkernel::fromTriangles(pos, tri));
     }
     return solids.size() == 1 ? solids.front() : meshkernel::merged(solids);
+}
+
+}  // namespace
+
+MeshSolid letters(const std::vector<float>& positions, const std::vector<std::uint32_t>& indices, const Vec3& point,
+                  const Vec3& normal, const EmbossText& words)
+{
+    if (!(words.depth > 0.0))
+        throw std::invalid_argument("The depth must be greater than zero");
+    const double maxEdge = std::max(words.letterHeight / 25.0, 0.05);
+    return onSurface(positions, indices, point, normal, text::flatLetters(words, maxEdge), maxEdge, words.depth,
+                     words.raised, kWordsMisfit);
+}
+
+double pictureEdge(const EmbossPicture& picture)
+{
+    return std::max(std::min(picture.width, picture::heightOf(picture)) / 40.0, 0.05);
+}
+
+MeshSolid pictureSolid(const std::vector<float>& positions, const std::vector<std::uint32_t>& indices,
+                       const Vec3& point, const Vec3& normal, const EmbossPicture& picture)
+{
+    if (!(picture.depth > 0.0))
+        throw std::invalid_argument("The depth must be greater than zero");
+    const double maxEdge = pictureEdge(picture);
+    return onSurface(positions, indices, point, normal, picture::flatPieces(picture, maxEdge), maxEdge,
+                     picture.depth, picture.raised, kPictureMisfit);
 }
 
 
@@ -607,14 +658,37 @@ BooleanSpec embossSpec(const Document& doc, ObjectId target, const emboss::Surfa
     spec.planePoint = toStep.apply(where.point);
     spec.planeNormal = unit(toStep.applyDirection(where.normal));
     spec.emboss = words;
+    spec.picture.reset();
     const auto c = doc.worldBounds(target).center();
     const Vec3 centre = toStep.apply(Vec3{c[0], c[1], c[2]});
     spec.pivot = {centre[0], centre[1], centre[2]};
     return spec;
 }
 
+BooleanSpec embossSpec(const Document& doc, ObjectId target, const emboss::SurfacePoint& where,
+                       const EmbossPicture& picture)
+{
+    BooleanSpec spec = embossSpec(doc, target, where, EmbossText{});
+    spec.emboss.reset();
+    spec.picture = picture;
+    return spec;
+}
+
 std::optional<emboss::SurfacePoint> centeredSpot(const Document& doc, ObjectId id, const emboss::SurfacePoint& spot,
                                                  const EmbossText& words, emboss::Center how)
+{
+    return centeredSpot(doc, id, spot, words.angle, words.letterHeight / 2.0, how);
+}
+
+std::optional<emboss::SurfacePoint> centeredSpot(const Document& doc, ObjectId id, const emboss::SurfacePoint& spot,
+                                                 const EmbossPicture& picture, emboss::Center how)
+{
+    return centeredSpot(doc, id, spot, picture.angle, std::min(picture.width, picture::heightOf(picture)) / 4.0,
+                        how);
+}
+
+std::optional<emboss::SurfacePoint> centeredSpot(const Document& doc, ObjectId id, const emboss::SurfacePoint& spot,
+                                                 double angle, double radius, emboss::Center how)
 {
     const ObjectId part = embossedPart(doc, id);
     std::vector<float> pos;
@@ -623,7 +697,7 @@ std::optional<emboss::SurfacePoint> centeredSpot(const Document& doc, ObjectId i
     const Transform toPlate = doc.worldTransform(part);
     const Transform toLocal = toPlate.inverse();
     const emboss::SurfacePoint local{toLocal.apply(spot.point), unit(toLocal.applyDirection(spot.normal))};
-    const auto moved = emboss::centeredOnFace(pos, idx, local, words.angle, how, words.letterHeight / 2.0);
+    const auto moved = emboss::centeredOnFace(pos, idx, local, angle, how, radius);
     if (!moved)
         return std::nullopt;
     return emboss::SurfacePoint{toPlate.apply(moved->point), unit(toPlate.applyDirection(moved->normal))};
@@ -657,6 +731,15 @@ Body withEmboss(const Document& doc, ObjectId result, const emboss::SurfacePoint
     next.boolean->planePoint = toLocal.apply(where.point);
     next.boolean->planeNormal = unit(toLocal.applyDirection(where.normal));
     next.boolean->emboss = words;
+    next.boolean->picture.reset();
+    return next;
+}
+
+Body withEmboss(const Document& doc, ObjectId result, const emboss::SurfacePoint& where, const EmbossPicture& picture)
+{
+    Body next = withEmboss(doc, result, where, EmbossText{});
+    next.boolean->emboss.reset();
+    next.boolean->picture = picture;
     return next;
 }
 
