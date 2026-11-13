@@ -4,8 +4,26 @@ Parametric 3D modeling with sculpting, for Windows. The goal: the ease of Micros
 3D Builder, the precision of FreeCAD's parametric modeling, and Blender-style sculpting
 in one document with one undo history.
 
-> **Status:** early development (v0.1, slice 1). It opens a window and shows a box you
-> can orbit, pan and zoom. See [ROADMAP.md](ROADMAP.md).
+> **Status:** early development (0.20). Phase 1, the 3D Builder replacement, is well
+> along; sculpting is still to come. Expect rough edges, and keep copies of files you
+> care about. See [ROADMAP.md](ROADMAP.md) and [CHANGELOG.md](CHANGELOG.md).
+
+## What it can do so far
+
+- **Shapes:** box, cylinder, sphere, cone, torus, tube, wedge, pyramid (oval versions
+  too) and text. Move, turn and resize them with handles, with snapping.
+- **Combine:** Merge, Subtract, Intersect, Split by a plane, Mirror, Group, Align.
+  Results stay editable: change any part later and the result follows.
+- **Edges and surfaces:** rounded, chamfered and bevelled edges; Emboss words that wrap
+  round a surface; Shell (hollow out, with open faces).
+- **Parametric design:** a history of steps with a rollback bar; a 2D sketcher with
+  dimensions and rules; Pad, Pocket, Revolve, Groove; Holes (plain, counterbored,
+  countersunk, tapped, metric sizes); Follow grooves and ridges along a path drawn on
+  a flat or curved surface; linked patterns in rows, grids and circles.
+- **Print:** export STL, 3MF and OBJ, or send straight to your slicer; import STL, 3MF
+  and OBJ with automatic repair, and a fast mesh engine for big imported models.
+- A ribbon with Build, Design, Sculpt and Print tabs; undo / redo for everything;
+  Forge3D's own `.f3d` file format.
 
 ## Try it without building
 
@@ -68,3 +86,7 @@ More detail in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 GPL-3.0-or-later. See [LICENSE](LICENSE). Models you create with Forge3D are yours;
 the license covers the program, not your designs.
+
+Forge3D is built on open-source libraries (Qt, OpenCASCADE, Manifold and others). See
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md); the Windows download carries their
+full license texts in its `licenses` folder.

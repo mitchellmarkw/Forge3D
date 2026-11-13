@@ -104,7 +104,27 @@ jobs:
           $crt = Get-ChildItem -Directory "$env:VCToolsRedistDir\x64" -Filter 'Microsoft.VC*.CRT' | Select-Object -First 1
           if ($crt) { Copy-Item "$($crt.FullName)\*.dll" $dist -Force }
 
-          Copy-Item README.md, LICENSE $dist -ErrorAction SilentlyContinue
+          Copy-Item README.md, LICENSE, THIRD_PARTY_NOTICES.md $dist -ErrorAction SilentlyContinue
+
+          # Every shipped library's license, as vcpkg installed it (share\<port>\copyright).
+          # Build-only tools and Catch2 (tests) are left out.
+          $skip = @('catch2', 'vcpkg-cmake', 'vcpkg-cmake-config', 'vcpkg-cmake-get-vars', 'vcpkg-tool-meson', 'vcpkg-pkgconfig-get-modules')
+          $licenses = "$dist\licenses"
+          New-Item -ItemType Directory -Force -Path $licenses | Out-Null
+          foreach ($port in Get-ChildItem -Directory "$installed\share") {
+            $copyright = Join-Path $port.FullName 'copyright'
+            if ((Test-Path $copyright) -and ($skip -notcontains $port.Name)) {
+              New-Item -ItemType Directory -Force -Path "$licenses\$($port.Name)" | Out-Null
+              Copy-Item $copyright "$licenses\$($port.Name)\LICENSE.txt"
+            }
+          }
+          if (-not (Test-Path "$licenses\qtbase\LICENSE.txt")) { throw 'Qt license missing from package' }
+          if (-not (Test-Path "$licenses\opencascade\LICENSE.txt")) { throw 'OpenCASCADE license missing from package' }
+          # The Visual C++ runtime's terms ship with it in the redistributable folder.
+          if ($crt) {
+            $crtTerms = Get-ChildItem -File "$env:VCToolsRedistDir" -Filter '*.txt' -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($crtTerms) { Copy-Item $crtTerms.FullName "$licenses\Microsoft-Visual-C++-runtime.txt" }
+          }
           New-Item -ItemType Directory -Force -Path "$dist\test-sheets" | Out-Null
           Copy-Item docs\test-sheets\*.md "$dist\test-sheets"
           Copy-Item -Recurse docs\test-sheets\samples "$dist\test-sheets\samples"
