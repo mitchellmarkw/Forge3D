@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.18.0 — Slice 9: middle planes and the ribbon (2026-11-12)
+
+- **Sketch on a middle plane**: the Sketch button's arrow offers the front, side or top
+  plane through the middle of the selected shape (or of the plate, with nothing
+  selected). Where the plane cuts the shape is shown dashed, to see and snap to.
+  This is what Groove and Revolve need for round parts: draw a groove's outline at
+  a cylinder's edge, a helper line up its middle, and Groove cuts a ring all the way
+  round. (On a flat face, Groove spins round a line lying on the face, which is why it
+  made two dents there.)
+- Pocket can now go **both ways** (half each side of the sketch), handy from a middle
+  plane.
+- **Ribbon**: the toolbar is now tabs of grouped buttons, so nothing falls off the
+  edge:
+  - **Build**: File, Undo, Add, Handles, Combine, Arrange, Remove;
+  - **Design**: Sketch (with the planes), Hole, Shell, Edges, Split, Emboss;
+  - **Sculpt**: coming in a later phase;
+  - **Print**: Export, Send to Slicer.
+  The tab you were on is remembered. Menus and shortcuts are unchanged.
+- 175 unit tests (1 new: a groove round a cylinder from its front middle plane).
+
 ## 0.17.0 — Slice 8: Revolve, Hole, Shell (2026-11-12)
 
 - **Revolve** (in the sketch's **Make:** list): spins the outline round a helper line

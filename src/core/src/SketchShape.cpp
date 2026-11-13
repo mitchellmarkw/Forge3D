@@ -16,6 +16,10 @@
 #include <TopTools_IndexedMapOfShape.hxx>
 #include <BRepPrimAPI_MakePrism.hxx>
 #include <BRepPrimAPI_MakeRevol.hxx>
+#include <BRepAlgoAPI_Section.hxx>
+#include <BRepBndLib.hxx>
+#include <Bnd_Box.hxx>
+#include <gp_Pln.hxx>
 #include <BRepBuilderAPI_MakePolygon.hxx>
 #include <BRepCheck_Analyzer.hxx>
 #include <gp_Ax1.hxx>
@@ -536,6 +540,70 @@ std::vector<std::vector<Point>> outlinesOnPlane(const TopoDS_Shape& shape, const
             }
             out.push_back(std::move(q));
         }
+    }
+    return out;
+}
+
+Transform middlePlane(int which, const Vec3& centre)
+{
+    Transform t;
+    // Columns: X, Y, Z of the sketch in plate coordinates.
+    const auto set = [&t](const Vec3& x, const Vec3& y, const Vec3& z) {
+        for (std::size_t r = 0; r < 3; ++r) {
+            t.m[r][0] = x[r];
+            t.m[r][1] = y[r];
+            t.m[r][2] = z[r];
+        }
+    };
+    if (which == 0)
+        set({1, 0, 0}, {0, 0, 1}, {0, -1, 0});
+    else if (which == 1)
+        set({0, 1, 0}, {0, 0, 1}, {1, 0, 0});
+    else
+        set({1, 0, 0}, {0, 1, 0}, {0, 0, 1});
+    for (std::size_t r = 0; r < 3; ++r)
+        t.m[r][3] = centre[r];
+    return t;
+}
+
+std::vector<std::vector<Point>> sectionOutlines(const TopoDS_Shape& shape, const Transform& frame)
+{
+    std::vector<std::vector<Point>> out;
+    const Vec3 o = frame.apply({0, 0, 0});
+    const Vec3 n = frame.applyDirection({0, 0, 1});
+    const Transform toSketch = frame.inverse();
+    try {
+        BRepAlgoAPI_Section section(shape, gp_Pln(gp_Pnt(o[0], o[1], o[2]), gp_Dir(n[0], n[1], n[2])), Standard_False);
+        section.Approximation(Standard_True);
+        section.Build();
+        if (!section.IsDone())
+            return out;
+        Bnd_Box box;
+        BRepBndLib::Add(shape, box);
+        double x0, y0, z0, x1, y1, z1;
+        box.Get(x0, y0, z0, x1, y1, z1);
+        const double deflection = std::max(std::hypot(x1 - x0, y1 - y0, z1 - z0) * 2e-3, 1e-3);
+        for (TopExp_Explorer e(section.Shape(), TopAbs_EDGE); e.More(); e.Next()) {
+            BRepAdaptor_Curve curve(TopoDS::Edge(e.Current()));
+            std::vector<Point> line;
+            const auto add = [&](const gp_Pnt& p) {
+                const Vec3 q = toSketch.apply({p.X(), p.Y(), p.Z()});
+                line.push_back({q[0], q[1]});
+            };
+            if (curve.GetType() == GeomAbs_Line) {
+                add(curve.Value(curve.FirstParameter()));
+                add(curve.Value(curve.LastParameter()));
+            } else {
+                GCPnts_QuasiUniformDeflection sampler(curve, deflection);
+                if (!sampler.IsDone())
+                    continue;
+                for (int k = 1; k <= sampler.NbPoints(); ++k)
+                    add(sampler.Value(k));
+            }
+            if (line.size() >= 2)
+                out.push_back(std::move(line));
+        }
+    } catch (const Standard_Failure&) {
     }
     return out;
 }

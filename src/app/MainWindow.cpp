@@ -51,6 +51,9 @@
 #include <QMessageBox>
 #include <QSettings>
 #include <QStackedWidget>
+#include <QHBoxLayout>
+#include <QFrame>
+#include <QTabWidget>
 #include <Standard_Failure.hxx>
 #include <gp_Trsf.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
@@ -456,6 +459,23 @@ void MainWindow::createActions()
                                   "nothing selected it goes on the plate; with a shape selected, click the flat "
                                   "face to draw on"));
     connect(m_sketchAction, &QAction::triggered, this, &MainWindow::sketchClicked);
+    m_sketchMenu = new QMenu(tr("Sketch on"), this);
+    {
+        QAction* onFace = m_sketchMenu->addAction(tr("A face (click it), or the plate"));
+        onFace->setToolTip(m_sketchAction->toolTip());
+        connect(onFace, &QAction::triggered, this, &MainWindow::sketchClicked);
+        m_sketchMenu->addSeparator();
+        const QString names[] = {tr("Front plane through the middle"), tr("Side plane through the middle"),
+                                 tr("Top plane through the middle")};
+        for (int which = 0; which < 3; ++which) {
+            QAction* a = m_sketchMenu->addAction(names[which]);
+            a->setToolTip(tr("Sketch on a plane through the middle of the selected shape (or the plate's middle "
+                             "with nothing selected). Its cut through the shape is shown to snap to: draw a "
+                             "groove's outline at a round part's edge and spin it round the middle line."));
+            connect(a, &QAction::triggered, this, [this, which] { sketchOnPlane(which); });
+        }
+        m_sketchMenu->setToolTipsVisible(true);
+    }
 
     m_holeAction = new QAction(tr("Hole"), this);
     m_holeAction->setToolTip(tr("Hole: drill holes (plain, counterbored, countersunk; standard metric sizes) into a "
@@ -556,6 +576,7 @@ void MainWindow::createMenus()
     edit->addAction(m_emboss);
     edit->addAction(m_edgesAction);
     edit->addAction(m_sketchAction);
+    edit->addMenu(m_sketchMenu);
     edit->addAction(m_holeAction);
     edit->addAction(m_shellAction);
     edit->addMenu(m_alignMenu);
@@ -583,63 +604,131 @@ void MainWindow::createMenus()
 
 void MainWindow::createToolBar()
 {
-    QToolBar* bar = addToolBar(tr("Build"));
-    bar->setObjectName(QStringLiteral("BuildToolBar"));
+    // The ribbon: tabs of grouped buttons (Build / Design / Sculpt / Print), in a fixed
+    // bar across the top. Each button runs a window action, so the menus, shortcuts and
+    // enabling all stay as they are.
+    QToolBar* bar = addToolBar(tr("Ribbon"));
+    bar->setObjectName(QStringLiteral("Ribbon"));
     bar->setMovable(false);
-    bar->setToolButtonStyle(Qt::ToolButtonTextOnly);
-    bar->addAction(m_open);
-    bar->addAction(m_save);
-    bar->addAction(m_import);
-    bar->addAction(m_export);
-    bar->addAction(m_sendToSlicer);
-    bar->addSeparator();
-    bar->addAction(m_undo);
-    bar->addAction(m_redo);
-    bar->addSeparator();
+    bar->setFloatable(false);
+    bar->toggleViewAction()->setEnabled(false);
+    auto* tabs = new QTabWidget(bar);
+    tabs->setObjectName(QStringLiteral("RibbonTabs"));
+    tabs->setDocumentMode(true);
+    tabs->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    bar->addWidget(tabs);
+
+    struct Page {
+        QWidget* widget;
+        QHBoxLayout* row;
+    };
+    const auto page = [tabs](const QString& title, const QString& tip) {
+        auto* w = new QWidget;
+        auto* row = new QHBoxLayout(w);
+        row->setContentsMargins(4, 2, 4, 0);
+        row->setSpacing(2);
+        const int index = tabs->addTab(w, title);
+        tabs->setTabToolTip(index, tip);
+        return Page{w, row};
+    };
+    // A group: buttons in a row, its name underneath, a line after it.
+    const auto group = [](Page& p, const QString& name, const std::vector<QWidget*>& buttons) {
+        auto* box = new QWidget;
+        auto* column = new QVBoxLayout(box);
+        column->setContentsMargins(2, 0, 2, 0);
+        column->setSpacing(0);
+        auto* row = new QHBoxLayout;
+        row->setSpacing(1);
+        for (QWidget* b : buttons)
+            row->addWidget(b);
+        column->addLayout(row);
+        auto* label = new QLabel(name);
+        label->setAlignment(Qt::AlignCenter);
+        QFont small = label->font();
+        small.setPointSizeF(small.pointSizeF() * 0.85);
+        label->setFont(small);
+        label->setStyleSheet(QStringLiteral("color: palette(mid);"));
+        column->addWidget(label);
+        p.row->addWidget(box);
+        auto* line = new QFrame;
+        line->setFrameShape(QFrame::VLine);
+        line->setFrameShadow(QFrame::Sunken);
+        p.row->addWidget(line);
+    };
+    const auto button = [](QAction* action) {
+        auto* b = new QToolButton;
+        b->setDefaultAction(action);
+        b->setToolButtonStyle(Qt::ToolButtonTextOnly);
+        b->setAutoRaise(true);
+        return static_cast<QWidget*>(b);
+    };
+    const auto menuButton = [](QMenu* menu, const QString& name = {}) {
+        auto* b = new QToolButton;
+        b->setDefaultAction(menu->menuAction());
+        if (!name.isEmpty())
+            b->setText(name);
+        b->setPopupMode(QToolButton::InstantPopup);
+        b->setToolButtonStyle(Qt::ToolButtonTextOnly);
+        b->setAutoRaise(true);
+        return static_cast<QWidget*>(b);
+    };
+
+    Page build = page(tr("Build"), tr("Shapes: add, move, combine and arrange them"));
+    group(build, tr("File"), {button(m_open), button(m_save), button(m_import)});
+    group(build, tr("Undo"), {button(m_undo), button(m_redo)});
     {
-        auto* addButton = new QToolButton(bar);
-        addButton->setDefaultAction(m_addMenu->menuAction());
-        addButton->setPopupMode(QToolButton::InstantPopup);
-        addButton->setToolButtonStyle(Qt::ToolButtonTextOnly);
-        addButton->setObjectName(QStringLiteral("AddShapeButton"));
-        bar->addWidget(addButton);
+        QWidget* add = menuButton(m_addMenu);
+        add->setObjectName(QStringLiteral("AddShapeButton"));
+        group(build, tr("Add"), {add});
     }
-    bar->addSeparator();
-    bar->addAction(m_modeMove);
-    bar->addAction(m_modeRotate);
-    bar->addAction(m_modeResize);
-    bar->addAction(m_snapAction);
-    bar->addAction(m_uniformAction);
-    bar->addSeparator();
-    bar->addAction(m_merge);
-    bar->addAction(m_subtract);
-    bar->addAction(m_intersect);
-    bar->addAction(m_separate);
-    bar->addAction(m_split);
-    bar->addAction(m_emboss);
-    bar->addAction(m_edgesAction);
-    bar->addAction(m_sketchAction);
-    bar->addAction(m_holeAction);
-    bar->addAction(m_shellAction);
-    bar->addSeparator();
+    group(build, tr("Handles"),
+          {button(m_modeMove), button(m_modeRotate), button(m_modeResize), button(m_snapAction),
+           button(m_uniformAction)});
+    group(build, tr("Combine"), {button(m_merge), button(m_subtract), button(m_intersect), button(m_separate)});
     {
-        auto* alignButton = new QToolButton(bar);
-        alignButton->setDefaultAction(m_alignMenu->menuAction());
-        alignButton->setPopupMode(QToolButton::InstantPopup);
-        alignButton->setToolButtonStyle(Qt::ToolButtonTextOnly);
-        alignButton->setObjectName(QStringLiteral("AlignShapesButton"));
-        bar->addWidget(alignButton);
-        auto* mirrorButton = new QToolButton(bar);
-        mirrorButton->setDefaultAction(m_mirrorMenu->menuAction());
-        mirrorButton->setPopupMode(QToolButton::InstantPopup);
-        mirrorButton->setToolButtonStyle(Qt::ToolButtonTextOnly);
-        bar->addWidget(mirrorButton);
+        QWidget* align = menuButton(m_alignMenu);
+        align->setObjectName(QStringLiteral("AlignShapesButton"));
+        group(build, tr("Arrange"), {align, menuButton(m_mirrorMenu), button(m_group), button(m_duplicate)});
     }
-    bar->addAction(m_group);
-    bar->addAction(m_duplicate);
-    bar->addSeparator();
-    bar->addAction(m_delete);
-    bar->addAction(m_clear);
+    group(build, tr("Remove"), {button(m_delete), button(m_clear)});
+    build.row->addStretch(1);
+
+    Page design = page(tr("Design"), tr("Features: sketches, holes, shells, edges, text and cuts"));
+    {
+        // Sketch: click for a face (or the plate); the arrow offers the middle planes.
+        auto* sketchButton = new QToolButton;
+        sketchButton->setDefaultAction(m_sketchAction);
+        sketchButton->setMenu(m_sketchMenu);
+        sketchButton->setPopupMode(QToolButton::MenuButtonPopup);
+        sketchButton->setToolButtonStyle(Qt::ToolButtonTextOnly);
+        sketchButton->setAutoRaise(true);
+        group(design, tr("Sketch"), {sketchButton});
+    }
+    group(design, tr("Features"), {button(m_holeAction), button(m_shellAction), button(m_edgesAction)});
+    group(design, tr("Change"), {button(m_split), button(m_emboss)});
+    group(design, tr("Undo"), {button(m_undo), button(m_redo)});
+    design.row->addStretch(1);
+
+    Page sculpt = page(tr("Sculpt"), tr("Sculpting brushes (coming in a later phase)"));
+    {
+        auto* note = new QLabel(tr("Sculpting brushes (push, pull, smooth, like Blender or ShapeLab) are coming in "
+                                   "a later phase."));
+        note->setStyleSheet(QStringLiteral("color: palette(mid);"));
+        sculpt.row->addWidget(note);
+        sculpt.row->addStretch(1);
+    }
+
+    Page print = page(tr("Print"), tr("Get it to the printer"));
+    group(print, tr("Out"), {button(m_export), button(m_sendToSlicer)});
+    group(print, tr("Undo"), {button(m_undo), button(m_redo)});
+    print.row->addStretch(1);
+
+    // Keep the tab you were on.
+    QSettings settings;
+    tabs->setCurrentIndex(std::clamp(settings.value(QStringLiteral("ribbon/tab"), 0).toInt(), 0, tabs->count() - 1));
+    connect(tabs, &QTabWidget::currentChanged, this,
+            [](int index) { QSettings().setValue(QStringLiteral("ribbon/tab"), index); });
+    m_ribbonTabs = tabs;
 }
 
 void MainWindow::createDocks()
@@ -3610,6 +3699,25 @@ void MainWindow::showAbout()
                  QString::fromLatin1(OCC_VERSION_COMPLETE), m_viewport->glVersionString()));
 }
 
+namespace {
+
+gp_Trsf toGp(const Transform& t)
+{
+    gp_Trsf trsf;
+    trsf.SetValues(t.m[0][0], t.m[0][1], t.m[0][2], t.m[0][3],  //
+                   t.m[1][0], t.m[1][1], t.m[1][2], t.m[1][3],  //
+                   t.m[2][0], t.m[2][1], t.m[2][2], t.m[2][3]);
+    return trsf;
+}
+
+// A shape as it stands on the plate (the whole step, rounding and all).
+TopoDS_Shape inPlate(const Document& doc, ObjectId id)
+{
+    return BRepBuilderAPI_Transform(doc.shape(id), toGp(doc.worldTransform(id)), true).Shape();
+}
+
+}  // namespace
+
 // ---- Sketches ---------------------------------------------------------------------
 
 void MainWindow::createSketchBar()
@@ -3765,30 +3873,81 @@ void MainWindow::sketchClicked()
         return;
     }
     const ObjectId id = selectedOne();
-    if (id == kInvalidId || !m_doc.isTopLevel(id)) {
-        statusBar()->showMessage(tr("Sketch: select one shape on the plate (to sketch on one of its faces), or "
-                                    "nothing (to sketch on the plate)."),
-                                 8000);
+    if (!sketchTargetOk(id))
         return;
-    }
-    if (rolledBackSelected()) {
-        statusBar()->showMessage(tr("'%1' is rolled back: roll it forward to the end before sketching on it.")
-                                     .arg(QString::fromStdString(m_doc.find(id)->name)),
-                                 8000);
-        return;
-    }
-    if (m_doc.usesMeshEngine(id)) {
-        QMessageBox::information(this, tr("Forge3D"),
-                                 tr("Sketches go on solid shapes made in Forge3D, not on imported meshes or shapes "
-                                    "made with them. Deselect it to sketch on the plate instead."));
-        return;
-    }
     m_sketchMode = SketchMode{};
     m_sketchMode.picking = true;
     m_sketchMode.target = id;
     statusBar()->showMessage(tr("Sketch: click the flat face of '%1' to draw on. Esc cancels.")
                                  .arg(QString::fromStdString(m_doc.find(id)->name)));
     refreshScene();
+}
+
+bool MainWindow::sketchTargetOk(ObjectId id)
+{
+    if (id == kInvalidId || m_selection.size() != 1 || !m_doc.isTopLevel(id)) {
+        statusBar()->showMessage(tr("Sketch: select one shape on the plate (to sketch on one of its faces), or "
+                                    "nothing (to sketch on the plate)."),
+                                 8000);
+        return false;
+    }
+    if (rolledBackSelected()) {
+        statusBar()->showMessage(tr("'%1' is rolled back: roll it forward to the end before sketching on it.")
+                                     .arg(QString::fromStdString(m_doc.find(id)->name)),
+                                 8000);
+        return false;
+    }
+    if (m_doc.usesMeshEngine(id)) {
+        QMessageBox::information(this, tr("Forge3D"),
+                                 tr("Sketches go on solid shapes made in Forge3D, not on imported meshes or shapes "
+                                    "made with them. Deselect it to sketch on the plate instead."));
+        return false;
+    }
+    return true;
+}
+
+void MainWindow::sketchOnPlane(int which)
+{
+    if (toolOpen())
+        return;
+    if (m_dragState.kind != Drag::Kind::None)
+        cancelDrag();
+    static const char* names[] = {"front", "side", "top"};
+    const QString planeName = tr(names[which]);
+    if (m_selection.empty()) {
+        // Through the plate's middle: the front and side planes stand up from it.
+        m_sketchMode = SketchMode{};
+        m_sketchMode.plane = which;
+        m_sketchMode.frame = sketch::middlePlane(which, {0, 0, 0});
+        SketchPanel::Options options;
+        openSketch(sketch::Sketch{}, {}, tr("Sketch on the %1 plane").arg(planeName), false, options);
+        return;
+    }
+    const ObjectId id = selectedOne();
+    if (!sketchTargetOk(id))
+        return;
+    const auto c = m_doc.worldBounds(id).center();
+    m_sketchMode = SketchMode{};
+    m_sketchMode.target = id;
+    m_sketchMode.plane = which;
+    m_sketchMode.frame = sketch::middlePlane(which, {c[0], c[1], c[2]});
+    std::vector<std::vector<QPointF>> reference;
+    try {
+        for (const auto& line : sketch::sectionOutlines(inPlate(m_doc, id), m_sketchMode.frame)) {
+            std::vector<QPointF> q;
+            for (const auto& p : line)
+                q.emplace_back(p.x, p.y);
+            reference.push_back(std::move(q));
+        }
+    } catch (const std::exception& e) {
+        qWarning() << "Cutting through the shape failed:" << e.what();
+    }
+    SketchPanel::Options options;
+    options.length = 5.0;
+    openSketch(sketch::Sketch{}, std::move(reference),
+               tr("Sketch on the %1 plane through the middle of '%2'")
+                   .arg(planeName, QString::fromStdString(m_doc.find(id)->name)),
+               true, options);
 }
 
 void MainWindow::sketchFaceClick(const QVector3D& origin, const QVector3D& direction)
@@ -3880,13 +4039,18 @@ void MainWindow::startSketchEdit(ObjectId id)
     if (step) {
         try {
             const ObjectId under = step->boolean->operands.front();
-            if (!m_doc.usesMeshEngine(under))
-                for (const auto& line : sketch::outlinesOnPlane(pickableShape(m_doc, under), m_sketchMode.frame)) {
+            if (!m_doc.usesMeshEngine(under)) {
+                const TopoDS_Shape shape = pickableShape(m_doc, under);
+                auto lines = sketch::outlinesOnPlane(shape, m_sketchMode.frame);
+                if (lines.empty())  // drawn on a middle plane: show the cut through it
+                    lines = sketch::sectionOutlines(shape, m_sketchMode.frame);
+                for (const auto& line : lines) {
                     std::vector<QPointF> q;
                     for (const auto& p : line)
                         q.emplace_back(p.x, p.y);
                     reference.push_back(std::move(q));
                 }
+            }
         } catch (const std::exception& e) {
             qWarning() << "Finding the face under the sketch failed:" << e.what();
         }
@@ -4072,7 +4236,7 @@ void MainWindow::finishSketch()
     body.placement = placementFromTransform(mode.frame, pivotOf(body.spec));
     const ObjectId toolId = body.id;
     if (mode.target == kInvalidId) {  // on the plate
-        if (m_sketchPanel->revolve() || std::holds_alternative<RevolveSpec>(spec)) {
+        if (mode.plane < 0 && std::holds_alternative<RevolveSpec>(spec)) {
             // Spun round: the sketch is the side view, standing up (its Y is the plate's Z),
             // and the shape sits on the plate.
             Transform upright;
@@ -4167,24 +4331,6 @@ void MainWindow::relockForSketch()
 
 // ---- Holes ------------------------------------------------------------------------
 
-namespace {
-
-gp_Trsf toGp(const Transform& t)
-{
-    gp_Trsf trsf;
-    trsf.SetValues(t.m[0][0], t.m[0][1], t.m[0][2], t.m[0][3],  //
-                   t.m[1][0], t.m[1][1], t.m[1][2], t.m[1][3],  //
-                   t.m[2][0], t.m[2][1], t.m[2][2], t.m[2][3]);
-    return trsf;
-}
-
-// A shape as it stands on the plate (the whole step, rounding and all).
-TopoDS_Shape inPlate(const Document& doc, ObjectId id)
-{
-    return BRepBuilderAPI_Transform(doc.shape(id), toGp(doc.worldTransform(id)), true).Shape();
-}
-
-}  // namespace
 
 void MainWindow::holeClicked()
 {

@@ -275,3 +275,61 @@ TEST_CASE("Shell hollows a box, open where picked, and keeps its faces when resi
         CHECK_THAT(volumeOf(back.shape(result.id)), WithinRel(cup, 1e-6));
     }
 }
+
+TEST_CASE("Middle planes: a groove round a cylinder", "[planes]")
+{
+    // The front plane faces you: X right, Z up, its Z towards you (-Y).
+    const Transform front = sketch::middlePlane(0, {1, 2, 3});
+    const Vec3 up = front.applyDirection({0, 1, 0}), out = front.applyDirection({0, 0, 1});
+    CHECK(up[2] == 1.0);
+    CHECK(out[1] == -1.0);
+    const Transform side = sketch::middlePlane(1, {0, 0, 0});
+    CHECK(side.applyDirection({1, 0, 0})[1] == 1.0);
+    CHECK(side.applyDirection({0, 0, 1})[0] == 1.0);
+
+    Document doc;
+    CommandStack stack(doc);
+    Body cylinder;
+    cylinder.id = doc.allocateId();
+    cylinder.name = "Cylinder";
+    cylinder.spec = CylinderSpec{10, 10, 30};
+    stack.execute(std::make_unique<AddBodyCommand>(cylinder));
+    const auto c = doc.worldBounds(cylinder.id).center();
+    const Transform plane = sketch::middlePlane(0, {c[0], c[1], c[2]});
+    // Its cross-section: a 20 x 30 rectangle round the middle.
+    const auto section = sketch::sectionOutlines(pickableShape(doc, cylinder.id), plane);
+    REQUIRE(section.size() >= 4);
+    for (const auto& line : section)
+        for (const auto& p : line) {
+            CHECK(std::abs(p.x) <= 10 + 1e-6);
+            CHECK(std::abs(p.y) <= 15 + 1e-6);
+        }
+    // A 2 x 2 square on the right-hand edge, spun round the cylinder's axis (Y in the
+    // sketch): a groove all the way round.
+    RevolveSpec groove;
+    sketch::Sketch& s = groove.sketch;
+    const int a = sketch::addPoint(s, {9, -1}), b = sketch::addPoint(s, {11, -1}), d = sketch::addPoint(s, {11, 1}),
+              e = sketch::addPoint(s, {9, 1});
+    line(s, a, b);
+    line(s, b, d);
+    line(s, d, e);
+    line(s, e, a);
+    const int p = sketch::addPoint(s, {0, -20}), q = sketch::addPoint(s, {0, 20});
+    groove.axis = line(s, p, q, true);
+    Body tool;
+    tool.id = doc.allocateId();
+    tool.name = "Groove";
+    tool.spec = groove;
+    tool.placement = placementFromTransform(plane, pivotOf(tool.spec));
+    stack.execute(std::make_unique<AddBodyCommand>(tool));
+    Body result;
+    result.id = doc.allocateId();
+    result.name = "Grooved";
+    BooleanSpec spec;
+    spec.op = BooleanOp::Subtract;
+    spec.operands = {cylinder.id, tool.id};
+    result.boolean = spec;
+    stack.execute(std::make_unique<CombineCommand>(result));
+    // The ring removed: radius 9..10, 2 high.
+    CHECK_THAT(volumeOf(doc.shape(result.id)), WithinRel(pi * 100 * 30 - pi * (100 - 81) * 2, 1e-6));
+}
