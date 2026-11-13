@@ -38,7 +38,8 @@ namespace forge::file {
 //  14  revolves (type "revolve": axis, angle, sketch), holes (type "hole": kind, size,
 //      diameters, sketch) and shells (operation "shell"; "shell": thickness, outward,
 //      open faces)
-inline constexpr int kFormatVersion = 14;
+//  15  follow steps (operation "follow": path sketch, where it starts, cross-section)
+inline constexpr int kFormatVersion = 15;
 inline constexpr const char* kExtension = ".f3d";
 inline constexpr const char* kDocumentEntry = "document.json";
 

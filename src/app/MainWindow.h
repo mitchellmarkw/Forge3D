@@ -46,6 +46,7 @@ class PropertiesPanel;
 class SplitPanel;
 class EmbossPanel;
 class EdgesPanel;
+class FollowPanel;
 class HolePanel;
 class ShellPanel;
 class SketchPanel;
@@ -190,6 +191,16 @@ private:
     void showHoleSpots();
     void applyHole();
     void endHole();
+    // Follow (slice 10): a groove / ridge along a path drawn on the surface.
+    void startFollow(ObjectId target, bool editing);
+    void followClick(const QVector3D& origin, const QVector3D& direction);
+    void openFollowSketch(bool profile);  // draw the path (or the cross-section)
+    FollowFinish currentFollow() const;
+    void updateFollowPreview();
+    void applyFollow();
+    void endFollow();
+    // The sketch view is open for a tool (hole spots, a path, a cross-section).
+    bool sketchingForTool() const { return m_holeMode.positioning || m_followMode.sketching != 0; }
     // Shell (slice 8): hollow out, faces clicked to leave open.
     void startShell(ObjectId target, bool editing);
     void shellClick(const QVector3D& origin, const QVector3D& direction);
@@ -427,6 +438,23 @@ private:
         std::shared_ptr<const Mesh> pickedLines;
     };
     ShellMode m_shellMode;
+
+    QAction* m_followAction = nullptr;
+    FollowPanel* m_followPanel = nullptr;
+    QTimer* m_followTimer = nullptr;
+    struct FollowMode {
+        bool active = false;
+        bool editing = false;
+        bool placed = false;           // the path's spot is chosen
+        int sketching = 0;             // the sketch view is open: 1 the path, 2 the cross-section
+        ObjectId target = kInvalidId;  // the shape (editing: the Follow step)
+        TopoDS_Shape shape;            // what the path goes on, in plate coordinates
+        std::shared_ptr<edges::FaceFinder> finder;
+        FollowFinish finish;           // plate coordinates (the panel's settings applied on use)
+        std::shared_ptr<const Mesh> preview;  // result coordinates (like Edges)
+        std::shared_ptr<const Mesh> pathLines;
+    };
+    FollowMode m_followMode;
 };
 
 }  // namespace forge::app

@@ -381,6 +381,7 @@ std::string toString(BooleanOp op)
     case BooleanOp::Emboss: return "Emboss";
     case BooleanOp::Edges: return "Edges";
     case BooleanOp::Shell: return "Shell";
+    case BooleanOp::Follow: return "Follow";
     }
     return "Combine";
 }

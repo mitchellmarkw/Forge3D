@@ -104,6 +104,21 @@ void scaleInto(const Document& doc, ObjectId id, const Vec3& factors, const Vec3
         out.push_back(std::move(next));
         return;
     }
+    if (body->boolean->op == BooleanOp::Follow && body->boolean->follow) {
+        // The path's start moves with the shape; evenly scaled, the path and groove grow too.
+        Body next = *body;
+        FollowFinish& f = *next.boolean->follow;
+        for (std::size_t k = 0; k < 3; ++k)
+            f.origin[k] = factors[k] * (f.origin[k] - anchor[k]) + anchor[k];
+        if (even(factors)) {
+            sketch::scale(f.path, factors[0], factors[0]);
+            sketch::scale(f.custom, factors[0], factors[0]);
+            f.width *= factors[0];
+            f.depth *= factors[0];
+        }
+        out.push_back(std::move(next));
+        return;
+    }
     if (body->boolean->op == BooleanOp::Shell && body->boolean->shell) {
         // The open faces' picks move with the shape; evenly scaled, the walls grow too.
         Body next = *body;

@@ -6,6 +6,7 @@
 #include "EmbossPanel.h"
 #include "Log.h"
 #include "PropertiesPanel.h"
+#include "FollowPanel.h"
 #include "HolePanel.h"
 #include "ShellPanel.h"
 #include "SketchPanel.h"
@@ -24,6 +25,7 @@
 #include "forge/core/Primitives.h"
 #include "forge/core/SketchShape.h"
 #include "forge/core/Shell.h"
+#include "forge/core/Follow.h"
 #include "forge/core/Tessellator.h"
 #include "forge/core/Tessellator.h"
 #include "forge/core/Text.h"
@@ -318,6 +320,8 @@ void MainWindow::createActions()
             endHole();
         else if (m_shellMode.active)
             endShell();
+        else if (m_followMode.active)
+            endFollow();
         else if (m_sketchMode.picking) {
             m_sketchMode.picking = false;
             statusBar()->clearMessage();
@@ -481,6 +485,24 @@ void MainWindow::createActions()
     m_holeAction->setToolTip(tr("Hole: drill holes (plain, counterbored, countersunk; standard metric sizes) into a "
                                 "flat face of the selected shape"));
     connect(m_holeAction, &QAction::triggered, this, &MainWindow::holeClicked);
+    m_followAction = new QAction(tr("Follow"), this);
+    m_followAction->setToolTip(tr("Follow: draw a path on the selected shape's surface and cut a groove (or raise a "
+                                  "ridge) along it, round, square, V or your own shape across"));
+    connect(m_followAction, &QAction::triggered, this, [this] {
+        const ObjectId id = selectedOne();
+        if (id == kInvalidId || m_selection.size() != 1 || !m_doc.isTopLevel(id)) {
+            statusBar()->showMessage(tr("Follow: select one shape on the plate first."), 6000);
+            return;
+        }
+        const ObjectId target = history::tip(m_doc, id);
+        if (m_doc.usesMeshEngine(target)) {
+            QMessageBox::information(this, tr("Forge3D"),
+                                     tr("Follow works on solid shapes made in Forge3D, not on imported meshes or "
+                                        "shapes made with them."));
+            return;
+        }
+        startFollow(target, false);
+    });
     m_shellAction = new QAction(tr("Shell"), this);
     m_shellAction->setToolTip(tr("Shell: hollow the selected shape out to walls of a set thickness, leaving the "
                                  "faces you click open"));
@@ -579,6 +601,7 @@ void MainWindow::createMenus()
     edit->addMenu(m_sketchMenu);
     edit->addAction(m_holeAction);
     edit->addAction(m_shellAction);
+    edit->addAction(m_followAction);
     edit->addMenu(m_alignMenu);
     edit->addMenu(m_mirrorMenu);
     edit->addAction(m_group);
@@ -704,7 +727,8 @@ void MainWindow::createToolBar()
         sketchButton->setAutoRaise(true);
         group(design, tr("Sketch"), {sketchButton});
     }
-    group(design, tr("Features"), {button(m_holeAction), button(m_shellAction), button(m_edgesAction)});
+    group(design, tr("Features"),
+          {button(m_holeAction), button(m_shellAction), button(m_followAction), button(m_edgesAction)});
     group(design, tr("Change"), {button(m_split), button(m_emboss)});
     group(design, tr("Undo"), {button(m_undo), button(m_redo)});
     design.row->addStretch(1);
@@ -922,6 +946,19 @@ void MainWindow::createDocks()
     });
     connect(m_shellPanel, &ShellPanel::applyRequested, this, &MainWindow::applyShell);
     connect(m_shellPanel, &ShellPanel::cancelRequested, this, &MainWindow::endShell);
+
+    m_followPanel = new FollowPanel;
+    stackLayout->addWidget(m_followPanel);
+    m_followPanel->hide();
+    m_followTimer = new QTimer(this);
+    m_followTimer->setSingleShot(true);
+    m_followTimer->setInterval(200);
+    connect(m_followTimer, &QTimer::timeout, this, &MainWindow::updateFollowPreview);
+    connect(m_followPanel, &FollowPanel::changed, this, [this] { m_followTimer->start(); });
+    connect(m_followPanel, &FollowPanel::pathRequested, this, [this] { openFollowSketch(false); });
+    connect(m_followPanel, &FollowPanel::profileRequested, this, [this] { openFollowSketch(true); });
+    connect(m_followPanel, &FollowPanel::applyRequested, this, &MainWindow::applyFollow);
+    connect(m_followPanel, &FollowPanel::cancelRequested, this, &MainWindow::endFollow);
     propsDock->setMinimumWidth(320);
     addDockWidget(Qt::RightDockWidgetArea, propsDock);
 
@@ -1027,6 +1064,8 @@ void MainWindow::setSelection(std::vector<ObjectId> ids)
         endHole();
     if (m_shellMode.active)
         endShell();
+    if (m_followMode.active && m_followMode.sketching == 0)
+        endFollow();
     if (m_sketchMode.picking) {
         m_sketchMode.picking = false;  // picking something else leaves the face picking
         statusBar()->clearMessage();
@@ -1084,6 +1123,10 @@ void MainWindow::onViewportClicked(const QVector3D& origin, const QVector3D& dir
     }
     if (m_shellMode.active) {
         shellClick(origin, direction);
+        return;
+    }
+    if (m_followMode.active) {
+        followClick(origin, direction);
         return;
     }
     Ray ray;
@@ -1174,7 +1217,7 @@ void MainWindow::onLeftPressed(const QVector3D& origin, const QVector3D& directi
             m_pressOnHandle = true;
         return;
     }
-    if (m_embossMode.active || m_edgesMode.active || m_holeMode.active || m_shellMode.active)
+    if (m_embossMode.active || m_edgesMode.active || m_holeMode.active || m_shellMode.active || m_followMode.active)
         return;  // shapes stay put while the tool is open
 
     if (handle.valid() && multiSelection()) {
@@ -2451,7 +2494,7 @@ void MainWindow::applyEdges()
 bool MainWindow::toolOpen() const
 {
     return m_splitMode.active || m_embossMode.active || m_edgesMode.active || m_sketchMode.picking ||
-           m_sketchMode.active || m_holeMode.active || m_shellMode.active;
+           m_sketchMode.active || m_holeMode.active || m_shellMode.active || m_followMode.active;
 }
 
 void MainWindow::startEmboss(ObjectId target, bool editing)
@@ -3168,6 +3211,8 @@ void MainWindow::refreshScene()
             endHole();
         if (m_shellMode.active && !m_doc.find(m_shellMode.target))
             endShell();
+        if (m_followMode.active && !m_doc.find(m_followMode.target))
+            endFollow();
         for (ObjectId id : m_doc.topLevelIds()) {
             DisplayItem item;
             item.id = id;
@@ -3196,6 +3241,20 @@ void MainWindow::refreshScene()
             if (m_holeMode.active && m_holeMode.preview && id == history::objectOf(m_doc, m_holeMode.target)) {
                 item.mesh = m_holeMode.preview;  // drilled, as it will be (plate coordinates)
                 item.model = QMatrix4x4();
+            }
+            if (m_followMode.active && id == history::objectOf(m_doc, m_followMode.target)) {
+                if (m_followMode.preview) {
+                    item.mesh = m_followMode.preview;
+                    item.model = previewFrame(m_followMode.target, m_followMode.editing);
+                }
+                if (m_followMode.pathLines && !m_followMode.pathLines->empty()) {
+                    DisplayItem line;
+                    line.id = kEdgesPickedItem;
+                    line.mesh = m_followMode.pathLines;
+                    line.color = QVector3D(0.95f, 0.5f, 0.05f);
+                    line.ghost = true;
+                    items.push_back(line);
+                }
             }
             if (m_shellMode.active && id == history::objectOf(m_doc, m_shellMode.target)) {
                 if (m_shellMode.preview) {
@@ -3355,6 +3414,7 @@ void MainWindow::refreshScene()
                                !toolOpen());
     m_holeAction->setEnabled(m_selection.size() == 1 && allTopLevel && !rolled && !toolOpen());
     m_shellAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
+    m_followAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_clear->setEnabled(!m_doc.empty());
     relockForSketch();
 }
@@ -3505,6 +3565,7 @@ void MainWindow::editStep(ObjectId id)
     switch (body->boolean->op) {
     case BooleanOp::Edges: startEdges(id, true); break;
     case BooleanOp::Shell: startShell(id, true); break;
+    case BooleanOp::Follow: startFollow(id, true); break;
     case BooleanOp::Emboss: startEmboss(id, true); break;
     case BooleanOp::Split:
         if (m_doc.isTopLevel(id))
@@ -4073,24 +4134,37 @@ void MainWindow::openSketch(const sketch::Sketch& sketch, std::vector<std::vecto
     const bool editing = m_sketchMode.pad != kInvalidId;
     m_central->setCurrentWidget(m_sketchView);
     if (m_holeMode.positioning)
-        m_sketchPanel->startPositions(title);
+        m_sketchPanel->startPositions(
+            title, tr("Each point on its own (Point tool, P) is a hole. Add dimensions to place them exactly."));
+    else if (m_followMode.sketching == 1)
+        m_sketchPanel->startPositions(title, tr("Draw the path: lines, arcs, circles or slots, joined or not. "
+                                                "The grey dot is the spot you clicked; it's laid over the surface "
+                                                "from there."));
+    else if (m_followMode.sketching == 2)
+        m_sketchPanel->startPositions(title, tr("Draw the shape across the path as one closed outline: the "
+                                                "dashed line is the surface, up is out of it, the grey dot is "
+                                                "where the path runs. A groove is the part below the line."));
     else
         m_sketchPanel->start(title, onFace, editing, options);
-    if (!m_holeMode.active)
+    if (!m_holeMode.active && !m_followMode.active)
         m_propsDockWidth = m_propsDock->width();
     m_properties->hide();
     m_holePanel->hide();
+    m_followPanel->hide();
     m_sketchPanel->show();
     m_sketchView->start(sketch, std::move(reference));
     if (m_holeMode.positioning)
         m_sketchView->setTool(SketchView::Tool::Point);
+    else if (m_followMode.sketching != 0)
+        m_sketchView->setTool(m_sketchView->sketch().geos.empty() ? SketchView::Tool::Line : SketchView::Tool::Select);
     else if (!editing)
         m_sketchView->setTool(SketchView::Tool::Line);
     m_sketchBar->show();
     lockForSketch(true);
     m_sketchView->setFocus();
-    statusBar()->showMessage(m_holeMode.positioning ? tr("Place the holes: points, dimensions and rules. Then Done.")
-                                                    : tr("Sketching: draw a closed outline, then click Finish."));
+    statusBar()->showMessage(m_holeMode.positioning      ? tr("Place the holes: points, dimensions and rules. Then Done.")
+                             : m_followMode.sketching != 0 ? tr("Draw it, then click Done.")
+                                                           : tr("Sketching: draw a closed outline, then click Finish."));
     // The view only knows its size once shown.
     QTimer::singleShot(0, this, [this] {
         if (m_sketchMode.active)
@@ -4129,7 +4203,7 @@ void MainWindow::updateSketchStatus()
                                         "and rules to pin it down.)")
                                          .arg(solved.freedom);
     }
-    if (!loose.empty())
+    if (!loose.empty() && m_followMode.sketching != 1)  // a path may well have ends
         text += QStringLiteral("\n") + (loose.size() == 1 ? tr("1 loose end (red): the outline isn't closed there.")
                                                           : tr("%1 loose ends (red): the outline isn't closed there.")
                                                                 .arg(loose.size()));
@@ -4148,6 +4222,12 @@ void MainWindow::finishSketch()
     if (m_holeMode.positioning) {
         // Back to the Hole tool with the spots placed.
         m_holeMode.spots = m_sketchView->sketch();
+        endSketch();
+        return;
+    }
+    if (m_followMode.sketching != 0) {
+        // Back to the Follow tool with the path (or cross-section) drawn.
+        (m_followMode.sketching == 1 ? m_followMode.finish.path : m_followMode.finish.custom) = m_sketchView->sketch();
         endSketch();
         return;
     }
@@ -4271,6 +4351,14 @@ void MainWindow::endSketch()
     m_sketchPanel->hide();
     m_central->setCurrentWidget(m_viewport);
     statusBar()->clearMessage();
+    if (m_followMode.sketching != 0) {
+        // Back to the Follow tool (its panel still open).
+        m_followMode.sketching = 0;
+        m_followPanel->show();
+        updateFollowPreview();
+        refreshCommandState();
+        return;
+    }
     if (m_holeMode.positioning) {
         // Back to the Hole tool (its panel still open).
         m_holeMode.positioning = false;
@@ -4733,6 +4821,228 @@ void MainWindow::endShell()
     m_shellTimer->stop();
     m_shellMode = ShellMode{};
     m_shellPanel->hide();
+    m_properties->show();
+    QTimer::singleShot(0, this, [this] { resizeDocks({m_propsDock}, {m_propsDockWidth}, Qt::Horizontal); });
+    statusBar()->clearMessage();
+    refreshScene();
+    refreshCommandState();
+}
+
+// ---- Follow -----------------------------------------------------------------------
+
+void MainWindow::startFollow(ObjectId target, bool editing)
+{
+    const Body* body = m_doc.find(target);
+    if (!body)
+        return;
+    if (m_dragState.kind != Drag::Kind::None)
+        cancelDrag();
+    FollowMode mode;
+    mode.active = true;
+    mode.editing = editing;
+    mode.target = target;
+    try {
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        struct RestoreCursor {
+            ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
+        } restore;
+        mode.shape = editing ? pickableShape(m_doc, target) : inPlate(m_doc, target);
+        mode.finder = std::make_shared<edges::FaceFinder>(mode.shape);
+        if (editing) {
+            if (!body->isBoolean() || body->boolean->op != BooleanOp::Follow)
+                return;
+            mode.finish = followInPlate(m_doc, target);
+            mode.placed = true;
+        } else {
+            // A groove about a twentieth of the shape's smallest side.
+            auto sides = m_doc.worldBounds(target).size();
+            std::sort(sides.begin(), sides.end());
+            mode.finish.width = std::clamp(std::round(double(sides[0]) * 0.1 * 2.0) / 2.0, 0.5, 5.0);
+            mode.finish.depth = mode.finish.width / 2.0;
+            mode.finish.profile = FollowProfile::Round;
+        }
+    } catch (const std::exception& e) {
+        QMessageBox::information(this, tr("Forge3D"), QString::fromUtf8(e.what()));
+        return;
+    }
+    m_followMode = std::move(mode);
+    const QString name = QString::fromStdString(body->name);
+    m_followPanel->start(editing ? tr("Change the groove / ridge in '%1'").arg(name)
+                                 : tr("Groove or ridge on '%1'").arg(name),
+                         m_followMode.finish, editing);
+    m_followPanel->setPlaced(m_followMode.placed);
+    m_propsDockWidth = m_propsDock->width();
+    m_properties->hide();
+    m_followPanel->show();
+    statusBar()->showMessage(editing ? tr("Follow: change the settings or the path, then Apply. Clicking the shape "
+                                          "moves the path there.")
+                                     : tr("Follow: click the spot on the shape where the path goes. Esc cancels."));
+    updateFollowPreview();
+    refreshCommandState();
+}
+
+void MainWindow::followClick(const QVector3D& origin, const QVector3D& direction)
+{
+    if (m_followMode.sketching != 0)
+        return;
+    const QVector3D d = direction.normalized();
+    const auto hit = m_followMode.finder->under({origin.x(), origin.y(), origin.z()}, {d.x(), d.y(), d.z()});
+    if (!hit) {
+        statusBar()->showMessage(tr("Follow: click on the shape itself."), 4000);
+        return;
+    }
+    // The spot, facing out of the surface there; X level (or along the plate's X on a
+    // top or bottom), the way Emboss lays words.
+    const FaceRef ref = shell::refFor(m_followMode.shape, hit->face, hit->point);
+    const Vec3 n = ref.normal, up = emboss::upFor(n);
+    Vec3 x{up[1] * n[2] - up[2] * n[1], up[2] * n[0] - up[0] * n[2], up[0] * n[1] - up[1] * n[0]};
+    m_followMode.finish.origin = ref.point;
+    m_followMode.finish.normal = n;
+    m_followMode.finish.xAxis = x;
+    const bool first = !m_followMode.placed;
+    m_followMode.placed = true;
+    m_followPanel->setPlaced(true);
+    if (first && m_followMode.finish.path.geos.empty()) {
+        openFollowSketch(false);  // straight on to drawing the path
+        return;
+    }
+    m_followTimer->start(0);
+}
+
+void MainWindow::openFollowSketch(bool profile)
+{
+    if (!m_followMode.active || !m_followMode.placed)
+        return;
+    const FollowFinish& f = m_followMode.finish;
+    std::vector<std::vector<QPointF>> reference;
+    if (profile) {
+        // The surface, seen end-on: a line through the dot.
+        const double w = std::max(f.width, 1.0) * 2.0;
+        reference.push_back({QPointF(-w, 0), QPointF(w, 0)});
+    } else {
+        try {
+            const Transform frame = follow::frameOf(f);
+            for (const auto& line : sketch::outlinesOnPlane(m_followMode.shape, frame)) {
+                std::vector<QPointF> q;
+                for (const auto& p : line)
+                    q.emplace_back(p.x, p.y);
+                reference.push_back(std::move(q));
+            }
+        } catch (const std::exception& e) {
+            qWarning() << "Finding the face's outline failed:" << e.what();
+        }
+    }
+    m_followMode.sketching = profile ? 2 : 1;
+    m_followTimer->stop();
+    m_sketchMode = SketchMode{};
+    m_sketchMode.frame = follow::frameOf(f);
+    openSketch(profile ? f.custom : f.path, std::move(reference),
+               profile ? tr("Draw the shape across the path") : tr("Draw the path"), false, SketchPanel::Options{});
+}
+
+FollowFinish MainWindow::currentFollow() const
+{
+    FollowFinish f = m_followMode.finish;
+    f.ridge = m_followPanel->ridge();
+    f.profile = m_followPanel->profile();
+    f.width = m_followPanel->width();
+    f.depth = m_followPanel->depth();
+    return f;
+}
+
+void MainWindow::updateFollowPreview()
+{
+    if (!m_followMode.active || m_followMode.sketching != 0)
+        return;
+    m_followTimer->stop();
+    m_followMode.preview.reset();
+    m_followMode.pathLines.reset();
+    bool ok = false;
+    const FollowFinish f = currentFollow();
+    if (!m_followMode.placed) {
+        m_followPanel->setStatus(tr("Click the spot on the shape where the path goes."), false);
+    } else if (f.path.geos.empty()) {
+        m_followPanel->setStatus(tr("Draw the path (Draw the path...)."), false);
+    } else {
+        try {
+            QApplication::setOverrideCursor(Qt::WaitCursor);
+            struct RestoreCursor {
+                ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
+            } restore;
+            // The path as it lies on the surface, shown as a line.
+            const auto laid = followPathInPlate(m_doc, m_followMode.target, f, m_followMode.editing);
+            std::vector<const std::vector<Vec3>*> lines;
+            for (const auto& l : laid)
+                lines.push_back(&l);
+            const float radius = std::max(0.02f, m_viewport->camera().distance() * 0.0018f);
+            m_followMode.pathLines = tubes(lines, radius);
+            const BooleanSpec spec = m_followMode.editing
+                                         ? *withFollow(m_doc, m_followMode.target, f).boolean
+                                         : followSpec(m_doc, m_followMode.target, f);
+            m_followMode.preview = m_doc.previewMesh(spec);
+            m_followPanel->setStatus(tr("This is how it will look. Click the shape to move the path."), false);
+            ok = true;
+        } catch (const std::exception& e) {
+            m_followPanel->setStatus(QString::fromUtf8(e.what()), true);
+        }
+    }
+    m_followPanel->setApplyEnabled(ok);
+    refreshScene();
+}
+
+void MainWindow::applyFollow()
+{
+    if (!m_followMode.active)
+        return;
+    const FollowFinish f = currentFollow();
+    const ObjectId target = m_followMode.target;
+    const bool editing = m_followMode.editing;
+    std::optional<BooleanSpec> spec;
+    try {
+        spec = editing ? *withFollow(m_doc, target, f).boolean : followSpec(m_doc, target, f);
+        m_doc.previewMesh(*spec);
+    } catch (const std::exception& e) {
+        QMessageBox::warning(this, tr("Forge3D"), tr("That did not work:\n%1").arg(QString::fromUtf8(e.what())));
+        return;
+    }
+    endFollow();
+    if (editing) {
+        const Body* now = m_doc.find(target);
+        if (!now)
+            return;
+        Body after = *now;
+        after.boolean = *spec;
+        run(std::make_unique<EditBodyCommand>(*now, after, f.ridge ? "Change ridge" : "Change groove"));
+        setSelection(history::objectOf(m_doc, target));
+        return;
+    }
+    Body result;
+    result.id = m_doc.allocateId();
+    result.name = m_doc.uniqueName(f.ridge ? "Ridged" : "Grooved");
+    result.boolean = *spec;
+    const ObjectId id = result.id;
+    if (!m_doc.isTopLevel(target)) {
+        // Rolled back: the step goes in at the bar.
+        const ObjectId object = history::objectOf(m_doc, target);
+        if (run(std::make_unique<InsertStepCommand>(std::move(result), m_doc.parentOf(target))))
+            setSelection(object);
+        return;
+    }
+    if (run(std::make_unique<CombineCommand>(std::move(result))))
+        setSelection(id);
+}
+
+void MainWindow::endFollow()
+{
+    if (!m_followMode.active)
+        return;
+    if (m_followMode.sketching != 0) {
+        m_followMode.sketching = 0;
+        endSketch();
+    }
+    m_followTimer->stop();
+    m_followMode = FollowMode{};
+    m_followPanel->hide();
     m_properties->show();
     QTimer::singleShot(0, this, [this] { resizeDocks({m_propsDock}, {m_propsDockWidth}, Qt::Horizontal); });
     statusBar()->clearMessage();

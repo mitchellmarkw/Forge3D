@@ -446,6 +446,29 @@ Viewport (mouse)  --leftPressed(ray, handle)-->  MainWindow drag controller
   shortcuts are unchanged). The Sketch button is a split button whose menu holds the
   plane choices.
 
+## Follow (slice 10)
+
+- `BooleanOp::Follow` + `FollowFinish{path sketch, origin / xAxis / normal, relative,
+  ridge, profile, width, depth, custom sketch}`: a one-part step like Shell.
+- Laying the path (`follow::laidPath`): the sketch's lines and arcs are joined into runs
+  and sampled; a walker starts at the origin (on the surface; after resizing, moved to
+  the same spot in the part's box and onto the surface) and takes small steps
+  (about 1/400 of the part's size) along its own across / ahead directions, each step
+  snapped to the nearest point on the part's faces (the face it was on first, else
+  BRepExtrema on the faces), its directions carried over to the new tangent plane.
+  On a flat face this reproduces the drawing exactly; on a cylinder it wraps without
+  stretching.
+- Sweeping (`follow::swept`): each run becomes a wire of B-spline edges (one per drawn
+  curve); a second wire 1 mm out along the surface normals guides
+  BRepOffsetAPI_MakePipeShell, so the cross-section stays upright to the surface.
+  Corners use round transitions. The swept solid is cut from (groove) or fused to
+  (ridge) the part. Cross-sections reach a little past the surface so the result is
+  clean.
+- App: `FollowPanel`; the path and the cross-section are drawn in the sketch view
+  (opened from the panel, like the Hole tool's **Place exactly**). The preview shows
+  the result and the laid path as orange tubes.
+- File format 15: `"follow"` steps.
+
 ## Rendering
 
 `Document::mesh()` → `forge::Mesh` (positions, normals, indices) → `DisplayItem`

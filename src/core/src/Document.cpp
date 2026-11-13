@@ -3,6 +3,7 @@
 
 #include "forge/core/Edges.h"
 #include "forge/core/Shell.h"
+#include "forge/core/Follow.h"
 #include "forge/core/Emboss.h"
 
 #include "forge/core/Export.h"
@@ -197,7 +198,12 @@ void Document::validateBoolean(const Body& body, const std::map<ObjectId, Object
 {
     const auto& ops = body.boolean->operands;
     const BooleanOp op = body.boolean->op;
-    if (op == BooleanOp::Shell) {
+    if (op == BooleanOp::Follow) {
+        if (ops.size() != 1)
+            throw std::invalid_argument("Follow works on exactly one shape");
+        if (!body.boolean->follow)
+            throw std::invalid_argument("Follow needs a path");
+    } else if (op == BooleanOp::Shell) {
         if (ops.size() != 1)
             throw std::invalid_argument("Shell works on exactly one shape");
         if (!body.boolean->shell)
@@ -458,6 +464,14 @@ TopoDS_Shape Document::combine(const BooleanSpec& spec) const
     try {
         if (op == BooleanOp::Emboss)
             throw GeometryError("Emboss is worked out by the mesh engine");
+        if (op == BooleanOp::Follow) {
+            if (!spec.follow)
+                throw GeometryError("No path was drawn");
+            const ObjectId part = operands.at(0);
+            return follow::apply(
+                BRepBuilderAPI_Transform(shape(part), toTrsf(localTransform(part)), /*copy=*/true).Shape(),
+                *spec.follow);
+        }
         if (op == BooleanOp::Shell) {
             if (!spec.shell)
                 throw GeometryError("No wall thickness was set");
@@ -561,6 +575,7 @@ TopoDS_Shape Document::combine(const BooleanSpec& spec) const
             case BooleanOp::Emboss:
             case BooleanOp::Edges:
             case BooleanOp::Shell:
+            case BooleanOp::Follow:
                 break;  // handled above / by the mesh engine
             }
         }
@@ -652,7 +667,8 @@ TopoDS_Shape Document::previewCombine(const BooleanSpec& spec) const
         if (!find(part))
             throw std::out_of_range("No body with id " + std::to_string(part));
     if ((spec.op == BooleanOp::Split || spec.op == BooleanOp::Mirror || spec.op == BooleanOp::Emboss ||
-         spec.op == BooleanOp::Edges || spec.op == BooleanOp::Shell) &&
+         spec.op == BooleanOp::Edges || spec.op == BooleanOp::Shell ||
+         spec.op == BooleanOp::Follow) &&
         spec.operands.size() != 1)
         throw std::invalid_argument(toString(spec.op) + " works on exactly one shape");
     return combine(spec);
@@ -717,6 +733,7 @@ BooleanSpec Document::passThrough(const BooleanSpec& spec)
     pass.emboss.reset();
     pass.edges.reset();
     pass.shell.reset();
+    pass.follow.reset();
     switch (spec.op) {
     case BooleanOp::Merge:
     case BooleanOp::Intersect:
@@ -967,6 +984,8 @@ MeshSolid Document::combineMeshes(const BooleanSpec& spec) const
                             "with them.");
     case BooleanOp::Shell:
         throw GeometryError("Shell works on solid shapes, not on imported meshes or shapes made with them.");
+    case BooleanOp::Follow:
+        throw GeometryError("Follow works on solid shapes, not on imported meshes or shapes made with them.");
     case BooleanOp::Emboss: {
         if (!spec.emboss)
             throw GeometryError("Emboss has no words");
