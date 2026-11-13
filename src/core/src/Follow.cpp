@@ -5,6 +5,7 @@
 
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
+#include <TopTools_ListOfShape.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepBndLib.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
@@ -33,6 +34,8 @@
 #include <TColgp_Array1OfPnt.hxx>
 #include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
+#include <BRepGProp.hxx>
+#include <GProp_GProps.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Face.hxx>
@@ -70,6 +73,13 @@ gp_Pnt pnt(const Vec3& p) { return gp_Pnt(p[0], p[1], p[2]); }
 gp_Dir dir(const Vec3& d) { return gp_Dir(d[0], d[1], d[2]); }
 
 const char* kFailed = "The groove could not follow this path. Try a smaller cross-section or a smoother path.";
+
+double volumeOf(const TopoDS_Shape& shape)
+{
+    GProp_GProps props;
+    BRepGProp::VolumeProperties(shape, props);
+    return props.Mass();
+}
 
 struct Box {
     Vec3 min{0, 0, 0}, size{1, 1, 1};
@@ -538,6 +548,57 @@ TopoDS_Wire profileAt(const FollowFinish& f, const Vec3& at, const Vec3& across,
     throw std::invalid_argument("Unknown cross-section");
 }
 
+const char* kOverItself = "The path runs back over itself (round the shape and past where it started, "
+                          "or doubling back), so the groove or ridge would overlap itself. Make it shorter, "
+                          "or keep it from crossing itself.";
+
+// How wide the cross-section is.
+double acrossSize(const FollowFinish& f)
+{
+    if (f.profile != FollowProfile::Custom)
+        return f.width;
+    if (f.custom.geos.empty())
+        return 0.0;
+    const Box b = boxOf(sketch::faces(f.custom));
+    return std::min(b.size[0], b.size[1]);
+}
+
+// A run that comes back within the cross-section's width of itself (further along it
+// than any corner could explain) would sweep a tube through itself, which the booleans
+// can't make sense of: refuse it.
+void checkNotOverItself(const std::vector<std::vector<Vec3>>& pieces, bool closed, double width)
+{
+    if (!(width > 0.0))
+        return;
+    // Points about a quarter of the width apart, with how far along the run each is.
+    std::vector<Vec3> pts;
+    std::vector<double> at;
+    double run = 0.0;
+    for (const auto& piece : pieces)
+        for (const Vec3& p : piece) {
+            if (!pts.empty()) {
+                const double d = length(sub(p, pts.back()));
+                if (d < width / 4)
+                    continue;
+                run += d;
+            }
+            pts.push_back(p);
+            at.push_back(run);
+        }
+    const double total = run;
+    // Ends that meet (a line exactly once round) close the run.
+    closed = closed || (pts.size() > 2 && length(sub(pts.back(), pts.front())) < 1e-6 * std::max(1.0, total));
+    const double near = 0.9 * width, apart = 1.6 * width;
+    for (std::size_t i = 0; i < pts.size(); ++i)
+        for (std::size_t j = i + 1; j < pts.size(); ++j) {
+            double along = at[j] - at[i];
+            if (closed)
+                along = std::min(along, total - along);
+            if (along > apart && length(sub(pts[j], pts[i])) < near)
+                throw GeometryError(kOverItself);
+        }
+}
+
 // One run swept: the cross-section carried along, kept upright to the surface.
 TopoDS_Shape sweepRun(const std::vector<std::vector<Vec3>>& pts, const std::vector<std::vector<Vec3>>& nrm,
                       const FollowFinish& f)
@@ -627,6 +688,7 @@ TopoDS_Shape swept(const TopoDS_Shape& part, const FollowFinish& f)
         TopoDS_Shape all;
         bool first = true;
         for (std::size_t r = 0; r < laid.points.size(); ++r) {
+            checkNotOverItself(laid.points[r], laid.closed[r], acrossSize(f));
             const TopoDS_Shape one = sweepRun(laid.points[r], laid.normals[r], f);
             if (first) {
                 all = one;
@@ -647,15 +709,32 @@ TopoDS_Shape swept(const TopoDS_Shape& part, const FollowFinish& f)
 TopoDS_Shape apply(const TopoDS_Shape& part, const FollowFinish& f)
 {
     const TopoDS_Shape tool = swept(part, f);
+    // A groove's tube is centred on the surface, which some cuts miss altogether
+    // (nothing removed) without a little tolerance.
+    const double fuzzy = 1e-5 * boxOf(part).diagonal();
     TopoDS_Shape result;
     try {
         if (f.ridge) {
-            BRepAlgoAPI_Fuse fuse(part, tool);
+            BRepAlgoAPI_Fuse fuse;
+            TopTools_ListOfShape args, tools;
+            args.Append(part);
+            tools.Append(tool);
+            fuse.SetArguments(args);
+            fuse.SetTools(tools);
+            fuse.SetFuzzyValue(fuzzy);
+            fuse.Build();
             if (!fuse.IsDone() || fuse.HasErrors())
                 throw GeometryError(kFailed);
             result = fuse.Shape();
         } else {
-            BRepAlgoAPI_Cut cut(part, tool);
+            BRepAlgoAPI_Cut cut;
+            TopTools_ListOfShape args, tools;
+            args.Append(part);
+            tools.Append(tool);
+            cut.SetArguments(args);
+            cut.SetTools(tools);
+            cut.SetFuzzyValue(fuzzy);
+            cut.Build();
             if (!cut.IsDone() || cut.HasErrors())
                 throw GeometryError(kFailed);
             result = cut.Shape();
@@ -667,6 +746,19 @@ TopoDS_Shape apply(const TopoDS_Shape& part, const FollowFinish& f)
         throw GeometryError(kFailed);
     }
     if (result.IsNull() || !BRepCheck_Analyzer(result).IsValid())
+        throw GeometryError(kFailed);
+    // A sound groove takes some away and a ridge adds some, and neither leaves a hollow
+    // inside (a second shell). Otherwise the boolean went wrong without saying so.
+    for (TopExp_Explorer solid(result, TopAbs_SOLID); solid.More(); solid.Next()) {
+        int shells = 0;
+        for (TopExp_Explorer shell(solid.Current(), TopAbs_SHELL); shell.More(); shell.Next())
+            ++shells;
+        if (shells > 1)
+            throw GeometryError(kFailed);
+    }
+    const double before = volumeOf(part), after = volumeOf(result);
+    const double change = 1e-3 * std::min(before, volumeOf(tool));
+    if (f.ridge ? after < before + change : after > before - change)
         throw GeometryError(kFailed);
     return result;
 }

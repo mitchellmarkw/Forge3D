@@ -15,6 +15,7 @@
 #include "forge/core/SketchShape.h"
 
 #include <BRepCheck_Analyzer.hxx>
+#include <TopExp_Explorer.hxx>
 #include <BRepGProp.hxx>
 #include <GProp_GProps.hxx>
 #include <TopExp.hxx>
@@ -688,4 +689,44 @@ TEST_CASE("Pattern: Follow grooves round a cylinder, apart and overlapping", "[p
         CHECK(cut > 85.0);
         CHECK(cut < 105.0);
     }
+}
+
+TEST_CASE("Follow: long grooves round a cylinder cut cleanly; past once round is refused", "[follow]")
+{
+    // A round groove 4 wide, 2 deep (centred on the surface) round a cylinder R20: some
+    // lengths used to cut nothing at all, and once past all the way round the tube ran
+    // through itself and came out looking like a ridge.
+    const double around = 2 * pi * 20;
+    for (bool ridge : {false, true})
+        for (double length : {40.0, 60.0, 100.0, 120.0, 140.0}) {
+            Document doc;
+            CommandStack stack(doc);
+            Body cylinder;
+            cylinder.id = doc.allocateId();
+            cylinder.name = "Cylinder";
+            cylinder.spec = CylinderSpec{20, 20, 40};
+            stack.execute(std::make_unique<AddBodyCommand>(cylinder));
+            FollowFinish f;
+            f.origin = {0, -20, 20};
+            f.xAxis = {1, 0, 0};
+            f.normal = {0, -1, 0};
+            f.profile = FollowProfile::Round;
+            f.width = 4;
+            f.depth = 2;
+            f.ridge = ridge;
+            line(f.path, sketch::addPoint(f.path, {-length / 2, 0}), sketch::addPoint(f.path, {length / 2, 0}));
+            INFO("ridge " << ridge << " length " << length);
+            const TopoDS_Shape part = doc.shape(cylinder.id);
+            if (length > around) {
+                CHECK_THROWS_WITH(follow::apply(part, f), Catch::Matchers::ContainsSubstring("runs back over itself"));
+                continue;
+            }
+            const TopoDS_Shape shape = follow::apply(part, f);
+            CHECK(BRepCheck_Analyzer(shape).IsValid());
+            // About a half-round (2 pi square mm) along the length, less a little for
+            // the curve; plus the rounded ends.
+            const double change = std::abs(volumeOf(shape) - volumeOf(part));
+            CHECK(change > 5.5 * length);
+            CHECK(change < 6.8 * length + 20);
+        }
 }

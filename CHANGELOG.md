@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.20.2 — Long Follow grooves cut cleanly (2026-11-13)
+
+- Changing a Follow groove's path to a longer line round a cylinder could make it look
+  like a ridge, or cut nothing at all, even with Groove chosen. Two causes, both fixed:
+  - for some lengths the cut quietly removed nothing; it now uses a small tolerance and
+    cuts every time;
+  - a path that goes past all the way round (or doubles back) runs the groove through
+    itself, which can't be made into a sound shape. It's now refused with "The path
+    runs back over itself…" (shown in the Follow panel, Apply greyed) instead of giving
+    a broken shape.
+- A groove that removes nothing, a ridge that adds nothing, or a result with a hollow
+  inside is now reported as a failure instead of being kept.
+- 182 unit tests (1 new: grooves and ridges 40–140 mm round a cylinder).
+
 ## 0.20.1 — Overlapping pattern copies no longer hang (2026-11-13)
 
 - Repeating a Follow groove round a circle froze Forge3D for about two minutes and then
