@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.20.0 — Slice 11: Patterns (2026-11-13)
+
+- **Pattern** (Design → Features, and Build → Arrange): select a shape and choose what to
+  repeat:
+  - **The whole shape**: copies side by side, kept together as one object;
+  - **Its last step**: the hole set, pad, pocket, revolve, groove, Follow groove /
+    ridge, or any shape merged or subtracted, repeated on the same part (the choice
+    shown by name; it starts here when the last step is one of those).
+  Then **In a row** (direction, the other way, how many, spacing), **In a grid** (two
+  directions) or **Round a circle** (turning round a line across / front to back /
+  straight up through a centre you set; how many; 360° spreads them evenly, less
+  spreads them over that angle). Live preview.
+- **Linked**: change the original (the hole's size, the pad's sketch, the groove's
+  path) and every copy follows. It's a step in the history: double-click to change
+  the count, spacing or circle. Resizing the shape stretches the spacing with it.
+  Roll back to an earlier feature to repeat that one instead.
+- File format version 16. Older files still open.
+- 180 unit tests (2 new: rows, grids and circles of shapes; holes repeated and linked,
+  through all, round a circle; a Follow groove repeated).
+
 ## 0.19.1 — Follow no longer hangs off the edge (2026-11-12)
 
 - A Follow path that runs off the edge of the face it's drawn on (a circle bigger than

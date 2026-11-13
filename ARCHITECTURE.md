@@ -469,6 +469,23 @@ Viewport (mouse)  --leftPressed(ray, handle)-->  MainWindow drag controller
   the result and the laid path as orange tubes.
 - File format 15: `"follow"` steps.
 
+## Patterns (slice 11)
+
+- `BooleanOp::Pattern` + `PatternFinish{kind, feature, directions, counts, spacings,
+  centre, axis, count, angle}`: a one-part step. `pattern::placements` gives a
+  transform per copy (the first the identity); circles turn about a line (Rodrigues).
+- The whole part (`feature == false`): a compound of the part placed by each transform
+  (like Group; meshes: `meshkernel::together`).
+- Its last feature (`feature == true`): the operand must be a Merge / Subtract of two
+  parts (its tool, through all stretched as the step does) or a Follow (its swept
+  solid, recomputed); the copies of the tool are fused to / cut from the step's result
+  in one boolean (OCCT SetArguments / SetTools; meshes: merged / subtracted). Because it
+  reads the feature's tool every time, the copies follow any change to it.
+- Directions and centre are kept in step coordinates (moved like the other steps'
+  picks); scaling stretches each spacing by the scale along its direction.
+- App: `PatternPanel` (lists with their labels above), preview via `previewMesh`.
+- File format 16: `"pattern"` steps.
+
 ## Rendering
 
 `Document::mesh()` → `forge::Mesh` (positions, normals, indices) → `DisplayItem`

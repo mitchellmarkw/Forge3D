@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "forge/core/History.h"
+#include "forge/core/Pattern.h"
 
 #include "forge/core/Document.h"
 
@@ -196,6 +197,19 @@ std::string describe(const Document& doc, ObjectId id)
         case EdgeFinishKind::Bevel: return count + " bevelled " + num(f.size) + " mm at " + num(f.angle) + "\xC2\xB0";
         }
         return count;
+    }
+    case BooleanOp::Pattern: {
+        if (!spec.pattern)
+            return {};
+        const auto& p = *spec.pattern;
+        std::string out = p.kind == PatternKind::Row    ? "row of " + std::to_string(p.count1) + ", " + num(p.spacing1) + " mm apart"
+                          : p.kind == PatternKind::Grid ? "grid of " + std::to_string(p.count1) + " x " + std::to_string(p.count2)
+                                                        : "circle of " + std::to_string(p.count) +
+                                                              (p.angle < 360.0 ? " over " + num(p.angle) + "\xC2\xB0" : std::string());
+        if (p.feature && !spec.operands.empty())
+            if (const auto name = pattern::featureName(doc, spec.operands.front()))
+                out += " (" + *name + ")";
+        return out;
     }
     case BooleanOp::Follow: {
         if (!spec.follow)

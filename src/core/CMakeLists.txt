@@ -30,6 +30,7 @@ add_library(forge_core STATIC
     src/Edges.cpp
     src/Shell.cpp
     src/Follow.cpp
+    src/Pattern.cpp
     src/Emboss.cpp
     src/Export.cpp
     src/History.cpp

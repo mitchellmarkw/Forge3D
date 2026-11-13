@@ -21,6 +21,8 @@ add_executable(Forge3D WIN32
     EdgesPanel.cpp
     FollowPanel.h
     FollowPanel.cpp
+    PatternPanel.h
+    PatternPanel.cpp
     HolePanel.h
     HolePanel.cpp
     ShellPanel.h
