@@ -174,7 +174,7 @@ bool SketchPanel::otherWay() const
 
 bool SketchPanel::bothWays() const
 {
-    return m_bothWays->isChecked() && !(pocket() && !revolve());
+    return m_bothWays->isChecked() && !throughAll();
 }
 
 bool SketchPanel::throughAll() const
@@ -209,13 +209,14 @@ void SketchPanel::updateLabels()
     m_angleLabel->setVisible(spin);
     m_angle->setVisible(spin);
     m_axisHelp->setVisible(spin);
-    m_bothWays->setVisible(kind != Make::Pocket);
+    m_bothWays->setVisible(true);
     m_throughAll->setVisible(kind == Make::Pocket);
     m_otherWay->setToolTip(spin  ? tr("Spin the other way round")
                            : cut ? tr("Cut outwards from the face instead of into it")
                                  : tr("Push the other way (down / into the face)"));
-    m_otherWay->setEnabled(!m_bothWays->isChecked() || kind == Make::Pocket);
-    m_bothWays->setEnabled(!m_otherWay->isChecked());
+    const bool through = kind == Make::Pocket && m_throughAll->isChecked();
+    m_otherWay->setEnabled(!m_bothWays->isChecked() && !through);
+    m_bothWays->setEnabled(!m_otherWay->isChecked() && !through);
     m_length->setEnabled(!(kind == Make::Pocket && m_throughAll->isChecked()));
     m_lengthLabel->setEnabled(m_length->isEnabled());
 }

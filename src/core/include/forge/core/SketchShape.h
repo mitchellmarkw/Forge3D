@@ -52,5 +52,11 @@ std::optional<FacePlane> planeOfFace(const TopoDS_Shape& shape, int face);
 // The outlines of the flat faces of `shape` lying in the sketch plane `frame` (its
 // Z = 0), in sketch coordinates: the face a sketch was drawn on, found again.
 std::vector<std::vector<Point>> outlinesOnPlane(const TopoDS_Shape& shape, const Transform& frame);
+// Where the sketch plane `frame` (its Z = 0) cuts through `shape`, in sketch
+// coordinates: the shape's cross-section, to see and snap to on a middle plane.
+std::vector<std::vector<Point>> sectionOutlines(const TopoDS_Shape& shape, const Transform& frame);
+// The plane through `centre` facing the front (0: X right, Z up, looking from -Y),
+// the side (1: Y right, Z up, looking from +X) or the top (2: X right, Y up).
+Transform middlePlane(int which, const Vec3& centre);
 
 }  // namespace forge::sketch

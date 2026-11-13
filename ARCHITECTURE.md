@@ -434,6 +434,18 @@ Viewport (mouse)  --leftPressed(ray, handle)-->  MainWindow drag controller
 - `removeGeos` now keeps points that stood on their own; `removePoints` removes points.
 - File format 14: `"revolve"` and `"hole"` bodies (with their sketches), `"shell"` steps.
 
+## Middle planes and the ribbon (slice 9)
+
+- `sketch::middlePlane(which, centre)` gives the front (X right, Z up, facing -Y), side
+  (Y right, Z up, facing +X) or top frame through a point (the shape's box centre);
+  `sketch::sectionOutlines` cuts the shape with that plane (BRepAlgoAPI_Section) for the
+  sketch view's reference lines. Finishing works as on a face (Merge / Subtract step);
+  when a sketch is changed later and no face lies in its plane, the section is shown.
+- The ribbon is a fixed toolbar holding a QTabWidget; each tab is rows of groups of
+  QToolButtons that run the window's existing actions (so enabling, menus and
+  shortcuts are unchanged). The Sketch button is a split button whose menu holds the
+  plane choices.
+
 ## Rendering
 
 `Document::mesh()` → `forge::Mesh` (positions, normals, indices) → `DisplayItem`

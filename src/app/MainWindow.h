@@ -37,6 +37,7 @@ class QActionGroup;
 class QWidget;
 class QDockWidget;
 class QStackedWidget;
+class QTabWidget;
 class QToolBar;
 
 namespace forge::app {
@@ -162,6 +163,8 @@ private:
     // (Pocket). On the plate, or on a flat face of the selected shape.
     void createSketchBar();
     void sketchClicked();                  // the Sketch button
+    void sketchOnPlane(int which);         // front / side / top plane through the middle
+    bool sketchTargetOk(ObjectId id);      // a shape that can be sketched on (else says why)
     void sketchFaceClick(const QVector3D& origin, const QVector3D& direction);
     void openSketch(const sketch::Sketch& sketch, std::vector<std::vector<QPointF>> reference, const QString& title,
                     bool onFace, const SketchPanel::Options& options);
@@ -381,8 +384,11 @@ private:
         ObjectId pad = kInvalidId;     // the pad (or revolve) being changed
         ObjectId step = kInvalidId;    // the Merge / Subtract step holding it
         Transform frame;               // sketch -> plate coordinates
+        int plane = -1;                // a middle plane (0 front, 1 side, 2 top), or -1
     };
     SketchMode m_sketchMode;
+    QMenu* m_sketchMenu = nullptr;
+    QTabWidget* m_ribbonTabs = nullptr;     // where to sketch: a face, or a middle plane
 
     QAction* m_holeAction = nullptr;
     HolePanel* m_holePanel = nullptr;
