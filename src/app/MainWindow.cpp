@@ -56,6 +56,10 @@
 #include <QMessageBox>
 #include <QSettings>
 #include <QStackedWidget>
+#include <QScrollArea>
+#include <QScreen>
+#include <QGuiApplication>
+#include <QScrollBar>
 #include <QHBoxLayout>
 #include <QFrame>
 #include <QTabWidget>
@@ -160,9 +164,51 @@ void rememberFolderOf(const QString& filePath)
 
 }  // namespace
 
+namespace {
+
+// A ribbon page that scrolls sideways when the window is too narrow for its buttons:
+// as tall as its buttons, plus the scroll bar only while one is needed.
+class RibbonScroll : public QScrollArea {
+public:
+    explicit RibbonScroll(QWidget* page)
+    {
+        setWidget(page);
+        setWidgetResizable(true);
+        setFrameShape(QFrame::NoFrame);
+        setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+        setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
+        setStyleSheet(QStringLiteral("QScrollArea { background: transparent; }"));
+        fit();
+    }
+
+protected:
+    void resizeEvent(QResizeEvent* event) override
+    {
+        QScrollArea::resizeEvent(event);
+        fit();
+    }
+
+private:
+    void fit()
+    {
+        const QSize content = widget()->sizeHint();
+        const bool scrolls = content.width() > width();
+        const int h = content.height() + (scrolls ? horizontalScrollBar()->sizeHint().height() : 0);
+        if (height() != h)
+            setFixedHeight(h);
+    }
+};
+
+}  // namespace
+
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
 {
-    resize(1400, 860);
+    // 1400 x 860, or less on a smaller screen.
+    QSize start(1400, 860);
+    if (const QScreen* screen = QGuiApplication::primaryScreen())
+        start = start.boundedTo(screen->availableGeometry().size() * 0.95);
+    resize(start);
     setAcceptDrops(true);  // drop STL / 3MF / OBJ (import) or .f3d (open) files on the window
 
     m_viewport = new Viewport(this);
@@ -171,6 +217,20 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
     m_central->addWidget(m_viewport);
     m_central->addWidget(m_sketchView);
     setCentralWidget(m_central);
+    // A first step for an empty plate, over the top of the view.
+    {
+        auto* overlay = new QVBoxLayout(m_viewport);
+        m_emptyHint = new QLabel(tr("Start by adding a shape: <b>Build → Add Shape</b> (or the <b>Add</b> menu).<br>"
+                                    "Or <b>Import</b> an STL, 3MF or OBJ file, or drop one here."));
+        m_emptyHint->setAlignment(Qt::AlignCenter);
+        m_emptyHint->setTextFormat(Qt::RichText);
+        m_emptyHint->setStyleSheet(QStringLiteral("QLabel { background: rgba(255, 255, 255, 215); color: #333; "
+                                                  "border: 1px solid #c8ccd2; border-radius: 6px; padding: 10px; }"));
+        m_emptyHint->setAttribute(Qt::WA_TransparentForMouseEvents);
+        overlay->addSpacing(40);
+        overlay->addWidget(m_emptyHint, 0, Qt::AlignHCenter | Qt::AlignTop);
+        overlay->addStretch(1);
+    }
     connect(m_viewport, &Viewport::firstFrameRendered, this, &MainWindow::firstFrameRendered);
     connect(m_viewport, &Viewport::clicked, this, &MainWindow::onViewportClicked);
     connect(m_viewport, &Viewport::hovered, this, [this](const QVector3D& o, const QVector3D& d, const QPointF& px) {
@@ -312,11 +372,28 @@ void MainWindow::createActions()
     addMirror(tr("Front / back (Y)"), tr("Flip across Y: what was at the front ends up at the back"), 1);
     addMirror(tr("Upside down (Z)"), tr("Flip across Z: the top ends up at the bottom, still on the plate"), 2);
 
+    m_layFlat = new QAction(tr("Lay on Face"), this);
+    m_layFlat->setCheckable(true);
+    m_layFlat->setToolTip(tr("Lay on Face: click a face of a shape, and the shape turns to lie on that face on "
+                             "the plate (good for printing). Esc cancels."));
+    connect(m_layFlat, &QAction::toggled, this, [this](bool on) {
+        if (on)
+            statusBar()->showMessage(tr("Lay on Face: click the face the shape should lie on. Esc cancels."));
+        else
+            statusBar()->clearMessage();
+        refreshScene();  // the handles go while picking a face
+    });
+    m_sitOnPlate = new QAction(tr("Sit on Plate"), this);
+    m_sitOnPlate->setToolTip(tr("Sit on Plate: move the selected shapes straight down (or up) to rest on the plate"));
+    connect(m_sitOnPlate, &QAction::triggered, this, &MainWindow::sitSelectedOnPlate);
+
     m_deselect = new QAction(tr("Select &None"), this);
     m_deselect->setShortcut(Qt::Key_Escape);
     connect(m_deselect, &QAction::triggered, this, [this] {
         if (m_dragState.kind != Drag::Kind::None)
             cancelDrag();  // Esc during a drag puts the body back
+        else if (m_layFlat->isChecked())
+            m_layFlat->setChecked(false);
         else if (m_splitMode.active)
             endSplit();  // Esc leaves the Split tool without cutting
         else if (m_embossMode.active)
@@ -669,9 +746,13 @@ void MainWindow::createToolBar()
     const auto page = [tabs](const QString& title, const QString& tip) {
         auto* w = new QWidget;
         auto* row = new QHBoxLayout(w);
-        row->setContentsMargins(4, 2, 4, 0);
+        row->setContentsMargins(2, 2, 2, 0);
         row->setSpacing(2);
-        const int index = tabs->addTab(w, title);
+        row->setSizeConstraint(QLayout::SetMinimumSize);
+        // In a narrow window the buttons keep their size and the row scrolls sideways
+        // (a scroll bar appears under it), rather than squashing the names.
+        auto* scroll = new RibbonScroll(w);
+        const int index = tabs->addTab(scroll, title);
         tabs->setTabToolTip(index, tip);
         return Page{w, row};
     };
@@ -679,7 +760,7 @@ void MainWindow::createToolBar()
     const auto group = [](Page& p, const QString& name, const std::vector<QWidget*>& buttons) {
         auto* box = new QWidget;
         auto* column = new QVBoxLayout(box);
-        column->setContentsMargins(2, 0, 2, 0);
+        column->setContentsMargins(1, 0, 1, 0);
         column->setSpacing(0);
         auto* row = new QHBoxLayout;
         row->setSpacing(1);
@@ -706,6 +787,18 @@ void MainWindow::createToolBar()
         b->setAutoRaise(true);
         return static_cast<QWidget*>(b);
     };
+    // Undo / Redo keep a short name in the ribbon (so it doesn't change width); what
+    // they'd undo shows as the tip.
+    const auto shortButton = [this, button](QAction* action, const QString& name) {
+        auto* b = static_cast<QToolButton*>(button(action));
+        const auto shorten = [b, action, name] {
+            b->setText(name);
+            b->setToolTip(QString(action->text()).remove(QLatin1Char('&')));
+        };
+        shorten();
+        connect(action, &QAction::changed, b, shorten);
+        return static_cast<QWidget*>(b);
+    };
     const auto menuButton = [](QMenu* menu, const QString& name = {}) {
         auto* b = new QToolButton;
         b->setDefaultAction(menu->menuAction());
@@ -719,7 +812,7 @@ void MainWindow::createToolBar()
 
     Page build = page(tr("Build"), tr("Shapes: add, move, combine and arrange them"));
     group(build, tr("File"), {button(m_open), button(m_save), button(m_import)});
-    group(build, tr("Undo"), {button(m_undo), button(m_redo)});
+    group(build, tr("Undo"), {shortButton(m_undo, tr("Undo")), shortButton(m_redo, tr("Redo"))});
     {
         QWidget* add = menuButton(m_addMenu);
         add->setObjectName(QStringLiteral("AddShapeButton"));
@@ -730,7 +823,7 @@ void MainWindow::createToolBar()
            button(m_uniformAction)});
     group(build, tr("Combine"), {button(m_merge), button(m_subtract), button(m_intersect), button(m_separate)});
     {
-        QWidget* align = menuButton(m_alignMenu);
+        QWidget* align = menuButton(m_alignMenu, tr("Align"));
         align->setObjectName(QStringLiteral("AlignShapesButton"));
         group(build, tr("Arrange"),
               {align, menuButton(m_mirrorMenu), button(m_patternAction), button(m_group), button(m_duplicate)});
@@ -753,7 +846,7 @@ void MainWindow::createToolBar()
           {button(m_holeAction), button(m_shellAction), button(m_followAction), button(m_patternAction),
            button(m_edgesAction)});
     group(design, tr("Change"), {button(m_split), button(m_emboss)});
-    group(design, tr("Undo"), {button(m_undo), button(m_redo)});
+    group(design, tr("Undo"), {shortButton(m_undo, tr("Undo")), shortButton(m_redo, tr("Redo"))});
     design.row->addStretch(1);
 
     Page sculpt = page(tr("Sculpt"), tr("Sculpting brushes (coming in a later phase)"));
@@ -766,8 +859,9 @@ void MainWindow::createToolBar()
     }
 
     Page print = page(tr("Print"), tr("Get it to the printer"));
+    group(print, tr("Place"), {button(m_layFlat), button(m_sitOnPlate)});
     group(print, tr("Out"), {button(m_export), button(m_sendToSlicer)});
-    group(print, tr("Undo"), {button(m_undo), button(m_redo)});
+    group(print, tr("Undo"), {shortButton(m_undo, tr("Undo")), shortButton(m_redo, tr("Redo"))});
     print.row->addStretch(1);
 
     // Keep the tab you were on.
@@ -793,10 +887,8 @@ void MainWindow::createDocks()
     m_objects->viewport()->installEventFilter(this);
     connect(m_objects, &QTreeWidget::itemSelectionChanged, this, &MainWindow::onTreeSelectionChanged);
     connect(m_objects, &QTreeWidget::customContextMenuRequested, this, &MainWindow::showTreeMenu);
-    connect(m_objects, &QTreeWidget::itemDoubleClicked, this, [this](QTreeWidgetItem* item) {
-        if (item->data(0, kRowKindRole).toInt() != kBarRow)
-            editStep(item->data(0, Qt::UserRole).value<ObjectId>());
-    });
+    // Double-clicks are handled in eventFilter: the first click can rebuild the list
+    // (selecting), and Qt then misses the double-click on the new row.
     const auto keyOf = [](QTreeWidgetItem* item) {
         return std::pair{item->data(0, kRowKindRole).toInt(), item->data(0, Qt::UserRole).value<ObjectId>()};
     };
@@ -1155,6 +1247,10 @@ void MainWindow::onViewportClicked(const QVector3D& origin, const QVector3D& dir
         return;  // while splitting, clicks don't change what is selected (Cancel or Esc leaves)
     if (m_embossMode.active) {
         placeEmboss(origin, direction);  // a click on the shape moves the words there
+        return;
+    }
+    if (m_layFlat->isChecked()) {
+        layFlatClick(origin, direction);
         return;
     }
     if (m_edgesMode.active) {
@@ -2768,6 +2864,59 @@ void MainWindow::applyEmboss()
         setSelection(id);
 }
 
+void MainWindow::layFlatClick(const QVector3D& origin, const QVector3D& direction)
+{
+    Ray ray;
+    ray.origin = {origin.x(), origin.y(), origin.z()};
+    ray.direction = {direction.x(), direction.y(), direction.z()};
+    try {
+        const auto hit = pick(m_doc, ray);
+        if (!hit) {
+            statusBar()->showMessage(tr("Lay on Face: click a face of a shape (Esc cancels)."));
+            return;
+        }
+        ObjectId id = hit->id;
+        while (m_doc.parentOf(id) != kInvalidId)
+            id = m_doc.parentOf(id);
+        const auto face = faceUnder(m_doc, id, ray.origin, ray.direction);
+        if (!face)
+            return;
+        const Body before = *m_doc.find(id);
+        Body after = before;
+        after.placement = laidOnFace(m_doc, id, face->second);
+        m_layFlat->setChecked(false);
+        if (!(after.placement == before.placement))
+            run(std::make_unique<EditBodyCommand>(before, after, "Lay on Face"));
+        setSelection(id);
+    } catch (const std::exception& e) {
+        qWarning() << "Lay on Face failed:" << e.what();
+        m_layFlat->setChecked(false);
+    }
+}
+
+void MainWindow::sitSelectedOnPlate()
+{
+    std::vector<ObjectId> ids;
+    for (ObjectId id : m_selection)
+        if (m_doc.isTopLevel(id))
+            ids.push_back(id);
+    if (ids.empty()) {
+        statusBar()->showMessage(tr("Select the shapes to sit on the plate first."), 5000);
+        return;
+    }
+    m_stack.beginMacro("Sit on Plate");
+    try {
+        for (ObjectId id : ids) {
+            const Placement resting = sitOnPlate(m_doc, id);
+            if (!(resting == m_doc.find(id)->placement))
+                m_stack.execute(std::make_unique<SetPlacementCommand>(id, resting, /*mergeable=*/false));
+        }
+    } catch (const std::exception& e) {
+        qWarning() << "Sit on plate failed:" << e.what();
+    }
+    m_stack.endMacro();
+}
+
 void MainWindow::choosePicture()
 {
     if (!m_embossMode.active)
@@ -3328,6 +3477,8 @@ void MainWindow::scheduleSceneRefresh()
 void MainWindow::refreshScene()
 {
     std::erase_if(m_selection, [this](ObjectId id) { return !m_doc.find(id); });
+    if (m_emptyHint)
+        m_emptyHint->setVisible(m_doc.empty());
 
     std::vector<DisplayItem> items;
     std::size_t triangles = 0;
@@ -3462,7 +3613,8 @@ void MainWindow::refreshScene()
             m_properties->setKeepRound(false);
         }
     }
-    m_viewport->setGizmo(toolOpen() ? std::nullopt : selectionGizmo(), m_gizmoMode);
+    m_viewport->setGizmo(toolOpen() || (m_layFlat && m_layFlat->isChecked()) ? std::nullopt : selectionGizmo(),
+                         m_gizmoMode);
 
     // Properties: what the selected body is made of, or what it belongs to.
     QString context;
@@ -3555,6 +3707,10 @@ void MainWindow::refreshScene()
     m_paste->setEnabled(!m_clipboard.empty() && !toolOpen());
     m_export->setEnabled(!m_doc.empty());
     m_sendToSlicer->setEnabled(!m_doc.empty());
+    m_layFlat->setEnabled(!m_doc.empty() && !toolOpen());
+    if (!m_layFlat->isEnabled() && m_layFlat->isChecked())
+        m_layFlat->setChecked(false);
+    m_sitOnPlate->setEnabled(!m_selection.empty() && !toolOpen());
     m_split->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen() && !rolled);
     m_emboss->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_edgesAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
@@ -3802,6 +3958,34 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
             return true;
         }
         break;
+    }
+    case QEvent::MouseButtonDblClick: {
+        auto* me = static_cast<QMouseEvent*>(event);
+        QTreeWidgetItem* item = m_objects->itemAt(pointOf(event));
+        if (me->button() != Qt::LeftButton || !item || item->data(0, kRowKindRole).toInt() == kBarRow)
+            break;
+        const ObjectId id = item->data(0, Qt::UserRole).value<ObjectId>();
+        const Body* body = m_doc.find(id);
+        if (!body)
+            return true;
+        const BooleanOp op = body->isBoolean() ? body->boolean->op : BooleanOp::Merge;
+        const bool opens = sketchedToolOf(id) != kInvalidId ||
+                           (body->isBoolean() && (op == BooleanOp::Edges || op == BooleanOp::Shell ||
+                                                  op == BooleanOp::Follow || op == BooleanOp::Pattern ||
+                                                  op == BooleanOp::Emboss ||
+                                                  (op == BooleanOp::Split && m_doc.isTopLevel(id))));
+        if (!opens) {
+            // Nothing to open: show or hide what's inside, as a list does.
+            if (item->childCount() > 0)
+                item->setExpanded(!item->isExpanded());
+            return true;
+        }
+        // Open it once the first click's selection has settled (it's applied a moment later).
+        QTimer::singleShot(0, this, [this, id] {
+            if (m_doc.find(id))
+                editStep(id);
+        });
+        return true;
     }
     case QEvent::MouseMove:
         if (m_barDrag != kInvalidId) {

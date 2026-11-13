@@ -14,6 +14,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include <cmath>
 #include <memory>
 
 using namespace forge;
@@ -155,4 +156,51 @@ TEST_CASE("Copies land clear of everything on the plate", "[arrange]")
     CHECK_THAT(offset[0], WithinAbs(45 + 5 + 10, 1e-4));
     const auto made = addCopies(stack, doc, {captureTree(doc, a)}, offset, "Duplicate");
     CHECK_THAT(doc.worldBounds(made.front()).min[0], WithinAbs(50, 1e-4));
+}
+
+TEST_CASE("Lay on Face turns a face down onto the plate", "[arrange][layflat]")
+{
+    Document doc;
+    CommandStack stack(doc);
+    const auto lay = [&](ObjectId id, const Vec3& from, const Vec3& dir) {
+        const auto hit = faceUnder(doc, id, from, dir);
+        REQUIRE(hit);
+        const Placement p = laidOnFace(doc, id, hit->second);
+        stack.execute(std::make_unique<SetPlacementCommand>(id, p, false));
+        return hit->second;
+    };
+
+    SECTION("a box on its end")
+    {
+        const ObjectId box = add(stack, doc, BoxSpec{40, 20, 10}, 5, 7, 0);
+        const Vec3 n = lay(box, {100, 7, 5}, {-1, 0, 0});  // click its +X end
+        CHECK_THAT(n[0], WithinAbs(1.0, 1e-6));
+        const Bounds b = doc.worldBounds(box);
+        CHECK_THAT(b.min[2], WithinAbs(0.0, 1e-6));
+        CHECK_THAT(b.size()[2], WithinAbs(40.0, 1e-4));
+        CHECK_THAT(b.size()[0], WithinAbs(10.0, 1e-4));
+        CHECK_THAT(b.size()[1], WithinAbs(20.0, 1e-4));
+        // It stays where it was across the plate (its middle).
+        CHECK_THAT((b.min[0] + b.max[0]) / 2, WithinAbs(5.0, 1e-4));
+        CHECK_THAT((b.min[1] + b.max[1]) / 2, WithinAbs(7.0, 1e-4));
+        // Undo puts it back as one step.
+        stack.undo();
+        CHECK_THAT(doc.worldBounds(box).size()[2], WithinAbs(10.0, 1e-6));
+    }
+    SECTION("upside down, and a slope")
+    {
+        const ObjectId box = add(stack, doc, BoxSpec{20, 20, 10});
+        lay(box, {0, 0, 100}, {0, 0, -1});  // the top
+        CHECK_THAT(doc.worldBounds(box).size()[2], WithinAbs(10.0, 1e-4));
+        CHECK_THAT(doc.worldBounds(box).min[2], WithinAbs(0.0, 1e-6));
+
+        // A wedge's slope: the right angle ends up pointing up, the slope flat.
+        const ObjectId wedge = add(stack, doc, WedgeSpec{20, 20, 20}, 60);
+        const Vec3 n = lay(wedge, {160, 0, 5.0}, {-1, 0, 0});  // the slope faces +X and up
+        CHECK_THAT(n[0], WithinAbs(std::sqrt(0.5), 1e-6));
+        const auto hit = faceUnder(doc, wedge, {60, 0, -50}, {0, 0, 1});  // from below
+        REQUIRE(hit);
+        CHECK_THAT(hit->second[2], WithinAbs(-1.0, 1e-6));
+        CHECK_THAT(doc.worldBounds(wedge).min[2], WithinAbs(0.0, 1e-6));
+    }
 }

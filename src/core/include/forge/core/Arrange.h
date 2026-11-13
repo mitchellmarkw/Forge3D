@@ -4,6 +4,8 @@
 #include "forge/core/Body.h"
 #include "forge/core/Transform.h"
 
+#include <optional>
+#include <utility>
 #include <vector>
 
 namespace forge {
@@ -45,5 +47,14 @@ std::vector<ObjectId> mirrorBodies(CommandStack& stack, Document& doc, const std
 // Groups shapes on the plate so they move, turn and resize as one ("Group 1"),
 // without merging them. Separate ungroups. Needs two or more shapes.
 ObjectId groupBodies(CommandStack& stack, Document& doc, const std::vector<ObjectId>& ids);
+
+// Where a ray from the plate first meets shape `id` (on the plate), and which way its
+// surface faces there, both in plate coordinates. Nothing if it misses.
+std::optional<std::pair<Vec3, Vec3>> faceUnder(const Document& doc, ObjectId id, const Vec3& origin,
+                                               const Vec3& direction);
+// The placement that turns shape `id` (on the plate) about its middle, the least
+// needed, so the surface facing `normal` (plate coordinates) faces straight down, and
+// then rests it on the plate ("Lay on Face"). Where it sits across the plate stays.
+Placement laidOnFace(const Document& doc, ObjectId id, const Vec3& normal);
 
 }  // namespace forge
