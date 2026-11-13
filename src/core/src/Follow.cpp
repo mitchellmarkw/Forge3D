@@ -355,12 +355,28 @@ Walker startOf(const Surface& surface, const TopoDS_Shape& part, const FollowFin
 }
 
 // One small step over the surface, d along the walker's own across / ahead.
-void stepOn(const Surface& surface, Walker& w, double dx, double dy)
+const char* kOffEdge = "The path runs off the edge of the surface it's drawn on. Keep it on the face (or make "
+                       "the shape bigger).";
+
+// One small step over the surface, d along the walker's own across / ahead. Rounded
+// edges are crossed in smaller steps; a sharp edge (the surface turning a corner) or
+// the walker getting stuck at the edge of the shape stops the walk.
+void stepOn(const Surface& surface, Walker& w, double dx, double dy, int depth = 0)
 {
+    const double length = std::hypot(dx, dy);
     const Vec3 aim = add(w.point, add(mul(w.x, dx), mul(w.y, dy)));
     const Surface::Hit hit = surface.nearest(aim, w.face);
     if (hit.face < 0)
-        throw GeometryError("The path runs off the shape.");
+        throw GeometryError(kOffEdge);
+    const bool turned = dot(hit.normal, w.normal) < std::cos(30.0 * pi / 180.0);
+    const bool stuck = std::sqrt(dot(sub(hit.point, w.point), sub(hit.point, w.point))) < 0.5 * length;
+    if (turned || stuck) {
+        if (depth >= 4)
+            throw GeometryError(kOffEdge);
+        stepOn(surface, w, dx / 2, dy / 2, depth + 1);
+        stepOn(surface, w, dx / 2, dy / 2, depth + 1);
+        return;
+    }
     w.point = hit.point;
     w.face = hit.face;
     // Carry the directions over to the surface there.
@@ -392,6 +408,13 @@ Laid layOut(const TopoDS_Shape& part, const FollowFinish& f)
     const std::vector<Run> runs = runsOf(f.path, step);
     if (runs.empty())
         throw GeometryError("Draw the path first (lines, arcs or circles).");
+    // Far longer than the shape could hold: it can't be laid on it (and would take ages).
+    std::size_t samples = 0;
+    for (const Run& run : runs)
+        for (const Piece& piece : run.pieces)
+            samples += piece.points.size();
+    if (samples > 40000)
+        throw GeometryError(kOffEdge);
     const Walker start = startOf(surface, part, f);
     Laid laid;
     for (const Run& run : runs) {
@@ -421,9 +444,11 @@ Laid layOut(const TopoDS_Shape& part, const FollowFinish& f)
 
 TopoDS_Edge edgeThrough(const std::vector<Vec3>& points)
 {
-    // Close points dropped (they upset the fit), the ends kept.
+    // Close points dropped (they upset the fit, and slow it), the ends kept: at most
+    // about 300 along one curve.
     std::vector<Vec3> keep{points.front()};
-    for (std::size_t i = 1; i + 1 < points.size(); ++i)
+    const std::size_t every = std::max<std::size_t>(1, points.size() / 300);
+    for (std::size_t i = every; i + 1 < points.size(); i += every)
         if (length(sub(points[i], keep.back())) > 1e-4)
             keep.push_back(points[i]);
     if (length(sub(points.back(), keep.back())) > 1e-6 || keep.size() == 1)

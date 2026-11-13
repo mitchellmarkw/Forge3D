@@ -22,6 +22,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 
+#include <chrono>
 #include <cmath>
 #include <numbers>
 
@@ -465,4 +466,38 @@ TEST_CASE("Follow: a path on a curved surface bends round with it", "[follow]")
     CHECK_THAT(std::atan2(end[0], -end[1]), WithinAbs(0.5, 0.02));
     // An annular sector 2 high, 1 deep, 1 radian.
     CHECK_THAT(removed(doc, stack, cylinder.id, f), WithinRel(0.5 * (100 - 81) * 2, 0.03));
+}
+
+TEST_CASE("Follow: a path off the edge of its face is refused quickly", "[follow]")
+{
+    Document doc;
+    CommandStack stack(doc);
+    const ObjectId box = addBox(stack, doc, 20, 20, 10);
+    FollowFinish f = onTop(10);
+    const auto started = std::chrono::steady_clock::now();
+    SECTION("A circle bigger than the box")
+    {
+        const int c = sketch::addPoint(f.path, {0, 0});
+        f.path.radii.push_back(15);
+        f.path.geos.push_back({sketch::GeoKind::Circle, c, -1, -1, 0, false});
+        CHECK_THROWS_WITH(doc.previewCombine(followSpec(doc, box, f)),
+                          Catch::Matchers::ContainsSubstring("runs off the edge"));
+    }
+    SECTION("The box made smaller than its groove")
+    {
+        const int c = sketch::addPoint(f.path, {0, 0});
+        f.path.radii.push_back(6);
+        f.path.geos.push_back({sketch::GeoKind::Circle, c, -1, -1, 0, false});
+        ObjectId id = kInvalidId;
+        removed(doc, stack, box, f, &id);
+        Body smaller = *doc.find(box);
+        std::get<BoxSpec>(smaller.spec).width = 8;
+        std::get<BoxSpec>(smaller.spec).depth = 8;
+        stack.execute(std::make_unique<EditBodyCommand>(*doc.find(box), smaller, "Smaller"));
+        // The step can't be made: the shape shows without it, with the reason.
+        CHECK(doc.problemWith(id).value_or("").find("runs off the edge") != std::string::npos);
+    }
+    const double seconds =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+    CHECK(seconds < 5.0);
 }
