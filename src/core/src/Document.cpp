@@ -32,6 +32,10 @@
 #include <gp_Vec.hxx>
 #include <ShapeUpgrade_UnifySameDomain.hxx>
 #include <TopTools_ListOfShape.hxx>
+#include <chrono>
+#include <BRepCheck_Analyzer.hxx>
+#include <Message_ProgressScope.hxx>
+#include <Message_ProgressIndicator.hxx>
 #include <Standard_Failure.hxx>
 #include <Standard_Version.hxx>
 #include <TopAbs_ShapeEnum.hxx>
@@ -958,6 +962,25 @@ MeshSolid Document::meshSolid(ObjectId id) const
 }
 
 namespace {
+
+// Gives up on a boolean that runs past its time (OCCT asks UserBreak as it goes).
+class Deadline : public Message_ProgressIndicator {
+public:
+    explicit Deadline(double seconds)
+        : m_end(std::chrono::steady_clock::now() + std::chrono::milliseconds(long(seconds * 1000)))
+    {
+    }
+    Standard_Boolean UserBreak() override { return std::chrono::steady_clock::now() > m_end; }
+    void Show(const Message_ProgressScope&, const Standard_Boolean) override {}
+
+private:
+    std::chrono::steady_clock::time_point m_end;
+};
+
+constexpr double kPatternSeconds = 30.0;
+const char* kTooLong = "Making the copies took too long: they overlap a lot, or there are very many. Try fewer, or "
+                       "space them out.";
+
 const char* kNotRepeatable =
     "Only a step that adds or cuts a shape (a hole, pad, pocket, revolve, groove, or a shape merged or subtracted) "
     "or a Follow groove can be repeated as a feature.";
@@ -1015,11 +1038,22 @@ TopoDS_Shape Document::patternShape(const BooleanSpec& spec) const
         return result;
     TopTools_ListOfShape arguments;
     arguments.Append(result);
+    // Copies that overlap leave surfaces nearly on top of each other: a small fuzzy
+    // tolerance lets the boolean treat them as one (faster, and sound).
+    const Bounds box = shapeBounds(result);
+    const auto size = box.size();
+    const double fuzzy =
+        1e-5 * std::sqrt(double(size[0]) * size[0] + double(size[1]) * size[1] + double(size[2]) * size[2]);
     if (adds) {
         BRepAlgoAPI_Fuse fuse;
         fuse.SetArguments(arguments);
         fuse.SetTools(copies);
-        fuse.Build();
+        fuse.SetFuzzyValue(fuzzy);
+        fuse.SetRunParallel(Standard_True);
+        Handle(Deadline) deadline = new Deadline(kPatternSeconds);
+        fuse.Build(deadline->Start());
+        if (deadline->UserBreak())
+            throw GeometryError(kTooLong);
         if (!fuse.IsDone() || fuse.HasErrors())
             throw GeometryError("The copies could not be added");
         result = fuse.Shape();
@@ -1027,11 +1061,19 @@ TopoDS_Shape Document::patternShape(const BooleanSpec& spec) const
         BRepAlgoAPI_Cut cut;
         cut.SetArguments(arguments);
         cut.SetTools(copies);
-        cut.Build();
+        cut.SetFuzzyValue(fuzzy);
+        cut.SetRunParallel(Standard_True);
+        Handle(Deadline) deadline = new Deadline(kPatternSeconds);
+        cut.Build(deadline->Start());
+        if (deadline->UserBreak())
+            throw GeometryError(kTooLong);
         if (!cut.IsDone() || cut.HasErrors())
             throw GeometryError("The copies could not be cut");
         result = cut.Shape();
     }
+    if (!BRepCheck_Analyzer(result).IsValid())
+        throw GeometryError("The copies overlap in a way that can't be made into a sound shape. Try fewer, or space "
+                            "them out.");
     ShapeUpgrade_UnifySameDomain unify(result, true, true, false);
     unify.Build();
     return unify.Shape();

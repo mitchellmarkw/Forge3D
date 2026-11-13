@@ -481,6 +481,11 @@ Viewport (mouse)  --leftPressed(ray, handle)-->  MainWindow drag controller
   solid, recomputed); the copies of the tool are fused to / cut from the step's result
   in one boolean (OCCT SetArguments / SetTools; meshes: merged / subtracted). Because it
   reads the feature's tool every time, the copies follow any change to it.
+  The boolean runs with a fuzzy value (1e-5 × the part's box diagonal) and in
+  parallel: without it, overlapping or nearly touching curved copies (a Follow groove
+  round a cylinder) took minutes and came out invalid. A `Message_ProgressIndicator`
+  (`Deadline`) stops it after 30 s, and a `BRepCheck_Analyzer` check refuses an
+  invalid result; both throw `GeometryError`, so the step is marked ⚠.
 - Directions and centre are kept in step coordinates (moved like the other steps'
   picks); scaling stretches each spacing by the scale along its direction.
 - App: `PatternPanel` (lists with their labels above), preview via `previewMesh`.

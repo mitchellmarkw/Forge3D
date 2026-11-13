@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.20.1 — Overlapping pattern copies no longer hang (2026-11-13)
+
+- Repeating a Follow groove round a circle froze Forge3D for about two minutes and then
+  gave a broken shape, when the copies overlapped or nearly touched. The copies are now
+  joined with a small tolerance and in parallel, so the same pattern takes a second or
+  two and comes out sound.
+- Safety nets: if making the copies takes more than 30 seconds it stops with "Making
+  the copies took too long…"; if the result isn't a sound shape the step is refused
+  with "The copies overlap in a way that can't be made into a sound shape…". In the
+  Pattern panel either shows as the message (Apply greyed).
+- 181 unit tests (1 new: Follow grooves round a cylinder, apart and overlapping into a
+  ring, checked sound, the right amount removed and fast).
+
 ## 0.20.0 — Slice 11: Patterns (2026-11-13)
 
 - **Pattern** (Design → Features, and Build → Arrange): select a shape and choose what to
