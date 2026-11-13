@@ -495,6 +495,8 @@ TopoDS_Wire profileAt(const FollowFinish& f, const Vec3& at, const Vec3& across,
         return poly.Wire();
     }
     case FollowProfile::Custom: {
+        if (f.custom.geos.empty())
+            throw GeometryError("Draw the shape across the path first (Draw the shape across...).");
         const TopoDS_Shape faces = sketch::faces(f.custom);
         TopExp_Explorer first(faces, TopAbs_FACE);
         if (!first.More())

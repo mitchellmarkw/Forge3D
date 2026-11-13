@@ -143,13 +143,13 @@ void SketchPanel::start(const QString& title, bool onFace, bool editing, const O
     updateLabels();
 }
 
-void SketchPanel::startPositions(const QString& title)
+void SketchPanel::startPositions(const QString& title, const QString& message)
 {
     m_title->setText(title);
     m_makeGroup->hide();
     m_finish->setText(tr("Done"));
-    m_finish->setToolTip(tr("Use these points for the holes"));
-    setMessage(tr("Each point on its own (Point tool, P) is a hole. Add dimensions to place them exactly."), false);
+    m_finish->setToolTip(tr("Use this and go back"));
+    setMessage(message, false);
 }
 
 SketchPanel::Make SketchPanel::make() const

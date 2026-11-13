@@ -33,7 +33,7 @@ public:
     // before (it stays adding, or cutting).
     void start(const QString& title, bool onFace, bool editing, const Options& options);
     // Only placing points (a Hole's spots): no Make section.
-    void startPositions(const QString& title);
+    void startPositions(const QString& title, const QString& message);
     Make make() const;
     bool pocket() const { return make() == Make::Pocket || make() == Make::Groove; }
     bool revolve() const { return make() == Make::Revolve || make() == Make::Groove; }

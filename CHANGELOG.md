@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.19.0 — Slice 10: Follow (grooves and ridges along a path) (2026-11-12)
+
+- **Follow** (Design tab → Features): pick a shape, click the spot on its surface
+  where the path goes, and draw the path in the sketcher (lines, arcs, circles,
+  slots; joined or not; open or closed). Then choose:
+  - **Groove** (cut in) or **Ridge** (raised);
+  - the shape across the path: **Round**, **Square**, **V**, or **My own** (drawn in
+    the sketcher: across to the sides, up out of the surface, the dashed line is the
+    surface);
+  - width and depth (or height).
+  On a flat face the path stays exactly as drawn; on a curved surface it is laid over
+  the surface from the spot you clicked, bending round with it (round a cylinder,
+  over a dome). The cross-section stays upright to the surface all along. The path
+  shows in orange with a live preview; clicking the shape again moves the path there.
+- It's a step in the shape's history: double-click it to change the settings, the
+  path or the cross-section. It stays on the same face when the shape is resized.
+- File format version 15. Older files still open.
+- 177 unit tests (2 new: straight, ring, ridge, V, drawn cross-section, closed
+  outline with corners, resizing, saving, and a path round a cylinder).
+
 ## 0.18.0 — Slice 9: middle planes and the ribbon (2026-11-12)
 
 - **Sketch on a middle plane**: the Sketch button's arrow offers the front, side or top

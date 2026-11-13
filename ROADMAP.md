@@ -31,7 +31,8 @@ Gate to Phase 2: a new user prints a customised part within 10 minutes.
 | 6 | History (feature tree) with rollback bar, switching steps off, steps added at the bar; Through all | Done (0.15.1) |
 | 7 | 2D sketcher with dimensions and rules, on the plate or a flat face; Pad and Pocket | Done (0.16.0) |
 | 8 | Revolve / Groove, Hole (plain, counterbored, countersunk, metric sizes), Shell | Done (0.17.0) |
-| 9 | Sketch on middle planes (grooves round parts); ribbon with Build / Design / Sculpt / Print tabs | **Delivered for testing** |
+| 9 | Sketch on middle planes (grooves round parts); ribbon with Build / Design / Sculpt / Print tabs | Done (0.18.0) |
+| 10 | Follow: grooves and ridges along a path drawn on the surface (flat or curved); round / square / V / drawn cross-sections | **Delivered for testing** |
 
 Separate track: sculpt-engine prototype (one Draw brush on a 1M-triangle mesh at 60 fps).
 
