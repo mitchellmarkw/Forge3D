@@ -469,6 +469,14 @@ Viewport (mouse)  --leftPressed(ray, handle)-->  MainWindow drag controller
   the result and the laid path as orange tubes.
 - File format 15: `"follow"` steps.
 
+## Icons (slice 14)
+
+- `src/app/icons/*.svg` (24 × 24, 1.6 px strokes, `#3a3f45` lines, `#2b78d0` accent),
+  listed in `icons.qrc` (AUTORCC). `ribbonIcon(name)` renders one with QSvgRenderer at
+  16–64 px into a QIcon (so Qt's SVG icon plugin isn't needed), swapping the line colour
+  for a light one when the window palette is dark. Actions carry the icons; ribbon
+  buttons are `ToolButtonTextUnderIcon` at 32 px.
+
 ## Phase 1 polish (slice 13)
 
 - `faceUnder` / `laidOnFace` (Arrange): the clicked point and facing from the shape's

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.23.0 — Slice 14: Icons (2026-11-13)
+
+- Every ribbon button has a picture now, with its name underneath (like 3D Builder):
+  clean dark-grey line drawings with one blue accent, 32 px. Greyed-out buttons show
+  greyed pictures.
+- The same pictures sit beside the commands in the menus, and **Add Shape** shows a
+  little picture of each shape (box, cylinder, sphere, cone, torus, tube, wedge,
+  pyramid, text).
+- On a dark Windows theme the lines turn light so they stay easy to see.
+- The pictures are drawn from small SVG files built into Forge3D (nothing extra to
+  install).
+
 ## 0.22.0 — Slice 13: Phase 1 polish (2026-11-13)
 
 - **Lay on Face** (Print tab → Place): click it, then click any face of a shape; the
