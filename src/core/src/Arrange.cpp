@@ -4,7 +4,10 @@
 #include "forge/core/CommandStack.h"
 #include "forge/core/Commands.h"
 #include "forge/core/Document.h"
+#include "forge/core/Emboss.h"
+#include "forge/core/Mesh.h"
 
+#include <cmath>
 #include <map>
 #include <memory>
 #include <set>
@@ -185,6 +188,65 @@ ObjectId groupBodies(CommandStack& stack, Document& doc, const std::vector<Objec
     const ObjectId id = r.id;
     stack.execute(std::make_unique<CombineCommand>(std::move(r)));
     return id;
+}
+
+std::optional<std::pair<Vec3, Vec3>> faceUnder(const Document& doc, ObjectId id, const Vec3& origin,
+                                               const Vec3& direction)
+{
+    const auto mesh = doc.mesh(id);
+    if (!mesh || mesh->empty())
+        return std::nullopt;
+    const Transform toPlate = doc.worldTransform(id);
+    const Transform toLocal = toPlate.inverse();
+    // A small area: a flat face's own facing, not blended with its neighbours.
+    const auto hit = emboss::surfaceAt(mesh->positions, mesh->indices, toLocal.apply(origin),
+                                       toLocal.applyDirection(direction), 1e-3);
+    if (!hit)
+        return std::nullopt;
+    return std::pair{toPlate.apply(hit->point), toPlate.applyDirection(hit->normal)};
+}
+
+Placement laidOnFace(const Document& doc, ObjectId id, const Vec3& normal)
+{
+    const Body* body = doc.find(id);
+    if (!body)
+        throw std::out_of_range("No body with id " + std::to_string(id));
+    const double len = std::sqrt(normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]);
+    if (!(len > 1e-12))
+        throw std::invalid_argument("A direction is needed");
+    const Vec3 n{normal[0] / len, normal[1] / len, normal[2] / len};
+    // The turn taking n to straight down (0, 0, -1): about n x down, by the angle between.
+    Vec3 axis{n[1] * -1.0 - n[2] * 0.0, n[2] * 0.0 - n[0] * -1.0, 0.0};  // n x (0,0,-1) = (-n1, n0, 0)
+    double s = std::sqrt(axis[0] * axis[0] + axis[1] * axis[1]);
+    const double c = -n[2];
+    if (s < 1e-12) {
+        if (c > 0.0)
+            return sitOnPlate(doc, id);  // already facing down
+        axis = {1.0, 0.0, 0.0};  // facing straight up: turn over about X
+        s = 0.0;
+    } else {
+        axis = {axis[0] / s, axis[1] / s, 0.0};
+    }
+    const double t = 1.0 - c;
+    const double x = axis[0], y = axis[1], z = axis[2];
+    Transform turn;
+    turn.m = {{{t * x * x + c, t * x * y - s * z, t * x * z + s * y, 0.0},
+               {t * x * y + s * z, t * y * y + c, t * y * z - s * x, 0.0},
+               {t * x * z - s * y, t * y * z + s * x, t * z * z + c, 0.0}}};
+    const Transform world = doc.worldTransform(id);
+    const Vec3 centre = world.apply(doc.visibleCentre(id));
+    const Transform about = Transform::translation(centre) * turn *
+                            Transform::translation({-centre[0], -centre[1], -centre[2]});
+    Transform next = about * world;
+    // Down onto the plate: its lowest point at zero.
+    const auto mesh = doc.mesh(id);
+    double lowest = 1e300;
+    if (mesh)
+        for (std::size_t i = 0; i + 2 < mesh->positions.size(); i += 3)
+            lowest = std::min(lowest, next.apply({mesh->positions[i], mesh->positions[i + 1], mesh->positions[i + 2]})[2]);
+    if (lowest < 1e299)
+        next = Transform::translation({0.0, 0.0, -lowest}) * next;
+    return placementFromTransform(next, pivotOf(*body));
 }
 
 }  // namespace forge

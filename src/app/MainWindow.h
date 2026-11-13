@@ -145,6 +145,9 @@ private:
     void placeEmboss(const QVector3D& origin, const QVector3D& direction);
     void updateEmbossPreview();
     void choosePicture();
+    // Lay on Face: the next click on a shape turns it onto that face.
+    void layFlatClick(const QVector3D& origin, const QVector3D& direction);
+    void sitSelectedOnPlate();
     std::optional<BooleanSpec> currentEmbossSpec() const;
     bool toolOpen() const;  // Split, Emboss or Edges
 
@@ -346,6 +349,9 @@ private:
     };
     SplitMode m_splitMode;
     QAction* m_emboss = nullptr;
+    QAction* m_layFlat = nullptr;
+    QLabel* m_emptyHint = nullptr;  // over the view while the plate is empty
+    QAction* m_sitOnPlate = nullptr;
     EmbossPanel* m_embossPanel = nullptr;
     struct EmbossMode {
         bool active = false;

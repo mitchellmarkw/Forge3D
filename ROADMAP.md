@@ -33,7 +33,8 @@ Gate to Phase 2: a new user prints a customised part within 10 minutes.
 | 9 | Sketch on middle planes (grooves round parts); ribbon with Build / Design / Sculpt / Print tabs | Done (0.18.0) |
 | 10 | Follow: grooves and ridges along a path drawn on the surface (flat or curved); round / square / V / drawn cross-sections | Done (0.19.1) |
 | 11 | Patterns: linked rows, grids and circles of a shape or its last feature | Done (0.20.2) |
-| 12 | Emboss a picture: logos traced to an outline, photos as reliefs; flat and curved surfaces | **Delivered for testing** |
+| 12 | Emboss a picture: logos traced to an outline, photos as reliefs; flat and curved surfaces | Done (0.21.0) |
+| 13 | Phase 1 polish: Lay on Face, Sit on Plate in the ribbon, a ribbon that fits narrow windows, a first step on an empty plate, double-click fix | **Delivered for testing** |
 
 Separate track: sculpt-engine prototype (one Draw brush on a 1M-triangle mesh at 60 fps).
 

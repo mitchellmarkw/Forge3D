@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.22.0 — Slice 13: Phase 1 polish (2026-11-13)
+
+- **Lay on Face** (Print tab → Place): click it, then click any face of a shape; the
+  shape turns the least it needs to so that face lies flat on the plate (the way you'd
+  print it), staying where it is across the plate. One undo step. The handles hide while
+  you pick; Esc cancels.
+- **Sit on Plate** is now in the ribbon too (Print → Place), and works on several
+  selected shapes at once.
+- **A first step on an empty plate**: a note over the view says how to start (Add
+  Shape, the Add menu, Import, or drop a file); it goes once there's something on the
+  plate.
+- **The ribbon fits narrower windows**: rather than squashing the button names, a row
+  that doesn't fit scrolls sideways (a scroll bar appears under it). Undo / Redo keep
+  their short names in the ribbon (what they'd undo shows when you point at them), so
+  the ribbon doesn't change width as you work. The window starts no bigger than the
+  screen.
+- **Double-click in Objects** opens a step every time, even when its row wasn't
+  selected yet (the first click used to rebuild the list and lose the double-click).
+  Double-clicking a row with nothing to open (a Merge, say) opens or closes it instead.
+- 188 unit tests (1 new: Lay on Face onto a box's end, its top, and a wedge's slope).
+
 ## 0.21.0 — Slice 12: Emboss a picture (2026-11-13)
 
 - **Emboss** now takes a picture as well as words: choose **Emboss: A picture (logo or

@@ -469,6 +469,19 @@ Viewport (mouse)  --leftPressed(ray, handle)-->  MainWindow drag controller
   the result and the laid path as orange tubes.
 - File format 15: `"follow"` steps.
 
+## Phase 1 polish (slice 13)
+
+- `faceUnder` / `laidOnFace` (Arrange): the clicked point and facing from the shape's
+  display mesh (`emboss::surfaceAt` with a tiny radius, so a flat face's own facing);
+  the turn taking it to -Z (Rodrigues, about the shape's visible centre), then down so
+  the lowest mesh point is at Z = 0; back to a placement with `placementFromTransform`.
+- Ribbon pages sit in `RibbonScroll` (a QScrollArea as tall as its buttons, plus a
+  scroll bar only when the window is too narrow). Undo / Redo ribbon buttons keep
+  short text; the full label is the tooltip.
+- Objects double-clicks are handled in `eventFilter` (MouseButtonDblClick): the first
+  click's selection rebuilds the tree, and QAbstractItemView then drops the
+  double-click because its pressed index is gone.
+
 ## Emboss pictures (slice 12)
 
 - `EmbossPicture` (in `BooleanSpec::picture`, instead of `emboss`): the name, a shared
