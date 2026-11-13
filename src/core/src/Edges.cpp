@@ -648,11 +648,10 @@ TopoDS_Shape pickableShape(const Document& doc, ObjectId target)
     if (!body)
         throw std::out_of_range("No body with id " + std::to_string(target));
     ObjectId part = target;
-    if (body->isBoolean() && body->boolean->op == BooleanOp::Edges)
+    if (body->isBoolean() && (body->boolean->op == BooleanOp::Edges || body->boolean->op == BooleanOp::Shell))
         part = body->boolean->operands.front();
     if (doc.usesMeshEngine(part))
-        throw std::invalid_argument("Rounding and chamfering work on solid shapes, not on imported meshes or "
-                                    "shapes made with them.");
+        throw std::invalid_argument("This works on solid shapes, not on imported meshes or shapes made with them.");
     return BRepBuilderAPI_Transform(doc.shape(part), toTrsf(doc.worldTransform(part)), /*copy=*/true).Shape();
 }
 

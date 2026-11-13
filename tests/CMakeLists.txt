@@ -25,6 +25,7 @@ add_executable(forge_tests
     test_edges.cpp
     test_history.cpp
     test_sketch.cpp
+    test_features.cpp
 )
 target_link_libraries(forge_tests PRIVATE
     Forge3D::core

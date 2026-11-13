@@ -410,6 +410,30 @@ Viewport (mouse)  --leftPressed(ray, handle)-->  MainWindow drag controller
   the sketch keys (L, R, C, A, S, H, V, D, Delete, Ctrl+Z) don't clash.
 - File format 13: `"pad"` bodies carry the sketch as JSON.
 
+## Revolve, Hole, Shell (slice 8)
+
+- `RevolveSpec{sketch, axis, angle, reversed, midplane}`: the sketch's faces spun round
+  one of its lines (`sketch::revolveShape`, BRepPrimAPI_MakeRevol), refused when the
+  outline crosses the axis. Made like a pad (Revolve adds, Groove subtracts on a face).
+  On the plate its frame stands the sketch up (sketch Y = plate Z) and lifts it onto
+  the plate.
+- `HoleSpec{sketch, kind, size, tapped, diameters, depth}`: a tool body whose solid
+  (`sketch::holeShape`) is one cutter per loose point of the sketch (points used by no
+  curve: `sketch::loosePoints`), each a profile spun round Z, going down from a little
+  above the face. A Hole step is a Subtract of it (Through all: `throughTool` makes the
+  holes as deep as the part reaches below the face). `holeSizes` holds the ISO metric
+  table (clearance medium fit, tap drill, counterbore, countersink).
+- `BooleanOp::Shell` + `ShellFinish{thickness, outward, open faces}`: one-part step
+  like Edges. Open faces are `FaceRef`s (a point on the face, its normal, and where the
+  point sits in the part's box), matched like edge picks: exactly, then by box spot and
+  facing, then nearest (`shell::match`). Open faces → BRepOffsetAPI_MakeThickSolid;
+  none → the solid minus its inward offset (or the outward offset minus the solid).
+- App: `HolePanel` and `ShellPanel` like the Edges panel; the Hole tool previews by
+  cutting its cutters from the shape directly. **Place exactly...** opens the hole spots
+  in the sketch view (positions only) and returns to the Hole panel.
+- `removeGeos` now keeps points that stood on their own; `removePoints` removes points.
+- File format 14: `"revolve"` and `"hole"` bodies (with their sketches), `"shell"` steps.
+
 ## Rendering
 
 `Document::mesh()` → `forge::Mesh` (positions, normals, indices) → `DisplayItem`

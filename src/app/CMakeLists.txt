@@ -19,6 +19,10 @@ add_executable(Forge3D WIN32
     SplitPanel.cpp
     EdgesPanel.h
     EdgesPanel.cpp
+    HolePanel.h
+    HolePanel.cpp
+    ShellPanel.h
+    ShellPanel.cpp
     SketchPanel.h
     SketchPanel.cpp
     SketchView.h

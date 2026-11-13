@@ -594,7 +594,7 @@ int addPoint(Sketch& s, Point p)
 
 int mergePoints(Sketch& s, int into, int from)
 {
-    if (into == from || from <= 0 && into <= 0)
+    if (into == from || (from <= 0 && into <= 0))
         return into;
     if (from == 0)
         std::swap(into, from);  // the origin stays
@@ -639,8 +639,72 @@ void removeConstraints(Sketch& s, std::vector<int> rules)
             s.constraints.erase(s.constraints.begin() + rules[i]);
 }
 
+namespace {
+// Removes point i and the rules on it (nothing else may use it).
+void dropPoint(Sketch& s, int i)
+{
+    std::vector<Constraint> left;
+    for (const Constraint& c : s.constraints) {
+        const auto sl = slots(c);
+        bool refers = false;
+        for (int k = 0; k < 3; ++k)
+            refers = refers || (sl[std::size_t(k)] == 'p' && slotValue(c, k) == i);
+        if (!refers)
+            left.push_back(c);
+    }
+    s.constraints = std::move(left);
+    mergePoints(s, 0, i);  // nothing refers to it: this just removes it
+}
+
+std::vector<bool> pointsInUse(const Sketch& s)
+{
+    std::vector<bool> used(s.points.size(), false);
+    used[0] = true;
+    for (const Geo& g : s.geos) {
+        used[std::size_t(g.a)] = true;
+        if (g.kind != GeoKind::Circle)
+            used[std::size_t(g.b)] = true;
+        if (g.kind == GeoKind::Arc)
+            used[std::size_t(g.c)] = true;
+    }
+    return used;
+}
+}  // namespace
+
+std::vector<int> loosePoints(const Sketch& s)
+{
+    const std::vector<bool> used = pointsInUse(s);
+    std::vector<int> out;
+    for (std::size_t i = 1; i < s.points.size(); ++i)
+        if (!used[i])
+            out.push_back(int(i));
+    return out;
+}
+
+void removePoints(Sketch& s, std::vector<int> points)
+{
+    std::sort(points.begin(), points.end());
+    points.erase(std::unique(points.begin(), points.end()), points.end());
+    // The curves using them go too.
+    std::vector<int> geos;
+    for (std::size_t g = 0; g < s.geos.size(); ++g) {
+        const Geo& geo = s.geos[g];
+        for (int p : {geo.a, geo.kind != GeoKind::Circle ? geo.b : -1, geo.kind == GeoKind::Arc ? geo.c : -1})
+            if (p > 0 && std::binary_search(points.begin(), points.end(), p))
+                geos.push_back(int(g));
+    }
+    removeGeos(s, geos);
+    // Then the loose ones asked for (highest first, so indices stay right).
+    const std::vector<bool> used = pointsInUse(s);
+    for (auto it = points.rbegin(); it != points.rend(); ++it)
+        if (*it > 0 && std::size_t(*it) < s.points.size() && !used[std::size_t(*it)])
+            dropPoint(s, *it);
+}
+
 void removeGeos(Sketch& s, std::vector<int> geos)
 {
+    // Points only these curves used go with them; points on their own stay.
+    const std::vector<bool> usedBefore = pointsInUse(s);
     std::sort(geos.begin(), geos.end());
     geos.erase(std::unique(geos.begin(), geos.end()), geos.end());
     std::vector<int> newIndex(s.geos.size());
@@ -671,33 +735,14 @@ void removeGeos(Sketch& s, std::vector<int> geos)
     }
     s.constraints = std::move(rules);
     // Points and radii nothing uses any more.
-    std::vector<bool> used(s.points.size(), false), radiusUsed(s.radii.size(), false);
-    used[0] = true;
-    for (const Geo& g : s.geos) {
-        used[std::size_t(g.a)] = true;
-        if (g.kind != GeoKind::Circle)
-            used[std::size_t(g.b)] = true;
-        if (g.kind == GeoKind::Arc)
-            used[std::size_t(g.c)] = true;
+    std::vector<bool> radiusUsed(s.radii.size(), false);
+    for (const Geo& g : s.geos)
         if (g.kind == GeoKind::Circle)
             radiusUsed[std::size_t(g.r)] = true;
-    }
+    const std::vector<bool> used = pointsInUse(s);
     for (std::size_t i = s.points.size(); i-- > 1;)
-        if (!used[i]) {
-            // Drop rules on it, then the point.
-            std::vector<Constraint> left;
-            for (const Constraint& c : s.constraints) {
-                const auto sl = slots(c);
-                bool refers = false;
-                for (int k = 0; k < 3; ++k)
-                    refers = refers || (sl[std::size_t(k)] == 'p' && slotValue(c, k) == int(i));
-                if (!refers)
-                    left.push_back(c);
-            }
-            s.constraints = std::move(left);
-            mergePoints(s, 0, int(i));  // nothing refers to it: this just removes it
-            // mergePoints keeps the origin; re-add nothing.
-        }
+        if (!used[i] && usedBefore[i])
+            dropPoint(s, int(i));
     std::vector<int> radiusIndex(s.radii.size(), -1);
     std::vector<double> radii;
     for (std::size_t i = 0; i < s.radii.size(); ++i)

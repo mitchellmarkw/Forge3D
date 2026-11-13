@@ -110,6 +110,7 @@ const char* opName(BooleanOp op)
     case BooleanOp::Group: return "group";
     case BooleanOp::Emboss: return "emboss";
     case BooleanOp::Edges: return "edges";
+    case BooleanOp::Shell: return "shell";
     }
     return "merge";
 }
@@ -147,6 +148,16 @@ json bodyToJson(const Body& b)
             }
             j["edges"] = json{{"kind", kinds[int(f->kind)]}, {"size", f->size}, {"angle", f->angle}, {"picks", picks}};
         }
+        if (const auto& sh = b.boolean->shell) {
+            json open = json::array();
+            for (const FaceRef& r : sh->open) {
+                json pick{{"point", r.point}, {"normal", r.normal}};
+                if (r.located)
+                    pick["relative"] = r.relative;
+                open.push_back(pick);
+            }
+            j["shell"] = json{{"thickness", sh->thickness}, {"outward", sh->outward}, {"open", open}};
+        }
         if (const auto& e = b.boolean->emboss) {
             j["emboss"] = json{{"text", e->text},     {"font", e->font},   {"bold", e->bold},
                                {"italic", e->italic}, {"vertical", e->vertical}, {"letterHeight", e->letterHeight},
@@ -161,6 +172,24 @@ json bodyToJson(const Body& b)
         j["reversed"] = pad->reversed;
         j["midplane"] = pad->midplane;
         j["sketch"] = sketchToJson(pad->sketch);
+    }
+    if (const auto* r = std::get_if<RevolveSpec>(&b.spec)) {
+        j["axis"] = r->axis;
+        j["angle"] = r->angle;
+        j["reversed"] = r->reversed;
+        j["midplane"] = r->midplane;
+        j["sketch"] = sketchToJson(r->sketch);
+    }
+    if (const auto* h = std::get_if<HoleSpec>(&b.spec)) {
+        static const char* kinds[] = {"plain", "counterbored", "countersunk"};
+        j["kind"] = kinds[int(h->kind)];
+        j["size"] = h->size;
+        j["tapped"] = h->tapped;
+        j["headDiameter"] = h->headDiameter;
+        j["headDepth"] = h->headDepth;
+        j["countersinkDiameter"] = h->countersinkDiameter;
+        j["countersinkAngle"] = h->countersinkAngle;
+        j["sketch"] = sketchToJson(h->sketch);
     }
     if (const auto* t = std::get_if<TextSpec>(&b.spec)) {
         j["text"] = t->text;
@@ -237,6 +266,8 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
             spec.op = BooleanOp::Emboss;
         else if (op == "edges" && version >= 11)
             spec.op = BooleanOp::Edges;
+        else if (op == "shell" && version >= 14)
+            spec.op = BooleanOp::Shell;
         else
             damaged(where + ": unknown combine operation '" + op + "'");
         const auto operands = j.find("operands");
@@ -310,6 +341,34 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
             }
             spec.edges = std::move(f);
         }
+        if (spec.op == BooleanOp::Shell) {
+            const auto sh = j.find("shell");
+            if (sh == j.end() || !sh->is_object())
+                damaged(where + ": missing the shell");
+            ShellFinish f;
+            f.thickness = number(*sh, "thickness", where);
+            f.outward = sh->value("outward", false);
+            const auto open = sh->find("open");
+            if (open != sh->end() && open->is_array())
+                for (const auto& p : *open) {
+                    FaceRef r;
+                    const auto readPoint = [&](const char* key, std::array<double, 3>& out) {
+                        const auto v = p.find(key);
+                        if (v == p.end() || !v->is_array() || v->size() != 3)
+                            damaged(where + ": a picked face is damaged");
+                        for (std::size_t i = 0; i < 3; ++i)
+                            out[i] = (*v)[i].get<double>();
+                    };
+                    readPoint("point", r.point);
+                    readPoint("normal", r.normal);
+                    if (p.contains("relative")) {
+                        readPoint("relative", r.relative);
+                        r.located = true;
+                    }
+                    f.open.push_back(r);
+                }
+            spec.shell = std::move(f);
+        }
         if (spec.op == BooleanOp::Emboss) {
             const auto e = j.find("emboss");
             if (e == j.end() || !e->is_object())
@@ -363,6 +422,36 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
             damaged(where + ": missing sketch");
         pad.sketch = sketchFromJson(*sk, where);
         b.spec = pad;
+    } else if (t == "revolve" && version >= 14) {
+        RevolveSpec r;
+        r.axis = j.value("axis", -1);
+        r.angle = j.value("angle", 360.0);
+        r.reversed = j.value("reversed", false);
+        r.midplane = j.value("midplane", false);
+        const auto sk = j.find("sketch");
+        if (sk == j.end() || !sk->is_object())
+            damaged(where + ": missing sketch");
+        r.sketch = sketchFromJson(*sk, where);
+        b.spec = r;
+    } else if (t == "hole" && version >= 14) {
+        HoleSpec h;
+        h.diameter = number(*params, "diameter", where);
+        h.depth = number(*params, "depth", where);
+        const std::string kind = j.value("kind", std::string("plain"));
+        h.kind = kind == "counterbored" ? HoleKind::Counterbored
+                 : kind == "countersunk" ? HoleKind::Countersunk
+                                         : HoleKind::Plain;
+        h.size = j.value("size", std::string());
+        h.tapped = j.value("tapped", false);
+        h.headDiameter = j.value("headDiameter", h.headDiameter);
+        h.headDepth = j.value("headDepth", h.headDepth);
+        h.countersinkDiameter = j.value("countersinkDiameter", h.countersinkDiameter);
+        h.countersinkAngle = j.value("countersinkAngle", h.countersinkAngle);
+        const auto sk = j.find("sketch");
+        if (sk == j.end() || !sk->is_object())
+            damaged(where + ": missing sketch");
+        h.sketch = sketchFromJson(*sk, where);
+        b.spec = h;
     } else if (version < 6 && t == "sphere") {  // 0.6.0 shapes were always round
         b.spec = SphereSpec{num("radius")};
     } else if (version < 6 && t == "cone") {

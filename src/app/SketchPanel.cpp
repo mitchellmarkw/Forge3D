@@ -9,6 +9,7 @@
 #include <QLabel>
 #include <QPushButton>
 #include <QSignalBlocker>
+#include <QStandardItemModel>
 #include <QVBoxLayout>
 
 namespace forge::app {
@@ -30,15 +31,20 @@ SketchPanel::SketchPanel(QWidget* parent) : QWidget(parent)
     layout->addWidget(m_message);
 
     auto* makeGroup = new QGroupBox(tr("When finished"));
+    m_makeGroup = makeGroup;
     auto* makeLayout = new QVBoxLayout(makeGroup);
     makeLayout->setSpacing(2);
     // The label sits right on top of its list.
     m_makeLabel = new QLabel(tr("Make:"));
     makeLayout->addWidget(m_makeLabel);
     m_make = new QComboBox;
-    m_make->addItem(tr("Pad (push the outline out)"));
-    m_make->addItem(tr("Pocket (cut the outline in)"));
-    m_make->setToolTip(tr("Pad adds a solid shaped like the outline. Pocket cuts it into the shape you sketched on."));
+    m_make->addItem(tr("Pad (push the outline out)"), int(Make::Pad));
+    m_make->addItem(tr("Pocket (cut the outline in)"), int(Make::Pocket));
+    m_make->addItem(tr("Revolve (spin it round a helper line)"), int(Make::Revolve));
+    m_make->addItem(tr("Groove (spin it round, cutting in)"), int(Make::Groove));
+    m_make->setToolTip(tr("Pad adds a solid shaped like the outline; Pocket cuts it into the shape you sketched "
+                          "on. Revolve spins the outline round a helper line (a knob, a bottle); Groove cuts "
+                          "that in."));
     makeLayout->addWidget(m_make);
     makeLayout->addSpacing(8);
     m_lengthLabel = new QLabel;
@@ -50,6 +56,20 @@ SketchPanel::SketchPanel(QWidget* parent) : QWidget(parent)
     m_length->setSuffix(tr(" mm"));
     m_length->setMinimumWidth(110);
     makeLayout->addWidget(m_length);
+    m_angleLabel = new QLabel(tr("Angle:"));
+    makeLayout->addWidget(m_angleLabel);
+    m_angle = new QDoubleSpinBox;
+    m_angle->setRange(0.1, 360.0);
+    m_angle->setDecimals(1);
+    m_angle->setSingleStep(15.0);
+    m_angle->setSuffix(QStringLiteral("\u00B0"));
+    m_angle->setToolTip(tr("How far round it spins (360\u00B0: all the way)"));
+    makeLayout->addWidget(m_angle);
+    m_axisHelp = new QLabel(tr("It spins round the helper line you pick (or the only one there is). Draw a line "
+                               "and press G (Helper) to make one."));
+    m_axisHelp->setWordWrap(true);
+    m_axisHelp->setStyleSheet(QStringLiteral("color: palette(mid);"));
+    makeLayout->addWidget(m_axisHelp);
     makeLayout->addSpacing(6);
     m_otherWay = new QCheckBox(tr("The other way"));
     m_bothWays = new QCheckBox(tr("Both ways (half each side)"));
@@ -60,7 +80,7 @@ SketchPanel::SketchPanel(QWidget* parent) : QWidget(parent)
     makeLayout->addWidget(m_throughAll);
     layout->addWidget(makeGroup);
 
-    auto* help = new QLabel(tr("<b>Draw</b>: Line (L), Rectangle (R), Circle (C), Arc (A), Slot (S). "
+    auto* help = new QLabel(tr("<b>Draw</b>: Line (L), Rectangle (R), Circle (C), Arc (A), Slot (S), Point (P). "
                                "Esc stops drawing, then goes back to picking.<br>"
                                "<b>Pick</b>: click; Ctrl+click picks more. Drag points and lines to move them.<br>"
                                "<b>Rules</b> go on what's picked: Horizontal (H), Vertical (V), Parallel, "
@@ -70,6 +90,7 @@ SketchPanel::SketchPanel(QWidget* parent) : QWidget(parent)
                                "Shapes go <span style='color:#1e8c3c'>green</span> when every size and place "
                                "is set. <span style='color:#d22'>Red</span> points are loose ends.<br>"
                                "Wheel zooms; right- or middle-drag pans; F fits."));
+    m_help = help;
     help->setWordWrap(true);
     help->setStyleSheet(QStringLiteral("color: palette(mid);"));
     layout->addWidget(help);
@@ -86,38 +107,64 @@ SketchPanel::SketchPanel(QWidget* parent) : QWidget(parent)
 
     connect(m_make, &QComboBox::currentIndexChanged, this, &SketchPanel::updateLabels);
     connect(m_bothWays, &QCheckBox::toggled, this, &SketchPanel::updateLabels);
+    connect(m_otherWay, &QCheckBox::toggled, this, &SketchPanel::updateLabels);
     connect(m_throughAll, &QCheckBox::toggled, this, &SketchPanel::updateLabels);
     connect(m_finish, &QPushButton::clicked, this, &SketchPanel::finishRequested);
     connect(cancel, &QPushButton::clicked, this, &SketchPanel::cancelRequested);
 }
 
-void SketchPanel::start(const QString& title, bool pocketAllowed, bool pocket, double length, bool otherWay,
-                        bool bothWays, bool throughAll, bool editing)
+void SketchPanel::start(const QString& title, bool onFace, bool editing, const Options& options)
 {
     m_title->setText(title);
-    const QSignalBlocker b0(m_make), b1(m_bothWays), b2(m_throughAll);
-    m_make->setCurrentIndex(pocketAllowed && pocket ? 1 : 0);
-    // Changing a sketch keeps what it makes (a pad stays a pad).
-    m_make->setEnabled(pocketAllowed && !editing);
-    m_makeLabel->setVisible(pocketAllowed);
-    m_make->setVisible(pocketAllowed);
-    m_length->setValue(length);
-    m_otherWay->setChecked(otherWay);
-    m_bothWays->setChecked(bothWays);
-    m_throughAll->setChecked(throughAll);
-    m_finish->setToolTip(editing ? tr("Change it to this sketch") : tr("Make the pad or pocket from this sketch"));
+    m_makeGroup->show();
+    const QSignalBlocker b0(m_make), b1(m_bothWays), b2(m_throughAll), b3(m_otherWay);
+    // On the plate there's nothing to cut into. Changing one keeps it adding or cutting.
+    const bool cutting = options.make == Make::Pocket || options.make == Make::Groove;
+    auto* model = qobject_cast<QStandardItemModel*>(m_make->model());
+    for (int i = 0; i < m_make->count(); ++i) {
+        const auto kind = Make(m_make->itemData(i).toInt());
+        const bool cuts = kind == Make::Pocket || kind == Make::Groove;
+        bool allowed = onFace || !cuts;
+        if (editing)
+            allowed = cuts == cutting;
+        if (model)
+            if (QStandardItem* item = model->item(i))
+                item->setEnabled(allowed);
+    }
+    m_make->setCurrentIndex(m_make->findData(int(options.make)));
+    m_length->setValue(options.length);
+    m_angle->setValue(options.angle);
+    m_otherWay->setChecked(options.otherWay);
+    m_bothWays->setChecked(options.bothWays);
+    m_throughAll->setChecked(options.throughAll);
+    m_finish->setText(tr("Finish"));
+    m_finish->setToolTip(editing ? tr("Change it to this sketch") : tr("Make it from this sketch"));
     setMessage({}, false);
     updateLabels();
 }
 
-bool SketchPanel::pocket() const
+void SketchPanel::startPositions(const QString& title)
 {
-    return m_make->isVisibleTo(this) && m_make->currentIndex() == 1;
+    m_title->setText(title);
+    m_makeGroup->hide();
+    m_finish->setText(tr("Done"));
+    m_finish->setToolTip(tr("Use these points for the holes"));
+    setMessage(tr("Each point on its own (Point tool, P) is a hole. Add dimensions to place them exactly."), false);
+}
+
+SketchPanel::Make SketchPanel::make() const
+{
+    return Make(m_make->currentData().toInt());
 }
 
 double SketchPanel::length() const
 {
     return m_length->value();
+}
+
+double SketchPanel::angle() const
+{
+    return m_angle->value();
 }
 
 bool SketchPanel::otherWay() const
@@ -127,12 +174,12 @@ bool SketchPanel::otherWay() const
 
 bool SketchPanel::bothWays() const
 {
-    return m_bothWays->isChecked() && !pocket();
+    return m_bothWays->isChecked() && !(pocket() && !revolve());
 }
 
 bool SketchPanel::throughAll() const
 {
-    return m_throughAll->isChecked() && pocket();
+    return m_throughAll->isChecked() && make() == Make::Pocket;
 }
 
 void SketchPanel::setStatus(const QString& text, bool problem, bool held)
@@ -151,16 +198,25 @@ void SketchPanel::setMessage(const QString& text, bool problem)
 
 void SketchPanel::updateLabels()
 {
+    const Make kind = make();
+    const bool spin = revolve();
     const bool cut = pocket();
     m_lengthLabel->setText(cut ? tr("Depth:") : tr("Length:"));
     m_length->setToolTip(cut ? tr("How deep the pocket goes into the shape")
                              : tr("How far the outline is pushed out"));
-    m_bothWays->setVisible(!cut);
-    m_throughAll->setVisible(cut);
-    m_otherWay->setToolTip(cut ? tr("Cut outwards from the face instead of into it")
-                               : tr("Push the other way (down / into the face)"));
-    m_otherWay->setEnabled(cut || !m_bothWays->isChecked());
-    m_length->setEnabled(!(cut && m_throughAll->isChecked()));
+    m_lengthLabel->setVisible(!spin);
+    m_length->setVisible(!spin);
+    m_angleLabel->setVisible(spin);
+    m_angle->setVisible(spin);
+    m_axisHelp->setVisible(spin);
+    m_bothWays->setVisible(kind != Make::Pocket);
+    m_throughAll->setVisible(kind == Make::Pocket);
+    m_otherWay->setToolTip(spin  ? tr("Spin the other way round")
+                           : cut ? tr("Cut outwards from the face instead of into it")
+                                 : tr("Push the other way (down / into the face)"));
+    m_otherWay->setEnabled(!m_bothWays->isChecked() || kind == Make::Pocket);
+    m_bothWays->setEnabled(!m_otherWay->isChecked());
+    m_length->setEnabled(!(kind == Make::Pocket && m_throughAll->isChecked()));
     m_lengthLabel->setEnabled(m_length->isEnabled());
 }
 

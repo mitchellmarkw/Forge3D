@@ -6,6 +6,8 @@
 #include "EmbossPanel.h"
 #include "Log.h"
 #include "PropertiesPanel.h"
+#include "HolePanel.h"
+#include "ShellPanel.h"
 #include "SketchPanel.h"
 #include "SketchView.h"
 #include "SplitPanel.h"
@@ -21,6 +23,8 @@
 #include "forge/core/Picking.h"
 #include "forge/core/Primitives.h"
 #include "forge/core/SketchShape.h"
+#include "forge/core/Shell.h"
+#include "forge/core/Tessellator.h"
 #include "forge/core/Tessellator.h"
 #include "forge/core/Text.h"
 #include "forge/core/Transform.h"
@@ -47,6 +51,10 @@
 #include <QMessageBox>
 #include <QSettings>
 #include <QStackedWidget>
+#include <Standard_Failure.hxx>
+#include <gp_Trsf.hxx>
+#include <BRepBuilderAPI_Transform.hxx>
+#include <BRepAlgoAPI_Cut.hxx>
 #include <QStandardPaths>
 #include <QStatusBar>
 #include <QTimer>
@@ -303,6 +311,10 @@ void MainWindow::createActions()
             endEmboss();
         else if (m_edgesMode.active)
             endEdges();
+        else if (m_holeMode.active)
+            endHole();
+        else if (m_shellMode.active)
+            endShell();
         else if (m_sketchMode.picking) {
             m_sketchMode.picking = false;
             statusBar()->clearMessage();
@@ -445,6 +457,29 @@ void MainWindow::createActions()
                                   "face to draw on"));
     connect(m_sketchAction, &QAction::triggered, this, &MainWindow::sketchClicked);
 
+    m_holeAction = new QAction(tr("Hole"), this);
+    m_holeAction->setToolTip(tr("Hole: drill holes (plain, counterbored, countersunk; standard metric sizes) into a "
+                                "flat face of the selected shape"));
+    connect(m_holeAction, &QAction::triggered, this, &MainWindow::holeClicked);
+    m_shellAction = new QAction(tr("Shell"), this);
+    m_shellAction->setToolTip(tr("Shell: hollow the selected shape out to walls of a set thickness, leaving the "
+                                 "faces you click open"));
+    connect(m_shellAction, &QAction::triggered, this, [this] {
+        const ObjectId id = selectedOne();
+        if (id == kInvalidId || m_selection.size() != 1 || !m_doc.isTopLevel(id)) {
+            statusBar()->showMessage(tr("Shell: select one shape on the plate first."), 6000);
+            return;
+        }
+        const ObjectId target = history::tip(m_doc, id);
+        if (m_doc.usesMeshEngine(target)) {
+            QMessageBox::information(this, tr("Forge3D"),
+                                     tr("Shell works on solid shapes made in Forge3D, not on imported meshes or "
+                                        "shapes made with them."));
+            return;
+        }
+        startShell(target, false);
+    });
+
     // Align Shapes: the first shape selected stays put; the others move to it.
     m_alignMenu = new QMenu(tr("Align Shapes"), this);
     m_alignMenu->setToolTipsVisible(true);
@@ -521,6 +556,8 @@ void MainWindow::createMenus()
     edit->addAction(m_emboss);
     edit->addAction(m_edgesAction);
     edit->addAction(m_sketchAction);
+    edit->addAction(m_holeAction);
+    edit->addAction(m_shellAction);
     edit->addMenu(m_alignMenu);
     edit->addMenu(m_mirrorMenu);
     edit->addAction(m_group);
@@ -582,6 +619,8 @@ void MainWindow::createToolBar()
     bar->addAction(m_emboss);
     bar->addAction(m_edgesAction);
     bar->addAction(m_sketchAction);
+    bar->addAction(m_holeAction);
+    bar->addAction(m_shellAction);
     bar->addSeparator();
     {
         auto* alignButton = new QToolButton(bar);
@@ -724,6 +763,76 @@ void MainWindow::createDocks()
     });
     connect(m_edgesPanel, &EdgesPanel::applyRequested, this, &MainWindow::applyEdges);
     connect(m_edgesPanel, &EdgesPanel::cancelRequested, this, &MainWindow::endEdges);
+
+    m_holePanel = new HolePanel;
+    stackLayout->addWidget(m_holePanel);
+    m_holePanel->hide();
+    m_holeTimer = new QTimer(this);
+    m_holeTimer->setSingleShot(true);
+    m_holeTimer->setInterval(150);
+    connect(m_holeTimer, &QTimer::timeout, this, &MainWindow::updateHolePreview);
+    connect(m_holePanel, &HolePanel::changed, this, [this] { m_holeTimer->start(); });
+    connect(m_holePanel, &HolePanel::spotEdited, this, [this](int index, double x, double y) {
+        const auto spots = sketch::loosePoints(m_holeMode.spots);
+        if (index < 0 || std::size_t(index) >= spots.size())
+            return;
+        m_holeMode.spots.points[std::size_t(spots[std::size_t(index)])] = {x, y};
+        // Typed: rules that held it elsewhere would fight, so they go.
+        std::vector<int> rules;
+        for (std::size_t i = 0; i < m_holeMode.spots.constraints.size(); ++i) {
+            const auto& c = m_holeMode.spots.constraints[i];
+            if (c.a == spots[std::size_t(index)] || c.b == spots[std::size_t(index)])
+                rules.push_back(int(i));
+        }
+        sketch::removeConstraints(m_holeMode.spots, rules);
+        m_holeTimer->start();
+    });
+    connect(m_holePanel, &HolePanel::removeSpotRequested, this, [this](int index) {
+        const auto spots = sketch::loosePoints(m_holeMode.spots);
+        if (index < 0 || std::size_t(index) >= spots.size())
+            return;
+        sketch::removePoints(m_holeMode.spots, {spots[std::size_t(index)]});
+        showHoleSpots();
+        m_holeTimer->start(0);
+    });
+    connect(m_holePanel, &HolePanel::sketchRequested, this, [this] {
+        if (!m_holeMode.active || !m_holeMode.placed)
+            return;
+        std::vector<std::vector<QPointF>> reference;
+        try {
+            for (const auto& line : sketch::outlinesOnPlane(m_holeMode.shape, m_holeMode.frame)) {
+                std::vector<QPointF> q;
+                for (const auto& p : line)
+                    q.emplace_back(p.x, p.y);
+                reference.push_back(std::move(q));
+            }
+        } catch (const std::exception& e) {
+            qWarning() << "Finding the face's outline failed:" << e.what();
+        }
+        m_holeMode.positioning = true;
+        m_sketchMode = SketchMode{};
+        m_sketchMode.frame = m_holeMode.frame;
+        openSketch(m_holeMode.spots, std::move(reference), tr("Place the holes exactly"), false,
+                   SketchPanel::Options{});
+    });
+    connect(m_holePanel, &HolePanel::applyRequested, this, &MainWindow::applyHole);
+    connect(m_holePanel, &HolePanel::cancelRequested, this, &MainWindow::endHole);
+
+    m_shellPanel = new ShellPanel;
+    stackLayout->addWidget(m_shellPanel);
+    m_shellPanel->hide();
+    m_shellTimer = new QTimer(this);
+    m_shellTimer->setSingleShot(true);
+    m_shellTimer->setInterval(150);
+    connect(m_shellTimer, &QTimer::timeout, this, &MainWindow::updateShellPreview);
+    connect(m_shellPanel, &ShellPanel::changed, this, [this] { m_shellTimer->start(); });
+    connect(m_shellPanel, &ShellPanel::clearRequested, this, [this] {
+        m_shellMode.picks.clear();
+        rebuildShellHighlights();
+        m_shellTimer->start(0);
+    });
+    connect(m_shellPanel, &ShellPanel::applyRequested, this, &MainWindow::applyShell);
+    connect(m_shellPanel, &ShellPanel::cancelRequested, this, &MainWindow::endShell);
     propsDock->setMinimumWidth(320);
     addDockWidget(Qt::RightDockWidgetArea, propsDock);
 
@@ -825,6 +934,10 @@ void MainWindow::setSelection(std::vector<ObjectId> ids)
         endEmboss();
     if (m_edgesMode.active)
         endEdges();
+    if (m_holeMode.active && !m_holeMode.positioning)
+        endHole();
+    if (m_shellMode.active)
+        endShell();
     if (m_sketchMode.picking) {
         m_sketchMode.picking = false;  // picking something else leaves the face picking
         statusBar()->clearMessage();
@@ -874,6 +987,14 @@ void MainWindow::onViewportClicked(const QVector3D& origin, const QVector3D& dir
     }
     if (m_sketchMode.picking) {
         sketchFaceClick(origin, direction);
+        return;
+    }
+    if (m_holeMode.active) {
+        holeClick(origin, direction);
+        return;
+    }
+    if (m_shellMode.active) {
+        shellClick(origin, direction);
         return;
     }
     Ray ray;
@@ -964,7 +1085,7 @@ void MainWindow::onLeftPressed(const QVector3D& origin, const QVector3D& directi
             m_pressOnHandle = true;
         return;
     }
-    if (m_embossMode.active || m_edgesMode.active)
+    if (m_embossMode.active || m_edgesMode.active || m_holeMode.active || m_shellMode.active)
         return;  // shapes stay put while the tool is open
 
     if (handle.valid() && multiSelection()) {
@@ -2241,7 +2362,7 @@ void MainWindow::applyEdges()
 bool MainWindow::toolOpen() const
 {
     return m_splitMode.active || m_embossMode.active || m_edgesMode.active || m_sketchMode.picking ||
-           m_sketchMode.active;
+           m_sketchMode.active || m_holeMode.active || m_shellMode.active;
 }
 
 void MainWindow::startEmboss(ObjectId target, bool editing)
@@ -2954,6 +3075,10 @@ void MainWindow::refreshScene()
             endEmboss();  // e.g. Undo removed the shape
         if (m_edgesMode.active && !m_doc.find(m_edgesMode.target))
             endEdges();
+        if (m_holeMode.active && !m_doc.find(m_holeMode.target))
+            endHole();
+        if (m_shellMode.active && !m_doc.find(m_shellMode.target))
+            endShell();
         for (ObjectId id : m_doc.topLevelIds()) {
             DisplayItem item;
             item.id = id;
@@ -2975,6 +3100,24 @@ void MainWindow::refreshScene()
                     line.id = tag;
                     line.mesh = lines;
                     line.color = colour;
+                    line.ghost = true;
+                    items.push_back(line);
+                }
+            }
+            if (m_holeMode.active && m_holeMode.preview && id == history::objectOf(m_doc, m_holeMode.target)) {
+                item.mesh = m_holeMode.preview;  // drilled, as it will be (plate coordinates)
+                item.model = QMatrix4x4();
+            }
+            if (m_shellMode.active && id == history::objectOf(m_doc, m_shellMode.target)) {
+                if (m_shellMode.preview) {
+                    item.mesh = m_shellMode.preview;
+                    item.model = previewFrame(m_shellMode.target, m_shellMode.editing);
+                }
+                if (m_shellMode.pickedLines && !m_shellMode.pickedLines->empty()) {
+                    DisplayItem line;
+                    line.id = kEdgesPickedItem;
+                    line.mesh = m_shellMode.pickedLines;
+                    line.color = QVector3D(0.9f, 0.15f, 0.1f);
                     line.ghost = true;
                     items.push_back(line);
                 }
@@ -3121,6 +3264,8 @@ void MainWindow::refreshScene()
     m_edgesAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_sketchAction->setEnabled((m_selection.empty() || (m_selection.size() == 1 && allTopLevel && !rolled)) &&
                                !toolOpen());
+    m_holeAction->setEnabled(m_selection.size() == 1 && allTopLevel && !rolled && !toolOpen());
+    m_shellAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_clear->setEnabled(!m_doc.empty());
     relockForSketch();
 }
@@ -3255,14 +3400,22 @@ void MainWindow::editStep(ObjectId id)
     if (!body || toolOpen())
         return;
     setSelection(id);
-    if (padOf(id) != kInvalidId) {
-        startSketchEdit(id);  // a pad, or a Pad / Pocket step: change its sketch
+    if (const ObjectId tool = sketchedToolOf(id); tool != kInvalidId) {
+        // A pad / revolve (or its step): change its sketch. Holes: the Hole tool.
+        if (std::holds_alternative<HoleSpec>(m_doc.find(tool)->spec)) {
+            const ObjectId step = m_doc.parentOf(tool);
+            if (step != kInvalidId && sketchedToolOf(step) == tool)
+                startHole(step, true);
+        } else {
+            startSketchEdit(id);
+        }
         return;
     }
     if (!body->isBoolean())
         return;  // its size and place are in Properties
     switch (body->boolean->op) {
     case BooleanOp::Edges: startEdges(id, true); break;
+    case BooleanOp::Shell: startShell(id, true); break;
     case BooleanOp::Emboss: startEmboss(id, true); break;
     case BooleanOp::Split:
         if (m_doc.isTopLevel(id))
@@ -3494,6 +3647,7 @@ void MainWindow::createSketchBar()
         {SketchView::Tool::Circle, tr("Circle"), Qt::Key_C, tr("A circle from its middle and a point on its edge")},
         {SketchView::Tool::Arc, tr("Arc"), Qt::Key_A, tr("An arc: its middle, then its start, then its end")},
         {SketchView::Tool::Slot, tr("Slot"), Qt::Key_S, tr("A slot: the middles of its round ends, then its width")},
+        {SketchView::Tool::Point, tr("Point"), Qt::Key_P, tr("A point on its own (where a hole goes)")},
     };
     for (const auto& t : toolList) {
         QAction* a = add(t.text, t.key, t.tip, [this, tool = t.tool] { m_sketchView->setTool(tool); });
@@ -3543,19 +3697,60 @@ void MainWindow::createSketchBar()
         a->setEnabled(false);
 }
 
-ObjectId MainWindow::padOf(ObjectId id) const
+ObjectId MainWindow::sketchedToolOf(ObjectId id) const
 {
     const Body* body = m_doc.find(id);
     if (!body)
         return kInvalidId;
     if (!body->isBoolean())
-        return std::holds_alternative<PadSpec>(body->spec) ? id : kInvalidId;
+        return isSketched(body->spec) ? id : kInvalidId;
     const BooleanOp op = body->boolean->op;
     if ((op != BooleanOp::Merge && op != BooleanOp::Subtract) || body->boolean->operands.size() != 2)
         return kInvalidId;
     const ObjectId added = body->boolean->operands[1];
-    const Body* pad = m_doc.find(added);
-    return pad && !pad->isBoolean() && std::holds_alternative<PadSpec>(pad->spec) ? added : kInvalidId;
+    const Body* tool = m_doc.find(added);
+    return tool && !tool->isBoolean() && isSketched(tool->spec) ? added : kInvalidId;
+}
+
+bool MainWindow::addWithStep(ObjectId target, Body tool, BooleanOp op, bool throughAll, const std::string& label,
+                             const std::string& resultName, const Bounds& toolBox)
+{
+    const ObjectId toolId = tool.id;
+    BooleanSpec spec;
+    spec.op = op;
+    spec.operands = {target, toolId};
+    spec.throughAll = throughAll;
+    Bounds box = m_doc.worldBounds(target);
+    if (op == BooleanOp::Merge) {
+        if (toolBox.valid) {
+            box.expand(toolBox.min[0], toolBox.min[1], toolBox.min[2]);
+            box.expand(toolBox.max[0], toolBox.max[1], toolBox.max[2]);
+        }
+    }
+    const auto centre = box.center();
+    spec.pivot = {centre[0], centre[1], centre[2]};
+    Body result;
+    result.id = m_doc.allocateId();
+    result.name = m_doc.uniqueName(resultName);
+    result.boolean = spec;
+    const ObjectId resultId = result.id;
+    m_stack.beginMacro(label);
+    try {
+        m_stack.execute(std::make_unique<AddBodyCommand>(std::move(tool)));
+        m_stack.execute(std::make_unique<CombineCommand>(std::move(result)));
+    } catch (const std::exception& e) {
+        qWarning().noquote() << QString::fromStdString(label) << "failed:" << e.what();
+        m_stack.endMacro();
+        if (m_stack.canUndo() && m_doc.find(toolId))
+            m_stack.undo();
+        QMessageBox::warning(this, tr("Forge3D"),
+                             tr("%1 did not work:\n%2").arg(QString::fromStdString(label), QString::fromUtf8(e.what())));
+        return false;
+    }
+    m_stack.endMacro();
+    qInfo().noquote() << "Command:" << QString::fromStdString(m_stack.undoLabel());
+    setSelection(resultId);
+    return true;
 }
 
 void MainWindow::sketchClicked()
@@ -3566,7 +3761,7 @@ void MainWindow::sketchClicked()
         cancelDrag();
     if (m_selection.empty()) {
         m_sketchMode = SketchMode{};
-        openSketch(sketch::Sketch{}, {}, tr("Sketch on the plate"), false, false, 10.0, false, false, false);
+        openSketch(sketch::Sketch{}, {}, tr("Sketch on the plate"), false, SketchPanel::Options{});
         return;
     }
     const ObjectId id = selectedOne();
@@ -3635,39 +3830,58 @@ void MainWindow::sketchFaceClick(const QVector3D& origin, const QVector3D& direc
             q.emplace_back(p.x, p.y);
         reference.push_back(std::move(q));
     }
+    SketchPanel::Options options;
+    options.length = 5.0;
     openSketch(sketch::Sketch{}, std::move(reference),
-               tr("Sketch on a face of '%1'").arg(QString::fromStdString(body->name)), true, false, 5.0, false, false,
-               false);
+               tr("Sketch on a face of '%1'").arg(QString::fromStdString(body->name)), true, options);
 }
 
 void MainWindow::startSketchEdit(ObjectId id)
 {
-    const ObjectId padId = padOf(id);
-    const Body* pad = m_doc.find(padId);
-    if (!pad)
+    const ObjectId toolId = sketchedToolOf(id);
+    const Body* tool = m_doc.find(toolId);
+    if (!tool || std::holds_alternative<HoleSpec>(tool->spec))
         return;
     if (toolOpen())
         return;
     if (m_dragState.kind != Drag::Kind::None)
         cancelDrag();
-    const auto& spec = std::get<PadSpec>(pad->spec);
     m_sketchMode = SketchMode{};
-    m_sketchMode.pad = padId;
-    const ObjectId holder = m_doc.parentOf(padId);
-    if (holder != kInvalidId && padOf(holder) == padId)
+    m_sketchMode.pad = toolId;
+    const ObjectId holder = m_doc.parentOf(toolId);
+    if (holder != kInvalidId && sketchedToolOf(holder) == toolId)
         m_sketchMode.step = holder;
-    m_sketchMode.frame = m_doc.worldTransform(padId);
+    m_sketchMode.frame = m_doc.worldTransform(toolId);
     const Body* step = m_doc.find(m_sketchMode.step);
-    const bool pocket = step && step->boolean->op == BooleanOp::Subtract;
-    const QString name = QString::fromStdString((step ? step : pad)->name);
+    const bool cuts = step && step->boolean->op == BooleanOp::Subtract;
+    SketchPanel::Options options;
+    sketch::Sketch drawn;
+    int axis = -1;
+    if (const auto* pad = std::get_if<PadSpec>(&tool->spec)) {
+        drawn = pad->sketch;
+        options.make = cuts ? SketchPanel::Make::Pocket : SketchPanel::Make::Pad;
+        options.length = pad->length;
+        options.otherWay = cuts ? !pad->reversed : pad->reversed;
+        options.bothWays = pad->midplane;
+        options.throughAll = step && step->boolean->throughAll;
+    } else if (const auto* revolve = std::get_if<RevolveSpec>(&tool->spec)) {
+        drawn = revolve->sketch;
+        axis = revolve->axis;
+        options.make = cuts ? SketchPanel::Make::Groove : SketchPanel::Make::Revolve;
+        options.angle = revolve->angle;
+        options.otherWay = revolve->reversed;
+        options.bothWays = revolve->midplane;
+    } else {
+        return;
+    }
+    const QString name = QString::fromStdString((step ? step : tool)->name);
     // The face it was drawn on, to show again.
     std::vector<std::vector<QPointF>> reference;
     if (step) {
         try {
             const ObjectId under = step->boolean->operands.front();
             if (!m_doc.usesMeshEngine(under))
-                for (const auto& line :
-                     sketch::outlinesOnPlane(pickableShape(m_doc, under), m_sketchMode.frame)) {
+                for (const auto& line : sketch::outlinesOnPlane(pickableShape(m_doc, under), m_sketchMode.frame)) {
                     std::vector<QPointF> q;
                     for (const auto& p : line)
                         q.emplace_back(p.x, p.y);
@@ -3677,13 +3891,13 @@ void MainWindow::startSketchEdit(ObjectId id)
             qWarning() << "Finding the face under the sketch failed:" << e.what();
         }
     }
-    openSketch(spec.sketch, std::move(reference), tr("Change the sketch of '%1'").arg(name), pocket, pocket, spec.length,
-               pocket ? !spec.reversed : spec.reversed, spec.midplane, step && step->boolean->throughAll);
+    openSketch(drawn, std::move(reference), tr("Change the sketch of '%1'").arg(name), step != nullptr, options);
+    if (axis >= 0)
+        m_sketchView->pickGeo(axis);  // the line it spins round
 }
 
 void MainWindow::openSketch(const sketch::Sketch& sketch, std::vector<std::vector<QPointF>> reference,
-                            const QString& title, bool pocketAllowed, bool pocket, double length, bool otherWay,
-                            bool bothWays, bool throughAll)
+                            const QString& title, bool onFace, const SketchPanel::Options& options)
 {
     if (m_splitMode.active)
         endSplit();
@@ -3694,17 +3908,25 @@ void MainWindow::openSketch(const sketch::Sketch& sketch, std::vector<std::vecto
     m_sketchMode.active = true;
     const bool editing = m_sketchMode.pad != kInvalidId;
     m_central->setCurrentWidget(m_sketchView);
-    m_sketchPanel->start(title, pocketAllowed, pocket, length, otherWay, bothWays, throughAll, editing);
-    m_propsDockWidth = m_propsDock->width();
+    if (m_holeMode.positioning)
+        m_sketchPanel->startPositions(title);
+    else
+        m_sketchPanel->start(title, onFace, editing, options);
+    if (!m_holeMode.active)
+        m_propsDockWidth = m_propsDock->width();
     m_properties->hide();
+    m_holePanel->hide();
     m_sketchPanel->show();
     m_sketchView->start(sketch, std::move(reference));
-    if (!editing)
+    if (m_holeMode.positioning)
+        m_sketchView->setTool(SketchView::Tool::Point);
+    else if (!editing)
         m_sketchView->setTool(SketchView::Tool::Line);
     m_sketchBar->show();
     lockForSketch(true);
     m_sketchView->setFocus();
-    statusBar()->showMessage(tr("Sketching: draw a closed outline, then click Finish."));
+    statusBar()->showMessage(m_holeMode.positioning ? tr("Place the holes: points, dimensions and rules. Then Done.")
+                                                    : tr("Sketching: draw a closed outline, then click Finish."));
     // The view only knows its size once shown.
     QTimer::singleShot(0, this, [this] {
         if (m_sketchMode.active)
@@ -3722,9 +3944,15 @@ void MainWindow::updateSketchStatus()
     const auto loose = sketch::looseEnds(s);
     QString text;
     bool problem = false, held = false;
+    const std::size_t spots = sketch::loosePoints(s).size();
     if (!solved.ok) {
         text = tr("Some rules can't all be met: they're shown in red. Delete or change one.");
         problem = true;
+    } else if (m_holeMode.positioning) {
+        text = (spots == 1 ? tr("1 hole.") : tr("%1 holes.").arg(spots)) + QLatin1Char(' ') +
+               (solved.freedom == 0 ? tr("Every place is set.")
+                                    : tr("Add dimensions (Across, Up) to set their places exactly."));
+        held = solved.freedom == 0 && spots > 0;
     } else if (s.geos.empty()) {
         text = tr("Nothing drawn yet.");
     } else if (solved.freedom == 0) {
@@ -3753,15 +3981,53 @@ void MainWindow::finishSketch()
         m_sketchPanel->setMessage(tr("Some rules can't all be met (shown in red). Fix them first."), true);
         return;
     }
-    const bool pocket = m_sketchPanel->pocket();
-    PadSpec pad;
-    pad.sketch = m_sketchView->sketch();
-    pad.length = m_sketchPanel->length();
-    pad.reversed = pocket ? !m_sketchPanel->otherWay() : m_sketchPanel->otherWay();
-    pad.midplane = m_sketchPanel->bothWays();
+    if (m_holeMode.positioning) {
+        // Back to the Hole tool with the spots placed.
+        m_holeMode.spots = m_sketchView->sketch();
+        endSketch();
+        return;
+    }
+    using Make = SketchPanel::Make;
+    const Make make = m_sketchPanel->make();
+    const bool cut = m_sketchPanel->pocket();
+    PrimitiveSpec spec;
+    if (m_sketchPanel->revolve()) {
+        RevolveSpec revolve;
+        revolve.sketch = m_sketchView->sketch();
+        // The axis: the picked line, else the only helper line.
+        std::vector<int> lines;
+        for (int g : m_sketchView->pickedGeos())
+            if (revolve.sketch.geos[std::size_t(g)].kind == sketch::GeoKind::Line)
+                lines.push_back(g);
+        if (lines.empty())
+            for (std::size_t g = 0; g < revolve.sketch.geos.size(); ++g)
+                if (revolve.sketch.geos[g].kind == sketch::GeoKind::Line && revolve.sketch.geos[g].construction)
+                    lines.push_back(int(g));
+        if (lines.size() != 1) {
+            m_sketchPanel->setMessage(lines.empty() ? tr("Draw a line to spin round, and press G to make it a helper "
+                                                         "line (or pick it).")
+                                                    : tr("There are several helper lines: pick the one to spin "
+                                                         "round."),
+                                      true);
+            return;
+        }
+        revolve.axis = lines.front();
+        revolve.sketch.geos[std::size_t(revolve.axis)].construction = true;
+        revolve.angle = m_sketchPanel->angle();
+        revolve.reversed = m_sketchPanel->otherWay();
+        revolve.midplane = m_sketchPanel->bothWays();
+        spec = revolve;
+    } else {
+        PadSpec pad;
+        pad.sketch = m_sketchView->sketch();
+        pad.length = m_sketchPanel->length();
+        pad.reversed = cut ? !m_sketchPanel->otherWay() : m_sketchPanel->otherWay();
+        pad.midplane = m_sketchPanel->bothWays();
+        spec = pad;
+    }
     TopoDS_Shape solid;
     try {
-        solid = primitives::buildShape(PrimitiveSpec{pad});
+        solid = primitives::buildShape(spec);
     } catch (const std::exception& e) {
         m_sketchPanel->setMessage(QString::fromUtf8(e.what()), true);
         return;
@@ -3775,7 +4041,9 @@ void MainWindow::finishSketch()
         if (!now)
             return;
         Body after = *now;
-        after.spec = pad;
+        after.spec = spec;
+        if (typeName(now->spec) != typeName(spec) && now->name.rfind(typeName(now->spec), 0) == 0)
+            after.name = m_doc.uniqueName(typeName(spec));  // a Pad turned Revolve is named so
         const Body* step = m_doc.find(mode.step);
         if (step && step->boolean->throughAll != throughAll && step->boolean->op == BooleanOp::Subtract) {
             Body stepAfter = *step;
@@ -3795,60 +4063,37 @@ void MainWindow::finishSketch()
         return;
     }
 
+    static const char* toolNames[] = {"Pad", "Pocket", "Revolve", "Groove"};
+    static const char* resultNames[] = {"Padded", "Pocketed", "Revolved", "Grooved"};
     Body body;
     body.id = m_doc.allocateId();
-    body.spec = pad;
-    body.name = m_doc.uniqueName(pocket ? "Pocket" : "Pad");
+    body.spec = spec;
+    body.name = m_doc.uniqueName(toolNames[int(make)]);
     body.placement = placementFromTransform(mode.frame, pivotOf(body.spec));
-    const ObjectId padId = body.id;
+    const ObjectId toolId = body.id;
     if (mode.target == kInvalidId) {  // on the plate
+        if (m_sketchPanel->revolve() || std::holds_alternative<RevolveSpec>(spec)) {
+            // Spun round: the sketch is the side view, standing up (its Y is the plate's Z),
+            // and the shape sits on the plate.
+            Transform upright;
+            upright.m[1][1] = 0.0;
+            upright.m[1][2] = -1.0;
+            upright.m[2][1] = 1.0;
+            upright.m[2][2] = 0.0;
+            const Bounds box = shapeBounds(solid, upright);
+            if (box.valid)
+                upright.m[2][3] = -box.min[2];
+            body.placement = placementFromTransform(upright, pivotOf(body.spec));
+        }
         if (run(std::make_unique<AddBodyCommand>(std::move(body))))
-            setSelection(padId);
+            setSelection(toolId);
         return;
     }
     // On a face: added to (or cut from) the shape it was drawn on.
-    const Body* target = m_doc.find(mode.target);
-    if (!target)
+    if (!m_doc.find(mode.target))
         return;
-    BooleanSpec spec;
-    spec.op = pocket ? BooleanOp::Subtract : BooleanOp::Merge;
-    spec.operands = {mode.target, padId};
-    spec.throughAll = throughAll;
-    Bounds box = m_doc.worldBounds(mode.target);
-    if (!pocket) {
-        const Bounds padBox = shapeBounds(solid, mode.frame);
-        if (padBox.valid) {
-            box.expand(padBox.min[0], padBox.min[1], padBox.min[2]);
-            box.expand(padBox.max[0], padBox.max[1], padBox.max[2]);
-        }
-    }
-    const auto centre = box.center();
-    spec.pivot = {centre[0], centre[1], centre[2]};
-    Body result;
-    result.id = m_doc.allocateId();
-    result.name = m_doc.uniqueName(pocket ? "Pocketed" : "Padded");
-    result.boolean = spec;
-    const ObjectId resultId = result.id;
-    const std::string label = pocket ? "Pocket" : "Pad";
-    m_stack.beginMacro(label);
-    bool ok = true;
-    try {
-        m_stack.execute(std::make_unique<AddBodyCommand>(std::move(body)));
-        m_stack.execute(std::make_unique<CombineCommand>(std::move(result)));
-    } catch (const std::exception& e) {
-        ok = false;
-        qWarning().noquote() << QString::fromStdString(label) << "failed:" << e.what();
-        m_stack.endMacro();
-        if (m_stack.canUndo() && m_doc.find(padId))
-            m_stack.undo();
-        QMessageBox::warning(this, tr("Forge3D"), tr("%1 did not work:\n%2")
-                                                      .arg(QString::fromStdString(label), QString::fromUtf8(e.what())));
-    }
-    if (ok) {
-        m_stack.endMacro();
-        qInfo().noquote() << "Command:" << QString::fromStdString(m_stack.undoLabel());
-        setSelection(resultId);
-    }
+    addWithStep(mode.target, std::move(body), cut ? BooleanOp::Subtract : BooleanOp::Merge, throughAll,
+                toolNames[int(make)], resultNames[int(make)], shapeBounds(solid, mode.frame));
 }
 
 void MainWindow::endSketch()
@@ -3860,10 +4105,19 @@ void MainWindow::endSketch()
     lockForSketch(false);
     m_sketchBar->hide();
     m_sketchPanel->hide();
-    m_properties->show();
-    QTimer::singleShot(0, this, [this] { resizeDocks({m_propsDock}, {m_propsDockWidth}, Qt::Horizontal); });
     m_central->setCurrentWidget(m_viewport);
     statusBar()->clearMessage();
+    if (m_holeMode.positioning) {
+        // Back to the Hole tool (its panel still open).
+        m_holeMode.positioning = false;
+        m_holePanel->show();
+        showHoleSpots();
+        updateHolePreview();
+        refreshCommandState();
+        return;
+    }
+    m_properties->show();
+    QTimer::singleShot(0, this, [this] { resizeDocks({m_propsDock}, {m_propsDockWidth}, Qt::Horizontal); });
     refreshScene();
     refreshCommandState();
 }
@@ -3909,6 +4163,435 @@ void MainWindow::relockForSketch()
             a->setEnabled(false);
         }
     }
+}
+
+// ---- Holes ------------------------------------------------------------------------
+
+namespace {
+
+gp_Trsf toGp(const Transform& t)
+{
+    gp_Trsf trsf;
+    trsf.SetValues(t.m[0][0], t.m[0][1], t.m[0][2], t.m[0][3],  //
+                   t.m[1][0], t.m[1][1], t.m[1][2], t.m[1][3],  //
+                   t.m[2][0], t.m[2][1], t.m[2][2], t.m[2][3]);
+    return trsf;
+}
+
+// A shape as it stands on the plate (the whole step, rounding and all).
+TopoDS_Shape inPlate(const Document& doc, ObjectId id)
+{
+    return BRepBuilderAPI_Transform(doc.shape(id), toGp(doc.worldTransform(id)), true).Shape();
+}
+
+}  // namespace
+
+void MainWindow::holeClicked()
+{
+    if (toolOpen())
+        return;
+    const ObjectId id = selectedOne();
+    if (id == kInvalidId || m_selection.size() != 1 || !m_doc.isTopLevel(id)) {
+        statusBar()->showMessage(tr("Hole: select one shape on the plate first."), 6000);
+        return;
+    }
+    if (rolledBackSelected()) {
+        statusBar()->showMessage(tr("'%1' is rolled back: roll it forward to the end before drilling it.")
+                                     .arg(QString::fromStdString(m_doc.find(id)->name)),
+                                 8000);
+        return;
+    }
+    if (m_doc.usesMeshEngine(id)) {
+        QMessageBox::information(this, tr("Forge3D"),
+                                 tr("Holes go into solid shapes made in Forge3D, not imported meshes or shapes made "
+                                    "with them. (Subtract a cylinder from a mesh instead.)"));
+        return;
+    }
+    startHole(id, false);
+}
+
+void MainWindow::startHole(ObjectId target, bool editing)
+{
+    const Body* body = m_doc.find(target);
+    if (!body)
+        return;
+    if (m_dragState.kind != Drag::Kind::None)
+        cancelDrag();
+    HoleMode mode;
+    mode.active = true;
+    mode.editing = editing;
+    mode.target = target;
+    HoleSpec hole = sketch::sizedAs(HoleSpec{}, "M3", false);
+    bool throughAll = false;
+    try {
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        struct RestoreCursor {
+            ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
+        } restore;
+        if (editing) {
+            if (!body->isBoolean() || body->boolean->operands.size() != 2)
+                return;
+            const ObjectId under = body->boolean->operands[0];
+            mode.tool = body->boolean->operands[1];
+            const Body* tool = m_doc.find(mode.tool);
+            if (!tool || !std::holds_alternative<HoleSpec>(tool->spec))
+                return;
+            hole = std::get<HoleSpec>(tool->spec);
+            throughAll = body->boolean->throughAll;
+            mode.shape = inPlate(m_doc, under);
+            mode.frame = m_doc.worldTransform(mode.tool);
+            mode.placed = true;
+            mode.spots = hole.sketch;
+        } else {
+            mode.shape = inPlate(m_doc, target);
+            // Deep enough for most things this size, not past half its height.
+            const auto size = m_doc.worldBounds(target).size();
+            hole.depth = std::clamp(std::round(double(*std::min_element(size.begin(), size.end())) * 0.6), 1.0, 20.0);
+        }
+        mode.finder = std::make_shared<edges::FaceFinder>(mode.shape);
+        const auto size = m_doc.worldBounds(history::objectOf(m_doc, target)).size();
+        mode.size = std::sqrt(double(size[0]) * size[0] + double(size[1]) * size[1] + double(size[2]) * size[2]);
+    } catch (const std::exception& e) {
+        QMessageBox::information(this, tr("Forge3D"), QString::fromUtf8(e.what()));
+        return;
+    }
+    m_holeMode = std::move(mode);
+    const QString name = QString::fromStdString(body->name);
+    m_holePanel->start(editing ? tr("Change the holes in '%1'").arg(name) : tr("Holes in '%1'").arg(name), hole,
+                       throughAll, editing);
+    m_propsDockWidth = m_propsDock->width();
+    m_properties->hide();
+    m_holePanel->show();
+    statusBar()->showMessage(editing ? tr("Hole: click the face to add holes; change the sizes; then Apply.")
+                                     : tr("Hole: click the flat face where the first hole goes. Esc cancels."));
+    showHoleSpots();
+    updateHolePreview();
+    refreshCommandState();
+}
+
+HoleSpec MainWindow::currentHole() const
+{
+    HoleSpec h = m_holePanel->settings();
+    h.sketch = m_holeMode.spots;
+    return h;
+}
+
+void MainWindow::showHoleSpots()
+{
+    std::vector<sketch::Point> spots;
+    for (int p : sketch::loosePoints(m_holeMode.spots))
+        spots.push_back(m_holeMode.spots.points[std::size_t(p)]);
+    m_holePanel->setSpots(spots, m_holeMode.placed);
+}
+
+void MainWindow::holeClick(const QVector3D& origin, const QVector3D& direction)
+{
+    if (m_holeMode.positioning)
+        return;
+    const QVector3D dir = direction.normalized();
+    const auto hit = m_holeMode.finder->under({origin.x(), origin.y(), origin.z()}, {dir.x(), dir.y(), dir.z()});
+    if (!hit) {
+        statusBar()->showMessage(tr("Hole: click on the shape itself."), 4000);
+        return;
+    }
+    if (!m_holeMode.placed) {
+        const auto plane = sketch::planeOfFace(m_holeMode.shape, hit->face);
+        if (!plane) {
+            statusBar()->showMessage(tr("Hole: that face is curved. Click a flat face."), 6000);
+            return;
+        }
+        m_holeMode.frame = plane->frame;
+        m_holeMode.placed = true;
+    }
+    const Vec3 local = m_holeMode.frame.inverse().apply(hit->point);
+    if (std::abs(local[2]) > std::max(m_holeMode.size * 1e-4, 1e-3)) {
+        statusBar()->showMessage(tr("Hole: click on the same flat face as the other holes (or Cancel to start "
+                                    "again on another)."),
+                                 6000);
+        return;
+    }
+    const auto tenth = [](double v) { return std::round(v * 10.0) / 10.0; };
+    sketch::addPoint(m_holeMode.spots, {tenth(local[0]), tenth(local[1])});
+    statusBar()->showMessage(tr("Hole: click to add more holes on this face, or type their places. Then Apply."));
+    showHoleSpots();
+    m_holeTimer->start(0);
+}
+
+void MainWindow::updateHolePreview()
+{
+    if (!m_holeMode.active || m_holeMode.positioning)
+        return;
+    m_holeTimer->stop();
+    m_holeMode.preview.reset();
+    bool ok = false;
+    if (sketch::loosePoints(m_holeMode.spots).empty()) {
+        m_holePanel->setStatus(m_holeMode.placed ? tr("Click on the face to add a hole.")
+                                                 : tr("Click the flat face where the first hole goes."),
+                               false);
+    } else {
+        try {
+            QApplication::setOverrideCursor(Qt::WaitCursor);
+            struct RestoreCursor {
+                ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
+            } restore;
+            HoleSpec h = currentHole();
+            if (m_holePanel->throughAll())
+                h.depth = std::max(h.depth, m_holeMode.size * 2.0);
+            const TopoDS_Shape cutter =
+                BRepBuilderAPI_Transform(sketch::holeShape(h), toGp(m_holeMode.frame), true).Shape();
+            BRepAlgoAPI_Cut cut(m_holeMode.shape, cutter);
+            if (!cut.IsDone() || cut.HasErrors())
+                throw GeometryError("The holes could not be cut here");
+            m_holeMode.preview = std::make_shared<const Mesh>(tessellate(cut.Shape()));
+            m_holePanel->setStatus(tr("This is how it will look."), false);
+            ok = true;
+        } catch (const std::exception& e) {
+            m_holePanel->setStatus(QString::fromUtf8(e.what()), true);
+        } catch (const Standard_Failure&) {
+            m_holePanel->setStatus(tr("The holes could not be cut here."), true);
+        }
+    }
+    m_holePanel->setApplyEnabled(ok);
+    refreshScene();
+}
+
+void MainWindow::applyHole()
+{
+    if (!m_holeMode.active)
+        return;
+    const HoleSpec hole = currentHole();
+    try {
+        (void)sketch::holeShape(hole);
+    } catch (const std::exception& e) {
+        m_holePanel->setStatus(QString::fromUtf8(e.what()), true);
+        return;
+    }
+    const bool throughAll = m_holePanel->throughAll();
+    const HoleMode mode = m_holeMode;
+    endHole();
+    if (mode.editing) {
+        const Body* tool = m_doc.find(mode.tool);
+        const Body* step = m_doc.find(mode.target);
+        if (!tool || !step)
+            return;
+        Body after = *tool;
+        after.spec = hole;
+        if (step->boolean->throughAll != throughAll) {
+            Body stepAfter = *step;
+            stepAfter.boolean->throughAll = throughAll;
+            m_stack.beginMacro("Change holes");
+            try {
+                m_stack.execute(std::make_unique<EditBodyCommand>(*tool, after, "Change holes"));
+                m_stack.execute(std::make_unique<EditBodyCommand>(*m_doc.find(mode.target), stepAfter, "Through all"));
+            } catch (const std::exception& e) {
+                qWarning() << "Changing the holes failed:" << e.what();
+            }
+            m_stack.endMacro();
+        } else {
+            run(std::make_unique<EditBodyCommand>(*tool, after, "Change holes"));
+        }
+        setSelection(history::objectOf(m_doc, mode.target));
+        return;
+    }
+    Body tool;
+    tool.id = m_doc.allocateId();
+    tool.spec = hole;
+    tool.name = m_doc.uniqueName("Hole");
+    tool.placement = placementFromTransform(mode.frame, pivotOf(tool.spec));
+    addWithStep(mode.target, std::move(tool), BooleanOp::Subtract, throughAll, "Hole", "Drilled", Bounds{});
+}
+
+void MainWindow::endHole()
+{
+    if (!m_holeMode.active)
+        return;
+    if (m_holeMode.positioning)
+        endSketch();
+    m_holeTimer->stop();
+    m_holeMode = HoleMode{};
+    m_holePanel->hide();
+    m_properties->show();
+    QTimer::singleShot(0, this, [this] { resizeDocks({m_propsDock}, {m_propsDockWidth}, Qt::Horizontal); });
+    statusBar()->clearMessage();
+    refreshScene();
+    refreshCommandState();
+}
+
+// ---- Shell ------------------------------------------------------------------------
+
+void MainWindow::startShell(ObjectId target, bool editing)
+{
+    const Body* body = m_doc.find(target);
+    if (!body)
+        return;
+    if (m_dragState.kind != Drag::Kind::None)
+        cancelDrag();
+    ShellMode mode;
+    mode.active = true;
+    mode.editing = editing;
+    mode.target = target;
+    ShellFinish finish;
+    try {
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        struct RestoreCursor {
+            ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
+        } restore;
+        mode.shape = editing ? pickableShape(m_doc, target) : inPlate(m_doc, target);
+        mode.found = edges::analyse(mode.shape);
+        mode.finder = std::make_shared<edges::FaceFinder>(mode.shape);
+        if (editing) {
+            if (!body->isBoolean() || body->boolean->op != BooleanOp::Shell)
+                return;
+            finish = shellInPlate(m_doc, target);
+            const std::vector<int> found = pickedFaces(m_doc, target);
+            for (std::size_t i = 0; i < found.size(); ++i)
+                if (found[i] >= 0)
+                    mode.picks.push_back({found[i], shell::refFor(mode.shape, found[i], finish.open[i].point)});
+        } else {
+            auto sides = m_doc.worldBounds(target).size();
+            std::sort(sides.begin(), sides.end());
+            finish.thickness = std::clamp(std::round(double(sides[0]) * 0.1 * 2.0) / 2.0, 0.5, 3.0);
+        }
+    } catch (const std::exception& e) {
+        QMessageBox::information(this, tr("Forge3D"), QString::fromUtf8(e.what()));
+        return;
+    }
+    m_shellMode = std::move(mode);
+    const QString name = QString::fromStdString(body->name);
+    m_shellPanel->start(editing ? tr("Change the shell of '%1'").arg(name) : tr("Shell '%1'").arg(name), editing,
+                        finish.thickness, finish.outward);
+    m_propsDockWidth = m_propsDock->width();
+    m_properties->hide();
+    m_shellPanel->show();
+    statusBar()->showMessage(tr("Shell: click the faces to leave open, then click Apply. Esc cancels."));
+    rebuildShellHighlights();
+    updateShellPreview();
+    refreshCommandState();
+}
+
+void MainWindow::shellClick(const QVector3D& origin, const QVector3D& direction)
+{
+    const QVector3D dir = direction.normalized();
+    const auto hit = m_shellMode.finder->under({origin.x(), origin.y(), origin.z()}, {dir.x(), dir.y(), dir.z()});
+    if (!hit)
+        return;
+    auto& picks = m_shellMode.picks;
+    const auto it = std::find_if(picks.begin(), picks.end(), [&](const auto& p) { return p.face == hit->face; });
+    if (it != picks.end())
+        picks.erase(it);  // clicked again: closed again
+    else
+        picks.push_back({hit->face, shell::refFor(m_shellMode.shape, hit->face, hit->point)});
+    rebuildShellHighlights();
+    m_shellTimer->start(0);
+}
+
+void MainWindow::rebuildShellHighlights()
+{
+    const float radius = std::max(0.02f, m_viewport->camera().distance() * 0.0022f);
+    std::vector<const std::vector<Vec3>*> lines;
+    for (const auto& pick : m_shellMode.picks)
+        if (std::size_t(pick.face) < m_shellMode.found.faceEdges.size())
+            for (int e : m_shellMode.found.faceEdges[std::size_t(pick.face)])
+                lines.push_back(&m_shellMode.found.edges[std::size_t(e)].polyline);
+    m_shellMode.pickedLines = lines.empty() ? nullptr : tubes(lines, radius);
+    m_shellPanel->setOpenCount(int(m_shellMode.picks.size()));
+}
+
+std::optional<BooleanSpec> MainWindow::currentShellSpec() const
+{
+    if (!m_shellMode.active)
+        return std::nullopt;
+    ShellFinish f;
+    f.thickness = m_shellPanel->thickness();
+    f.outward = m_shellPanel->outward();
+    for (const auto& pick : m_shellMode.picks)
+        f.open.push_back(pick.ref);
+    if (m_shellMode.editing)
+        return withShell(m_doc, m_shellMode.target, f).boolean;
+    return shellSpec(m_doc, m_shellMode.target, f);
+}
+
+void MainWindow::updateShellPreview()
+{
+    if (!m_shellMode.active)
+        return;
+    m_shellTimer->stop();
+    m_shellMode.preview.reset();
+    bool ok = false;
+    try {
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        struct RestoreCursor {
+            ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
+        } restore;
+        if (const auto spec = currentShellSpec()) {
+            m_shellMode.preview = m_doc.previewMesh(*spec);
+            m_shellPanel->setStatus(tr("This is how it will look."), false);
+            ok = true;
+        }
+    } catch (const std::exception& e) {
+        m_shellPanel->setStatus(QString::fromUtf8(e.what()), true);
+    }
+    m_shellPanel->setApplyEnabled(ok);
+    refreshScene();
+}
+
+void MainWindow::applyShell()
+{
+    if (!m_shellMode.active)
+        return;
+    std::optional<BooleanSpec> spec;
+    try {
+        spec = currentShellSpec();
+        if (!spec)
+            return;
+        m_doc.previewMesh(*spec);
+    } catch (const std::exception& e) {
+        QMessageBox::warning(this, tr("Forge3D"), tr("The shape could not be hollowed out:\n%1")
+                                                      .arg(QString::fromUtf8(e.what())));
+        return;
+    }
+    const ObjectId target = m_shellMode.target;
+    if (m_shellMode.editing) {
+        const Body* now = m_doc.find(target);
+        if (!now)
+            return endShell();
+        const Body before = *now;
+        Body after = before;
+        after.boolean = *spec;
+        endShell();
+        run(std::make_unique<EditBodyCommand>(before, after, "Change shell"));
+        setSelection(history::objectOf(m_doc, target));
+        return;
+    }
+    Body result;
+    result.id = m_doc.allocateId();
+    result.name = m_doc.uniqueName("Shelled");
+    result.boolean = *spec;
+    const ObjectId id = result.id;
+    endShell();
+    if (!m_doc.isTopLevel(target)) {
+        // Rolled back: the step goes in at the bar.
+        const ObjectId object = history::objectOf(m_doc, target);
+        if (run(std::make_unique<InsertStepCommand>(std::move(result), m_doc.parentOf(target))))
+            setSelection(object);
+        return;
+    }
+    if (run(std::make_unique<CombineCommand>(std::move(result))))
+        setSelection(id);
+}
+
+void MainWindow::endShell()
+{
+    if (!m_shellMode.active)
+        return;
+    m_shellTimer->stop();
+    m_shellMode = ShellMode{};
+    m_shellPanel->hide();
+    m_properties->show();
+    QTimer::singleShot(0, this, [this] { resizeDocks({m_propsDock}, {m_propsDockWidth}, Qt::Horizontal); });
+    statusBar()->clearMessage();
+    refreshScene();
+    refreshCommandState();
 }
 
 }  // namespace forge::app

@@ -114,6 +114,9 @@ void SketchView::setTool(Tool tool)
     case Tool::Slot:
         emit message(tr("Slot: click the middle of one round end, then the other, then how wide."), false);
         break;
+    case Tool::Point:
+        emit message(tr("Point: click to put a point (a hole goes at each point on its own)."), false);
+        break;
     }
     update();
 }
@@ -333,6 +336,14 @@ void SketchView::clickTool(const Snap& snapIn)
     Snap snap = snapIn;
     switch (m_tool) {
     case Tool::Select: return;
+    case Tool::Point: {
+        if (snap.point >= 0)
+            return;  // already a point there
+        remember();
+        addPoint(m_sketch, snap.at);
+        solveNow();
+        return;
+    }
     case Tool::Line: {
         if (m_clicks.empty()) {
             m_clicks.push_back(snap);
@@ -629,7 +640,7 @@ void SketchView::editDimension(int index)
                                              : tr("Distance (mm):");
     bool accepted = false;
     const double shown = signedValue ? std::abs(c.value) : c.value;
-    const double value = QInputDialog::getDouble(this, tr("Dimension"), label, shown, angle ? -360.0 : 0.001,
+    const double value = QInputDialog::getDouble(this, tr("Dimension"), label, shown, angle ? -360.0 : signedValue ? 0.0 : 0.001,
                                                  angle ? 360.0 : 100000.0, 3, &accepted);
     if (!accepted)
         return;
@@ -653,6 +664,14 @@ void SketchView::editDimension(int index)
     solveNow();
 }
 
+void SketchView::pickGeo(int geo)
+{
+    m_picks.clear();
+    if (geo >= 0 && std::size_t(geo) < m_sketch.geos.size())
+        m_picks.push_back({Pick::Geo, geo});
+    update();
+}
+
 void SketchView::toggleConstruction()
 {
     const std::vector<int> geos = picked(Pick::Geo);
@@ -672,18 +691,27 @@ void SketchView::deleteSelection()
     if (m_picks.empty())
         return;
     remember();
-    std::vector<int> geos = picked(Pick::Geo), rules = picked(Pick::Rule);
-    // Points take the curves using them with them.
+    std::vector<int> geos = picked(Pick::Geo);
+    const std::vector<int> rules = picked(Pick::Rule);
+    // Picked points take the curves using them with them; points on their own just go.
+    const std::vector<int> loose = loosePoints(m_sketch);
+    std::vector<int> lonePicked;
     for (int p : picked(Pick::Point)) {
         if (p == 0)
             continue;
+        if (std::find(loose.begin(), loose.end(), p) != loose.end()) {
+            lonePicked.push_back(p);
+            continue;
+        }
         for (std::size_t g = 0; g < m_sketch.geos.size(); ++g) {
             const Geo& geo = m_sketch.geos[g];
             if (geo.a == p || (geo.kind != GeoKind::Circle && geo.b == p) || (geo.kind == GeoKind::Arc && geo.c == p))
                 geos.push_back(int(g));
         }
     }
+    // Each removal renumbers only its own kind (and lone points belong to no curve).
     removeConstraints(m_sketch, rules);
+    removePoints(m_sketch, lonePicked);
     removeGeos(m_sketch, geos);
     m_picks.clear();
     m_hover.reset();

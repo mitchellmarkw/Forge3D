@@ -2,6 +2,7 @@
 #include "forge/core/Document.h"
 
 #include "forge/core/Edges.h"
+#include "forge/core/Shell.h"
 #include "forge/core/Emboss.h"
 
 #include "forge/core/Export.h"
@@ -196,7 +197,12 @@ void Document::validateBoolean(const Body& body, const std::map<ObjectId, Object
 {
     const auto& ops = body.boolean->operands;
     const BooleanOp op = body.boolean->op;
-    if (op == BooleanOp::Edges) {
+    if (op == BooleanOp::Shell) {
+        if (ops.size() != 1)
+            throw std::invalid_argument("Shell works on exactly one shape");
+        if (!body.boolean->shell)
+            throw std::invalid_argument("Shell needs a wall thickness");
+    } else if (op == BooleanOp::Edges) {
         if (ops.size() != 1)
             throw std::invalid_argument("Edges works on exactly one shape");
         if (!body.boolean->edges || body.boolean->edges->edges.empty())
@@ -452,6 +458,14 @@ TopoDS_Shape Document::combine(const BooleanSpec& spec) const
     try {
         if (op == BooleanOp::Emboss)
             throw GeometryError("Emboss is worked out by the mesh engine");
+        if (op == BooleanOp::Shell) {
+            if (!spec.shell)
+                throw GeometryError("No wall thickness was set");
+            const ObjectId part = operands.at(0);
+            return shell::apply(
+                BRepBuilderAPI_Transform(shape(part), toTrsf(localTransform(part)), /*copy=*/true).Shape(),
+                *spec.shell);
+        }
         if (op == BooleanOp::Edges) {
             if (!spec.edges)
                 throw GeometryError("No edges were picked");
@@ -546,6 +560,7 @@ TopoDS_Shape Document::combine(const BooleanSpec& spec) const
             case BooleanOp::Group:
             case BooleanOp::Emboss:
             case BooleanOp::Edges:
+            case BooleanOp::Shell:
                 break;  // handled above / by the mesh engine
             }
         }
@@ -637,7 +652,7 @@ TopoDS_Shape Document::previewCombine(const BooleanSpec& spec) const
         if (!find(part))
             throw std::out_of_range("No body with id " + std::to_string(part));
     if ((spec.op == BooleanOp::Split || spec.op == BooleanOp::Mirror || spec.op == BooleanOp::Emboss ||
-         spec.op == BooleanOp::Edges) &&
+         spec.op == BooleanOp::Edges || spec.op == BooleanOp::Shell) &&
         spec.operands.size() != 1)
         throw std::invalid_argument(toString(spec.op) + " works on exactly one shape");
     return combine(spec);
@@ -701,6 +716,7 @@ BooleanSpec Document::passThrough(const BooleanSpec& spec)
     pass.op = BooleanOp::Group;
     pass.emboss.reset();
     pass.edges.reset();
+    pass.shell.reset();
     switch (spec.op) {
     case BooleanOp::Merge:
     case BooleanOp::Intersect:
@@ -732,7 +748,21 @@ std::optional<std::pair<PrimitiveSpec, Transform>> Document::throughTool(ObjectI
         height = &t->height;
     else if (auto* x = std::get_if<TextSpec>(&spec))
         height = &x->height;
-    else if (auto* pad = std::get_if<PadSpec>(&spec)) {
+    else if (auto* hole = std::get_if<HoleSpec>(&spec)) {
+        // Holes go down from the face: as deep as the first part reaches below it.
+        const Transform place = localTransform(tool);
+        const Transform toTool = place.inverse();
+        double lo = 0.0, hi = 0.0;
+        for (int k = 0; k < 8; ++k) {
+            const Vec3 corner{k & 1 ? reach.max[0] : reach.min[0], k & 2 ? reach.max[1] : reach.min[1],
+                              k & 4 ? reach.max[2] : reach.min[2]};
+            const double z = toTool.apply(corner)[2];
+            lo = std::min(lo, z);
+            hi = std::max(hi, z);
+        }
+        hole->depth = std::max(-lo, 0.0) + 1.0 + 0.01 * (hi - lo);
+        return std::pair{spec, place};
+    } else if (auto* pad = std::get_if<PadSpec>(&spec)) {
         pad->reversed = false;  // stretched from its base up, like the others
         pad->midplane = false;
         height = &pad->length;
@@ -935,6 +965,8 @@ MeshSolid Document::combineMeshes(const BooleanSpec& spec) const
     case BooleanOp::Edges:
         throw GeometryError("Rounding and chamfering work on solid shapes, not on imported meshes or shapes made "
                             "with them.");
+    case BooleanOp::Shell:
+        throw GeometryError("Shell works on solid shapes, not on imported meshes or shapes made with them.");
     case BooleanOp::Emboss: {
         if (!spec.emboss)
             throw GeometryError("Emboss has no words");
@@ -1115,7 +1147,7 @@ Vec3 Document::visibleCentre(ObjectId id) const
     if (!body)
         throw std::out_of_range("No body with id " + std::to_string(id));
     // A pad's sketch can sit anywhere around its origin: the middle of its box.
-    if (!body->isBoolean() && !std::holds_alternative<PadSpec>(body->spec))
+    if (!body->isBoolean() && !isSketched(body->spec))
         return pivotOf(body->spec);
     const Bounds b = localBounds(id);
     if (!b.valid)

@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "forge/core/Transform.h"
+#include "forge/core/Primitives.h"
+
+#include <BRepBndLib.hxx>
+#include <Bnd_Box.hxx>
 
 #include <algorithm>
 #include <cmath>
@@ -109,6 +113,21 @@ Vec3 halfExtents(const PrimitiveSpec& spec)
                     }
                 return {std::max(x, 0.5), std::max(y, 0.5), p.length / 2.0};
             }
+            else if constexpr (std::is_same_v<T, RevolveSpec> || std::is_same_v<T, HoleSpec>) {
+                // As far as the solid reaches from the sketch origin, either way.
+                try {
+                    Bnd_Box box;
+                    BRepBndLib::Add(primitives::buildShape(PrimitiveSpec{p}), box);
+                    if (box.IsVoid())
+                        return {0.5, 0.5, 0.5};
+                    double x0, y0, z0, x1, y1, z1;
+                    box.Get(x0, y0, z0, x1, y1, z1);
+                    return {std::max({std::abs(x0), std::abs(x1), 0.5}), std::max({std::abs(y0), std::abs(y1), 0.5}),
+                            std::max({std::abs(z0), std::abs(z1), 0.5})};
+                } catch (const std::exception&) {
+                    return {0.5, 0.5, 0.5};
+                }
+            }
             else {
                 static_assert(std::is_same_v<T, PyramidSpec>, "halfExtents: unhandled primitive");
                 return {std::max(p.baseWidth, p.topWidth) / 2.0, std::max(p.baseDepth, p.topDepth) / 2.0,
@@ -122,7 +141,7 @@ Vec3 pivotOf(const PrimitiveSpec& spec)
 {
     // A pad turns about its sketch's origin, so changing its length never moves the
     // sketch plane.
-    if (std::holds_alternative<PadSpec>(spec))
+    if (isSketched(spec))
         return {0.0, 0.0, 0.0};
     return {0.0, 0.0, halfExtents(spec)[2]};
 }
@@ -369,6 +388,18 @@ void resizeOne(PrimitiveSpec& spec, int axis, double value, const ResizeOptions&
                     p.length = value;
                 } else {
                     // Sketches resize evenly across (circles stay circles).
+                    const double current = 2.0 * halfExtents(PrimitiveSpec{p})[std::size_t(axis)];
+                    if (current > 0.0)
+                        sketch::scale(p.sketch, value / current, value / current);
+                }
+            } else if constexpr (std::is_same_v<T, RevolveSpec>) {
+                const double current = 2.0 * halfExtents(PrimitiveSpec{p})[std::size_t(axis)];
+                if (current > 0.0)
+                    sketch::scale(p.sketch, value / current, value / current);
+            } else if constexpr (std::is_same_v<T, HoleSpec>) {
+                if (axis == 2) {
+                    p.depth = value;
+                } else {
                     const double current = 2.0 * halfExtents(PrimitiveSpec{p})[std::size_t(axis)];
                     if (current > 0.0)
                         sketch::scale(p.sketch, value / current, value / current);

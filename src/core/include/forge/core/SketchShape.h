@@ -19,6 +19,26 @@ TopoDS_Shape faces(const Sketch& s);
 // The pad's solid.
 TopoDS_Shape padShape(const PadSpec& pad);
 
+// The revolve's solid: the sketch's outlines spun around its axis line.
+TopoDS_Shape revolveShape(const RevolveSpec& revolve);
+// The cutters of a Hole step: one per loose point of its sketch, going down (-Z) from
+// a little above the sketch plane.
+TopoDS_Shape holeShape(const HoleSpec& hole);
+
+// Standard metric sizes for holes (ISO): clearance (bolt passes, medium fit), tap
+// drill, and counterbore / countersink for socket-head / flat-head screws.
+struct HoleSize {
+    const char* name;
+    double clearance;
+    double tapDrill;
+    double headDiameter;
+    double headDepth;
+    double countersinkDiameter;
+};
+const std::vector<HoleSize>& holeSizes();
+// The hole with a standard size's diameters (size empty: left as it is).
+HoleSpec sizedAs(HoleSpec hole, const std::string& size, bool tapped);
+
 // A flat face to sketch on: where the sketch sits (sketch -> shape coordinates: its
 // origin at the middle of the face, Z pointing out of the solid, X along the plate's X
 // on faces that look up or down, else level), and the face's outlines in sketch
