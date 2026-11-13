@@ -14,6 +14,7 @@
 #include "forge/core/Sketch.h"
 #include "forge/core/SketchShape.h"
 
+#include <BRepCheck_Analyzer.hxx>
 #include <BRepGProp.hxx>
 #include <GProp_GProps.hxx>
 #include <TopExp.hxx>
@@ -645,5 +646,46 @@ TEST_CASE("Pattern: a feature repeated on its part, and linked to it", "[pattern
         r.spacing1 = 10;
         const ObjectId rows = repeat(d2, s2, grooved, r);
         CHECK_THAT(40 * 40 * 10 - volumeOf(d2.shape(rows)), WithinRel(3 * 40.0, 1e-2));
+    }
+}
+
+TEST_CASE("Pattern: Follow grooves round a cylinder, apart and overlapping", "[pattern]")
+{
+    // 4 round grooves round a cylinder: 16 mm long (apart), and 60 mm (overlapping into
+    // a ring). Overlapping copies used to take minutes and come out broken.
+    for (double length : {16.0, 60.0}) {
+        Document doc;
+        CommandStack stack(doc);
+        Body cylinder;
+        cylinder.id = doc.allocateId();
+        cylinder.name = "Cylinder";
+        cylinder.spec = CylinderSpec{10, 10, 30};
+        stack.execute(std::make_unique<AddBodyCommand>(cylinder));
+        FollowFinish f;
+        f.origin = {0, -10, 15};
+        f.xAxis = {1, 0, 0};
+        f.normal = {0, -1, 0};
+        f.profile = FollowProfile::Round;
+        f.width = 2;
+        f.depth = 1;
+        line(f.path, sketch::addPoint(f.path, {-length / 2, 0}), sketch::addPoint(f.path, {length / 2, 0}));
+        ObjectId grooved = kInvalidId;
+        removed(doc, stack, cylinder.id, f, &grooved);
+        PatternFinish p;
+        p.feature = true;
+        p.kind = PatternKind::Circle;
+        p.count = 4;
+        p.centre = {0, 0, 15};
+        const auto started = std::chrono::steady_clock::now();
+        const TopoDS_Shape shape = doc.previewCombine(patternSpec(doc, grooved, p));
+        const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+        INFO("length " << length);
+        CHECK(BRepCheck_Analyzer(shape).IsValid());
+        CHECK(seconds < 20.0);
+        // About a half-round (pi / 2 square mm) 64 mm long either way: four 16s, or a
+        // full ring of four overlapping 60s.
+        const double cut = pi * 100 * 30 - volumeOf(shape);
+        CHECK(cut > 85.0);
+        CHECK(cut < 105.0);
     }
 }

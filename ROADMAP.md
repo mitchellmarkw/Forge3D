@@ -33,7 +33,7 @@ Gate to Phase 2: a new user prints a customised part within 10 minutes.
 | 8 | Revolve / Groove, Hole (plain, counterbored, countersunk, metric sizes), Shell | Done (0.17.0) |
 | 9 | Sketch on middle planes (grooves round parts); ribbon with Build / Design / Sculpt / Print tabs | Done (0.18.0) |
 | 10 | Follow: grooves and ridges along a path drawn on the surface (flat or curved); round / square / V / drawn cross-sections | Done (0.19.1) |
-| 11 | Patterns: linked rows, grids and circles of a shape or its last feature | **Delivered for testing** |
+| 11 | Patterns: linked rows, grids and circles of a shape or its last feature | Done (0.20.1) |
 
 Separate track: sculpt-engine prototype (one Draw brush on a 1M-triangle mesh at 60 fps).
 
