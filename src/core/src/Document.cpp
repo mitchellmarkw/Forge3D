@@ -4,6 +4,7 @@
 #include "forge/core/Edges.h"
 #include "forge/core/Shell.h"
 #include "forge/core/Follow.h"
+#include "forge/core/Pattern.h"
 #include "forge/core/Emboss.h"
 
 #include "forge/core/Export.h"
@@ -198,7 +199,12 @@ void Document::validateBoolean(const Body& body, const std::map<ObjectId, Object
 {
     const auto& ops = body.boolean->operands;
     const BooleanOp op = body.boolean->op;
-    if (op == BooleanOp::Follow) {
+    if (op == BooleanOp::Pattern) {
+        if (ops.size() != 1)
+            throw std::invalid_argument("Pattern works on exactly one shape");
+        if (!body.boolean->pattern)
+            throw std::invalid_argument("Pattern needs its settings");
+    } else if (op == BooleanOp::Follow) {
         if (ops.size() != 1)
             throw std::invalid_argument("Follow works on exactly one shape");
         if (!body.boolean->follow)
@@ -464,6 +470,8 @@ TopoDS_Shape Document::combine(const BooleanSpec& spec) const
     try {
         if (op == BooleanOp::Emboss)
             throw GeometryError("Emboss is worked out by the mesh engine");
+        if (op == BooleanOp::Pattern)
+            return patternShape(spec);
         if (op == BooleanOp::Follow) {
             if (!spec.follow)
                 throw GeometryError("No path was drawn");
@@ -576,6 +584,7 @@ TopoDS_Shape Document::combine(const BooleanSpec& spec) const
             case BooleanOp::Edges:
             case BooleanOp::Shell:
             case BooleanOp::Follow:
+            case BooleanOp::Pattern:
                 break;  // handled above / by the mesh engine
             }
         }
@@ -668,7 +677,7 @@ TopoDS_Shape Document::previewCombine(const BooleanSpec& spec) const
             throw std::out_of_range("No body with id " + std::to_string(part));
     if ((spec.op == BooleanOp::Split || spec.op == BooleanOp::Mirror || spec.op == BooleanOp::Emboss ||
          spec.op == BooleanOp::Edges || spec.op == BooleanOp::Shell ||
-         spec.op == BooleanOp::Follow) &&
+         spec.op == BooleanOp::Follow || spec.op == BooleanOp::Pattern) &&
         spec.operands.size() != 1)
         throw std::invalid_argument(toString(spec.op) + " works on exactly one shape");
     return combine(spec);
@@ -734,6 +743,7 @@ BooleanSpec Document::passThrough(const BooleanSpec& spec)
     pass.edges.reset();
     pass.shell.reset();
     pass.follow.reset();
+    pass.pattern.reset();
     switch (spec.op) {
     case BooleanOp::Merge:
     case BooleanOp::Intersect:
@@ -946,6 +956,117 @@ MeshSolid Document::meshSolid(ObjectId id) const
     return built;
 }
 
+namespace {
+const char* kNotRepeatable =
+    "Only a step that adds or cuts a shape (a hole, pad, pocket, revolve, groove, or a shape merged or subtracted) "
+    "or a Follow groove can be repeated as a feature.";
+}
+
+TopoDS_Shape Document::patternShape(const BooleanSpec& spec) const
+{
+    if (!spec.pattern)
+        throw GeometryError("No pattern was set");
+    const PatternFinish& f = *spec.pattern;
+    const ObjectId part = spec.operands.at(0);
+    const Transform partPlace = localTransform(part);
+    const std::vector<Transform> where = pattern::placements(f);
+    if (!f.feature) {
+        // Copies of the whole part, side by side (like a Group).
+        BRep_Builder builder;
+        TopoDS_Compound group;
+        builder.MakeCompound(group);
+        for (const Transform& t : where)
+            builder.Add(group, BRepBuilderAPI_Transform(shape(part), toTrsf(t * partPlace), true).Shape());
+        return group;
+    }
+    // The feature the part's last step adds or cuts, repeated on the part.
+    const Body* step = find(part);
+    if (!step || !step->isBoolean())
+        throw GeometryError(kNotRepeatable);
+    const BooleanSpec& s = *step->boolean;
+    TopoDS_Shape tool;  // in the step's coordinates
+    bool adds = false;
+    if (s.op == BooleanOp::Follow && s.follow && s.operands.size() == 1) {
+        const ObjectId under = s.operands[0];
+        tool = follow::swept(
+            BRepBuilderAPI_Transform(shape(under), toTrsf(localTransform(under)), true).Shape(), *s.follow);
+        adds = s.follow->ridge;
+    } else if ((s.op == BooleanOp::Merge || s.op == BooleanOp::Subtract) && s.operands.size() == 2) {
+        const ObjectId under = s.operands[0], toolId = s.operands[1];
+        tool = BRepBuilderAPI_Transform(shape(toolId), toTrsf(localTransform(toolId)), true).Shape();
+        if (s.op == BooleanOp::Subtract && s.throughAll) {
+            const Bounds reach = shapeBounds(
+                BRepBuilderAPI_Transform(shape(under), toTrsf(localTransform(under)), true).Shape());
+            if (const auto stretched = throughTool(toolId, reach))
+                tool = BRepBuilderAPI_Transform(primitives::buildShape(stretched->first), toTrsf(stretched->second),
+                                                true)
+                           .Shape();
+        }
+        adds = s.op == BooleanOp::Merge;
+    } else {
+        throw GeometryError(kNotRepeatable);
+    }
+    TopoDS_Shape result = BRepBuilderAPI_Transform(shape(part), toTrsf(partPlace), true).Shape();
+    TopTools_ListOfShape copies;
+    for (std::size_t i = 1; i < where.size(); ++i)
+        copies.Append(BRepBuilderAPI_Transform(tool, toTrsf(where[i] * partPlace), true).Shape());
+    if (copies.IsEmpty())
+        return result;
+    TopTools_ListOfShape arguments;
+    arguments.Append(result);
+    if (adds) {
+        BRepAlgoAPI_Fuse fuse;
+        fuse.SetArguments(arguments);
+        fuse.SetTools(copies);
+        fuse.Build();
+        if (!fuse.IsDone() || fuse.HasErrors())
+            throw GeometryError("The copies could not be added");
+        result = fuse.Shape();
+    } else {
+        BRepAlgoAPI_Cut cut;
+        cut.SetArguments(arguments);
+        cut.SetTools(copies);
+        cut.Build();
+        if (!cut.IsDone() || cut.HasErrors())
+            throw GeometryError("The copies could not be cut");
+        result = cut.Shape();
+    }
+    ShapeUpgrade_UnifySameDomain unify(result, true, true, false);
+    unify.Build();
+    return unify.Shape();
+}
+
+MeshSolid Document::patternMeshes(const BooleanSpec& spec) const
+{
+    if (!spec.pattern)
+        throw GeometryError("No pattern was set");
+    const PatternFinish& f = *spec.pattern;
+    const ObjectId part = spec.operands.at(0);
+    const Transform partPlace = localTransform(part);
+    const std::vector<Transform> where = pattern::placements(f);
+    if (!f.feature) {
+        std::vector<MeshSolid> all;
+        for (const Transform& t : where)
+            all.push_back(meshkernel::transformed(meshSolid(part), t * partPlace));
+        return meshkernel::together(all);
+    }
+    const Body* step = find(part);
+    if (!step || !step->isBoolean() || step->boolean->operands.size() != 2 ||
+        (step->boolean->op != BooleanOp::Merge && step->boolean->op != BooleanOp::Subtract))
+        throw GeometryError(kNotRepeatable);
+    const ObjectId toolId = step->boolean->operands[1];
+    const MeshSolid tool = meshSolid(toolId);
+    std::vector<MeshSolid> copies;
+    for (std::size_t i = 1; i < where.size(); ++i)
+        copies.push_back(meshkernel::transformed(tool, where[i] * partPlace * localTransform(toolId)));
+    const MeshSolid base = meshkernel::transformed(meshSolid(part), partPlace);
+    if (step->boolean->op == BooleanOp::Merge) {
+        copies.insert(copies.begin(), base);
+        return meshkernel::merged(copies);
+    }
+    return meshkernel::subtracted(base, copies);
+}
+
 MeshSolid Document::combineMeshes(const BooleanSpec& spec) const
 {
     std::vector<MeshSolid> parts;
@@ -986,6 +1107,7 @@ MeshSolid Document::combineMeshes(const BooleanSpec& spec) const
         throw GeometryError("Shell works on solid shapes, not on imported meshes or shapes made with them.");
     case BooleanOp::Follow:
         throw GeometryError("Follow works on solid shapes, not on imported meshes or shapes made with them.");
+    case BooleanOp::Pattern: return patternMeshes(spec);
     case BooleanOp::Emboss: {
         if (!spec.emboss)
             throw GeometryError("Emboss has no words");

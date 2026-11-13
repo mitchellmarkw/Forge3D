@@ -112,6 +112,7 @@ const char* opName(BooleanOp op)
     case BooleanOp::Edges: return "edges";
     case BooleanOp::Shell: return "shell";
     case BooleanOp::Follow: return "follow";
+    case BooleanOp::Pattern: return "pattern";
     }
     return "merge";
 }
@@ -158,6 +159,13 @@ json bodyToJson(const Body& b)
                 open.push_back(pick);
             }
             j["shell"] = json{{"thickness", sh->thickness}, {"outward", sh->outward}, {"open", open}};
+        }
+        if (const auto& p = b.boolean->pattern) {
+            static const char* kinds[] = {"row", "grid", "circle"};
+            j["pattern"] = json{{"kind", kinds[int(p->kind)]}, {"feature", p->feature},  {"dir1", p->dir1},
+                                {"dir2", p->dir2},             {"count1", p->count1},    {"count2", p->count2},
+                                {"spacing1", p->spacing1},     {"spacing2", p->spacing2}, {"centre", p->centre},
+                                {"axis", p->axis},             {"count", p->count},       {"angle", p->angle}};
         }
         if (const auto& f = b.boolean->follow) {
             static const char* profiles[] = {"round", "square", "v", "custom"};
@@ -287,6 +295,8 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
             spec.op = BooleanOp::Shell;
         else if (op == "follow" && version >= 15)
             spec.op = BooleanOp::Follow;
+        else if (op == "pattern" && version >= 16)
+            spec.op = BooleanOp::Pattern;
         else
             damaged(where + ": unknown combine operation '" + op + "'");
         const auto operands = j.find("operands");
@@ -359,6 +369,33 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
                 f.edges.push_back(r);
             }
             spec.edges = std::move(f);
+        }
+        if (spec.op == BooleanOp::Pattern) {
+            const auto pj = j.find("pattern");
+            if (pj == j.end() || !pj->is_object())
+                damaged(where + ": missing the pattern");
+            PatternFinish p;
+            const std::string kind = pj->value("kind", std::string("row"));
+            p.kind = kind == "grid" ? PatternKind::Grid : kind == "circle" ? PatternKind::Circle : PatternKind::Row;
+            p.feature = pj->value("feature", false);
+            const auto readVec = [&](const char* key, std::array<double, 3>& out) {
+                const auto v = pj->find(key);
+                if (v == pj->end() || !v->is_array() || v->size() != 3)
+                    damaged(where + ": the pattern is damaged");
+                for (std::size_t i = 0; i < 3; ++i)
+                    out[i] = (*v)[i].get<double>();
+            };
+            readVec("dir1", p.dir1);
+            readVec("dir2", p.dir2);
+            readVec("centre", p.centre);
+            readVec("axis", p.axis);
+            p.count1 = pj->value("count1", 3);
+            p.count2 = pj->value("count2", 2);
+            p.count = pj->value("count", 6);
+            p.spacing1 = number(*pj, "spacing1", where);
+            p.spacing2 = number(*pj, "spacing2", where);
+            p.angle = number(*pj, "angle", where);
+            spec.pattern = p;
         }
         if (spec.op == BooleanOp::Follow) {
             const auto fj = j.find("follow");

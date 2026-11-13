@@ -108,6 +108,8 @@ public:
     // the same shape stretched along its own height to reach past `reach` (a box in the
     // result's coordinates) both ways, with the transform that places it there.
     std::optional<std::pair<PrimitiveSpec, Transform>> throughTool(ObjectId tool, const Bounds& reach) const;
+    TopoDS_Shape patternShape(const BooleanSpec& spec) const;
+    MeshSolid patternMeshes(const BooleanSpec& spec) const;
     // Why a step can't be built right now (an earlier change left it nothing to work
     // on), or nothing if it's fine. A step like that is left out: the object carries
     // on as if it were switched off.

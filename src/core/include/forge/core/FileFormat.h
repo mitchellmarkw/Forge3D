@@ -39,7 +39,8 @@ namespace forge::file {
 //      diameters, sketch) and shells (operation "shell"; "shell": thickness, outward,
 //      open faces)
 //  15  follow steps (operation "follow": path sketch, where it starts, cross-section)
-inline constexpr int kFormatVersion = 15;
+//  16  pattern steps (operation "pattern": kind, what, directions, counts, spacing, circle)
+inline constexpr int kFormatVersion = 16;
 inline constexpr const char* kExtension = ".f3d";
 inline constexpr const char* kDocumentEntry = "document.json";
 

@@ -104,6 +104,21 @@ void scaleInto(const Document& doc, ObjectId id, const Vec3& factors, const Vec3
         out.push_back(std::move(next));
         return;
     }
+    if (body->boolean->op == BooleanOp::Pattern && body->boolean->pattern) {
+        // The copies keep their places in the stretched shape: spacing grows with it.
+        Body next = *body;
+        PatternFinish& p = *next.boolean->pattern;
+        const auto along = [&](const std::array<double, 3>& d) {
+            const double x = factors[0] * d[0], y = factors[1] * d[1], z = factors[2] * d[2];
+            return std::sqrt(x * x + y * y + z * z);
+        };
+        p.spacing1 *= along(p.dir1);
+        p.spacing2 *= along(p.dir2);
+        for (std::size_t k = 0; k < 3; ++k)
+            p.centre[k] = factors[k] * (p.centre[k] - anchor[k]) + anchor[k];
+        out.push_back(std::move(next));
+        return;
+    }
     if (body->boolean->op == BooleanOp::Follow && body->boolean->follow) {
         // The path's start moves with the shape; evenly scaled, the path and groove grow too.
         Body next = *body;

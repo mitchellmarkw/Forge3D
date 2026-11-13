@@ -280,7 +280,7 @@ PrimitiveSpec madeRound(const PrimitiveSpec& spec);
 
 // ---- Combine results ------------------------------------------------------------
 
-enum class BooleanOp { Merge, Subtract, Intersect, Split, Mirror, Group, Emboss, Edges, Shell, Follow };
+enum class BooleanOp { Merge, Subtract, Intersect, Split, Mirror, Group, Emboss, Edges, Shell, Follow, Pattern };
 
 // What happens to the picked edges of a shape.
 enum class EdgeFinishKind {
@@ -368,6 +368,27 @@ struct FollowFinish {
     bool operator==(const FollowFinish&) const = default;
 };
 
+// Pattern: copies in a row, a grid or round a circle, of the whole part or of the
+// feature its last step added (a hole set, pad, pocket, groove...), linked: change the
+// original and the copies follow. Directions and the circle's centre are in the step's
+// own coordinates.
+enum class PatternKind { Row, Grid, Circle };
+struct PatternFinish {
+    PatternKind kind = PatternKind::Row;
+    bool feature = false;  // repeat the part's last step (its added / cut shape), not all of it
+    std::array<double, 3> dir1{1.0, 0.0, 0.0};
+    std::array<double, 3> dir2{0.0, 1.0, 0.0};  // grid
+    int count1 = 3;
+    int count2 = 2;
+    double spacing1 = 10.0;
+    double spacing2 = 10.0;
+    std::array<double, 3> centre{0.0, 0.0, 0.0};  // circle
+    std::array<double, 3> axis{0.0, 0.0, 1.0};
+    int count = 6;
+    double angle = 360.0;  // spread over this (360: evenly all the way round)
+    bool operator==(const PatternFinish&) const = default;
+};
+
 // "Merge", "Subtract", "Intersect", "Split", "Mirror", "Group"
 std::string toString(BooleanOp op);
 
@@ -385,6 +406,7 @@ std::string toString(BooleanOp op);
 //              bevelled; see `edges`.
 //   Shell:     one solid part hollowed out; see `shell`.
 //   Follow:    one solid part with a groove or ridge along a path; see `follow`.
+//   Pattern:   one part repeated (or its last feature repeated on it); see `pattern`.
 //   Emboss:    one part with words raised from or engraved into its surface,
 //              centred on planePoint (on the surface) and facing out along
 //              planeNormal; see `emboss`.
@@ -408,6 +430,8 @@ struct BooleanSpec {
     std::optional<ShellFinish> shell{};
     // Follow: the path, its cross-section, groove or ridge.
     std::optional<FollowFinish> follow{};
+    // Pattern: what's repeated, and where the copies go.
+    std::optional<PatternFinish> pattern{};
     // Subtract: straight tools (box, cylinder, tube, text) are stretched along their own
     // height to go right through the first part, whatever its size ("through all").
     bool throughAll = false;

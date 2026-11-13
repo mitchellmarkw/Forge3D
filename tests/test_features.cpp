@@ -7,6 +7,7 @@
 #include "forge/core/FileFormat.h"
 #include "forge/core/Follow.h"
 #include "forge/core/History.h"
+#include "forge/core/Pattern.h"
 #include "forge/core/Primitives.h"
 #include "forge/core/Scale.h"
 #include "forge/core/Shell.h"
@@ -500,4 +501,149 @@ TEST_CASE("Follow: a path off the edge of its face is refused quickly", "[follow
     const double seconds =
         std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
     CHECK(seconds < 5.0);
+}
+
+namespace {
+
+// Holes drilled into the top of `target` (top at z) at the given spots: the Drilled step.
+ObjectId drill(Document& doc, CommandStack& stack, ObjectId target, double z, std::vector<sketch::Point> spots,
+               double diameter, double depth, bool throughAll = false)
+{
+    HoleSpec h;
+    h.diameter = diameter;
+    h.depth = depth;
+    for (const auto& p : spots)
+        sketch::addPoint(h.sketch, p);
+    Body tool;
+    tool.id = doc.allocateId();
+    tool.name = "Hole";
+    tool.spec = h;
+    tool.placement.z = z;
+    stack.execute(std::make_unique<AddBodyCommand>(tool));
+    Body result;
+    result.id = doc.allocateId();
+    result.name = "Drilled";
+    BooleanSpec spec;
+    spec.op = BooleanOp::Subtract;
+    spec.operands = {target, tool.id};
+    spec.throughAll = throughAll;
+    result.boolean = spec;
+    stack.execute(std::make_unique<CombineCommand>(result));
+    return result.id;
+}
+
+ObjectId repeat(Document& doc, CommandStack& stack, ObjectId target, const PatternFinish& f)
+{
+    Body result;
+    result.id = doc.allocateId();
+    result.name = "Pattern";
+    result.boolean = patternSpec(doc, target, f);
+    stack.execute(std::make_unique<CombineCommand>(result));
+    return result.id;
+}
+
+}  // namespace
+
+TEST_CASE("Pattern: copies of a whole shape in a row, a grid, a circle", "[pattern]")
+{
+    Document doc;
+    CommandStack stack(doc);
+    const ObjectId box = addBox(stack, doc, 10, 10, 10);
+    PatternFinish f;
+    f.spacing1 = 15;
+    SECTION("Row")
+    {
+        const ObjectId id = repeat(doc, stack, box, f);
+        CHECK_THAT(volumeOf(doc.shape(id)), WithinRel(3000.0, 1e-9));
+        const Bounds b = doc.worldBounds(id);
+        CHECK_THAT(b.max[0] - b.min[0], WithinAbs(40.0, 1e-3));
+        CHECK(history::describe(doc, id) == "row of 3, 15 mm apart");
+        const auto back = roundTrip(doc);
+        CHECK(back->find(id)->boolean == doc.find(id)->boolean);
+    }
+    SECTION("Grid")
+    {
+        f.kind = PatternKind::Grid;
+        f.spacing2 = 12;
+        const ObjectId id = repeat(doc, stack, box, f);
+        CHECK_THAT(volumeOf(doc.shape(id)), WithinRel(6000.0, 1e-9));
+        const Bounds b = doc.worldBounds(id);
+        CHECK_THAT(b.max[1] - b.min[1], WithinAbs(22.0, 1e-3));
+    }
+    SECTION("Circle")
+    {
+        f.kind = PatternKind::Circle;
+        f.count = 4;
+        f.centre = {-20, 0, 0};
+        const ObjectId id = repeat(doc, stack, box, f);
+        CHECK_THAT(volumeOf(doc.shape(id)), WithinRel(4000.0, 1e-9));
+        const Bounds b = doc.worldBounds(id);
+        CHECK_THAT(b.min[0], WithinAbs(-45.0, 1e-3));  // the one opposite: centred 40 to the left
+        CHECK(history::describe(doc, id) == "circle of 4");
+    }
+    SECTION("Too many, or none, is refused")
+    {
+        f.count1 = 2000;
+        Body result;
+        result.id = doc.allocateId();
+        result.boolean = patternSpec(doc, box, f);
+        CHECK_THROWS_WITH(doc.previewCombine(*result.boolean), Catch::Matchers::ContainsSubstring("1000"));
+        f.count1 = 3;
+        f.feature = true;  // a plain box has no feature to repeat
+        result.boolean = patternSpec(doc, box, f);
+        CHECK_THROWS_WITH(doc.previewCombine(*result.boolean), Catch::Matchers::ContainsSubstring("can be repeated"));
+    }
+}
+
+TEST_CASE("Pattern: a feature repeated on its part, and linked to it", "[pattern]")
+{
+    Document doc;
+    CommandStack stack(doc);
+    const ObjectId box = addBox(stack, doc, 60, 40, 10);
+    const double hole = pi * 4 * 4;  // diameter 4, 4 deep
+    const ObjectId drilled = drill(doc, stack, box, 10, {{-20, 0}}, 4, 4);
+    PatternFinish f;
+    f.feature = true;
+    f.spacing1 = 12;
+    const ObjectId id = repeat(doc, stack, drilled, f);
+    CHECK_THAT(60 * 40 * 10 - volumeOf(doc.shape(id)), WithinRel(3 * hole, 1e-6));
+    CHECK(history::describe(doc, id) == "row of 3, 12 mm apart (Hole)");
+
+    SECTION("Change the hole: the copies follow")
+    {
+        const ObjectId toolId = doc.find(drilled)->boolean->operands[1];
+        Body wider = *doc.find(toolId);
+        std::get<HoleSpec>(wider.spec).diameter = 6;
+        stack.execute(std::make_unique<EditBodyCommand>(*doc.find(toolId), wider, "Wider"));
+        CHECK_THAT(60 * 40 * 10 - volumeOf(doc.shape(id)), WithinRel(3 * pi * 9 * 4, 1e-6));
+    }
+    SECTION("Through all, in a circle")
+    {
+        Body through = *doc.find(drilled);
+        through.boolean->throughAll = true;
+        stack.execute(std::make_unique<EditBodyCommand>(*doc.find(drilled), through, "Through"));
+        Body circle = *doc.find(id);
+        circle.boolean->pattern->kind = PatternKind::Circle;
+        circle.boolean->pattern->centre = {0, 0, 5};
+        circle.boolean->pattern->count = 6;  // 20 out from the middle: room for 6
+        stack.execute(std::make_unique<EditBodyCommand>(*doc.find(id), circle, "Circle"));
+        CHECK_THAT(60 * 40 * 10 - volumeOf(doc.shape(id)), WithinRel(6 * pi * 4 * 10, 1e-6));
+    }
+    SECTION("A Follow groove repeated")
+    {
+        Document d2;
+        CommandStack s2(d2);
+        const ObjectId plate = addBox(s2, d2, 40, 40, 10);
+        FollowFinish g = onTop(10);
+        g.origin = {0, -10, 10};
+        line(g.path, sketch::addPoint(g.path, {-10, 0}), sketch::addPoint(g.path, {10, 0}));
+        ObjectId grooved = kInvalidId;
+        removed(d2, s2, plate, g, &grooved);
+        PatternFinish r;
+        r.feature = true;
+        r.dir1 = {0, 1, 0};
+        r.spacing1 = 10;
+        const ObjectId rows = repeat(d2, s2, grooved, r);
+        CHECK_THAT(40 * 40 * 10 - volumeOf(d2.shape(rows)), WithinRel(3 * 40.0, 1e-2));
+    }
 }
