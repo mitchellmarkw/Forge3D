@@ -28,6 +28,7 @@ add_executable(forge_tests
     test_features.cpp
     test_picture.cpp
     test_updates.cpp
+    test_sculpt.cpp
 )
 target_link_libraries(forge_tests PRIVATE
     Forge3D::core

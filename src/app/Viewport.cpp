@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <numbers>
 #include <cstdint>
 #include <vector>
 
@@ -121,6 +122,8 @@ void Viewport::releaseGL()
     m_plateBuffer.destroy();
     m_gizmoVao.destroy();
     m_gizmoBuffer.destroy();
+    m_ringVao.destroy();
+    m_ringBuffer.destroy();
     m_meshShader.reset();
     m_lineShader.reset();
     m_glReady = false;
@@ -373,6 +376,24 @@ void Viewport::upload(GpuMesh& gpu, const std::shared_ptr<const forge::Mesh>& me
 
 void Viewport::syncGpuMeshes()
 {
+    // Points moved by sculpting: just their stretch of the buffers.
+    for (const auto& [id, range] : m_movedPoints) {
+        const auto found = m_gpu.find(id);
+        if (found == m_gpu.end() || !found->second->source || range.first >= range.second)
+            continue;
+        GpuMesh& gpu = *found->second;
+        const auto& mesh = *gpu.source;
+        const std::size_t last = std::min<std::size_t>(range.second, mesh.vertexCount());
+        if (range.first >= last)
+            continue;
+        const int offset = int(range.first * 3 * sizeof(float));
+        const int bytes = int((last - range.first) * 3 * sizeof(float));
+        gpu.positions.bind();
+        gpu.positions.write(offset, mesh.positions.data() + 3 * range.first, bytes);
+        gpu.normals.bind();
+        gpu.normals.write(offset, mesh.normals.data() + 3 * range.first, bytes);
+    }
+    m_movedPoints.clear();
     if (!m_itemsDirty)
         return;
     m_itemsDirty = false;
@@ -460,11 +481,72 @@ void Viewport::paintGL()
     m_meshShader->release();
 
     drawGizmo(viewProj);
+    drawBrushRing(viewProj);
 
     if (!m_firstFrameDone) {
         m_firstFrameDone = true;
         emit firstFrameRendered();
     }
+}
+
+void Viewport::meshPointsChanged(std::uint64_t id, std::uint32_t first, std::uint32_t last)
+{
+    if (first >= last)
+        return;
+    auto [it, added] = m_movedPoints.try_emplace(id, first, last);
+    if (!added) {
+        it->second.first = std::min(it->second.first, first);
+        it->second.second = std::max(it->second.second, last);
+    }
+    update();
+}
+
+void Viewport::setBrushRing(const std::optional<BrushRing>& ring)
+{
+    m_brushRing = ring;
+    update();
+}
+
+void Viewport::drawBrushRing(const QMatrix4x4& viewProj)
+{
+    if (!m_brushRing)
+        return;
+    // A circle in the plane facing the normal, lifted a touch off the surface.
+    const QVector3D n = m_brushRing->normal.normalized();
+    QVector3D u = QVector3D::crossProduct(n, std::abs(n.z()) < 0.9f ? QVector3D(0, 0, 1) : QVector3D(1, 0, 0));
+    u.normalize();
+    const QVector3D v = QVector3D::crossProduct(n, u);
+    const QVector3D c = m_brushRing->centre + n * (0.02f * m_brushRing->radius);
+    constexpr int kSegments = 64;
+    std::vector<float> vertices;
+    vertices.reserve(kSegments * 6);
+    for (int i = 0; i < kSegments; ++i) {
+        const float a = 2.0f * std::numbers::pi_v<float> * float(i) / kSegments;
+        const QVector3D p = c + (u * std::cos(a) + v * std::sin(a)) * m_brushRing->radius;
+        vertices.insert(vertices.end(), {p.x(), p.y(), p.z(), 0.95f, 0.55f, 0.10f});
+    }
+    if (!m_ringVao.isCreated()) {
+        m_ringVao.create();
+        QOpenGLVertexArrayObject::Binder bind(&m_ringVao);
+        m_ringBuffer.create();
+        m_ringBuffer.bind();
+        m_ringBuffer.setUsagePattern(QOpenGLBuffer::DynamicDraw);
+        m_ringBuffer.allocate(int(kSegments * 6 * sizeof(float)));
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), nullptr);
+        glEnableVertexAttribArray(1);
+        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float),
+                              reinterpret_cast<const void*>(3 * sizeof(float)));
+    }
+    QOpenGLVertexArrayObject::Binder bind(&m_ringVao);
+    m_ringBuffer.bind();
+    m_ringBuffer.write(0, vertices.data(), int(vertices.size() * sizeof(float)));
+    m_lineShader->bind();
+    m_lineShader->setUniformValue("uMvp", viewProj);
+    glDisable(GL_DEPTH_TEST);  // always visible, even where the surface bulges over it
+    glDrawArrays(GL_LINE_LOOP, 0, kSegments);
+    glEnable(GL_DEPTH_TEST);
+    m_lineShader->release();
 }
 
 // ---- Navigation -----------------------------------------------------------------

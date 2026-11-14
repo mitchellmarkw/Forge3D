@@ -16,6 +16,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <map>
 #include <optional>
 #include <unordered_map>
 #include <vector>
@@ -62,6 +63,17 @@ public:
     void setGizmo(const std::optional<view::GizmoTarget>& target, view::GizmoMode mode);
     // The handle being dragged, drawn highlighted (none = not dragging).
     void setActiveHandle(const view::GizmoHandle& handle);
+
+    // Sculpting: points [first, last) of item `id`'s mesh moved in place (same mesh, same
+    // triangles); only they are sent to the graphics card again.
+    void meshPointsChanged(std::uint64_t id, std::uint32_t first, std::uint32_t last);
+    // A ring showing the brush on the surface (none: hidden).
+    struct BrushRing {
+        QVector3D centre;
+        QVector3D normal;
+        float radius = 1.0f;
+    };
+    void setBrushRing(const std::optional<BrushRing>& ring);
 
     const view::OrbitCamera& camera() const { return m_camera; }
     std::optional<QPointF> projectToScreen(const QVector3D& point) const;
@@ -114,8 +126,15 @@ private:
     void syncGpuMeshes();
     void upload(GpuMesh& gpu, const std::shared_ptr<const forge::Mesh>& mesh);
     void releaseGL();
+    void drawBrushRing(const QMatrix4x4& viewProj);
 
     view::OrbitCamera m_camera;
+
+    // Sculpting
+    std::map<std::uint64_t, std::pair<std::uint32_t, std::uint32_t>> m_movedPoints;
+    std::optional<BrushRing> m_brushRing;
+    QOpenGLVertexArrayObject m_ringVao;
+    QOpenGLBuffer m_ringBuffer{QOpenGLBuffer::VertexBuffer};
 
     // Scene
     std::vector<DisplayItem> m_items;

@@ -43,5 +43,6 @@
     <file alias="undo.svg">icons/undo.svg</file>
     <file alias="uniform.svg">icons/uniform.svg</file>
     <file alias="forge3d.svg">appicon/forge3d.svg</file>
+    <file alias="sculpt.svg">icons/sculpt.svg</file>
   </qresource>
 </RCC>
