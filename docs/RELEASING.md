@@ -8,16 +8,16 @@ when a version tag is pushed.
    that `CHANGELOG.md` describes it.
 2. Write the release notes as `docs/release-notes/vX.Y.Z.md` (shown on the release page)
    and merge them.
-3. Tag that commit and push the tag:
+3. On GitHub: **Actions → Windows build → Run workflow**, branch **main**, tick
+   **Publish a GitHub release of this version**, and **Run workflow**.
 
-   ```
-   git tag v0.25.0
-   git push origin v0.25.0
-   ```
+   (Or tag the commit yourself and push the tag: `git tag v0.25.0` then
+   `git push origin v0.25.0`.)
 
-4. The build runs as usual, then publishes a release named "Forge3D 0.25.0 Beta" with
-   `Forge3D-0.25.0-Setup.exe` and `Forge3D-0.25.0-portable.zip`. It refuses if the tag
-   and the version in CMakeLists.txt differ, or the notes are missing.
+4. The build runs as usual, then makes the tag `vX.Y.Z` and publishes a release named
+   "Forge3D 0.25.0 Beta" with `Forge3D-0.25.0-Setup.exe` and
+   `Forge3D-0.25.0-portable.zip`. It refuses if that release already exists (bump the
+   version first), a pushed tag doesn't match CMakeLists.txt, or the notes are missing.
 
 Every build (not only tags) also uploads the installer as an artifact, to try before
 releasing. Forge3D's Help → Check for Updates reads the list of published releases, so
