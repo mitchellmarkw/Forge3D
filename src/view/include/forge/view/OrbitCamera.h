@@ -18,6 +18,9 @@ public:
     void zoom(float wheelSteps);  // positive = closer
     void fitSphere(const QVector3D& center, float radius);
     void reset();
+    // Turns to look from a direction: yaw about +Z, pitch above the plate (degrees;
+    // pitch kept within +-kMaxPitch).
+    void setAngles(float yawDegrees, float pitchDegrees);
 
     // Matrices
     QMatrix4x4 viewMatrix() const;

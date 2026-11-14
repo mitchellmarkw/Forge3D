@@ -22,6 +22,8 @@
 #include <unordered_map>
 #include <vector>
 
+class QVariantAnimation;
+
 namespace forge::app {
 
 // One thing to draw: a mesh in its own coordinates, plus where it sits.
@@ -59,6 +61,11 @@ public:
 
     void fitView();
     void resetView();
+    // The view cube in the top-right corner (shown by default).
+    void setViewCubeVisible(bool on);
+    bool viewCubeVisible() const { return m_viewCube; }
+    // Turns the view smoothly to look from a direction (from the model towards the eye).
+    void turnTo(const QVector3D& lookFrom);
 
     // The gizmo around the selected body (empty = none shown).
     void setGizmo(const std::optional<view::GizmoTarget>& target, view::GizmoMode mode);
@@ -131,8 +138,20 @@ private:
     void upload(GpuMesh& gpu, const std::shared_ptr<const forge::Mesh>& mesh);
     void releaseGL();
     void drawBrushRing(const QMatrix4x4& viewProj);
+    QRectF viewCubeArea() const;
+    std::optional<int> viewCubePieceAt(const QPointF& pixel) const;
+    // The three buttons under the cube: 0 turn left, 1 home view, 2 turn right.
+    QRectF viewCubeButton(int which) const;
+    std::optional<int> viewCubeButtonAt(const QPointF& pixel) const;
+    void turnToAngles(float yaw, float pitch);
 
     view::OrbitCamera m_camera;
+
+    // The view cube
+    bool m_viewCube = true;
+    std::optional<int> m_cubeHover;
+    std::optional<int> m_cubeButtonHover;
+    QVariantAnimation* m_turn = nullptr;
 
     // Sculpting
     std::map<std::uint64_t, std::pair<std::uint32_t, std::uint32_t>> m_movedPoints;

@@ -43,6 +43,12 @@ QVector3D OrbitCamera::forward() const
     return (m_target - eyePosition()).normalized();
 }
 
+void OrbitCamera::setAngles(float yawDegrees, float pitchDegrees)
+{
+    m_yaw = std::fmod(yawDegrees, 360.0f);
+    m_pitch = std::clamp(pitchDegrees, -kMaxPitch, kMaxPitch);
+}
+
 void OrbitCamera::orbit(float dxPixels, float dyPixels)
 {
     m_yaw -= dxPixels * kOrbitDegreesPerPixel;

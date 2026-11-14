@@ -39,6 +39,8 @@ add_executable(Forge3D WIN32
     Viewport.h
     Viewport.cpp
     Tour.h
+    ViewCube.h
+    ViewCube.cpp
     SculptPanel.h
     SculptPanel.cpp
     Tour.cpp
