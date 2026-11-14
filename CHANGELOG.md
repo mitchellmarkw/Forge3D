@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.24.0 — Slice 15: Quick start (2026-11-13)
+
+- **Help → Quick Start Guide**: an illustrated walk-through of a first print (a key tag
+  with a hole and your name on it, about ten minutes), in its own window beside
+  Forge3D so you can follow along. The same guide is on GitHub as
+  [docs/QUICK_START.md](docs/QUICK_START.md).
+- **A guided tour** the first time Forge3D starts (and any time from **Help → Take the
+  Tour**): nine short notes, each pointing at the part of the window it's about (Add
+  Shape, Properties, the handles, Subtract, Objects, Emboss, Send to Slicer), with
+  Back / Next / Skip. The window keeps working while it's open.
+- **Properties scrolls** when it's taller than the window (a big shape's settings, or
+  Emboss with a picture), instead of making the window taller than a laptop screen.
+  Fixes Forge3D opening taller than the screen on 768- and 900-pixel-high displays.
+
 ## 0.23.0 — Slice 14: Icons (2026-11-13)
 
 - Every ribbon button has a picture now, with its name underneath (like 3D Builder):

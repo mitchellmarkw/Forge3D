@@ -53,6 +53,15 @@ QDoubleSpinBox* makeSpin(double min, double max, const QString& suffix, int deci
 PropertiesPanel::PropertiesPanel(QWidget* parent) : QWidget(parent)
 {
     m_pages = new QStackedWidget(this);
+    // Only the page shown counts towards the panel's size, so the panel (which scrolls
+    // when tall) isn't as tall as the biggest page while it shows a one-line hint.
+    connect(m_pages, &QStackedWidget::currentChanged, this, [this](int current) {
+        for (int i = 0; i < m_pages->count(); ++i)
+            m_pages->widget(i)->setSizePolicy(QSizePolicy::Preferred,
+                                              i == current ? QSizePolicy::Preferred : QSizePolicy::Ignored);
+        m_pages->adjustSize();
+        updateGeometry();
+    });
     auto* outer = new QVBoxLayout(this);
     outer->setContentsMargins(8, 8, 8, 8);
     outer->addWidget(m_pages);
@@ -189,6 +198,7 @@ PropertiesPanel::PropertiesPanel(QWidget* parent) : QWidget(parent)
     layout->addWidget(rotGroup);
     layout->addStretch(1);
     m_pages->addWidget(page);
+    page->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Ignored);  // not shown yet
 
     connect(m_name, &QLineEdit::editingFinished, this, &PropertiesPanel::commitName);
     for (std::size_t i = 0; i < m_sizeFields.size(); ++i)

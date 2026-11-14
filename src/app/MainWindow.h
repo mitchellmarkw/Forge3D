@@ -16,6 +16,7 @@
 #include "SketchPanel.h"
 
 #include <QMainWindow>
+#include <QPointer>
 #include <QPointF>
 #include <QString>
 #include <QVector3D>
@@ -30,6 +31,7 @@ class QCloseEvent;
 class QDragEnterEvent;
 class QDropEvent;
 class QLabel;
+class QDialog;
 class QTreeWidget;
 class QTreeWidgetItem;
 class QMenu;
@@ -45,6 +47,7 @@ namespace forge::app {
 class PropertiesPanel;
 class SplitPanel;
 class EmbossPanel;
+class Tour;
 class EdgesPanel;
 class FollowPanel;
 class HolePanel;
@@ -258,6 +261,10 @@ private:
     void onTreeSelectionChanged();
     void refreshCommandState();
     void showAbout();
+    void showQuickStart();
+    void startTour();
+    // The ribbon button for an action on ribbon tab `tab` (nothing if it has none there).
+    QWidget* ribbonButtonFor(QAction* action, int tab) const;
 
     Document m_doc;
     CommandStack m_stack{m_doc};
@@ -351,6 +358,8 @@ private:
     QAction* m_emboss = nullptr;
     QAction* m_layFlat = nullptr;
     QLabel* m_emptyHint = nullptr;  // over the view while the plate is empty
+    QPointer<QDialog> m_quickStart;
+    QPointer<Tour> m_tour;
     QAction* m_sitOnPlate = nullptr;
     EmbossPanel* m_embossPanel = nullptr;
     struct EmbossMode {
