@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "Viewport.h"
 
+#include "ViewCube.h"
+
+#include <QPainter>
+#include <QVariantAnimation>
+
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QOpenGLContext>
@@ -170,6 +175,77 @@ void Viewport::fitView()
         m_camera.fitSphere(QVector3D(0, 0, 0), kPlateSize * 0.5f);
     }
     update();
+}
+
+void Viewport::setViewCubeVisible(bool on)
+{
+    m_viewCube = on;
+    m_cubeHover.reset();
+    update();
+}
+
+QRectF Viewport::viewCubeArea() const
+{
+    constexpr double kSize = 110.0, kMargin = 8.0;
+    return QRectF(width() - kSize - kMargin, kMargin, kSize, kSize);
+}
+
+std::optional<int> Viewport::viewCubePieceAt(const QPointF& pixel) const
+{
+    if (!m_viewCube || !viewCubeArea().contains(pixel))
+        return std::nullopt;
+    return ViewCube::pieceAt(ViewCube::pieces(m_camera.viewMatrix(), viewCubeArea()), pixel);
+}
+
+QRectF Viewport::viewCubeButton(int which) const
+{
+    const QRectF cube = viewCubeArea();
+    constexpr double kButton = 22.0;
+    const double gap = 6.0;
+    const double left = cube.center().x() - 1.5 * kButton - gap;
+    return QRectF(left + which * (kButton + gap), cube.bottom() + 2.0, kButton, kButton);
+}
+
+std::optional<int> Viewport::viewCubeButtonAt(const QPointF& pixel) const
+{
+    if (!m_viewCube)
+        return std::nullopt;
+    for (int i = 0; i < 3; ++i)
+        if (viewCubeButton(i).contains(pixel))
+            return i;
+    return std::nullopt;
+}
+
+void Viewport::turnTo(const QVector3D& lookFrom)
+{
+    const auto [yaw, pitch] = ViewCube::anglesFor(lookFrom);
+    turnToAngles(yaw, pitch);
+}
+
+void Viewport::turnToAngles(float yaw, float pitch)
+{
+    const float fromYaw = m_camera.yawDegrees(), fromPitch = m_camera.pitchDegrees();
+    // The short way round.
+    float turn = std::fmod(yaw - fromYaw, 360.0f);
+    if (turn > 180.0f)
+        turn -= 360.0f;
+    if (turn < -180.0f)
+        turn += 360.0f;
+    if (!m_turn) {
+        m_turn = new QVariantAnimation(this);
+        m_turn->setDuration(350);
+        m_turn->setEasingCurve(QEasingCurve::InOutCubic);
+    }
+    m_turn->stop();
+    m_turn->disconnect(this);
+    m_turn->setStartValue(0.0);
+    m_turn->setEndValue(1.0);
+    connect(m_turn, &QVariantAnimation::valueChanged, this, [this, fromYaw, fromPitch, turn, pitch](const QVariant& v) {
+        const float t = v.toFloat();
+        m_camera.setAngles(fromYaw + turn * t, fromPitch + (pitch - fromPitch) * t);
+        update();
+    });
+    m_turn->start();
 }
 
 void Viewport::resetView()
@@ -493,6 +569,26 @@ void Viewport::paintGL()
     drawGizmo(viewProj);
     drawBrushRing(viewProj);
 
+    if (m_viewCube) {
+        QPainter painter(this);
+        ViewCube::paint(painter, view, viewCubeArea(), m_cubeHover);
+        // Turn left, home, turn right.
+        painter.setRenderHint(QPainter::Antialiasing);
+        const QString labels[3] = {QStringLiteral("\u21BA"), QStringLiteral("\u2302"), QStringLiteral("\u21BB")};
+        for (int i = 0; i < 3; ++i) {
+            const QRectF r = viewCubeButton(i);
+            const bool hot = m_cubeButtonHover && *m_cubeButtonHover == i;
+            painter.setPen(QPen(QColor(0x5a, 0x63, 0x6e), 1.0));
+            painter.setBrush(hot ? QColor(0x2b, 0x78, 0xd0, 150) : QColor(0xe9, 0xee, 0xf5));
+            painter.drawEllipse(r);
+            QFont font = painter.font();
+            font.setPixelSize(15);
+            painter.setFont(font);
+            painter.setPen(QColor(0x2b, 0x2f, 0x33));
+            painter.drawText(r, Qt::AlignCenter, labels[i]);
+        }
+    }
+
     if (!m_firstFrameDone) {
         m_firstFrameDone = true;
         emit firstFrameRendered();
@@ -572,6 +668,19 @@ void Viewport::mousePressEvent(QMouseEvent* event)
     m_lastMouse = event->position();
     const bool shift = event->modifiers().testFlag(Qt::ShiftModifier);
     if (event->button() == Qt::LeftButton) {
+        if (const auto button = viewCubeButtonAt(event->position())) {
+            if (*button == 1)
+                turnToAngles(-60.0f, 25.0f);  // the starting view
+            else
+                turnToAngles(m_camera.yawDegrees() + (*button == 0 ? -90.0f : 90.0f), m_camera.pitchDegrees());
+            return;
+        }
+        if (const auto piece = viewCubePieceAt(event->position())) {
+            // A click on the view cube turns the view; nothing else happens.
+            const auto all = ViewCube::pieces(m_camera.viewMatrix(), viewCubeArea());
+            turnTo(all[std::size_t(*piece)].lookFrom);
+            return;
+        }
         m_leftPressed = true;
         m_leftDragging = false;
         m_leftPressAt = event->position();
@@ -620,6 +729,19 @@ void Viewport::mouseMoveEvent(QMouseEvent* event)
         update();
         break;
     case DragMode::None: {
+        const auto piece = viewCubePieceAt(event->position());
+        const auto button = viewCubeButtonAt(event->position());
+        if (piece != m_cubeHover || button != m_cubeButtonHover) {
+            m_cubeHover = piece;
+            m_cubeButtonHover = button;
+            setCursor(piece || button ? Qt::PointingHandCursor : Qt::ArrowCursor);
+            setToolTip(button ? (*button == 1 ? tr("Back to the starting view")
+                                              : *button == 0 ? tr("Turn the view 90° left") : tr("Turn the view 90° right"))
+                              : piece ? tr("Look from this side (or edge, or corner)") : QString());
+            update();
+        }
+        if (piece || button)
+            break;  // over the cube: nothing in the scene under it
         updateHover(event->position());
         QVector3D origin, direction;
         m_camera.rayThroughPixel(static_cast<float>(event->position().x()), static_cast<float>(event->position().y()),

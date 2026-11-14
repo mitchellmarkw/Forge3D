@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.29.0 Beta — Slice 20: View cube (2026-11-13)
+
+- A **view cube** in the top-right corner of the 3D view, like FreeCAD's: it turns with
+  the view, its sides labelled Front, Back, Left, Right, Top and Bottom, so you can
+  always see which way you're looking.
+  - Click a **side** to look straight at it, an **edge** to look from between two sides,
+    a **corner** for a three-quarter view. The view turns smoothly there.
+  - Under it: **turn 90° left**, **home** (back to the starting view) and **turn 90°
+    right**.
+  - The piece under the mouse lights up blue.
+- **View → View Cube** shows or hides it (remembered).
+
 ## 0.28.0 Beta — Slice 19: Detail where you sculpt (2026-11-13)
 
 - **Add detail where I sculpt** (on by default): as a brush goes over the shape, the

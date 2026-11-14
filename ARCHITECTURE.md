@@ -469,6 +469,18 @@ Viewport (mouse)  --leftPressed(ray, handle)-->  MainWindow drag controller
   the result and the laid path as orange tubes.
 - File format 15: `"follow"` steps.
 
+## View cube (slice 20)
+
+- `ViewCube` (src/app): pure geometry and drawing. Six faces (Front = -Y, Z up), each
+  split 3 × 3 into pieces whose look-from direction is the face normal plus the
+  piece's offset (so edges and corners give 45° and three-quarter views); only faces
+  turned towards the viewer are drawn and hit-tested, in an orthographic projection of
+  the view matrix's rotation. Labels are drawn with a QTransform mapping the face's
+  square onto its outline.
+- `Viewport` paints it with QPainter after the GL scene, takes left clicks on it (and
+  on the three buttons under it) before anything else, and turns the camera with a
+  QVariantAnimation over `OrbitCamera::setAngles` (the short way round in yaw).
+
 ## Sculpting prototype (slice 17)
 
 - `sculpt::welded` (shared corners), `sculpt::refined` (edges split at their middles

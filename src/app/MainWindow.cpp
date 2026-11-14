@@ -801,6 +801,16 @@ void MainWindow::createMenus()
     QMenu* view = menuBar()->addMenu(tr("&View"));
     view->addAction(m_fit);
     view->addAction(m_resetView);
+    auto* viewCube = view->addAction(tr("View &Cube"));
+    viewCube->setCheckable(true);
+    viewCube->setToolTip(tr("The cube in the top-right corner of the view: it shows which side faces you, and "
+                            "clicking a side, edge or corner turns the view to it"));
+    viewCube->setChecked(Preferences().value(QStringLiteral("view/cube"), true).toBool());
+    m_viewport->setViewCubeVisible(viewCube->isChecked());
+    connect(viewCube, &QAction::toggled, this, [this](bool on) {
+        m_viewport->setViewCubeVisible(on);
+        Preferences().setValue(QStringLiteral("view/cube"), on);
+    });
     view->addSeparator();
     m_viewMenu = view;  // the panels' show/hide entries are added in createDocks()
 
