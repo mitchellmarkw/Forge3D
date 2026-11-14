@@ -463,8 +463,9 @@ private:
         Mesh base;          // its surface, corners shared (before splitting finely)
         std::shared_ptr<sculpt::Sculptor> sculptor;
         std::shared_ptr<const Mesh> display;  // the sculptor's mesh, drawn
-        std::vector<float> start;             // the points before any stroke
-        std::vector<std::vector<float>> undo;  // the points before each recent stroke
+        Mesh start;              // the mesh before any stroke
+        std::vector<Mesh> undo;  // the mesh before each recent stroke
+        std::uint64_t topology = 0;  // the sculptor's topologyVersion last shown
         bool stroking = false;
         std::optional<Vec3> lastDab;
         Vec3 middle{0.0, 0.0, 0.0};  // of the shape, for the mirror planes
@@ -486,6 +487,8 @@ private:
     void beginStroke(const QVector3D& origin, const QVector3D& direction, Qt::KeyboardModifiers modifiers);
     void sculptAt(const QVector3D& origin, const QVector3D& direction, Qt::KeyboardModifiers modifiers);
     void undoStroke();
+    // Shows what a dab changed: points [first, last), or everything if it added triangles.
+    void sculptShown(std::uint32_t first, std::uint32_t last);
     sculpt::Symmetry sculptSymmetry() const;
     void finishSculpt();
     void endSculpt();

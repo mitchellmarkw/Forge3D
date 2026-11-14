@@ -486,6 +486,15 @@ Viewport (mouse)  --leftPressed(ray, handle)-->  MainWindow drag controller
   the offset across a plane through the grab point facing the view). `Symmetry` mirrors
   dabs and grabs across planes through the shape's middle; images start from
   `nearestPoint` (brute force).
+- Detail and picking (slice 19): the Sculptor keeps per-point triangle lists (vectors,
+  so triangles can be added) and a hashed grid of triangles (cells about twice the mean
+  edge; each triangle in every cell its box reaches) walked with Amanatides–Woo for
+  `hit`. Moved points move their triangles between cells. `setDetail(finest)`: before
+  a dab, `splitAround` splits edges longer than max(finest, radius × 0.08) round the
+  touched points (red-green, as `refined`, conforming across the region's edge), the
+  first piece keeping the triangle's slot. `topologyVersion()` tells the app to
+  re-upload the whole mesh (`Viewport::meshGrew`) instead of a point range; Undo stroke
+  keeps whole meshes.
 - The app works in plate coordinates on a finely re-tessellated copy (B-rep shapes) or
   the mesh itself; the display item points at the sculptor's mesh (aliasing
   shared_ptr), and `Viewport::meshPointsChanged` uploads just the changed range with

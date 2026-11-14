@@ -7,6 +7,7 @@
 #include <array>
 #include <cstdint>
 #include <optional>
+#include <unordered_map>
 #include <vector>
 
 // Sculpting (prototype): brushes that push and smooth a dense triangle mesh.
@@ -62,16 +63,27 @@ struct Hit {
     std::uint32_t triangle = 0;
 };
 
-// A mesh being sculpted: its points move in place; the triangles never change.
+// A mesh being sculpted: its points move in place. With detail on (setDetail), long
+// edges under the brush are split first, adding points and triangles at the end of the
+// lists (a triangle that's split keeps its place as its first piece).
 class Sculptor {
 public:
     explicit Sculptor(Mesh mesh);
 
     const Mesh& mesh() const { return m_mesh; }
-    // Where a ray first meets the surface.
+    // Detail where the brush goes: edges under it longer than `finest` (or 8% of the
+    // brush, whichever is more) are split before it acts, up to maxTriangles in all.
+    // 0: off (the triangles never change).
+    void setDetail(double finest, std::size_t maxTriangles = 4'000'000);
+    // Goes up whenever triangles are added (or the mesh is replaced).
+    std::uint64_t topologyVersion() const { return m_topology; }
+    // Replaces the whole mesh (an undo that has to take back added triangles).
+    void setMesh(Mesh mesh);
+    // Where a ray first meets the surface (through a grid of the triangles: quick even
+    // on millions).
     std::optional<Hit> hit(const Vec3& origin, const Vec3& direction) const;
     // One dab of a brush (not Grab). Returns the range of points changed, [first, last)
-    // (empty if none); their normals are updated too.
+    // (empty if none; new points included); their normals are updated too.
     std::pair<std::uint32_t, std::uint32_t> apply(const Dab& dab, std::uint32_t nearTriangle);
     // The same dab, and its mirror images if `symmetry` has any. The images start from
     // the point nearest each mirrored centre.
@@ -96,6 +108,13 @@ private:
     std::vector<std::uint32_t> pointsFrom(const Vec3& centre, double radius, const std::vector<std::uint32_t>& seeds);
     std::pair<std::uint32_t, std::uint32_t> applyFrom(const Dab& dab, const std::vector<std::uint32_t>& seeds);
 
+    bool splitAround(const std::vector<std::uint32_t>& points, double maxEdge);
+    void rebuild();
+    std::array<std::int32_t, 6> cellsOf(std::uint32_t triangle) const;
+    void gridInsert(std::uint32_t triangle);
+    void gridRemove(std::uint32_t triangle);
+    void gridUpdate(const std::vector<std::uint32_t>& movedPoints);
+
     struct Grabbed {
         std::uint32_t point;
         float weight;
@@ -106,11 +125,18 @@ private:
     Symmetry m_grabSymmetry;
 
     Mesh m_mesh;
-    // Neighbours of each point, and the triangles round it (compressed rows).
-    std::vector<std::uint32_t> m_neighbourStart, m_neighbours;
-    std::vector<std::uint32_t> m_triangleStart, m_triangles;
-    std::vector<std::uint32_t> m_mark;  // for walks: the walk number that last reached it
+    std::vector<std::vector<std::uint32_t>> m_vt;  // the triangles round each point
+    std::vector<std::uint32_t> m_mark;             // for walks: the walk number that last reached it
+    std::vector<std::uint32_t> m_triMark;
     std::uint32_t m_walk = 0;
+    double m_detail = 0.0;
+    std::size_t m_maxTriangles = 4'000'000;
+    std::uint64_t m_topology = 0;
+    // The grid: cells m_cell across, each listing the triangles whose box reaches it.
+    double m_cell = 1.0;
+    std::unordered_map<std::uint64_t, std::vector<std::uint32_t>> m_cells;
+    std::vector<std::array<std::int32_t, 6>> m_triCells;
+    std::array<std::int32_t, 3> m_cellLo{0, 0, 0}, m_cellHi{0, 0, 0};
 };
 
 }  // namespace forge::sculpt

@@ -18,7 +18,7 @@ class SculptPanel : public QWidget {
     Q_OBJECT
 
 public:
-    enum class Detail { Medium, High };
+    enum class Detail { Low, Medium, High };
 
     explicit SculptPanel(QWidget* parent = nullptr);
 
@@ -32,6 +32,10 @@ public:
     double strength() const;   // 0..1
     Detail detail() const;
     void setSize(double radius);
+    // Detail where you sculpt: on, and the finest edge (mm).
+    bool addDetail() const;
+    double finestDetail() const;
+    void setFinestDetail(double mm);
     // Detail can only change before the first stroke (it remakes the mesh).
     void setDetailEnabled(bool on);
     void setUndoEnabled(bool on);
@@ -39,6 +43,7 @@ public:
 
 signals:
     void detailChanged();
+    void addDetailChanged();
     void undoRequested();
     void doneRequested();
     void cancelRequested();
@@ -53,6 +58,8 @@ private:
     QSlider* m_strength = nullptr;
     QLabel* m_strengthValue = nullptr;
     QComboBox* m_detail = nullptr;
+    QCheckBox* m_addDetail = nullptr;
+    QDoubleSpinBox* m_finest = nullptr;
     QPushButton* m_undo = nullptr;
 };
 

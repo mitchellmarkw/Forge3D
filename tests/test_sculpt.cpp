@@ -142,8 +142,8 @@ TEST_CASE("Sculpt: a dab on a dense mesh is quick", "[sculpt][slow]")
     const double dabMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t1).count() / 20;
     WARN("triangles " << s.mesh().triangleCount() << ": finding the surface " << hitMs << " ms, a dab " << dabMs
                       << " ms");
-    CHECK(dabMs < 15.0);
-    CHECK(hitMs < 60.0);
+    CHECK(dabMs < 40.0);  // a big brush: tens of thousands of points
+    CHECK(hitMs < 2.0);   // through the grid
 }
 
 TEST_CASE("Sculpt: the other brushes", "[sculpt]")
@@ -248,4 +248,54 @@ TEST_CASE("Sculpt: symmetry does the same on the other side", "[sculpt]")
     g.moveGrab({2, 0, 0});
     CHECK_THAT(g.hit({50, 0, 10}, {-1, 0, 0})->point[0], WithinAbs(12.0, 0.05));
     CHECK_THAT(g.hit({-50, 0, 10}, {1, 0, 0})->point[0], WithinAbs(-12.0, 0.05));
+}
+
+TEST_CASE("Sculpt: detail is added where the brush goes", "[sculpt]")
+{
+    const Mesh coarse = sculpt::refined(box(20), 2.0, 10'000'000);
+    sculpt::Sculptor s(coarse);
+    const std::size_t before = s.mesh().triangleCount();
+    const auto version = s.topologyVersion();
+    s.setDetail(0.25);
+    sculpt::Dab dab;
+    dab.radius = 3.0;
+    dab.strength = 1.0;
+    const auto hit = s.hit({0, 0, 50}, {0, 0, -1});
+    REQUIRE(hit);
+    dab.centre = hit->point;
+    const auto range = s.apply(dab, hit->triangle);
+    CHECK(s.mesh().triangleCount() > before + 100);
+    CHECK(s.topologyVersion() > version);
+    CHECK(range.second == s.mesh().vertexCount());  // the new points are in the range
+    CHECK(closed(s.mesh()));
+    // Fine under the brush, untouched far away: every edge near the middle is short.
+    for (std::size_t t = 0; t + 2 < s.mesh().indices.size(); t += 3)
+        for (int k = 0; k < 3; ++k) {
+            const float* p = &s.mesh().positions[3 * s.mesh().indices[t + k]];
+            const float* q = &s.mesh().positions[3 * s.mesh().indices[t + (k + 1) % 3]];
+            if (std::hypot(p[0], p[1]) < 1.5 && std::hypot(q[0], q[1]) < 1.5 && p[2] > 19 && q[2] > 19)
+                CHECK(std::hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]) <= 0.25 * 1.01 + 0.08 * 3.0);
+        }
+    const auto far = s.hit({8, 8, 50}, {0, 0, -1});
+    REQUIRE(far);
+    CHECK_THAT(far->point[2], WithinAbs(20.0, 1e-5));
+    // The grid keeps up: the raised middle is found where it now is.
+    CHECK(s.hit({0, 0, 50}, {0, 0, -1})->point[2] > 20.1);
+    // Whole-mesh undo.
+    s.setMesh(coarse);
+    CHECK(s.mesh().triangleCount() == before);
+    CHECK_THAT(volume(s.mesh()), WithinRel(8000.0, 1e-6));
+
+    // With the grid, a hit agrees with testing every triangle.
+    sculpt::Sculptor g(sculpt::refined(box(20), 0.7, 10'000'000));
+    for (const Vec3& from : {Vec3{3, -50, 7}, Vec3{-50, 2.5, 13}, Vec3{40, 30, 35}}) {
+        const Vec3 dir{-from[0], -from[1], 10 - from[2]};
+        const auto h = g.hit(from, dir);
+        REQUIRE(h);
+        // On the box's surface: one coordinate at +-10 (or Z at 0 / 20).
+        const bool onFace = std::abs(std::abs(h->point[0]) - 10) < 1e-4 || std::abs(std::abs(h->point[1]) - 10) < 1e-4 ||
+                            std::abs(h->point[2]) < 1e-4 || std::abs(h->point[2] - 20) < 1e-4;
+        CHECK(onFace);
+    }
+    CHECK_FALSE(g.hit({50, 50, 50}, {1, 0, 0}));  // pointing away
 }

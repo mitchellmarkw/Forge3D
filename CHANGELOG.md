@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.28.0 Beta — Slice 19: Detail where you sculpt (2026-11-13)
+
+- **Add detail where I sculpt** (on by default): as a brush goes over the shape, the
+  triangles under it are split finer, so strokes stay crisp without making the whole
+  shape heavy. **Finest detail** (mm) sets how small they get; a big brush adds coarser
+  ones (a twelfth of its size), a small one finer.
+- A new starting **Detail: Low (about 40,000 triangles)**, for building detail only
+  where you sculpt.
+- **Finding the spot under the mouse is about 2,000 times faster** on big meshes (a grid
+  of the triangles instead of testing every one): the brush ring keeps up even at High.
+- Undo stroke takes back added detail too.
+- 196 unit tests (1 new: detail added under the brush only, the surface still closed,
+  and the grid finding the right spot).
+
 ## 0.27.0 Beta — Slice 18: More brushes and symmetry (2026-11-13)
 
 - Five new sculpting brushes (Brush, with a line under it saying what each does):

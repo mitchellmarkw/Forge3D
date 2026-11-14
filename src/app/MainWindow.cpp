@@ -1209,6 +1209,10 @@ void MainWindow::createDocks()
     stackLayout->addWidget(m_sculptPanel);
     m_sculptPanel->hide();
     connect(m_sculptPanel, &SculptPanel::detailChanged, this, &MainWindow::remeshSculpt);
+    connect(m_sculptPanel, &SculptPanel::addDetailChanged, this, [this] {
+        if (m_sculptMode.sculptor)
+            m_sculptMode.sculptor->setDetail(m_sculptPanel->addDetail() ? m_sculptPanel->finestDetail() : 0.0);
+    });
     connect(m_sculptPanel, &SculptPanel::undoRequested, this, &MainWindow::undoStroke);
     connect(m_sculptPanel, &SculptPanel::doneRequested, this, &MainWindow::finishSculpt);
     connect(m_sculptPanel, &SculptPanel::cancelRequested, this, &MainWindow::endSculpt);
@@ -3099,7 +3103,7 @@ namespace {
 // How many triangles each Detail setting aims for.
 std::size_t sculptTriangles(SculptPanel::Detail detail)
 {
-    return detail == SculptPanel::Detail::High ? 500'000 : 150'000;
+    return detail == SculptPanel::Detail::High ? 500'000 : detail == SculptPanel::Detail::Low ? 40'000 : 150'000;
 }
 }  // namespace
 
@@ -3166,10 +3170,15 @@ void MainWindow::remeshSculpt()
         // Splitting halves edges, so the count lands within about 2x of the aim either way.
         Mesh fine = sculpt::refined(m_sculptMode.base, sculpt::edgeForTriangles(m_sculptMode.base, want) * 1.4,
                                     want * 3);
+        // The finest added detail: half the starting triangles' edges.
+        const double edge = sculpt::edgeForTriangles(fine, fine.triangleCount());
+        m_sculptPanel->setFinestDetail(std::max(0.01, std::round(edge * 0.5 * 100.0) / 100.0));
         m_sculptMode.sculptor = std::make_shared<sculpt::Sculptor>(std::move(fine));
+        m_sculptMode.sculptor->setDetail(m_sculptPanel->addDetail() ? m_sculptPanel->finestDetail() : 0.0);
+        m_sculptMode.topology = m_sculptMode.sculptor->topologyVersion();
         m_sculptMode.display =
             std::shared_ptr<const Mesh>(m_sculptMode.sculptor, &m_sculptMode.sculptor->mesh());
-        m_sculptMode.start = m_sculptMode.sculptor->mesh().positions;
+        m_sculptMode.start = m_sculptMode.sculptor->mesh();
         m_sculptPanel->setStatus(tr("%1 triangles. Drag over the shape to sculpt.")
                                      .arg(QLocale().toString(qulonglong(m_sculptMode.sculptor->mesh().triangleCount()))),
                                  false);
@@ -3209,9 +3218,10 @@ void MainWindow::beginStroke(const QVector3D& origin, const QVector3D& direction
     const auto hit = sculptHit(origin, direction);
     if (!hit)
         return;  // pressed off the shape: nothing (the view turns with the right button)
-    // Before the stroke, for Undo stroke (the last 10).
-    m_sculptMode.undo.push_back(m_sculptMode.sculptor->mesh().positions);
-    if (m_sculptMode.undo.size() > 10)
+    // Before the stroke, for Undo stroke (the last 8; whole meshes, as strokes can add
+    // triangles).
+    m_sculptMode.undo.push_back(m_sculptMode.sculptor->mesh());
+    if (m_sculptMode.undo.size() > 8)
         m_sculptMode.undo.erase(m_sculptMode.undo.begin());
     m_sculptMode.stroking = true;
     m_sculptMode.lastDab.reset();
@@ -3251,7 +3261,7 @@ void MainWindow::sculptAt(const QVector3D& origin, const QVector3D& direction, Q
         const double t = (n[0] * (f[0] - o[0]) + n[1] * (f[1] - o[1]) + n[2] * (f[2] - o[2])) / along;
         const Vec3 at{o[0] + d[0] * t, o[1] + d[1] * t, o[2] + d[2] * t};
         const auto [first, last] = m_sculptMode.sculptor->moveGrab({at[0] - f[0], at[1] - f[1], at[2] - f[2]});
-        m_viewport->meshPointsChanged(m_sculptMode.target, first, last);
+        sculptShown(first, last);
         m_sculptMode.dabs++;
         return;
     }
@@ -3279,19 +3289,33 @@ void MainWindow::sculptAt(const QVector3D& origin, const QVector3D& direction, Q
     m_sculptMode.lastDab = hit->point;
     m_sculptMode.dabs++;
     m_sculptMode.dabMs += timer.nsecsElapsed() / 1e6;
-    m_viewport->meshPointsChanged(m_sculptMode.target, first, last);
+    sculptShown(first, last);
     m_viewport->setBrushRing(Viewport::BrushRing{
         QVector3D(float(hit->point[0]), float(hit->point[1]), float(hit->point[2])),
         QVector3D(float(hit->normal[0]), float(hit->normal[1]), float(hit->normal[2])), float(radius)});
+}
+
+void MainWindow::sculptShown(std::uint32_t first, std::uint32_t last)
+{
+    const auto version = m_sculptMode.sculptor->topologyVersion();
+    if (version != m_sculptMode.topology) {
+        m_sculptMode.topology = version;
+        m_viewport->meshGrew(m_sculptMode.target);
+        m_sculptPanel->setStatus(tr("%1 triangles.").arg(QLocale().toString(
+                                     qulonglong(m_sculptMode.sculptor->mesh().triangleCount()))),
+                                 false);
+    } else {
+        m_viewport->meshPointsChanged(m_sculptMode.target, first, last);
+    }
 }
 
 void MainWindow::undoStroke()
 {
     if (!m_sculptMode.active || m_sculptMode.undo.empty())
         return;
-    m_sculptMode.sculptor->setPositions(m_sculptMode.undo.back());
+    m_sculptMode.sculptor->setMesh(std::move(m_sculptMode.undo.back()));
     m_sculptMode.undo.pop_back();
-    m_viewport->meshPointsChanged(m_sculptMode.target, 0, std::uint32_t(m_sculptMode.sculptor->mesh().vertexCount()));
+    sculptShown(0, 0);
     m_sculptPanel->setUndoEnabled(!m_sculptMode.undo.empty());
 }
 
@@ -3300,7 +3324,8 @@ void MainWindow::finishSculpt()
     if (!m_sculptMode.active || !m_sculptMode.sculptor)
         return;
     const ObjectId target = m_sculptMode.target;
-    if (m_sculptMode.sculptor->mesh().positions == m_sculptMode.start) {
+    if (m_sculptMode.sculptor->mesh().positions == m_sculptMode.start.positions &&
+        m_sculptMode.sculptor->mesh().indices == m_sculptMode.start.indices) {
         endSculpt();  // nothing sculpted: the shape stays as it was
         return;
     }

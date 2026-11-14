@@ -17,6 +17,7 @@
 #include <cstdint>
 #include <memory>
 #include <map>
+#include <set>
 #include <optional>
 #include <unordered_map>
 #include <vector>
@@ -67,6 +68,9 @@ public:
     // Sculpting: points [first, last) of item `id`'s mesh moved in place (same mesh, same
     // triangles); only they are sent to the graphics card again.
     void meshPointsChanged(std::uint64_t id, std::uint32_t first, std::uint32_t last);
+    // Sculpting: item `id`'s mesh gained points and triangles (same mesh object): sent
+    // to the graphics card again in full.
+    void meshGrew(std::uint64_t id);
     // A ring showing the brush on the surface (none: hidden).
     struct BrushRing {
         QVector3D centre;
@@ -132,6 +136,7 @@ private:
 
     // Sculpting
     std::map<std::uint64_t, std::pair<std::uint32_t, std::uint32_t>> m_movedPoints;
+    std::set<std::uint64_t> m_grown;
     std::optional<BrushRing> m_brushRing;
     QOpenGLVertexArrayObject m_ringVao;
     QOpenGLBuffer m_ringBuffer{QOpenGLBuffer::VertexBuffer};
