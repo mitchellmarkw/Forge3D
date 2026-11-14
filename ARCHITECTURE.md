@@ -469,6 +469,21 @@ Viewport (mouse)  --leftPressed(ray, handle)-->  MainWindow drag controller
   the result and the laid path as orange tubes.
 - File format 15: `"follow"` steps.
 
+## Sculpting prototype (slice 17)
+
+- `sculpt::welded` (shared corners), `sculpt::refined` (edges split at their middles
+  until short enough; conforming, so a closed mesh stays closed) and `sculpt::Sculptor`
+  (core, `Sculpt.h`): point neighbours and point→triangle lists in compressed rows;
+  `hit` (brute-force Möller–Trumbore over all triangles: ~20 ms at 500k, the first
+  thing to speed up with a BVH); `apply(Dab)` walks out from the triangle under the
+  brush through neighbours inside the ball, moves those points (Draw: along the
+  falloff-weighted average normal, 0.08 × radius × strength at the middle; Smooth: 4
+  rounds of Laplacian), then recomputes normals for them and their neighbours.
+- The app works in plate coordinates on a finely re-tessellated copy (B-rep shapes) or
+  the mesh itself; the display item points at the sculptor's mesh (aliasing
+  shared_ptr), and `Viewport::meshPointsChanged` uploads just the changed range with
+  glBufferSubData. Done: a MeshSpec body replaces the shape (one undo step).
+
 ## Releases (slice 16)
 
 - `installer/Forge3D.iss` (Inno Setup 6): per-user or all-users install, Start menu,

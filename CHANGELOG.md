@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.26.0 Beta — Slice 17: Sculpting prototype (2026-11-13)
+
+The first step of Phase 2, to try out how sculpting feels and how fast it is.
+
+- **Sculpt tab → Sculpt**: select one shape, click Sculpt, and push and pull its surface
+  like clay. The shape is divided into fine triangles first (**Detail**: Medium, about
+  150,000, or High, about 500,000).
+  - **Draw** pushes the surface out where you drag; hold **Ctrl** to push in.
+  - **Smooth** evens it out; hold **Shift** with Draw to smooth without switching.
+  - **Size** (the brush's radius, also **[** and **]**) and **Strength**. An orange
+    ring shows the brush on the surface.
+  - **Undo stroke** (or Ctrl+Z) takes back the last strokes; **Done** keeps the result;
+    **Cancel** (Esc) leaves the shape as it was.
+- Prototype limits: the sculpted shape becomes a mesh (like an imported one), so its
+  earlier steps can't be changed afterwards (Undo after Done puts everything back).
+  No symmetry, masking or other brushes yet.
+- Only the part of the shape the brush moves is sent to the graphics card again, so
+  strokes stay quick on big meshes.
+- Mesh shapes now say "A mesh: N triangles" in Properties (was "Imported").
+- 193 unit tests (3 new: welding and splitting keep a shape closed; Draw, inverted Draw
+  and Smooth; a dab on 800,000 triangles in a few milliseconds).
+
 ## 0.25.0 Beta — Slice 16: the first public release (2026-11-13)
 
 - **An installer**: `Forge3D-0.25.0-Setup.exe` installs Forge3D just for you (no

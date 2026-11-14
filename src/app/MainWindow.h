@@ -7,6 +7,7 @@
 #include "forge/core/Document.h"
 #include "forge/core/Edges.h"
 #include "forge/core/Emboss.h"
+#include "forge/core/Sculpt.h"
 #include "forge/core/Sketch.h"
 #include "forge/core/Split.h"
 #include "forge/core/Transform.h"
@@ -49,6 +50,7 @@ class PropertiesPanel;
 class SplitPanel;
 class EmbossPanel;
 class Tour;
+class SculptPanel;
 class EdgesPanel;
 class FollowPanel;
 class HolePanel;
@@ -452,6 +454,36 @@ private:
     HoleMode m_holeMode;
     QAction* m_shellAction = nullptr;
     ShellPanel* m_shellPanel = nullptr;
+
+    // Sculpting (prototype): a dense copy of one shape's surface, in plate coordinates.
+    struct SculptMode {
+        bool active = false;
+        ObjectId target = kInvalidId;
+        double size = 0.0;  // the shape's biggest side
+        Mesh base;          // its surface, corners shared (before splitting finely)
+        std::shared_ptr<sculpt::Sculptor> sculptor;
+        std::shared_ptr<const Mesh> display;  // the sculptor's mesh, drawn
+        std::vector<float> start;             // the points before any stroke
+        std::vector<std::vector<float>> undo;  // the points before each recent stroke
+        bool stroking = false;
+        std::optional<Vec3> lastDab;
+        int dabs = 0;
+        double dabMs = 0.0;
+    };
+    SculptMode m_sculptMode;
+    SculptPanel* m_sculptPanel = nullptr;
+    QAction* m_sculptAction = nullptr;
+    QAction* m_sculptSmaller = nullptr;
+    QAction* m_sculptBigger = nullptr;
+    void startSculpt();
+    void remeshSculpt();
+    std::optional<sculpt::Hit> sculptHit(const QVector3D& origin, const QVector3D& direction) const;
+    void sculptHover(const QVector3D& origin, const QVector3D& direction);
+    void beginStroke(const QVector3D& origin, const QVector3D& direction, Qt::KeyboardModifiers modifiers);
+    void sculptAt(const QVector3D& origin, const QVector3D& direction, Qt::KeyboardModifiers modifiers);
+    void undoStroke();
+    void finishSculpt();
+    void endSculpt();
     QTimer* m_shellTimer = nullptr;
     struct ShellMode {
         bool active = false;
