@@ -376,6 +376,16 @@ void Viewport::upload(GpuMesh& gpu, const std::shared_ptr<const forge::Mesh>& me
 
 void Viewport::syncGpuMeshes()
 {
+    // Meshes that grew while sculpting: all of it again.
+    for (std::uint64_t id : m_grown) {
+        const auto found = m_gpu.find(id);
+        if (found != m_gpu.end() && found->second->source) {
+            const auto source = found->second->source;
+            upload(*found->second, source);
+        }
+        m_movedPoints.erase(id);
+    }
+    m_grown.clear();
     // Points moved by sculpting: just their stretch of the buffers.
     for (const auto& [id, range] : m_movedPoints) {
         const auto found = m_gpu.find(id);
@@ -498,6 +508,12 @@ void Viewport::meshPointsChanged(std::uint64_t id, std::uint32_t first, std::uin
         it->second.first = std::min(it->second.first, first);
         it->second.second = std::max(it->second.second, last);
     }
+    update();
+}
+
+void Viewport::meshGrew(std::uint64_t id)
+{
+    m_grown.insert(id);
     update();
 }
 

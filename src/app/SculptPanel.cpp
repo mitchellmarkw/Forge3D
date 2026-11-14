@@ -111,11 +111,34 @@ SculptPanel::SculptPanel(QWidget* parent) : QWidget(parent)
     layout->addLayout(form);
 
     m_detail = new QComboBox;
+    m_detail->addItem(tr("Low (about 40,000 triangles)"));
     m_detail->addItem(tr("Medium (about 150,000 triangles)"));
     m_detail->addItem(tr("High (about 500,000 triangles)"));
+    m_detail->setCurrentIndex(1);
     m_detail->setToolTip(tr("How finely the shape is divided for sculpting. More is smoother, but slower. Choose "
                             "before you start."));
     layout->addWidget(labelled(tr("Detail:"), m_detail));
+    m_addDetail = new QCheckBox(tr("Add detail where I sculpt"));
+    m_addDetail->setChecked(true);
+    m_addDetail->setToolTip(tr("Splits the triangles under the brush as you go, so fine strokes stay crisp "
+                               "without making the whole shape heavy"));
+    layout->addWidget(m_addDetail);
+    auto* finestForm = new QFormLayout;
+    m_finest = new QDoubleSpinBox;
+    m_finest->setRange(0.01, 50.0);
+    m_finest->setValue(0.1);
+    m_finest->setDecimals(2);
+    m_finest->setSingleStep(0.05);
+    m_finest->setSuffix(tr(" mm"));
+    m_finest->setToolTip(tr("How small the added triangles get: smaller is finer, but heavier. (A big brush "
+                            "adds coarser ones: a twelfth of its size.)"));
+    finestForm->addRow(tr("Finest detail:"), m_finest);
+    layout->addLayout(finestForm);
+    connect(m_addDetail, &QCheckBox::toggled, this, [this](bool on) {
+        m_finest->setEnabled(on);
+        emit addDetailChanged();
+    });
+    connect(m_finest, &QDoubleSpinBox::valueChanged, this, &SculptPanel::addDetailChanged);
 
     auto* hint = new QLabel(tr("Drag with the left button over the shape to sculpt. Hold <b>Ctrl</b> for the "
                                "opposite, <b>Shift</b> to smooth. <b>[</b> and <b>]</b> change the size. Turn the view with "
@@ -190,12 +213,28 @@ double SculptPanel::strength() const
 
 SculptPanel::Detail SculptPanel::detail() const
 {
-    return m_detail->currentIndex() == 1 ? Detail::High : Detail::Medium;
+    return m_detail->currentIndex() == 2 ? Detail::High : m_detail->currentIndex() == 0 ? Detail::Low : Detail::Medium;
 }
 
 void SculptPanel::setSize(double radius)
 {
     m_size->setValue(radius);
+}
+
+bool SculptPanel::addDetail() const
+{
+    return m_addDetail->isChecked();
+}
+
+double SculptPanel::finestDetail() const
+{
+    return m_finest->value();
+}
+
+void SculptPanel::setFinestDetail(double mm)
+{
+    const QSignalBlocker block(m_finest);
+    m_finest->setValue(mm);
 }
 
 void SculptPanel::setDetailEnabled(bool on)
