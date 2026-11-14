@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.24.1 — Settings are remembered (2026-11-13)
+
+- The tour came back every time Forge3D started, even after finishing it. Some
+  preferences were being kept somewhere Windows doesn't allow without an organisation
+  name, so they were quietly never saved. Now everything is kept with the rest of
+  Forge3D's preferences (HKEY_CURRENT_USER\Software\Forge3D). This also fixes Forge3D
+  forgetting:
+  - which slicer Send to Slicer uses (it asked again each time Forge3D started),
+  - the folder and file type you last exported to, and the folder you last imported from,
+  - which ribbon tab was open.
+
 ## 0.24.0 — Slice 15: Quick start (2026-11-13)
 
 - **Help → Quick Start Guide**: an illustrated walk-through of a first print (a key tag
