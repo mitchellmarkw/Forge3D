@@ -145,3 +145,107 @@ TEST_CASE("Sculpt: a dab on a dense mesh is quick", "[sculpt][slow]")
     CHECK(dabMs < 15.0);
     CHECK(hitMs < 60.0);
 }
+
+TEST_CASE("Sculpt: the other brushes", "[sculpt]")
+{
+    const Mesh start = sculpt::refined(box(20), 0.5, 10'000'000);
+    const auto topAt = [](const sculpt::Sculptor& s, double x, double y) {
+        return s.hit({x, y, 50}, {0, 0, -1})->point[2];
+    };
+    sculpt::Dab dab;
+    dab.centre = {0, 0, 20};
+    dab.radius = 4.0;
+    dab.strength = 1.0;
+
+    SECTION("Inflate swells out, inverted shrinks")
+    {
+        sculpt::Sculptor s(start);
+        dab.brush = sculpt::Brush::Inflate;
+        s.apply(dab, s.hit({0, 0, 50}, {0, 0, -1})->triangle);
+        CHECK(volume(s.mesh()) > 8000.0 + 1.0);
+        CHECK(closed(s.mesh()));
+        sculpt::Sculptor t(start);
+        dab.invert = true;
+        t.apply(dab, t.hit({0, 0, 50}, {0, 0, -1})->triangle);
+        CHECK(volume(t.mesh()) < 8000.0 - 1.0);
+    }
+    SECTION("Flatten takes a bump back down")
+    {
+        sculpt::Sculptor s(start);
+        dab.radius = 2.0;
+        s.apply(dab, s.hit({0, 0, 50}, {0, 0, -1})->triangle);  // a small bump
+        const double bump = topAt(s, 0, 0);
+        dab.radius = 6.0;
+        dab.brush = sculpt::Brush::Flatten;
+        for (int i = 0; i < 5; ++i)
+            s.apply(dab, s.hit({0, 0, 50}, {0, 0, -1})->triangle);
+        CHECK(topAt(s, 0, 0) < bump - 0.05);
+    }
+    SECTION("Clay builds a flat layer")
+    {
+        sculpt::Sculptor s(start);
+        dab.brush = sculpt::Brush::Clay;
+        for (int i = 0; i < 3; ++i)
+            s.apply(dab, s.hit({0, 0, 50}, {0, 0, -1})->triangle);
+        CHECK(topAt(s, 0, 0) > 20.1);
+        // Flat-ish on top: the middle and a little way off about the same height.
+        CHECK_THAT(topAt(s, 0.8, 0), WithinAbs(topAt(s, 0, 0), 0.05));
+    }
+    SECTION("Pinch draws points in towards the middle")
+    {
+        sculpt::Sculptor s(start);
+        dab.brush = sculpt::Brush::Pinch;
+        const std::uint32_t v = s.nearestPoint({2, 0, 20});
+        const double before = std::abs(s.mesh().positions[3 * v]);
+        s.apply(dab, s.hit({0, 0, 50}, {0, 0, -1})->triangle);
+        CHECK(std::abs(s.mesh().positions[3 * v]) < before - 0.05);
+        CHECK_THAT(s.mesh().positions[3 * v + 2], WithinAbs(20.0, 1e-4));  // along the surface
+    }
+    SECTION("Grab pulls the area with the mouse")
+    {
+        sculpt::Sculptor s(start);
+        const auto hit = s.hit({0, 0, 50}, {0, 0, -1});
+        s.beginGrab(hit->point, 4.0, hit->triangle, {});
+        s.moveGrab({0, 0, 3});
+        CHECK_THAT(topAt(s, 0, 0), WithinAbs(23.0, 0.05));
+        s.moveGrab({0, 0, 1});  // from where it started, not added up
+        CHECK_THAT(topAt(s, 0, 0), WithinAbs(21.0, 0.05));
+        s.endGrab();
+        CHECK(closed(s.mesh()));
+    }
+}
+
+TEST_CASE("Sculpt: symmetry does the same on the other side", "[sculpt]")
+{
+    sculpt::Sculptor s(sculpt::refined(box(20), 0.5, 10'000'000));
+    sculpt::Symmetry mirror;
+    mirror.x = true;
+    mirror.centre = {0, 0, 10};
+    CHECK(mirror.images({3, 1, 20}).size() == 2);
+    CHECK(mirror.images({3, 1, 20})[1] == Vec3{-3, 1, 20});
+    mirror.y = true;
+    CHECK(mirror.images({3, 1, 20}).size() == 4);
+    CHECK(mirror.mirrored({1, 1, 1}, 3) == Vec3{-1, -1, 1});
+    mirror.y = false;
+
+    sculpt::Dab dab;
+    dab.centre = {5, 2, 20};
+    dab.radius = 2.0;
+    dab.strength = 1.0;
+    const auto hit = s.hit({5, 2, 50}, {0, 0, -1});
+    s.apply(dab, hit->triangle, mirror);
+    const double here = s.hit({5, 2, 50}, {0, 0, -1})->point[2];
+    const double there = s.hit({-5, 2, 50}, {0, 0, -1})->point[2];
+    CHECK(here > 20.1);
+    CHECK_THAT(there, WithinAbs(here, 1e-4));
+    CHECK_THAT(s.hit({5, -6, 50}, {0, 0, -1})->point[2], WithinAbs(20.0, 1e-5));  // not mirrored in Y
+
+    // Grab, mirrored: pulling one side out to +X pulls the other out to -X.
+    sculpt::Sculptor g(sculpt::refined(box(20), 0.5, 10'000'000));
+    const auto side = g.hit({50, 0, 10}, {-1, 0, 0});
+    REQUIRE(side);
+    g.beginGrab(side->point, 3.0, side->triangle, mirror);
+    g.moveGrab({2, 0, 0});
+    CHECK_THAT(g.hit({50, 0, 10}, {-1, 0, 0})->point[0], WithinAbs(12.0, 0.05));
+    CHECK_THAT(g.hit({-50, 0, 10}, {1, 0, 0})->point[0], WithinAbs(-12.0, 0.05));
+}

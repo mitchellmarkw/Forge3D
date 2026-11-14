@@ -996,8 +996,8 @@ void MainWindow::createToolBar()
     Page sculpt = page(tr("Sculpt"), tr("Sculpting brushes (prototype)"));
     {
         group(sculpt, tr("Brushes"), {button(m_sculptAction)});
-        auto* note = new QLabel(tr("Prototype: Draw and Smooth brushes. More brushes, masking and symmetry are "
-                                   "coming."));
+        auto* note = new QLabel(tr("Select a shape, then Sculpt: Draw, Smooth, Inflate, Flatten, Pinch, Clay and "
+                                   "Grab brushes, mirrored across X, Y or Z if you like."));
         note->setStyleSheet(QStringLiteral("color: palette(mid);"));
         sculpt.row->addWidget(note);
         sculpt.row->addStretch(1);
@@ -1826,6 +1826,9 @@ void MainWindow::onLeftReleased(bool wasDrag)
     if (m_sculptMode.active) {
         m_sculptMode.stroking = false;
         m_sculptMode.lastDab.reset();
+        if (m_sculptMode.grabbing && m_sculptMode.sculptor)
+            m_sculptMode.sculptor->endGrab();
+        m_sculptMode.grabbing = false;
         return;
     }
     Drag d = m_dragState;
@@ -3134,6 +3137,7 @@ void MainWindow::startSculpt()
         const Bounds b = plate.bounds();
         mode.size = std::max({b.size()[0], b.size()[1], b.size()[2]});
         mode.base = sculpt::welded(plate, std::max(1e-6, double(b.radius()) * 1e-6));
+        mode.middle = {b.center()[0], b.center()[1], b.center()[2]};
     } catch (const std::exception& e) {
         QMessageBox::information(this, tr("Forge3D"), QString::fromUtf8(e.what()));
         return;
@@ -3213,11 +3217,44 @@ void MainWindow::beginStroke(const QVector3D& origin, const QVector3D& direction
     m_sculptMode.lastDab.reset();
     m_sculptPanel->setDetailEnabled(false);
     m_sculptPanel->setUndoEnabled(true);
+    if (m_sculptPanel->brush() == int(sculpt::Brush::Grab) && !modifiers.testFlag(Qt::ShiftModifier)) {
+        // Grab: the points under the brush follow the mouse across a plane facing the view.
+        m_sculptMode.grabbing = true;
+        m_sculptMode.grabFrom = hit->point;
+        m_sculptMode.grabFacing = {direction.x(), direction.y(), direction.z()};
+        m_sculptMode.sculptor->beginGrab(hit->point, m_sculptPanel->size(), hit->triangle, sculptSymmetry());
+        return;
+    }
     sculptAt(origin, direction, modifiers);
+}
+
+sculpt::Symmetry MainWindow::sculptSymmetry() const
+{
+    sculpt::Symmetry s;
+    s.x = m_sculptPanel->mirrorX();
+    s.y = m_sculptPanel->mirrorY();
+    s.z = m_sculptPanel->mirrorZ();
+    s.centre = m_sculptMode.middle;
+    return s;
 }
 
 void MainWindow::sculptAt(const QVector3D& origin, const QVector3D& direction, Qt::KeyboardModifiers modifiers)
 {
+    if (m_sculptMode.grabbing) {
+        // Where the ray crosses the plane through the grab point, facing the view.
+        const Vec3& n = m_sculptMode.grabFacing;
+        const Vec3 o{origin.x(), origin.y(), origin.z()}, d{direction.x(), direction.y(), direction.z()};
+        const double along = n[0] * d[0] + n[1] * d[1] + n[2] * d[2];
+        if (std::abs(along) < 1e-9)
+            return;
+        const Vec3& f = m_sculptMode.grabFrom;
+        const double t = (n[0] * (f[0] - o[0]) + n[1] * (f[1] - o[1]) + n[2] * (f[2] - o[2])) / along;
+        const Vec3 at{o[0] + d[0] * t, o[1] + d[1] * t, o[2] + d[2] * t};
+        const auto [first, last] = m_sculptMode.sculptor->moveGrab({at[0] - f[0], at[1] - f[1], at[2] - f[2]});
+        m_viewport->meshPointsChanged(m_sculptMode.target, first, last);
+        m_sculptMode.dabs++;
+        return;
+    }
     const auto hit = sculptHit(origin, direction);
     if (!hit)
         return;
@@ -3233,12 +3270,12 @@ void MainWindow::sculptAt(const QVector3D& origin, const QVector3D& direction, Q
     dab.centre = hit->point;
     dab.radius = radius;
     dab.strength = m_sculptPanel->strength();
-    dab.brush = (m_sculptPanel->smoothBrush() || modifiers.testFlag(Qt::ShiftModifier)) ? sculpt::Brush::Smooth
-                                                                                        : sculpt::Brush::Draw;
+    dab.brush = modifiers.testFlag(Qt::ShiftModifier) ? sculpt::Brush::Smooth
+                                                      : sculpt::Brush(std::clamp(m_sculptPanel->brush(), 0, 5));
     dab.invert = modifiers.testFlag(Qt::ControlModifier);
     QElapsedTimer timer;
     timer.start();
-    const auto [first, last] = m_sculptMode.sculptor->apply(dab, hit->triangle);
+    const auto [first, last] = m_sculptMode.sculptor->apply(dab, hit->triangle, sculptSymmetry());
     m_sculptMode.lastDab = hit->point;
     m_sculptMode.dabs++;
     m_sculptMode.dabMs += timer.nsecsElapsed() / 1e6;

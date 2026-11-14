@@ -467,6 +467,10 @@ private:
         std::vector<std::vector<float>> undo;  // the points before each recent stroke
         bool stroking = false;
         std::optional<Vec3> lastDab;
+        Vec3 middle{0.0, 0.0, 0.0};  // of the shape, for the mirror planes
+        bool grabbing = false;       // a Grab stroke: pulled across a plane facing the view
+        Vec3 grabFrom{0.0, 0.0, 0.0};
+        Vec3 grabFacing{0.0, 0.0, 1.0};
         int dabs = 0;
         double dabMs = 0.0;
     };
@@ -482,6 +486,7 @@ private:
     void beginStroke(const QVector3D& origin, const QVector3D& direction, Qt::KeyboardModifiers modifiers);
     void sculptAt(const QVector3D& origin, const QVector3D& direction, Qt::KeyboardModifiers modifiers);
     void undoStroke();
+    sculpt::Symmetry sculptSymmetry() const;
     void finishSculpt();
     void endSculpt();
     QTimer* m_shellTimer = nullptr;
