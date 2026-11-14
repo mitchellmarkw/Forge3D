@@ -8,6 +8,8 @@ in one document with one undo history.
 > along; sculpting is still to come. Expect rough edges, and keep copies of files you
 > care about. See [ROADMAP.md](ROADMAP.md) and [CHANGELOG.md](CHANGELOG.md).
 
+New to Forge3D? See the **[Quick Start](docs/QUICK_START.md)**: your first print in about ten minutes.
+
 ## What it can do so far
 
 - **Shapes:** box, cylinder, sphere, cone, torus, tube, wedge, pyramid (oval versions

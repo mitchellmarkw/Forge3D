@@ -1,0 +1,11 @@
+<RCC>
+  <qresource prefix="/help">
+    <file alias="quick-start.html">help/quick-start.html</file>
+    <file alias="guide-1-size.png">../../docs/quick-start/guide-1-size.png</file>
+    <file alias="guide-2-cylinder.png">../../docs/quick-start/guide-2-cylinder.png</file>
+    <file alias="guide-3-select.png">../../docs/quick-start/guide-3-select.png</file>
+    <file alias="guide-4-hole.png">../../docs/quick-start/guide-4-hole.png</file>
+    <file alias="guide-5-emboss.png">../../docs/quick-start/guide-5-emboss.png</file>
+    <file alias="guide-6-print.png">../../docs/quick-start/guide-6-print.png</file>
+  </qresource>
+</RCC>

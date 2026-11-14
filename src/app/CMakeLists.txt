@@ -38,7 +38,10 @@ add_executable(Forge3D WIN32
     WordsEditor.cpp
     Viewport.h
     Viewport.cpp
+    Tour.h
+    Tour.cpp
     icons.qrc
+    help.qrc
 )
 
 target_include_directories(Forge3D PRIVATE

@@ -1,0 +1,32 @@
+<html><head><meta charset='utf-8'><style>
+body { font-family: 'Segoe UI', sans-serif; font-size: 10.5pt; color: #2b2f33; }
+h1 { font-size: 16pt; color: #1f5fa8; } h2 { font-size: 12pt; margin-top: 14px; color: #1f5fa8; }
+code { font-family: Consolas, monospace; }
+</style></head><body>
+<h1>Quick Start: your first print</h1>
+<p>In about ten minutes you'll make a key tag with a hole for the ring and your name standing out on top, then send it to your printer. Every number is in millimetres.</p>
+<h2>Getting round the view</h2><ul>
+<li><b>Turn the view:</b> drag with the right mouse button</li>
+<li><b>Slide the view:</b> drag with the middle button (or Shift + right button)</li>
+<li><b>Zoom:</b> the mouse wheel</li>
+<li><b>Fit everything in view:</b> F (Home puts the view back to the start)</li>
+</ul>
+<h2>1. Add a box and size it</h2><p><b>Build → Add Shape → Box</b>. In <b>Properties</b> on the right, type <b>Width 50</b>, <b>Depth 20</b> and <b>Height 4</b>, pressing Enter after each.</p>
+<p><img src='qrc:/help/guide-1-size.png' width='640'></p>
+<h2>2. Add the shape for the hole</h2><p><b>Add Shape → Cylinder</b>. Make it <b>Radius 3</b> and <b>Height 10</b>, then set its <b>X</b> to <b>-18</b> so it stands up through the left end of the tag.</p>
+<p><img src='qrc:/help/guide-2-cylinder.png' width='640'></p>
+<h2>3. Pick both, the tag first</h2><p>Click <b>Box 1</b> in <b>Objects</b> on the left, then hold <b>Ctrl</b> and click <b>Cylinder 1</b>. Subtract keeps the first shape you pick and cuts the others out of it.</p>
+<p><img src='qrc:/help/guide-3-select.png' width='640'></p>
+<h2>4. Cut the hole</h2><p>Click <b>Subtract</b>. The cylinder cuts its hole and disappears. Nothing is lost: double-click a step in <b>Objects</b> any time to change it, and the tag follows.</p>
+<p><img src='qrc:/help/guide-4-hole.png' width='640'></p>
+<h2>5. Put your name on it</h2><p><b>Design → Emboss</b>. Type your name, set <b>Letter height 9</b> and <b>Depth 1</b>, keep <b>Raised</b>, click the top of the tag where the words should go, then click <b>Emboss</b>.</p>
+<p><img src='qrc:/help/guide-5-emboss.png' width='640'></p>
+<h2>6. Print it</h2><p><b>Print → Export</b> saves an STL or 3MF file your slicer opens. <b>Send to Slicer</b> opens it in your slicer straight away (the first time, it asks which slicer you use). If a shape needs a different face down, <b>Lay on Face</b> and click that face.</p>
+<p><img src='qrc:/help/guide-6-print.png' width='640'></p>
+<h2>7. Keep your work</h2><p><b>File → Save</b> keeps a <code>.f3d</code> file with every step, so you can open it later and change the name, the hole or the size.</p>
+<h2>Good to know</h2><ul>
+<li><b>Ctrl+Z</b> undoes anything; <b>Esc</b> cancels the tool you're in.</li>
+<li>Point at any button for a tip about what it does.</li>
+<li><b>Help → Take the Tour</b> shows where everything is; this guide is in <b>Help → Quick Start Guide</b>.</li>
+<li>Made a mistake with the order in step 3? Undo, and pick them again the other way round.</li>
+</ul></body></html>

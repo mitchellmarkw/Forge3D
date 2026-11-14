@@ -13,6 +13,7 @@
 #include "SketchPanel.h"
 #include "SketchView.h"
 #include "SplitPanel.h"
+#include "Tour.h"
 #include "Viewport.h"
 
 #include "forge/core/Edges.h"
@@ -58,6 +59,8 @@
 #include <QStackedWidget>
 #include <QScrollArea>
 #include <QScreen>
+#include <QTextBrowser>
+#include <QDialogButtonBox>
 #include <QFile>
 #include <QGuiApplication>
 #include <QScrollBar>
@@ -260,6 +263,11 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
         overlay->addStretch(1);
     }
     connect(m_viewport, &Viewport::firstFrameRendered, this, &MainWindow::firstFrameRendered);
+    // The first time Forge3D runs, the tour starts by itself (once).
+    connect(this, &MainWindow::firstFrameRendered, this, [this] {
+        if (!QSettings().value(QStringLiteral("tour/seen"), false).toBool())
+            QTimer::singleShot(600, this, &MainWindow::startTour);
+    });
     connect(m_viewport, &Viewport::clicked, this, &MainWindow::onViewportClicked);
     connect(m_viewport, &Viewport::hovered, this, [this](const QVector3D& o, const QVector3D& d, const QPointF& px) {
         if (m_edgesMode.active)
@@ -748,6 +756,8 @@ void MainWindow::createMenus()
         if (!path.isEmpty())
             QDesktopServices::openUrl(QUrl::fromLocalFile(QFileInfo(path).absolutePath()));
     });
+    help->addAction(tr("&Quick Start Guide"), this, &MainWindow::showQuickStart);
+    help->addAction(tr("Take the &Tour"), this, &MainWindow::startTour);
     help->addSeparator();
     help->addAction(tr("&About Forge3D"), this, &MainWindow::showAbout);
 }
@@ -1012,7 +1022,14 @@ void MainWindow::createDocks()
     });
     // Long hint texts wrap instead of widening the dock.
     m_propsStack->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
-    propsDock->setWidget(m_propsStack);
+    // A tall panel (Properties of a big shape, Emboss with a picture) scrolls rather
+    // than making the window taller than a laptop screen.
+    auto* propsScroll = new QScrollArea;
+    propsScroll->setWidget(m_propsStack);
+    propsScroll->setWidgetResizable(true);
+    propsScroll->setFrameShape(QFrame::NoFrame);
+    propsScroll->setMinimumWidth(300);
+    propsDock->setWidget(propsScroll);
     m_propsDock = propsDock;
     connect(m_splitPanel, &SplitPanel::planeChanged, this, &MainWindow::updateSplitPlane);
     connect(m_splitPanel, &SplitPanel::applyRequested, this, &MainWindow::applySplit);
@@ -4148,6 +4165,95 @@ void MainWindow::refreshCommandState()
                        .arg(name, QString::fromLatin1(build::kAppName), QString::fromLatin1(build::kVersion)));
     setWindowModified(!m_stack.isClean());
     relockForSketch();
+}
+
+void MainWindow::showQuickStart()
+{
+    if (!m_quickStart) {
+        m_quickStart = new QDialog(this);
+        m_quickStart->setWindowTitle(tr("Quick Start - Forge3D"));
+        auto* layout = new QVBoxLayout(m_quickStart);
+        auto* browser = new QTextBrowser;
+        browser->setOpenExternalLinks(true);
+        browser->setSource(QUrl(QStringLiteral("qrc:/help/quick-start.html")));
+        layout->addWidget(browser);
+        auto* buttons = new QDialogButtonBox(QDialogButtonBox::Close);
+        connect(buttons, &QDialogButtonBox::rejected, m_quickStart, &QDialog::close);
+        layout->addWidget(buttons);
+        m_quickStart->resize(760, std::min(820, height() - 40));
+    }
+    // Beside the main window, so the steps can be followed while it's open.
+    m_quickStart->show();
+    m_quickStart->raise();
+    m_quickStart->activateWindow();
+}
+
+QWidget* MainWindow::ribbonButtonFor(QAction* action, int tab) const
+{
+    if (!m_ribbonTabs || tab >= m_ribbonTabs->count())
+        return nullptr;
+    for (auto* button : m_ribbonTabs->widget(tab)->findChildren<QToolButton*>())
+        if (button->defaultAction() == action)
+            return button;
+    return nullptr;
+}
+
+void MainWindow::startTour()
+{
+    if (m_tour)
+        return;
+    if (toolOpen()) {
+        statusBar()->showMessage(tr("Finish or cancel the tool you're in first (Esc), then take the tour."), 6000);
+        return;
+    }
+    const auto tab = [this](int i) { return [this, i] { m_ribbonTabs->setCurrentIndex(i); }; };
+    const auto onTab = [this](QAction* action, int i) { return [this, action, i] { return ribbonButtonFor(action, i); }; };
+    std::vector<Tour::Step> steps{
+        {tr("Welcome to Forge3D"),
+         tr("This short tour shows where things are, so you can make and print your first part in a few "
+            "minutes. Try each step as you go; the window keeps working while the tour is open."),
+         {}, tab(0)},
+        {tr("Add a shape"),
+         tr("Start here: <b>Add Shape</b> puts a box, cylinder, sphere, letters and more on the plate. "
+            "<b>Import</b> brings in an STL, 3MF or OBJ."),
+         onTab(m_addMenu->menuAction(), 0), tab(0)},
+        {tr("Size it exactly"),
+         tr("<b>Properties</b> shows the selected shape: type its size in millimetres, where it sits, how "
+            "it's turned, and its name."),
+         [this] { return static_cast<QWidget*>(m_propsDock); }, tab(0)},
+        {tr("Move, turn and resize"),
+         tr("Pick <b>Move</b>, <b>Rotate</b> or <b>Resize</b>, then drag the handles on the shape. "
+            "<b>Snap</b> keeps to whole millimetres and neat angles. Turn the view by dragging with the "
+            "right mouse button; the wheel zooms."),
+         onTab(m_modeMove, 0), tab(0)},
+        {tr("Combine shapes"),
+         tr("Select two shapes (<b>Ctrl+click</b> adds to the selection), then <b>Merge</b> joins them and "
+            "<b>Subtract</b> cuts the others out of the first one you picked: that's how you make a hole."),
+         onTab(m_subtract, 0), tab(0)},
+        {tr("Every step, kept"),
+         tr("<b>Objects</b> lists your shapes and the steps that made them. <b>Double-click</b> a step to "
+            "change it later; everything after it follows."),
+         [this] { return m_objects->parentWidget(); }, tab(0)},
+        {tr("Words and pictures"),
+         tr("On the <b>Design</b> tab, <b>Emboss</b> raises or engraves your name, or a logo or photo, on "
+            "any surface, even round a cylinder. Holes, shells, rounded edges and sketches are here too."),
+         onTab(m_emboss, 1), tab(1)},
+        {tr("Ready to print"),
+         tr("On the <b>Print</b> tab, <b>Lay on Face</b> puts the best face down, and <b>Send to Slicer</b> "
+            "opens it in your slicer (or <b>Export</b> saves an STL or 3MF)."),
+         onTab(m_sendToSlicer, 3), tab(3)},
+        {tr("That's it"),
+         tr("<b>Help → Quick Start Guide</b> walks through a first print (a key tag with your name) with "
+            "pictures. <b>Help → Take the Tour</b> shows this again. Point at any button for a tip, and "
+            "<b>Ctrl+Z</b> undoes anything."),
+         {}, tab(0)},
+    };
+    m_tour = new Tour(this, std::move(steps));
+    connect(m_tour, &Tour::finished, this, [this] {
+        QSettings().setValue(QStringLiteral("tour/seen"), true);
+        m_ribbonTabs->setCurrentIndex(0);
+    });
+    m_tour->start();
 }
 
 void MainWindow::showAbout()

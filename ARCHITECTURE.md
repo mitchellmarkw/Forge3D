@@ -469,6 +469,19 @@ Viewport (mouse)  --leftPressed(ray, handle)-->  MainWindow drag controller
   the result and the laid path as orange tubes.
 - File format 15: `"follow"` steps.
 
+## Quick start (slice 15)
+
+- `tools/make_quick_start.py` writes the guide twice from one text:
+  `docs/QUICK_START.md` (GitHub) and `src/app/help/quick-start.html` (in `help.qrc`
+  with the screenshots from `docs/quick-start/`), shown in a QTextBrowser dialog.
+  Re-run it after changing the guide.
+- `Tour` (src/app/Tour.*): a mouse-transparent overlay that dims the window except the
+  target, plus a note (QFrame) placed below / left / right / above the target. Steps
+  find ribbon buttons with `MainWindow::ribbonButtonFor(action, tab)`. The first run
+  starts it (QSettings `tour/seen`).
+- The Properties dock is a QScrollArea; PropertiesPanel's hidden page is size-policy
+  Ignored so only the shown page sets its height.
+
 ## Icons (slice 14)
 
 - `src/app/icons/*.svg` (24 × 24, 1.6 px strokes, `#3a3f45` lines, `#2b78d0` accent),
