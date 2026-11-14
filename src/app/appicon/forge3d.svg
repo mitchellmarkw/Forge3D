@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3a8ae0"/>
+      <stop offset="1" stop-color="#1c56a3"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="240" height="240" rx="52" fill="url(#bg)"/>
+  <!-- A cube: top light, left mid, right darker; a rounded-off corner suggests sculpting -->
+  <path d="M128 40 L208 86 L128 132 L48 86 Z" fill="#ffffff"/>
+  <path d="M48 86 L128 132 L128 222 L48 176 Z" fill="#cfe2f8"/>
+  <path d="M128 132 L208 86 L208 150 C208 190 170 214 128 222 Z" fill="#9cc3ee"/>
+  <path d="M128 40 L208 86 L208 150 C208 190 170 214 128 222 L48 176 L48 86 Z M48 86 L128 132 L208 86 M128 132 L128 222"
+        fill="none" stroke="#123f7a" stroke-width="7" stroke-linejoin="round"/>
+</svg>

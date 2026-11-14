@@ -47,6 +47,7 @@ add_library(forge_core STATIC
     src/SketchShape.cpp
     src/Text.cpp
     src/Picture.cpp
+    src/Updates.cpp
     src/Transform.cpp
 )
 add_library(Forge3D::core ALIAS forge_core)

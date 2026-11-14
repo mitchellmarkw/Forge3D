@@ -43,6 +43,10 @@ add_executable(Forge3D WIN32
     icons.qrc
     help.qrc
 )
+if(WIN32)
+    # The program's own icon (Explorer, the taskbar, the installer's shortcuts).
+    target_sources(Forge3D PRIVATE Forge3D.rc)
+endif()
 
 target_include_directories(Forge3D PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
@@ -55,6 +59,7 @@ target_link_libraries(Forge3D PRIVATE
     Qt6::Widgets
     Qt6::OpenGLWidgets
     Qt6::Svg
+    Qt6::Network
 )
 
 if(WIN32)

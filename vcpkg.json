@@ -22,6 +22,7 @@
         "doubleconversion",
         "zstd",
         "concurrent",
+        "network",
         "thread",
         "windeployqt"
       ]

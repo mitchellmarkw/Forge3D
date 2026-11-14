@@ -469,6 +469,21 @@ Viewport (mouse)  --leftPressed(ray, handle)-->  MainWindow drag controller
   the result and the laid path as orange tubes.
 - File format 15: `"follow"` steps.
 
+## Releases (slice 16)
+
+- `installer/Forge3D.iss` (Inno Setup 6): per-user or all-users install, Start menu,
+  optional desktop icon, `.f3d` association (HKA, so it follows the install mode). The
+  Windows build makes it and a portable zip after packaging, and on a `v*` tag publishes
+  them with `gh release create` (notes from `docs/release-notes/<tag>.md`). See
+  docs/RELEASING.md.
+- `FORGE_RELEASE_LABEL` (top-level CMakeLists) → `build::kReleaseLabel`; shown after
+  the version.
+- `updates::newerRelease` (core, tested) reads GitHub's release list; the app fetches it
+  with QNetworkAccessManager (Qt Network; on Windows the schannel TLS plugin is
+  packaged). Preferences: `updates/atStart`.
+- The app icon: `src/app/appicon/forge3d.svg` (window icon, through `icons.qrc`) and
+  `forge3d.ico` (the exe, through `Forge3D.rc`).
+
 ## Quick start (slice 15)
 
 - `tools/make_quick_start.py` writes the guide twice from one text:

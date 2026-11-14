@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Builds Forge3D on Windows, runs the unit tests, and uploads a ready-to-run zip.
-# Download it from the run's "Artifacts" section, unzip, and run Forge3D.exe.
+# Builds Forge3D on Windows, runs the unit tests, and uploads a ready-to-run zip (for
+# testing) and the installer. Download them from the run's "Artifacts" section.
+# Pushing a version tag (v0.25.0) also publishes a GitHub release with the installer and
+# a portable zip; see docs/RELEASING.md.
 
 name: Windows build
 
@@ -13,6 +15,9 @@ on:
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+
+permissions:
+  contents: write   # publishing a release when a version tag is pushed
 
 env:
   VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}\.vcpkg-cache
@@ -92,13 +97,18 @@ jobs:
           }
           if (-not (Test-Path "$dist\platforms\qwindows.dll")) {
             Write-Host 'windeployqt did not deploy plugins; copying them directly'
-            foreach ($p in 'platforms', 'styles', 'imageformats') {
+            foreach ($p in 'platforms', 'styles', 'imageformats', 'tls') {
               if (Test-Path "$installed\Qt6\plugins\$p") {
                 Copy-Item -Recurse -Force "$installed\Qt6\plugins\$p" $dist
               }
             }
           }
           if (-not (Test-Path "$dist\platforms\qwindows.dll")) { throw 'qwindows.dll missing from package' }
+          # Secure connections (Help -> Check for Updates) need Qt's TLS plugin.
+          if (-not (Test-Path "$dist\tls\qschannelbackend.dll") -and (Test-Path "$installed\Qt6\plugins\tls")) {
+            Copy-Item -Recurse -Force "$installed\Qt6\plugins\tls" $dist
+          }
+          if (-not (Test-Path "$dist\tls\qschannelbackend.dll")) { throw 'Qt TLS plugin (qschannelbackend.dll) missing from package' }
 
           # The Visual C++ runtime, so the app runs on PCs without the redistributable installed
           $crt = Get-ChildItem -Directory "$env:VCToolsRedistDir\x64" -Filter 'Microsoft.VC*.CRT' | Select-Object -First 1
@@ -130,9 +140,65 @@ jobs:
           Copy-Item -Recurse docs\test-sheets\samples "$dist\test-sheets\samples"
           Get-ChildItem -Recurse $dist | Select-Object -ExpandProperty FullName
 
+      - name: Version
+        id: version
+        shell: pwsh
+        run: |
+          $cmake = Get-Content CMakeLists.txt -Raw
+          $version = [regex]::Match($cmake, 'project\(Forge3D\s+VERSION\s+([0-9.]+)').Groups[1].Value
+          $label = [regex]::Match($cmake, 'set\(FORGE_RELEASE_LABEL\s+"([^"]*)"\)').Groups[1].Value
+          if (-not $version) { throw 'Version not found in CMakeLists.txt' }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "label=$label" >> $env:GITHUB_OUTPUT
+          Write-Host "Forge3D $version $label"
+
+      - name: Installer and portable zip
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup -y --no-progress | Out-Null
+          }
+          if (-not (Test-Path $iscc)) { throw 'Inno Setup (ISCC.exe) not found' }
+          $version = '${{ steps.version.outputs.version }}'
+          $label = '${{ steps.version.outputs.label }}'
+          $out = (New-Item -ItemType Directory -Force -Path release).FullName
+          & $iscc "/DAppVersion=$version" "/DAppLabel=$label" "/DSourceDir=$((Resolve-Path dist\Forge3D).Path)" "/DOutputDir=$out" installer\Forge3D.iss
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed ($LASTEXITCODE)" }
+          # The portable zip: the same files, without the testing material.
+          $portable = 'portable\Forge3D'
+          New-Item -ItemType Directory -Force -Path $portable | Out-Null
+          Copy-Item -Recurse dist\Forge3D\* $portable -Exclude 'test-sheets'
+          Get-ChildItem -Recurse $portable -Filter *.pdb | Remove-Item
+          Compress-Archive -Path $portable -DestinationPath "$out\Forge3D-$version-portable.zip" -CompressionLevel Optimal
+          Get-ChildItem $out | Format-Table Name, Length
+
       - name: Upload Forge3D for testing
         uses: actions/upload-artifact@v4
         with:
           name: Forge3D-windows-x64-${{ github.sha }}
           path: dist/Forge3D
           retention-days: 30
+
+      - name: Upload the installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: Forge3D-Setup-${{ steps.version.outputs.version }}-${{ github.sha }}
+          path: release
+          retention-days: 30
+
+      # Only for a version tag (v0.25.0): the tag must match the version in CMakeLists.txt.
+      - name: Publish the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = '${{ steps.version.outputs.version }}'
+          $label = '${{ steps.version.outputs.label }}'
+          $tag = '${{ github.ref_name }}'
+          if ($tag -ne "v$version") { throw "Tag $tag doesn't match the version in CMakeLists.txt (v$version)" }
+          $title = "Forge3D $version $label".Trim()
+          $notes = "docs\release-notes\$tag.md"
+          if (-not (Test-Path $notes)) { throw "Release notes $notes are missing" }
+          gh release create $tag (Get-ChildItem release\*).FullName --title $title --notes-file $notes --verify-tag

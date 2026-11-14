@@ -2,9 +2,12 @@
 cmake_minimum_required(VERSION 3.21)
 
 project(Forge3D
-    VERSION 0.24.1
+    VERSION 0.25.0
     DESCRIPTION "Parametric 3D modeling with sculpting"
     LANGUAGES CXX)
+
+# Shown after the version number ("0.25.0 Beta"); empty for a plain release.
+set(FORGE_RELEASE_LABEL "Beta")
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -33,7 +36,7 @@ find_package(nlohmann_json 3 CONFIG REQUIRED)
 find_package(manifold CONFIG REQUIRED)  # the mesh engine (imported meshes)
 
 if(FORGE3D_BUILD_APP OR FORGE3D_BUILD_TESTS)
-    find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets OpenGLWidgets Svg)
+    find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets OpenGLWidgets Svg Network)
     message(STATUS "Qt ${Qt6_VERSION}")
 endif()
 

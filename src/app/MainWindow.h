@@ -32,6 +32,7 @@ class QDragEnterEvent;
 class QDropEvent;
 class QLabel;
 class QDialog;
+class QNetworkAccessManager;
 class QTreeWidget;
 class QTreeWidgetItem;
 class QMenu;
@@ -262,6 +263,10 @@ private:
     void refreshCommandState();
     void showAbout();
     void showQuickStart();
+    // quietly: at start (a note in the status bar if there's a newer one, nothing
+    // otherwise); else from the Help menu, with a message either way.
+    void checkForUpdates(bool quietly);
+    void updatesAtStart();
     void startTour();
     // The ribbon button for an action on ribbon tab `tab` (nothing if it has none there).
     QWidget* ribbonButtonFor(QAction* action, int tab) const;
@@ -360,6 +365,8 @@ private:
     QLabel* m_emptyHint = nullptr;  // over the view while the plate is empty
     QPointer<QDialog> m_quickStart;
     QPointer<Tour> m_tour;
+    QNetworkAccessManager* m_network = nullptr;
+    QAction* m_checkAtStart = nullptr;
     QAction* m_sitOnPlate = nullptr;
     EmbossPanel* m_embossPanel = nullptr;
     struct EmbossMode {

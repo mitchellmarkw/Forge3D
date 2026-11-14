@@ -37,6 +37,7 @@ Gate to Phase 2: a new user prints a customised part within 10 minutes.
 | 13 | Phase 1 polish: Lay on Face, Sit on Plate in the ribbon, a ribbon that fits narrow windows, a first step on an empty plate, double-click fix | Done (0.22.0) |
 | 14 | Icons: a picture on every ribbon button (name underneath) and in the menus; shape pictures in Add Shape | Done (0.23.0) |
 | 15 | Quick start: an illustrated first-print guide (in the app and on GitHub) and a guided tour the first time Forge3D runs | Done (0.24.1) |
+| 16 | First public release (0.25 Beta): installer, portable zip, GitHub releases from a version tag, app icon, Check for Updates | **Delivered for testing** |
 
 Separate track: sculpt-engine prototype (one Draw brush on a 1M-triangle mesh at 60 fps).
 
