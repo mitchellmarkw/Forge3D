@@ -1,0 +1,46 @@
+<RCC>
+  <qresource prefix="/icons">
+    <file alias="add-shape.svg">icons/add-shape.svg</file>
+    <file alias="align.svg">icons/align.svg</file>
+    <file alias="clear-plate.svg">icons/clear-plate.svg</file>
+    <file alias="delete.svg">icons/delete.svg</file>
+    <file alias="duplicate.svg">icons/duplicate.svg</file>
+    <file alias="edges.svg">icons/edges.svg</file>
+    <file alias="emboss.svg">icons/emboss.svg</file>
+    <file alias="export.svg">icons/export.svg</file>
+    <file alias="follow.svg">icons/follow.svg</file>
+    <file alias="group.svg">icons/group.svg</file>
+    <file alias="hole.svg">icons/hole.svg</file>
+    <file alias="import.svg">icons/import.svg</file>
+    <file alias="intersect.svg">icons/intersect.svg</file>
+    <file alias="lay-on-face.svg">icons/lay-on-face.svg</file>
+    <file alias="merge.svg">icons/merge.svg</file>
+    <file alias="mirror.svg">icons/mirror.svg</file>
+    <file alias="move.svg">icons/move.svg</file>
+    <file alias="open.svg">icons/open.svg</file>
+    <file alias="pattern.svg">icons/pattern.svg</file>
+    <file alias="redo.svg">icons/redo.svg</file>
+    <file alias="resize.svg">icons/resize.svg</file>
+    <file alias="rotate.svg">icons/rotate.svg</file>
+    <file alias="save.svg">icons/save.svg</file>
+    <file alias="send-to-slicer.svg">icons/send-to-slicer.svg</file>
+    <file alias="separate.svg">icons/separate.svg</file>
+    <file alias="shape-box.svg">icons/shape-box.svg</file>
+    <file alias="shape-cone.svg">icons/shape-cone.svg</file>
+    <file alias="shape-cylinder.svg">icons/shape-cylinder.svg</file>
+    <file alias="shape-pyramid.svg">icons/shape-pyramid.svg</file>
+    <file alias="shape-sphere.svg">icons/shape-sphere.svg</file>
+    <file alias="shape-text.svg">icons/shape-text.svg</file>
+    <file alias="shape-torus.svg">icons/shape-torus.svg</file>
+    <file alias="shape-tube.svg">icons/shape-tube.svg</file>
+    <file alias="shape-wedge.svg">icons/shape-wedge.svg</file>
+    <file alias="shell.svg">icons/shell.svg</file>
+    <file alias="sit-on-plate.svg">icons/sit-on-plate.svg</file>
+    <file alias="sketch.svg">icons/sketch.svg</file>
+    <file alias="snap.svg">icons/snap.svg</file>
+    <file alias="split.svg">icons/split.svg</file>
+    <file alias="subtract.svg">icons/subtract.svg</file>
+    <file alias="undo.svg">icons/undo.svg</file>
+    <file alias="uniform.svg">icons/uniform.svg</file>
+  </qresource>
+</RCC>

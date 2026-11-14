@@ -2,6 +2,7 @@
 # Forge3D: the desktop application (windows, menus, OpenGL viewport).
 
 set(CMAKE_AUTOMOC ON)
+set(CMAKE_AUTORCC ON)
 
 configure_file(BuildInfo.h.in ${CMAKE_CURRENT_BINARY_DIR}/generated/BuildInfo.h @ONLY)
 
@@ -37,6 +38,7 @@ add_executable(Forge3D WIN32
     WordsEditor.cpp
     Viewport.h
     Viewport.cpp
+    icons.qrc
 )
 
 target_include_directories(Forge3D PRIVATE

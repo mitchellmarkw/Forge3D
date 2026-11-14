@@ -58,6 +58,7 @@
 #include <QStackedWidget>
 #include <QScrollArea>
 #include <QScreen>
+#include <QFile>
 #include <QGuiApplication>
 #include <QScrollBar>
 #include <QHBoxLayout>
@@ -168,6 +169,33 @@ namespace {
 
 // A ribbon page that scrolls sideways when the window is too narrow for its buttons:
 // as tall as its buttons, plus the scroll bar only while one is needed.
+// An icon drawn from its SVG at every size it's shown (menus, ribbon, high-DPI screens).
+// Drawn here rather than by Qt's SVG icon plugin, so nothing extra has to be deployed.
+QIcon ribbonIcon(const QString& name)
+{
+    QFile file(QStringLiteral(":/icons/%1.svg").arg(name));
+    if (!file.open(QIODevice::ReadOnly))
+        return {};
+    QByteArray data = file.readAll();
+    // On a dark window the dark lines turn light.
+    if (QApplication::palette().color(QPalette::Window).lightness() < 128)
+        data.replace("#3a3f45", "#d6dade");
+    QSvgRenderer svg(data);
+    QIcon icon;
+    if (!svg.isValid())
+        return icon;
+    for (int size : {16, 20, 24, 32, 40, 48, 64}) {
+        QPixmap pixmap(size, size);
+        pixmap.fill(Qt::transparent);
+        QPainter painter(&pixmap);
+        painter.setRenderHint(QPainter::Antialiasing);
+        svg.render(&painter);
+        painter.end();
+        icon.addPixmap(pixmap);
+    }
+    return icon;
+}
+
 class RibbonScroll : public QScrollArea {
 public:
     explicit RibbonScroll(QWidget* page)
@@ -473,6 +501,7 @@ void MainWindow::createActions()
         QAction* a = m_addMenu->addAction(QString::fromStdString(typeName(spec)));
         a->setToolTip(tips[kind]);
         a->setObjectName(QStringLiteral("Add") + QString::fromStdString(typeName(spec)));
+        a->setIcon(ribbonIcon(QStringLiteral("shape-") + QString::fromStdString(typeName(spec)).toLower()));
         connect(a, &QAction::triggered, this, [this, spec] { addBody(spec); });
         if (kind == 1)
             m_addMenu->addSeparator();  // the familiar two first
@@ -728,6 +757,45 @@ void MainWindow::createToolBar()
     // The ribbon: tabs of grouped buttons (Build / Design / Sculpt / Print), in a fixed
     // bar across the top. Each button runs a window action, so the menus, shortcuts and
     // enabling all stay as they are.
+    // Pictures for the buttons (and the menus): line drawings from icons.qrc.
+    const std::pair<QAction*, const char*> pictures[] = {
+        {m_open, "open"},
+        {m_save, "save"},
+        {m_import, "import"},
+        {m_undo, "undo"},
+        {m_redo, "redo"},
+        {m_addMenu->menuAction(), "add-shape"},
+        {m_modeMove, "move"},
+        {m_modeRotate, "rotate"},
+        {m_modeResize, "resize"},
+        {m_snapAction, "snap"},
+        {m_uniformAction, "uniform"},
+        {m_merge, "merge"},
+        {m_subtract, "subtract"},
+        {m_intersect, "intersect"},
+        {m_separate, "separate"},
+        {m_alignMenu->menuAction(), "align"},
+        {m_mirrorMenu->menuAction(), "mirror"},
+        {m_patternAction, "pattern"},
+        {m_group, "group"},
+        {m_duplicate, "duplicate"},
+        {m_delete, "delete"},
+        {m_clear, "clear-plate"},
+        {m_sketchAction, "sketch"},
+        {m_holeAction, "hole"},
+        {m_shellAction, "shell"},
+        {m_followAction, "follow"},
+        {m_edgesAction, "edges"},
+        {m_split, "split"},
+        {m_emboss, "emboss"},
+        {m_layFlat, "lay-on-face"},
+        {m_sitOnPlate, "sit-on-plate"},
+        {m_export, "export"},
+        {m_sendToSlicer, "send-to-slicer"},
+    };
+    for (const auto& [action, name] : pictures)
+        action->setIcon(ribbonIcon(QString::fromLatin1(name)));
+
     QToolBar* bar = addToolBar(tr("Ribbon"));
     bar->setObjectName(QStringLiteral("Ribbon"));
     bar->setMovable(false);
@@ -783,7 +851,8 @@ void MainWindow::createToolBar()
     const auto button = [](QAction* action) {
         auto* b = new QToolButton;
         b->setDefaultAction(action);
-        b->setToolButtonStyle(Qt::ToolButtonTextOnly);
+        b->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+        b->setIconSize(QSize(32, 32));
         b->setAutoRaise(true);
         return static_cast<QWidget*>(b);
     };
@@ -805,7 +874,8 @@ void MainWindow::createToolBar()
         if (!name.isEmpty())
             b->setText(name);
         b->setPopupMode(QToolButton::InstantPopup);
-        b->setToolButtonStyle(Qt::ToolButtonTextOnly);
+        b->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+        b->setIconSize(QSize(32, 32));
         b->setAutoRaise(true);
         return static_cast<QWidget*>(b);
     };
@@ -838,7 +908,8 @@ void MainWindow::createToolBar()
         sketchButton->setDefaultAction(m_sketchAction);
         sketchButton->setMenu(m_sketchMenu);
         sketchButton->setPopupMode(QToolButton::MenuButtonPopup);
-        sketchButton->setToolButtonStyle(Qt::ToolButtonTextOnly);
+        sketchButton->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+        sketchButton->setIconSize(QSize(32, 32));
         sketchButton->setAutoRaise(true);
         group(design, tr("Sketch"), {sketchButton});
     }
