@@ -1,0 +1,3 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// The icon Windows shows for Forge3D.exe.
+IDI_ICON1 ICON "appicon/forge3d.ico"

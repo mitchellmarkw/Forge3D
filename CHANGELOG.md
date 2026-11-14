@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.25.0 Beta — Slice 16: the first public release (2026-11-13)
+
+- **An installer**: `Forge3D-0.25.0-Setup.exe` installs Forge3D just for you (no
+  administrator needed) or for everyone on the PC, adds it to the Start menu (and the
+  desktop, if you tick it), lets `.f3d` files open in Forge3D with a double-click, and
+  can be removed from Windows Settings → Apps. A **portable zip** runs without
+  installing.
+- **Releases on GitHub**: pushing a version tag builds and publishes both on the
+  Releases page, with release notes (see docs/RELEASING.md).
+- **Forge3D's own icon**: a blue tile with a cube, on the program, the window, the
+  taskbar and `.f3d` files.
+- **Check for Updates** (Help menu). The first time Forge3D starts (after the tour) it
+  asks whether to check at each start; **Help → Check for Updates at Start** changes
+  that. It only asks GitHub for the list of versions. A newer one shows as a link in the
+  status bar (at start) or a message with a Download button (from the menu).
+- The version reads "0.25.0 Beta" in the title bar and About.
+- 190 unit tests (2 new: comparing versions; finding the newest release in GitHub's
+  list, skipping drafts).
+
 ## 0.24.1 — Settings are remembered (2026-11-13)
 
 - The tour came back every time Forge3D started, even after finishing it. Some

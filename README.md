@@ -8,6 +8,15 @@ in one document with one undo history.
 > along; sculpting is still to come. Expect rough edges, and keep copies of files you
 > care about. See [ROADMAP.md](ROADMAP.md) and [CHANGELOG.md](CHANGELOG.md).
 
+## Download
+
+Get the latest version from the **[Releases page](https://github.com/mitchellmarkw/Forge3D/releases)**:
+`Forge3D-x.y.z-Setup.exe` installs it (Start menu, .f3d files open in it); the portable zip
+runs without installing. Windows 10 or 11, 64-bit. Forge3D is free.
+
+The installer isn't code-signed yet, so Windows may say "Windows protected your PC":
+click **More info**, then **Run anyway**.
+
 New to Forge3D? See the **[Quick Start](docs/QUICK_START.md)**: your first print in about ten minutes.
 
 ## What it can do so far

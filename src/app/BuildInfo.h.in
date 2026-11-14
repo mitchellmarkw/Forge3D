@@ -5,4 +5,6 @@
 namespace forge::build {
 inline constexpr const char* kAppName = "Forge3D";
 inline constexpr const char* kVersion = "@PROJECT_VERSION@";
+// Shown after the version ("0.25.0 Beta"); empty for a plain release.
+inline constexpr const char* kReleaseLabel = "@FORGE_RELEASE_LABEL@";
 }  // namespace forge::build

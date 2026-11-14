@@ -30,6 +30,7 @@
 #include "forge/core/Follow.h"
 #include "forge/core/Pattern.h"
 #include "forge/core/Picture.h"
+#include "forge/core/Updates.h"
 #include "forge/core/Tessellator.h"
 #include "forge/core/Tessellator.h"
 #include "forge/core/Text.h"
@@ -59,6 +60,10 @@
 #include <QStackedWidget>
 #include <QScrollArea>
 #include <QScreen>
+#include <QPushButton>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QNetworkRequest>
 #include <QTextBrowser>
 #include <QDialogButtonBox>
 #include <QFile>
@@ -194,7 +199,7 @@ QIcon ribbonIcon(const QString& name)
     QIcon icon;
     if (!svg.isValid())
         return icon;
-    for (int size : {16, 20, 24, 32, 40, 48, 64}) {
+    for (int size : {16, 20, 24, 32, 40, 48, 64, 128, 256}) {
         QPixmap pixmap(size, size);
         pixmap.fill(Qt::transparent);
         QPainter painter(&pixmap);
@@ -204,6 +209,13 @@ QIcon ribbonIcon(const QString& name)
         icon.addPixmap(pixmap);
     }
     return icon;
+}
+
+// "0.25.0 Beta": the version, with its label if it has one.
+QString versionText()
+{
+    const QString label = QString::fromLatin1(build::kReleaseLabel);
+    return QString::fromLatin1(build::kVersion) + (label.isEmpty() ? QString() : QStringLiteral(" ") + label);
 }
 
 class RibbonScroll : public QScrollArea {
@@ -271,9 +283,12 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
     }
     connect(m_viewport, &Viewport::firstFrameRendered, this, &MainWindow::firstFrameRendered);
     // The first time Forge3D runs, the tour starts by itself (once).
+    // After the tour (or straight away, once it's been seen): whether to look for updates.
     connect(this, &MainWindow::firstFrameRendered, this, [this] {
         if (!Preferences().value(QStringLiteral("tour/seen"), false).toBool())
             QTimer::singleShot(600, this, &MainWindow::startTour);
+        else
+            QTimer::singleShot(1500, this, &MainWindow::updatesAtStart);
     });
     connect(m_viewport, &Viewport::clicked, this, &MainWindow::onViewportClicked);
     connect(m_viewport, &Viewport::hovered, this, [this](const QVector3D& o, const QVector3D& d, const QPointF& px) {
@@ -284,6 +299,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
     connect(m_viewport, &Viewport::leftDragged, this, &MainWindow::onLeftDragged);
     connect(m_viewport, &Viewport::leftReleased, this, &MainWindow::onLeftReleased);
 
+    setWindowIcon(ribbonIcon(QStringLiteral("forge3d")));
     createActions();
     createMenus();
     createToolBar();
@@ -765,6 +781,14 @@ void MainWindow::createMenus()
     });
     help->addAction(tr("&Quick Start Guide"), this, &MainWindow::showQuickStart);
     help->addAction(tr("Take the &Tour"), this, &MainWindow::startTour);
+    help->addAction(tr("Check for &Updates..."), this, [this] { checkForUpdates(false); });
+    m_checkAtStart = help->addAction(tr("Check for Updates at &Start"));
+    m_checkAtStart->setCheckable(true);
+    m_checkAtStart->setChecked(Preferences().value(QStringLiteral("updates/atStart"), false).toBool());
+    m_checkAtStart->setToolTip(tr("Look for a newer Forge3D each time it starts (it only asks GitHub for the "
+                                  "latest version number)"));
+    connect(m_checkAtStart, &QAction::toggled, this,
+            [](bool on) { Preferences().setValue(QStringLiteral("updates/atStart"), on); });
     help->addSeparator();
     help->addAction(tr("&About Forge3D"), this, &MainWindow::showAbout);
 }
@@ -4169,9 +4193,95 @@ void MainWindow::refreshCommandState()
     // "[*]" is where Qt shows the unsaved-changes star.
     const QString name = m_filePath.isEmpty() ? tr("Untitled") : QFileInfo(m_filePath).fileName();
     setWindowTitle(QStringLiteral("%1[*] - %2 %3")
-                       .arg(name, QString::fromLatin1(build::kAppName), QString::fromLatin1(build::kVersion)));
+                       .arg(name, QString::fromLatin1(build::kAppName), versionText()));
     setWindowModified(!m_stack.isClean());
     relockForSketch();
+}
+
+void MainWindow::updatesAtStart()
+{
+    Preferences settings;
+    if (!settings.contains(QStringLiteral("updates/atStart"))) {
+        // Asked once; Help → Check for Updates at Start changes it later.
+        QMessageBox ask(QMessageBox::Question, tr("Forge3D"),
+                        tr("Should Forge3D check for a newer version each time it starts?"), QMessageBox::NoButton,
+                        this);
+        ask.setInformativeText(tr("It only asks GitHub for the latest version number; nothing about you or your "
+                                  "models is sent. You can change this any time in the Help menu."));
+        ask.addButton(tr("Yes, check at start"), QMessageBox::YesRole);
+        QPushButton* no = ask.addButton(tr("No, I'll check myself"), QMessageBox::NoRole);
+        ask.exec();
+        const bool yes = ask.clickedButton() != static_cast<QAbstractButton*>(no);
+        m_checkAtStart->setChecked(yes);  // saves it
+        if (!yes)
+            return;
+    }
+    if (m_checkAtStart->isChecked())
+        checkForUpdates(true);
+}
+
+void MainWindow::checkForUpdates(bool quietly)
+{
+    if (!m_network)
+        m_network = new QNetworkAccessManager(this);
+    QNetworkRequest request(QUrl(QString::fromLatin1(updates::kReleasesApi)));
+    request.setRawHeader("Accept", "application/vnd.github+json");
+    request.setHeader(QNetworkRequest::UserAgentHeader,
+                      QStringLiteral("Forge3D/%1").arg(QString::fromLatin1(build::kVersion)));
+    request.setTransferTimeout(15000);
+    QNetworkReply* reply = m_network->get(request);
+    if (!quietly)
+        statusBar()->showMessage(tr("Checking for updates..."));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, quietly] {
+        reply->deleteLater();
+        if (!quietly)
+            statusBar()->clearMessage();
+        const QString releases = QString::fromLatin1(updates::kReleasesPage);
+        std::optional<updates::Release> newer;
+        QString problem;
+        if (reply->error() != QNetworkReply::NoError) {
+            problem = reply->errorString();
+        } else {
+            try {
+                newer = updates::newerRelease(reply->readAll().toStdString(), build::kVersion);
+            } catch (const std::exception& e) {
+                problem = QString::fromUtf8(e.what());
+            }
+        }
+        if (!problem.isEmpty()) {
+            qWarning().noquote() << "Update check failed:" << problem;
+            if (!quietly)
+                QMessageBox::warning(this, tr("Check for Updates"),
+                                     tr("Couldn't check for updates (%1). You can look on the <a href=\"%2\">"
+                                        "releases page</a> instead.")
+                                         .arg(problem.toHtmlEscaped(), releases));
+            return;
+        }
+        if (!newer) {
+            qInfo() << "Update check: up to date";
+            if (!quietly)
+                QMessageBox::information(this, tr("Check for Updates"),
+                                         tr("You have the newest Forge3D (%1).").arg(versionText()));
+            return;
+        }
+        const QString name = QString::fromStdString(newer->name);
+        const QString url = QString::fromStdString(newer->url);
+        qInfo().noquote() << "Update check: newer release" << name << url;
+        if (quietly) {
+            // A note in the status bar, out of the way.
+            auto* note = new QLabel(tr("<a href=\"%1\">%2 is out: download</a>").arg(url, name.toHtmlEscaped()));
+            note->setOpenExternalLinks(true);
+            statusBar()->addPermanentWidget(note);
+            return;
+        }
+        QMessageBox box(QMessageBox::Information, tr("Check for Updates"),
+                        tr("%1 is out (you have %2).").arg(name, versionText()), QMessageBox::NoButton, this);
+        QPushButton* download = box.addButton(tr("Download"), QMessageBox::AcceptRole);
+        box.addButton(tr("Later"), QMessageBox::RejectRole);
+        box.exec();
+        if (box.clickedButton() == static_cast<QAbstractButton*>(download))
+            QDesktopServices::openUrl(QUrl(url));
+    });
 }
 
 void MainWindow::showQuickStart()
@@ -4259,6 +4369,7 @@ void MainWindow::startTour()
     connect(m_tour, &Tour::finished, this, [this] {
         Preferences().setValue(QStringLiteral("tour/seen"), true);
         m_ribbonTabs->setCurrentIndex(0);
+        QTimer::singleShot(400, this, &MainWindow::updatesAtStart);
     });
     m_tour->start();
 }
@@ -4274,7 +4385,7 @@ void MainWindow::showAbout()
            "This program is free software: you can redistribute it and/or modify it under the terms "
            "of the GNU General Public License, version 3 or any later version. It comes with "
            "ABSOLUTELY NO WARRANTY.</p>")
-            .arg(QString::fromLatin1(build::kVersion), QString::fromLatin1(qVersion()),
+            .arg(versionText(), QString::fromLatin1(qVersion()),
                  QString::fromLatin1(OCC_VERSION_COMPLETE), m_viewport->glVersionString()));
 }
 
