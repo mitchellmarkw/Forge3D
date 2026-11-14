@@ -148,11 +148,19 @@ std::filesystem::path toPath(const QString& path)
 }
 
 // Preferences live in HKEY_CURRENT_USER\Software\Forge3D on Windows. (No organisation
-// name is set on the app, so its data folder stays %LOCALAPPDATA%\Forge3D.)
+// name is set on the app, so its data folder stays %LOCALAPPDATA%\Forge3D; a plain
+// Preferences() would then have nowhere to keep anything on Windows, so always use this.)
+class Preferences : public QSettings {
+public:
+    Preferences() : QSettings(QSettings::NativeFormat, QSettings::UserScope, QStringLiteral("Forge3D"),
+                              QStringLiteral("Forge3D"))
+    {
+    }
+};
+
 QString startFolder()
 {
-    const QSettings settings(QSettings::NativeFormat, QSettings::UserScope, QStringLiteral("Forge3D"),
-                             QStringLiteral("Forge3D"));
+    const Preferences settings;
     const QString remembered = settings.value(kLastFolderKey).toString();
     if (!remembered.isEmpty() && QDir(remembered).exists())
         return remembered;
@@ -161,8 +169,7 @@ QString startFolder()
 
 void rememberFolderOf(const QString& filePath)
 {
-    QSettings settings(QSettings::NativeFormat, QSettings::UserScope, QStringLiteral("Forge3D"),
-                       QStringLiteral("Forge3D"));
+    Preferences settings;
     settings.setValue(kLastFolderKey, QFileInfo(filePath).absolutePath());
 }
 
@@ -265,7 +272,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
     connect(m_viewport, &Viewport::firstFrameRendered, this, &MainWindow::firstFrameRendered);
     // The first time Forge3D runs, the tour starts by itself (once).
     connect(this, &MainWindow::firstFrameRendered, this, [this] {
-        if (!QSettings().value(QStringLiteral("tour/seen"), false).toBool())
+        if (!Preferences().value(QStringLiteral("tour/seen"), false).toBool())
             QTimer::singleShot(600, this, &MainWindow::startTour);
     });
     connect(m_viewport, &Viewport::clicked, this, &MainWindow::onViewportClicked);
@@ -322,7 +329,7 @@ void MainWindow::createActions()
     m_import->setToolTip(tr("Import (Ctrl+I): add shapes from STL, 3MF or OBJ files, repaired for printing. "
                             "You can also drag files onto the window"));
     connect(m_import, &QAction::triggered, this, [this] {
-        QSettings settings;
+        Preferences settings;
         const QString folder = settings.value(QStringLiteral("import/folder"), startFolder()).toString();
         const QStringList paths = QFileDialog::getOpenFileNames(
             this, tr("Import shapes"), folder,
@@ -946,10 +953,10 @@ void MainWindow::createToolBar()
     print.row->addStretch(1);
 
     // Keep the tab you were on.
-    QSettings settings;
+    Preferences settings;
     tabs->setCurrentIndex(std::clamp(settings.value(QStringLiteral("ribbon/tab"), 0).toInt(), 0, tabs->count() - 1));
     connect(tabs, &QTabWidget::currentChanged, this,
-            [](int index) { QSettings().setValue(QStringLiteral("ribbon/tab"), index); });
+            [](int index) { Preferences().setValue(QStringLiteral("ribbon/tab"), index); });
     m_ribbonTabs = tabs;
 }
 
@@ -3314,7 +3321,7 @@ void MainWindow::exportShapes()
     const std::vector<ObjectId> ids = exportTargets();
     if (ids.empty())
         return;
-    QSettings settings;
+    Preferences settings;
     const QString folder = settings.value(QStringLiteral("export/folder"), startFolder()).toString();
     const QString base = m_filePath.isEmpty() ? (ids.size() == 1 ? QString::fromStdString(m_doc.find(ids[0])->name)
                                                                  : tr("Model"))
@@ -3418,7 +3425,7 @@ bool MainWindow::chooseSlicer()
         labels << c.label;
     labels << browse;
 
-    QSettings settings;
+    Preferences settings;
     const QString current = settings.value(QStringLiteral("slicer/path")).toString();
     int start = 0;
     for (int i = 0; i < static_cast<int>(choices.size()); ++i)
@@ -3451,7 +3458,7 @@ void MainWindow::sendToSlicer()
     const std::vector<ObjectId> ids = exportTargets();
     if (ids.empty())
         return;
-    QSettings settings;
+    Preferences settings;
     if (!settings.contains(QStringLiteral("slicer/path")) && !chooseSlicer())
         return;
     QString slicer = settings.value(QStringLiteral("slicer/path")).toString();
@@ -4250,7 +4257,7 @@ void MainWindow::startTour()
     };
     m_tour = new Tour(this, std::move(steps));
     connect(m_tour, &Tour::finished, this, [this] {
-        QSettings().setValue(QStringLiteral("tour/seen"), true);
+        Preferences().setValue(QStringLiteral("tour/seen"), true);
         m_ribbonTabs->setCurrentIndex(0);
     });
     m_tour->start();
