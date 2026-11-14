@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "SculptPanel.h"
 
+#include <QCheckBox>
 #include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QFormLayout>
@@ -10,6 +11,8 @@
 #include <QSignalBlocker>
 #include <QSlider>
 #include <QVBoxLayout>
+
+#include <algorithm>
 
 namespace forge::app {
 
@@ -43,10 +46,50 @@ SculptPanel::SculptPanel(QWidget* parent) : QWidget(parent)
     layout->addWidget(m_status);
 
     m_brush = new QComboBox;
-    m_brush->addItem(tr("Draw (push out; Ctrl: push in)"));
-    m_brush->addItem(tr("Smooth (even out)"));
+    m_brush->addItem(tr("Draw"));
+    m_brush->addItem(tr("Smooth"));
+    m_brush->addItem(tr("Inflate"));
+    m_brush->addItem(tr("Flatten"));
+    m_brush->addItem(tr("Pinch"));
+    m_brush->addItem(tr("Clay"));
+    m_brush->addItem(tr("Grab"));
     m_brush->setToolTip(tr("Hold Shift with any brush to smooth"));
     layout->addWidget(labelled(tr("Brush:"), m_brush));
+    m_brushHint = new QLabel;
+    m_brushHint->setWordWrap(true);
+    m_brushHint->setStyleSheet(QStringLiteral("color: palette(mid);"));
+    layout->addWidget(m_brushHint);
+    const auto describe = [this](int brush) {
+        static const char* hints[] = {
+            QT_TR_NOOP("Pushes the surface out where you drag. Ctrl: pushes in."),
+            QT_TR_NOOP("Evens out bumps and dents."),
+            QT_TR_NOOP("Swells the surface out like a balloon, each spot along its own facing. Ctrl: shrinks."),
+            QT_TR_NOOP("Presses the area flat."),
+            QT_TR_NOOP("Draws the surface together under the brush, for sharp creases and edges. Ctrl: pushes apart."),
+            QT_TR_NOOP("Builds up in flat layers, like adding strips of clay. Ctrl: digs out."),
+            QT_TR_NOOP("Pulls a whole area along with the mouse, like soft toffee."),
+        };
+        m_brushHint->setText(tr(hints[std::clamp(brush, 0, 6)]));
+    };
+    connect(m_brush, &QComboBox::currentIndexChanged, this, describe);
+    describe(0);
+
+    // Mirror: the label above its three ticks.
+    auto* mirrorBox = new QWidget;
+    auto* mirrorLayout = new QVBoxLayout(mirrorBox);
+    mirrorLayout->setContentsMargins(0, 0, 0, 0);
+    mirrorLayout->setSpacing(2);
+    mirrorLayout->addWidget(new QLabel(tr("Mirror (across the middle of the shape):")));
+    auto* ticks = new QHBoxLayout;
+    const char* names[] = {"X (left-right)", "Y (front-back)", "Z (up-down)"};
+    for (int i = 0; i < 3; ++i) {
+        m_mirror[i] = new QCheckBox(tr(names[i]));
+        m_mirror[i]->setToolTip(tr("What you do on one side happens on the other side too"));
+        ticks->addWidget(m_mirror[i]);
+    }
+    ticks->addStretch(1);
+    mirrorLayout->addLayout(ticks);
+    layout->addWidget(mirrorBox);
 
     auto* form = new QFormLayout;
     m_size = new QDoubleSpinBox;
@@ -74,8 +117,8 @@ SculptPanel::SculptPanel(QWidget* parent) : QWidget(parent)
                             "before you start."));
     layout->addWidget(labelled(tr("Detail:"), m_detail));
 
-    auto* hint = new QLabel(tr("Drag with the left button over the shape to sculpt. Hold <b>Ctrl</b> to push in, "
-                               "<b>Shift</b> to smooth. <b>[</b> and <b>]</b> change the size. Turn the view with "
+    auto* hint = new QLabel(tr("Drag with the left button over the shape to sculpt. Hold <b>Ctrl</b> for the "
+                               "opposite, <b>Shift</b> to smooth. <b>[</b> and <b>]</b> change the size. Turn the view with "
                                "the right button as usual."));
     hint->setWordWrap(true);
     layout->addWidget(hint);
@@ -115,9 +158,24 @@ void SculptPanel::start(const QString& title, double suggestedSize)
     setUndoEnabled(false);
 }
 
-bool SculptPanel::smoothBrush() const
+int SculptPanel::brush() const
 {
-    return m_brush->currentIndex() == 1;
+    return m_brush->currentIndex();
+}
+
+bool SculptPanel::mirrorX() const
+{
+    return m_mirror[0]->isChecked();
+}
+
+bool SculptPanel::mirrorY() const
+{
+    return m_mirror[1]->isChecked();
+}
+
+bool SculptPanel::mirrorZ() const
+{
+    return m_mirror[2]->isChecked();
 }
 
 double SculptPanel::size() const

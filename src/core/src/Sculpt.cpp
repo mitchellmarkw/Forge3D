@@ -234,7 +234,16 @@ std::optional<Hit> Sculptor::hit(const Vec3& origin, const Vec3& direction) cons
 
 std::vector<std::uint32_t> Sculptor::pointsWithin(const Vec3& centre, double radius, std::uint32_t nearTriangle)
 {
-    // A walk out from the triangle under the brush, through neighbours, keeping to the
+    std::vector<std::uint32_t> seeds;
+    for (int k = 0; k < 3 && 3 * std::size_t(nearTriangle) + 2 < m_mesh.indices.size(); ++k)
+        seeds.push_back(m_mesh.indices[3 * std::size_t(nearTriangle) + k]);
+    return pointsFrom(centre, radius, seeds);
+}
+
+std::vector<std::uint32_t> Sculptor::pointsFrom(const Vec3& centre, double radius,
+                                                const std::vector<std::uint32_t>& seeds)
+{
+    // A walk out from the points under the brush, through neighbours, keeping to the
     // ball: only the surface the brush touches, not a part that just passes near.
     ++m_walk;
     if (m_walk == 0) {
@@ -244,13 +253,11 @@ std::vector<std::uint32_t> Sculptor::pointsWithin(const Vec3& centre, double rad
     const V3 c = toV(centre);
     const double r2 = radius * radius;
     std::vector<std::uint32_t> out, todo;
-    for (int k = 0; k < 3 && 3 * std::size_t(nearTriangle) + 2 < m_mesh.indices.size(); ++k) {
-        const std::uint32_t v = m_mesh.indices[3 * std::size_t(nearTriangle) + k];
-        if (m_mark[v] != m_walk) {
+    for (std::uint32_t v : seeds)
+        if (v < m_mark.size() && m_mark[v] != m_walk) {
             m_mark[v] = m_walk;
             todo.push_back(v);
         }
-    }
     while (!todo.empty()) {
         const std::uint32_t v = todo.back();
         todo.pop_back();
@@ -269,7 +276,7 @@ std::vector<std::uint32_t> Sculptor::pointsWithin(const Vec3& centre, double rad
     return out;
 }
 
-void Sculptor::normalsAround(const std::vector<std::uint32_t>& points)
+void Sculptor::normalsOf(const std::vector<std::uint32_t>& points)
 {
     auto& p = m_mesh.positions;
     auto& nrm = m_mesh.normals;
@@ -289,33 +296,136 @@ void Sculptor::normalsAround(const std::vector<std::uint32_t>& points)
     }
 }
 
+std::pair<std::uint32_t, std::uint32_t> Sculptor::normalsAround(const std::vector<std::uint32_t>& moved)
+{
+    // The moved points and their neighbours (whose triangles moved too).
+    std::vector<std::uint32_t> around = moved;
+    for (std::uint32_t v : moved)
+        for (std::uint32_t k = m_neighbourStart[v]; k < m_neighbourStart[v + 1]; ++k)
+            around.push_back(m_neighbours[k]);
+    std::sort(around.begin(), around.end());
+    around.erase(std::unique(around.begin(), around.end()), around.end());
+    normalsOf(around);
+    if (around.empty())
+        return {0, 0};
+    return {around.front(), around.back() + 1};
+}
+
+std::uint32_t Sculptor::nearestPoint(const Vec3& point) const
+{
+    const V3 c = toV(point);
+    double best = 1e300;
+    std::uint32_t found = 0;
+    for (std::uint32_t v = 0; v < m_mesh.vertexCount(); ++v) {
+        const V3 d = at(m_mesh.positions, v) - c;
+        const double d2 = dot(d, d);
+        if (d2 < best) {
+            best = d2;
+            found = v;
+        }
+    }
+    return found;
+}
+
 std::pair<std::uint32_t, std::uint32_t> Sculptor::apply(const Dab& dab, std::uint32_t nearTriangle)
 {
-    if (!(dab.radius > 0.0) || 3 * std::size_t(nearTriangle) + 2 >= m_mesh.indices.size())
+    if (3 * std::size_t(nearTriangle) + 2 >= m_mesh.indices.size())
         return {0, 0};
-    const std::vector<std::uint32_t> touched = pointsWithin(dab.centre, dab.radius, nearTriangle);
+    std::vector<std::uint32_t> seeds;
+    for (int k = 0; k < 3; ++k)
+        seeds.push_back(m_mesh.indices[3 * std::size_t(nearTriangle) + k]);
+    return applyFrom(dab, seeds);
+}
+
+std::pair<std::uint32_t, std::uint32_t> Sculptor::apply(const Dab& dab, std::uint32_t nearTriangle,
+                                                        const Symmetry& symmetry)
+{
+    auto range = apply(dab, nearTriangle);
+    if (!symmetry.any())
+        return range;
+    const auto images = symmetry.images(dab.centre);
+    for (std::size_t i = 1; i < images.size(); ++i) {
+        Dab mirrored = dab;
+        mirrored.centre = images[i];
+        const auto r = applyFrom(mirrored, {nearestPoint(images[i])});
+        if (r.first < r.second) {
+            range.first = range.first < range.second ? std::min(range.first, r.first) : r.first;
+            range.second = std::max(range.second, r.second);
+        }
+    }
+    return range;
+}
+
+std::pair<std::uint32_t, std::uint32_t> Sculptor::applyFrom(const Dab& dab, const std::vector<std::uint32_t>& seeds)
+{
+    if (!(dab.radius > 0.0) || dab.brush == Brush::Grab)
+        return {0, 0};
+    const std::vector<std::uint32_t> touched = pointsFrom(dab.centre, dab.radius, seeds);
     if (touched.empty())
         return {0, 0};
     const V3 c = toV(dab.centre);
     auto& p = m_mesh.positions;
     const double strength = std::clamp(dab.strength, 0.0, 1.0);
+    const double sign = dab.invert ? -1.0 : 1.0;
+    const double most = 0.08 * dab.radius * strength;  // how far one dab moves the middle
+    const auto normalOf = [&](std::uint32_t v) {
+        return V3{m_mesh.normals[3 * v], m_mesh.normals[3 * v + 1], m_mesh.normals[3 * v + 2]};
+    };
+    // The area's average facing and middle, weighted by the falloff.
+    V3 areaNormal{0, 0, 0}, areaMiddle{0, 0, 0};
+    double weights = 0.0;
+    for (std::uint32_t v : touched) {
+        const double w = falloff(len(at(p, v) - c), dab.radius);
+        areaNormal = areaNormal + normalOf(v) * w;
+        areaMiddle = areaMiddle + at(p, v) * w;
+        weights += w;
+    }
+    const double nl = len(areaNormal);
+    if (!(nl > 0) || !(weights > 0))
+        return {0, 0};
+    areaNormal = areaNormal * (1.0 / nl);
+    areaMiddle = areaMiddle * (1.0 / weights);
+
     std::vector<V3> moved(touched.size());
-    if (dab.brush == Brush::Draw) {
-        // Out along the surface's average facing under the brush.
-        V3 n{0, 0, 0};
-        for (std::uint32_t v : touched)
-            n = n + V3{m_mesh.normals[3 * v], m_mesh.normals[3 * v + 1], m_mesh.normals[3 * v + 2]} *
-                        falloff(len(at(p, v) - c), dab.radius);
-        const double l = len(n);
-        if (!(l > 0))
-            return {0, 0};
-        n = n * ((dab.invert ? -1.0 : 1.0) / l);
-        const double most = 0.08 * dab.radius * strength;  // one dab, at the middle
+    switch (dab.brush) {
+    case Brush::Draw:
         for (std::size_t i = 0; i < touched.size(); ++i) {
             const V3 q = at(p, touched[i]);
-            moved[i] = q + n * (most * falloff(len(q - c), dab.radius));
+            moved[i] = q + areaNormal * (sign * most * falloff(len(q - c), dab.radius));
         }
-    } else {
+        break;
+    case Brush::Inflate:
+        for (std::size_t i = 0; i < touched.size(); ++i) {
+            const V3 q = at(p, touched[i]);
+            moved[i] = q + normalOf(touched[i]) * (sign * most * falloff(len(q - c), dab.radius));
+        }
+        break;
+    case Brush::Flatten:
+        for (std::size_t i = 0; i < touched.size(); ++i) {
+            const V3 q = at(p, touched[i]);
+            const double above = dot(q - areaMiddle, areaNormal);
+            moved[i] = q - areaNormal * (above * 0.5 * strength * falloff(len(q - c), dab.radius));
+        }
+        break;
+    case Brush::Clay: {
+        // A plane a little above (below, inverted) the area: points under it rise to it.
+        const V3 plane = areaMiddle + areaNormal * (sign * most);
+        for (std::size_t i = 0; i < touched.size(); ++i) {
+            const V3 q = at(p, touched[i]);
+            const double under = dot(plane - q, areaNormal) * sign;
+            moved[i] = under > 0 ? q + areaNormal * (sign * under * strength * falloff(len(q - c), dab.radius)) : q;
+        }
+        break;
+    }
+    case Brush::Pinch:
+        for (std::size_t i = 0; i < touched.size(); ++i) {
+            const V3 q = at(p, touched[i]);
+            V3 toMiddle = c - q;
+            toMiddle = toMiddle - areaNormal * dot(toMiddle, areaNormal);  // along the surface
+            moved[i] = q + toMiddle * (sign * 0.15 * strength * falloff(len(q - c), dab.radius));
+        }
+        break;
+    case Brush::Smooth: {
         // Each point part of the way to the middle of its neighbours, a few times over
         // (one step only evens out the finest ripples on a dense mesh).
         std::vector<V3> now(touched.size());
@@ -344,27 +454,98 @@ std::pair<std::uint32_t, std::uint32_t> Sculptor::apply(const Dab& dab, std::uin
                 p[3 * v + 2] = float(moved[i].z);
             }
         }
+        break;
     }
-    std::uint32_t lo = UINT32_MAX, hi = 0;
+    case Brush::Grab:
+        return {0, 0};
+    }
     for (std::size_t i = 0; i < touched.size(); ++i) {
         const std::uint32_t v = touched[i];
         p[3 * v] = float(moved[i].x);
         p[3 * v + 1] = float(moved[i].y);
         p[3 * v + 2] = float(moved[i].z);
     }
-    // Normals: the moved points and their neighbours (whose triangles moved too).
-    std::vector<std::uint32_t> around = touched;
-    for (std::uint32_t v : touched)
-        for (std::uint32_t k = m_neighbourStart[v]; k < m_neighbourStart[v + 1]; ++k)
-            around.push_back(m_neighbours[k]);
-    std::sort(around.begin(), around.end());
-    around.erase(std::unique(around.begin(), around.end()), around.end());
-    normalsAround(around);
-    for (std::uint32_t v : around) {
-        lo = std::min(lo, v);
-        hi = std::max(hi, v + 1);
+    return normalsAround(touched);
+}
+
+void Sculptor::beginGrab(const Vec3& centre, double radius, std::uint32_t nearTriangle, const Symmetry& symmetry)
+{
+    m_grab.clear();
+    m_grabSymmetry = symmetry;
+    if (!(radius > 0.0))
+        return;
+    const auto images = symmetry.images(centre);
+    std::vector<char> taken(m_mesh.vertexCount(), 0);
+    for (std::size_t i = 0; i < images.size(); ++i) {
+        const V3 c = toV(images[i]);
+        const auto points = i == 0 ? pointsWithin(images[i], radius, nearTriangle)
+                                   : pointsFrom(images[i], radius, {nearestPoint(images[i])});
+        for (std::uint32_t v : points) {
+            if (taken[v])
+                continue;  // where the images overlap, the first one takes it
+            taken[v] = 1;
+            const auto& q = m_mesh.positions;
+            m_grab.push_back({v, float(falloff(len(at(q, v) - c), radius)),
+                              {q[3 * v], q[3 * v + 1], q[3 * v + 2]}, std::uint8_t(i)});
+        }
     }
-    return {lo, hi};
+}
+
+std::pair<std::uint32_t, std::uint32_t> Sculptor::moveGrab(const Vec3& offset)
+{
+    if (m_grab.empty())
+        return {0, 0};
+    std::vector<Vec3> offsets;
+    for (std::size_t i = 0; i < 8; ++i)
+        offsets.push_back(m_grabSymmetry.mirrored(offset, i));
+    std::vector<std::uint32_t> points;
+    points.reserve(m_grab.size());
+    for (const Grabbed& g : m_grab) {
+        const Vec3& o = offsets[g.image];
+        for (int k = 0; k < 3; ++k)
+            m_mesh.positions[3 * g.point + k] = float(g.from[k] + o[k] * g.weight);
+        points.push_back(g.point);
+    }
+    return normalsAround(points);
+}
+
+void Sculptor::endGrab()
+{
+    m_grab.clear();
+}
+
+std::vector<Vec3> Symmetry::images(const Vec3& p) const
+{
+    std::vector<Vec3> out{p};
+    for (int axis = 0; axis < 3; ++axis) {
+        const bool on = axis == 0 ? x : axis == 1 ? y : z;
+        if (!on)
+            continue;
+        const std::size_t n = out.size();
+        for (std::size_t i = 0; i < n; ++i) {
+            Vec3 q = out[i];
+            q[axis] = 2.0 * centre[axis] - q[axis];
+            out.push_back(q);
+        }
+    }
+    return out;
+}
+
+Vec3 Symmetry::mirrored(const Vec3& v, std::size_t image) const
+{
+    // images() doubles the list for each axis that's on, in X, Y, Z order: bit k of the
+    // image number says whether the k-th axis that's on flipped it.
+    Vec3 out = v;
+    int bit = 0;
+    for (int axis = 0; axis < 3; ++axis) {
+        const bool on = axis == 0 ? x : axis == 1 ? y : z;
+        if (!on)
+            continue;
+        if (image & (std::size_t(1) << bit))
+            out[axis] = -out[axis];
+        ++bit;
+    }
+    return out;
 }
 
 void Sculptor::setPositions(const std::vector<float>& positions)

@@ -479,6 +479,13 @@ Viewport (mouse)  --leftPressed(ray, handle)-->  MainWindow drag controller
   brush through neighbours inside the ball, moves those points (Draw: along the
   falloff-weighted average normal, 0.08 × radius × strength at the middle; Smooth: 4
   rounds of Laplacian), then recomputes normals for them and their neighbours.
+- Brushes (slice 18): Inflate (each point along its own normal), Flatten (towards the
+  falloff-weighted plane), Pinch (towards the centre, along the surface), Clay (points
+  under a plane just above the area rise to it), Grab (`beginGrab` takes the points and
+  weights, `moveGrab(offset)` sets each to its start + offset × weight; the app moves
+  the offset across a plane through the grab point facing the view). `Symmetry` mirrors
+  dabs and grabs across planes through the shape's middle; images start from
+  `nearestPoint` (brute force).
 - The app works in plate coordinates on a finely re-tessellated copy (B-rep shapes) or
   the mesh itself; the display item points at the sculptor's mesh (aliasing
   shared_ptr), and `Viewport::meshPointsChanged` uploads just the changed range with

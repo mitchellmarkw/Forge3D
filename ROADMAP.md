@@ -38,7 +38,10 @@ Gate to Phase 2: a new user prints a customised part within 10 minutes.
 | 14 | Icons: a picture on every ribbon button (name underneath) and in the menus; shape pictures in Add Shape | Done (0.23.0) |
 | 15 | Quick start: an illustrated first-print guide (in the app and on GitHub) and a guided tour the first time Forge3D runs | Done (0.24.1) |
 | 16 | First public release (0.25 Beta): installer, portable zip, GitHub releases from a version tag, app icon, Check for Updates | Done (0.25.0, released) |
-| 17 | Sculpting prototype: Draw and Smooth brushes on a dense copy of a shape (Phase 2 begins) | **Delivered for testing** |
+| 17 | Sculpting prototype: Draw and Smooth brushes on a dense copy of a shape (Phase 2 begins) | Done (0.26.0) |
+| 18 | More brushes (Inflate, Flatten, Pinch, Clay, Grab) and mirror symmetry (X / Y / Z) | **Delivered for testing** |
+| 19 | Detail where you sculpt (triangles added under the brush) and faster picking | Planned |
+| 20 | Sculpting kept in the history (a Sculpt step on top of the parametric steps) | Planned |
 
 Separate track: sculpt-engine prototype (one Draw brush on a 1M-triangle mesh at 60 fps).
 

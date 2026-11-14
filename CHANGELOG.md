@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.27.0 Beta — Slice 18: More brushes and symmetry (2026-11-13)
+
+- Five new sculpting brushes (Brush, with a line under it saying what each does):
+  - **Inflate**: swells the surface out like a balloon, each spot along its own facing
+    (Ctrl: shrinks).
+  - **Flatten**: presses an area flat.
+  - **Pinch**: draws the surface together under the brush, for sharp creases and edges
+    (Ctrl: pushes apart).
+  - **Clay**: builds up in flat layers, like strips of clay (Ctrl: digs out).
+  - **Grab**: pulls a whole area along with the mouse, like soft toffee; it moves across
+    a plane facing you, so turn the view to pull another way.
+- **Mirror** X (left-right), Y (front-back) and Z (up-down), across the middle of the
+  shape: whatever a brush does on one side happens on the other too, Grab included. Tick
+  more than one for 4 or 8 copies.
+- Shift still smooths with any brush, and Ctrl gives the opposite (Draw, Inflate,
+  Pinch, Clay).
+- 195 unit tests (2 new: each new brush; mirrored dabs and a mirrored Grab).
+
 ## 0.26.0 Beta — Slice 17: Sculpting prototype (2026-11-13)
 
 The first step of Phase 2, to try out how sculpting feels and how fast it is.

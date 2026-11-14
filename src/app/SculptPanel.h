@@ -3,6 +3,7 @@
 
 #include <QWidget>
 
+class QCheckBox;
 class QComboBox;
 class QDoubleSpinBox;
 class QLabel;
@@ -22,7 +23,11 @@ public:
     explicit SculptPanel(QWidget* parent = nullptr);
 
     void start(const QString& title, double suggestedSize);
-    bool smoothBrush() const;  // else Draw
+    // 0 Draw, 1 Smooth, 2 Inflate, 3 Flatten, 4 Pinch, 5 Clay, 6 Grab (sculpt::Brush order)
+    int brush() const;
+    bool mirrorX() const;
+    bool mirrorY() const;
+    bool mirrorZ() const;
     double size() const;       // the brush's radius, mm
     double strength() const;   // 0..1
     Detail detail() const;
@@ -42,6 +47,8 @@ private:
     QLabel* m_title = nullptr;
     QLabel* m_status = nullptr;
     QComboBox* m_brush = nullptr;
+    QLabel* m_brushHint = nullptr;
+    QCheckBox* m_mirror[3] = {nullptr, nullptr, nullptr};
     QDoubleSpinBox* m_size = nullptr;
     QSlider* m_strength = nullptr;
     QLabel* m_strengthValue = nullptr;
