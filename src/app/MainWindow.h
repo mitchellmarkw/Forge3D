@@ -455,20 +455,29 @@ private:
     QAction* m_shellAction = nullptr;
     ShellPanel* m_shellPanel = nullptr;
 
-    // Sculpting (prototype): a dense copy of one shape's surface, in plate coordinates.
+    // Sculpting: a step whose strokes are kept and played again on its part. The
+    // sculpting happens in step coordinates (toPlate shows it on the plate).
     struct SculptMode {
         bool active = false;
-        ObjectId target = kInvalidId;
+        bool editing = false;         // adding strokes to a Sculpt step
+        ObjectId target = kInvalidId;  // the part sculpted, or (editing) the Sculpt step
+        ObjectId operand = kInvalidId; // the part the strokes are played on
+        ObjectId object = kInvalidId;  // the shape on the plate it shows as
+        Transform toPlate;
+        Transform fromPlate;
         double size = 0.0;  // the shape's biggest side
-        Mesh base;          // its surface, corners shared (before splitting finely)
+        Mesh start;         // the part's surface, divided finely: before any stroke
         std::shared_ptr<sculpt::Sculptor> sculptor;
         std::shared_ptr<const Mesh> display;  // the sculptor's mesh, drawn
-        Mesh start;              // the mesh before any stroke
-        std::vector<Mesh> undo;  // the mesh before each recent stroke
+        std::vector<SculptStroke> strokes;    // all of them, as kept in the step
+        std::size_t kept = 0;                 // how many the step had already
+        // The mesh before each recent stroke, and how many strokes there were then.
+        std::vector<std::pair<Mesh, std::size_t>> undo;
         std::uint64_t topology = 0;  // the sculptor's topologyVersion last shown
         bool stroking = false;
+        int recording = -1;  // the stroke the dabs go in (-1: none yet this press)
         std::optional<Vec3> lastDab;
-        Vec3 middle{0.0, 0.0, 0.0};  // of the shape, for the mirror planes
+        Vec3 middle{0.0, 0.0, 0.0};  // of the starting surface, for the mirror planes
         bool grabbing = false;       // a Grab stroke: pulled across a plane facing the view
         Vec3 grabFrom{0.0, 0.0, 0.0};
         Vec3 grabFacing{0.0, 0.0, 1.0};
@@ -480,16 +489,17 @@ private:
     QAction* m_sculptAction = nullptr;
     QAction* m_sculptSmaller = nullptr;
     QAction* m_sculptBigger = nullptr;
-    void startSculpt();
+    void startSculpt(ObjectId target, bool editing);
     void remeshSculpt();
     std::optional<sculpt::Hit> sculptHit(const QVector3D& origin, const QVector3D& direction) const;
     void sculptHover(const QVector3D& origin, const QVector3D& direction);
+    void showBrushRing(const sculpt::Hit& hit, double radius);
+    SculptStroke newStroke(int brush, bool invert) const;
     void beginStroke(const QVector3D& origin, const QVector3D& direction, Qt::KeyboardModifiers modifiers);
     void sculptAt(const QVector3D& origin, const QVector3D& direction, Qt::KeyboardModifiers modifiers);
     void undoStroke();
     // Shows what a dab changed: points [first, last), or everything if it added triangles.
     void sculptShown(std::uint32_t first, std::uint32_t last);
-    sculpt::Symmetry sculptSymmetry() const;
     void finishSculpt();
     void endSculpt();
     QTimer* m_shellTimer = nullptr;

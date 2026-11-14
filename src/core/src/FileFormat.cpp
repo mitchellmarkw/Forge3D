@@ -162,6 +162,7 @@ const char* opName(BooleanOp op)
     case BooleanOp::Shell: return "shell";
     case BooleanOp::Follow: return "follow";
     case BooleanOp::Pattern: return "pattern";
+    case BooleanOp::Sculpt: return "sculpt";
     }
     return "merge";
 }
@@ -208,6 +209,20 @@ json bodyToJson(const Body& b)
                 open.push_back(pick);
             }
             j["shell"] = json{{"thickness", sh->thickness}, {"outward", sh->outward}, {"open", open}};
+        }
+        if (const auto& sc = b.boolean->sculpt) {
+            json strokes = json::array();
+            for (const SculptStroke& st : sc->strokes) {
+                std::vector<float> dabs;
+                dabs.reserve(st.dabs.size() * 3);
+                for (const auto& d : st.dabs)
+                    dabs.insert(dabs.end(), d.begin(), d.end());
+                strokes.push_back(json{{"brush", st.brush},       {"invert", st.invert},   {"radius", st.radius},
+                                       {"strength", st.strength}, {"mirrorX", st.mirrorX}, {"mirrorY", st.mirrorY},
+                                       {"mirrorZ", st.mirrorZ},   {"finest", st.finest},   {"dabs", dabs},
+                                       {"grab", st.grab}});
+            }
+            j["sculpt"] = json{{"detail", sc->detail}, {"strokes", strokes}};
         }
         if (const auto& p = b.boolean->pattern) {
             static const char* kinds[] = {"row", "grid", "circle"};
@@ -361,6 +376,8 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
             spec.op = BooleanOp::Follow;
         else if (op == "pattern" && version >= 16)
             spec.op = BooleanOp::Pattern;
+        else if (op == "sculpt" && version >= 18)
+            spec.op = BooleanOp::Sculpt;
         else
             damaged(where + ": unknown combine operation '" + op + "'");
         const auto operands = j.find("operands");
@@ -433,6 +450,35 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
                 f.edges.push_back(r);
             }
             spec.edges = std::move(f);
+        }
+        if (spec.op == BooleanOp::Sculpt) {
+            const auto sj = j.find("sculpt");
+            if (sj == j.end() || !sj->is_object())
+                damaged(where + ": missing the sculpting");
+            SculptFinish sc;
+            sc.detail = std::clamp(sj->value("detail", 1), 0, 2);
+            const auto strokes = sj->find("strokes");
+            if (strokes != sj->end() && strokes->is_array())
+                for (const auto& s : *strokes) {
+                    if (!s.is_object())
+                        damaged(where + ": a sculpting stroke is unreadable");
+                    SculptStroke st;
+                    st.brush = std::clamp(s.value("brush", 0), 0, 6);
+                    st.invert = s.value("invert", false);
+                    st.radius = s.value("radius", 1.0);
+                    st.strength = s.value("strength", 0.5);
+                    st.mirrorX = s.value("mirrorX", false);
+                    st.mirrorY = s.value("mirrorY", false);
+                    st.mirrorZ = s.value("mirrorZ", false);
+                    st.finest = s.value("finest", 0.0);
+                    const auto dabs = s.value("dabs", std::vector<float>{});
+                    for (std::size_t i = 0; i + 2 < dabs.size(); i += 3)
+                        st.dabs.push_back({dabs[i], dabs[i + 1], dabs[i + 2]});
+                    if (const auto g = s.find("grab"); g != s.end() && g->is_array() && g->size() == 3)
+                        st.grab = {g->at(0).get<float>(), g->at(1).get<float>(), g->at(2).get<float>()};
+                    sc.strokes.push_back(std::move(st));
+                }
+            spec.sculpt = std::move(sc);
         }
         if (spec.op == BooleanOp::Pattern) {
             const auto pj = j.find("pattern");

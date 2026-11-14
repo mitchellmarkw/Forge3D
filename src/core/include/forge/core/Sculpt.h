@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "forge/core/Body.h"
 #include "forge/core/Mesh.h"
 #include "forge/core/Transform.h"
 
@@ -91,6 +92,9 @@ public:
                                                   const Symmetry& symmetry);
     // The point nearest `p` (a brute-force search).
     std::uint32_t nearestPoint(const Vec3& p) const;
+    // A triangle at (or very near) a point on the surface, through the grid; where a dab
+    // starts its walk.
+    std::uint32_t triangleAt(const Vec3& p) const;
 
     // Grab: on press, the points under the brush (and their mirror images) are taken
     // with how much each follows; each move puts them at where they were + offset x
@@ -138,5 +142,19 @@ private:
     std::vector<std::array<std::int32_t, 6>> m_triCells;
     std::array<std::int32_t, 3> m_cellLo{0, 0, 0}, m_cellHi{0, 0, 0};
 };
+
+// ---- Sculpt steps: strokes kept and played again ----
+
+// How many triangles each starting detail aims for (0 Low, 1 Medium, 2 High).
+std::size_t trianglesFor(int detail);
+// The mesh a Sculpt step starts from: a shape's surface (any triangles) with its corners
+// shared, split evenly to the detail. The same on every replay.
+Mesh startingMesh(const Mesh& surface, int detail);
+// The mirror planes for a stroke, through the middle of the starting mesh.
+Symmetry symmetryFor(const SculptStroke& stroke, const Mesh& start);
+// One recorded stroke played on a sculptor (as when it was made).
+void replay(Sculptor& sculptor, const SculptStroke& stroke, const Mesh& start);
+// Every stroke played on the starting mesh: the sculpted surface.
+Mesh replayed(const Mesh& start, const SculptFinish& finish);
 
 }  // namespace forge::sculpt

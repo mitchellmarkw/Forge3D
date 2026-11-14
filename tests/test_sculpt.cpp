@@ -299,3 +299,95 @@ TEST_CASE("Sculpt: detail is added where the brush goes", "[sculpt]")
     }
     CHECK_FALSE(g.hit({50, 50, 50}, {1, 0, 0}));  // pointing away
 }
+
+#include "forge/core/CommandStack.h"
+#include "forge/core/Commands.h"
+#include "forge/core/Document.h"
+#include "forge/core/FileFormat.h"
+#include "forge/core/History.h"
+#include "forge/core/MeshKernel.h"
+#include "forge/core/Scale.h"
+
+namespace {
+// A stroke of Draw across the top of a box 20 high, as the app records it.
+SculptStroke drawAcrossTop(int brush = 0)
+{
+    SculptStroke st;
+    st.brush = brush;
+    st.radius = 3.0;
+    st.strength = 1.0;
+    st.finest = 0.3;
+    for (double x = -4.0; x <= 4.0; x += 0.6)
+        st.dabs.push_back({float(x), 0.f, 20.f});
+    return st;
+}
+}  // namespace
+
+TEST_CASE("Sculpt steps: strokes play back the same, and follow a changed shape", "[sculpt][sculptstep]")
+{
+    Document doc;
+    CommandStack stack(doc);
+    Body box;
+    box.id = doc.allocateId();
+    box.name = "Box";
+    box.spec = BoxSpec{20, 20, 20};
+    stack.execute(std::make_unique<AddBodyCommand>(box));
+
+    SculptFinish finish;
+    finish.detail = 0;
+    finish.strokes.push_back(drawAcrossTop());
+    SculptStroke mirrored = drawAcrossTop(int(sculpt::Brush::Inflate));
+    mirrored.dabs = {{6.f, 6.f, 20.f}};
+    mirrored.mirrorX = true;
+    finish.strokes.push_back(mirrored);
+
+    // Played live (as the app does it) and replayed: the same surface.
+    const Mesh start = doc.sculptStart(box.id, finish.detail);
+    sculpt::Sculptor live(start);
+    for (const SculptStroke& st : finish.strokes)
+        sculpt::replay(live, st, start);
+    const Mesh again = sculpt::replayed(start, finish);
+    CHECK(again.indices == live.mesh().indices);
+    CHECK(again.positions == live.mesh().positions);
+    CHECK(again.triangleCount() > start.triangleCount());  // detail was added
+    CHECK(closed(again));
+
+    // As a step.
+    Body step;
+    step.id = doc.allocateId();
+    step.name = "Sculpt";
+    BooleanSpec spec;
+    spec.op = BooleanOp::Sculpt;
+    spec.operands = {box.id};
+    spec.sculpt = finish;
+    step.boolean = spec;
+    stack.execute(std::make_unique<CombineCommand>(step));
+    const double sculpted = meshkernel::volume(doc.meshSolid(step.id));
+    CHECK(sculpted > 8000.0 + 5.0);
+    CHECK(doc.worldBounds(step.id).max[2] > 20.1);
+    CHECK(history::describe(doc, step.id).find("2 strokes") != std::string::npos);
+
+    // Make the box longer: the ridge is played again on it, where it was.
+    Body longer = *doc.find(box.id);
+    longer.spec = BoxSpec{40, 20, 20};
+    stack.execute(std::make_unique<EditBodyCommand>(*doc.find(box.id), longer, "Resize"));
+    const double after = meshkernel::volume(doc.meshSolid(step.id));
+    CHECK(after > 16000.0 + 5.0);
+    CHECK(doc.worldBounds(step.id).max[2] > 20.1);
+    CHECK_THAT(doc.worldBounds(step.id).size()[0], WithinAbs(40.0, 0.5));
+
+    // Saved and opened: the same strokes, the same shape.
+    const auto loaded = file::fromJson(file::toJson(doc, "test"));
+    Document other;
+    other.replaceAll(loaded);
+    CHECK(*other.find(step.id) == *doc.find(step.id));
+    CHECK_THAT(meshkernel::volume(other.meshSolid(step.id)), WithinRel(after, 1e-9));
+
+    // Resized evenly, the strokes and brushes grow with it.
+    const auto scaled = scaledTree(doc, step.id, {2, 2, 2}, {0, 0, 0});
+    for (const Body& b : scaled)
+        if (b.id == step.id) {
+            CHECK_THAT(b.boolean->sculpt->strokes[0].radius, WithinRel(6.0, 1e-9));
+            CHECK_THAT(b.boolean->sculpt->strokes[0].dabs[0][0], WithinRel(-8.0, 1e-6));
+        }
+}

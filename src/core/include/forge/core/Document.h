@@ -150,6 +150,14 @@ public:
     // Imported meshes, and every combined shape with one inside, are worked out by the
     // mesh engine (fast with many triangles); everything else by the B-rep engine.
     bool usesMeshEngine(ObjectId id) const;
+    // A part's surface as triangles in step coordinates (its placement applied): what a
+    // Sculpt step on it starts from, before dividing; and that divided to a detail.
+    Mesh sculptSurface(ObjectId part) const;
+    Mesh sculptStart(ObjectId part, int detail) const;
+    // A sculpted surface already worked out (by the Sculpt tool, as it went), kept so
+    // making or undoing the step doesn't play every stroke again. Used only while the
+    // starting surface and strokes are exactly these.
+    void rememberSculpt(const Mesh& start, const SculptFinish& finish, const Mesh& sculpted) const;
     // The body as a triangle solid, in its own coordinates (cached like shape()).
     // Throws MeshEngineError (e.g. an imported mesh that isn't watertight).
     MeshSolid meshSolid(ObjectId id) const;
@@ -204,6 +212,13 @@ private:
     };
     mutable std::optional<LastPreview> m_lastPreview;
     bool partsUnchanged(const LastPreview& p) const;
+    struct KnownSculpt {
+        Mesh start;
+        SculptFinish finish;
+        Mesh sculpted;
+    };
+    mutable std::vector<KnownSculpt> m_knownSculpts;  // the last few, newest last
+    Mesh sculpted(const Mesh& start, const SculptFinish& finish) const;
 
     std::map<int, Listener> m_listeners;
     int m_nextListener = 1;
