@@ -582,9 +582,16 @@ void MainWindow::createActions()
     });
 
     m_sculptAction = new QAction(tr("Sculpt"), this);
-    m_sculptAction->setToolTip(tr("Sculpt (prototype): push, pull and smooth the selected shape with a brush, like "
+    m_sculptAction->setToolTip(tr("Sculpt: push, pull and smooth the selected shape with a brush, like "
                                   "modelling clay"));
-    connect(m_sculptAction, &QAction::triggered, this, &MainWindow::startSculpt);
+    connect(m_sculptAction, &QAction::triggered, this, [this] {
+        const ObjectId id = selectedOne();
+        if (id == kInvalidId || m_selection.size() != 1 || !m_doc.isTopLevel(id)) {
+            statusBar()->showMessage(tr("Sculpt: select one shape on the plate first."), 6000);
+            return;
+        }
+        startSculpt(history::tip(m_doc, id), false);
+    });
     m_sculptSmaller = new QAction(this);
     m_sculptSmaller->setShortcut(Qt::Key_BracketLeft);
     connect(m_sculptSmaller, &QAction::triggered, this, [this] {
@@ -1003,7 +1010,7 @@ void MainWindow::createToolBar()
     group(design, tr("Undo"), {shortButton(m_undo, tr("Undo")), shortButton(m_redo, tr("Redo"))});
     design.row->addStretch(1);
 
-    Page sculpt = page(tr("Sculpt"), tr("Sculpting brushes (prototype)"));
+    Page sculpt = page(tr("Sculpt"), tr("Sculpting brushes"));
     {
         group(sculpt, tr("Brushes"), {button(m_sculptAction)});
         auto* note = new QLabel(tr("Select a shape, then Sculpt: Draw, Smooth, Inflate, Flatten, Pinch, Clay and "
@@ -3107,95 +3114,115 @@ void MainWindow::sitSelectedOnPlate()
     m_stack.endMacro();
 }
 
-// ---- Sculpt (prototype) ----------------------------------------------------------
+// ---- Sculpt -----------------------------------------------------------------------
 
 namespace {
-// How many triangles each Detail setting aims for.
-std::size_t sculptTriangles(SculptPanel::Detail detail)
+int detailIndex(SculptPanel::Detail detail)
 {
-    return detail == SculptPanel::Detail::High ? 500'000 : detail == SculptPanel::Detail::Low ? 40'000 : 150'000;
+    return detail == SculptPanel::Detail::High ? 2 : detail == SculptPanel::Detail::Low ? 0 : 1;
+}
+
+// Stored as floats, so a stroke played again lands exactly where it went live.
+Vec3 asStored(const Vec3& p)
+{
+    return {double(float(p[0])), double(float(p[1])), double(float(p[2]))};
 }
 }  // namespace
 
-void MainWindow::startSculpt()
+void MainWindow::startSculpt(ObjectId target, bool editing)
 {
-    if (toolOpen() || m_selection.size() != 1 || !m_doc.isTopLevel(m_selection.front()))
+    const Body* body = m_doc.find(target);
+    if (toolOpen() || !body)
         return;
-    const ObjectId target = m_selection.front();
+    if (m_dragState.kind != Drag::Kind::None)
+        cancelDrag();
     SculptMode mode;
     mode.active = true;
+    mode.editing = editing;
     mode.target = target;
-    try {
-        // The shape's surface in plate coordinates, its corners shared.
-        const auto shown = m_doc.mesh(target);
-        if (!shown || shown->empty())
+    mode.object = history::objectOf(m_doc, target);
+    if (editing) {
+        if (!body->isBoolean() || body->boolean->op != BooleanOp::Sculpt || !body->boolean->sculpt)
             return;
-        const Transform world = m_doc.worldTransform(target);
-        Mesh plate = *shown;
-        const Body* body = m_doc.find(target);
-        if (!m_doc.usesMeshEngine(target) && !std::holds_alternative<MeshSpec>(body->spec)) {
-            // Curves divided much more finely than for showing, so they stay round when
-            // the triangles are split up (splitting keeps each one flat).
-            const float biggest = std::max({shown->bounds().size()[0], shown->bounds().size()[1],
-                                            shown->bounds().size()[2]});
-            TessellationSettings fine;
-            fine.linearDeflection = std::max(0.001, double(biggest) * 2e-4);
-            fine.angularDeflection = 0.06;
-            plate = tessellate(m_doc.shape(target), fine);
-        }
-        for (std::size_t i = 0; i + 2 < plate.positions.size(); i += 3) {
-            const Vec3 p = world.apply({plate.positions[i], plate.positions[i + 1], plate.positions[i + 2]});
-            for (int c = 0; c < 3; ++c)
-                plate.positions[i + c] = float(p[c]);
-        }
-        const Bounds b = plate.bounds();
+        mode.operand = body->boolean->operands.front();
+        mode.strokes = body->boolean->sculpt->strokes;
+        mode.kept = mode.strokes.size();
+    } else {
+        mode.operand = target;
+    }
+    try {
+        const ObjectId holder = m_doc.parentOf(target);
+        mode.toPlate = editing             ? m_doc.worldTransform(target)
+                       : holder != kInvalidId ? m_doc.worldTransform(holder)
+                                              : Transform{};
+        mode.fromPlate = mode.toPlate.inverse();
+        const Bounds b = m_doc.worldBounds(target);
         mode.size = std::max({b.size()[0], b.size()[1], b.size()[2]});
-        mode.base = sculpt::welded(plate, std::max(1e-6, double(b.radius()) * 1e-6));
-        mode.middle = {b.center()[0], b.center()[1], b.center()[2]};
     } catch (const std::exception& e) {
         QMessageBox::information(this, tr("Forge3D"), QString::fromUtf8(e.what()));
         return;
     }
     m_sculptMode = std::move(mode);
-    const QString name = QString::fromStdString(m_doc.find(target)->name);
-    m_sculptPanel->start(tr("Sculpt '%1'").arg(name), std::clamp(std::round(m_sculptMode.size * 0.08 * 2) / 2, 0.5, 50.0));
+    const QString name = QString::fromStdString(m_doc.find(m_sculptMode.object)->name);
+    m_sculptPanel->start(editing ? tr("Change the sculpting of '%1'").arg(name) : tr("Sculpt '%1'").arg(name),
+                         std::clamp(std::round(m_sculptMode.size * 0.08 * 2) / 2, 0.5, 50.0));
+    if (editing)
+        m_sculptPanel->setDetail(body->boolean->sculpt->detail);
     m_propsDockWidth = m_propsDock->width();
     m_properties->hide();
     m_sculptPanel->show();
     remeshSculpt();
-    statusBar()->showMessage(tr("Sculpt: drag over the shape to push it out (Ctrl: in, Shift: smooth). Done keeps it; "
-                                "Esc cancels."));
+    if (!m_sculptMode.sculptor) {
+        endSculpt();
+        return;
+    }
+    m_sculptPanel->setDetailEnabled(!editing);
+    statusBar()->showMessage(editing ? tr("Sculpt: add strokes to this step. Done keeps them; Esc leaves it as it was.")
+                                     : tr("Sculpt: drag over the shape to push it out (Ctrl: in, Shift: smooth). Done "
+                                          "keeps it; Esc cancels."));
     refreshCommandState();
 }
 
 void MainWindow::remeshSculpt()
 {
-    if (!m_sculptMode.active || !m_sculptMode.undo.empty())
+    if (!m_sculptMode.active || m_sculptMode.strokes.size() > m_sculptMode.kept)
         return;
     QApplication::setOverrideCursor(Qt::WaitCursor);
     QElapsedTimer timer;
     timer.start();
     try {
-        const std::size_t want = sculptTriangles(m_sculptPanel->detail());
-        // Splitting halves edges, so the count lands within about 2x of the aim either way.
-        Mesh fine = sculpt::refined(m_sculptMode.base, sculpt::edgeForTriangles(m_sculptMode.base, want) * 1.4,
-                                    want * 3);
+        const int detail = detailIndex(m_sculptPanel->detail());
+        // The step's surface, divided finely, in step coordinates; with the strokes it
+        // already has, when changing one.
+        m_sculptMode.undo.clear();
+        m_sculptMode.start = m_doc.sculptStart(m_sculptMode.operand, detail);
+        const Bounds b = m_sculptMode.start.bounds();
+        m_sculptMode.middle = {b.center()[0], b.center()[1], b.center()[2]};
         // The finest added detail: half the starting triangles' edges.
-        const double edge = sculpt::edgeForTriangles(fine, fine.triangleCount());
+        const double edge = sculpt::edgeForTriangles(m_sculptMode.start, m_sculptMode.start.triangleCount());
         m_sculptPanel->setFinestDetail(std::max(0.01, std::round(edge * 0.5 * 100.0) / 100.0));
-        m_sculptMode.sculptor = std::make_shared<sculpt::Sculptor>(std::move(fine));
+        m_sculptMode.sculptor = std::make_shared<sculpt::Sculptor>(m_sculptMode.start);
+        for (const SculptStroke& stroke : m_sculptMode.strokes)
+            sculpt::replay(*m_sculptMode.sculptor, stroke, m_sculptMode.start);
+        if (!m_sculptMode.strokes.empty())
+            m_sculptPanel->setFinestDetail(m_sculptMode.strokes.back().finest > 0.0 ? m_sculptMode.strokes.back().finest
+                                                                                     : m_sculptPanel->finestDetail());
         m_sculptMode.sculptor->setDetail(m_sculptPanel->addDetail() ? m_sculptPanel->finestDetail() : 0.0);
         m_sculptMode.topology = m_sculptMode.sculptor->topologyVersion();
         m_sculptMode.display =
             std::shared_ptr<const Mesh>(m_sculptMode.sculptor, &m_sculptMode.sculptor->mesh());
-        m_sculptMode.start = m_sculptMode.sculptor->mesh();
         m_sculptPanel->setStatus(tr("%1 triangles. Drag over the shape to sculpt.")
                                      .arg(QLocale().toString(qulonglong(m_sculptMode.sculptor->mesh().triangleCount()))),
                                  false);
         qInfo().noquote() << "Sculpt: mesh of" << m_sculptMode.sculptor->mesh().triangleCount() << "triangles in"
                           << timer.elapsed() << "ms";
     } catch (const std::exception& e) {
-        m_sculptPanel->setStatus(QString::fromUtf8(e.what()), true);
+        m_sculptMode.sculptor.reset();
+        m_sculptMode.display.reset();
+        QApplication::restoreOverrideCursor();
+        QMessageBox::information(this, tr("Forge3D"), QString::fromUtf8(e.what()));
+        refreshScene();
+        return;
     }
     QApplication::restoreOverrideCursor();
     refreshScene();
@@ -3205,8 +3232,17 @@ std::optional<sculpt::Hit> MainWindow::sculptHit(const QVector3D& origin, const 
 {
     if (!m_sculptMode.sculptor)
         return std::nullopt;
-    return m_sculptMode.sculptor->hit({origin.x(), origin.y(), origin.z()},
-                                      {direction.x(), direction.y(), direction.z()});
+    // Sculpting happens in step coordinates.
+    return m_sculptMode.sculptor->hit(m_sculptMode.fromPlate.apply({origin.x(), origin.y(), origin.z()}),
+                                      m_sculptMode.fromPlate.applyDirection({direction.x(), direction.y(), direction.z()}));
+}
+
+void MainWindow::showBrushRing(const sculpt::Hit& hit, double radius)
+{
+    const Vec3 p = m_sculptMode.toPlate.apply(hit.point);
+    const Vec3 n = m_sculptMode.toPlate.applyDirection(hit.normal);
+    m_viewport->setBrushRing(Viewport::BrushRing{QVector3D(float(p[0]), float(p[1]), float(p[2])),
+                                                 QVector3D(float(n[0]), float(n[1]), float(n[2])), float(radius)});
 }
 
 void MainWindow::sculptHover(const QVector3D& origin, const QVector3D& direction)
@@ -3216,9 +3252,21 @@ void MainWindow::sculptHover(const QVector3D& origin, const QVector3D& direction
         m_viewport->setBrushRing(std::nullopt);
         return;
     }
-    m_viewport->setBrushRing(Viewport::BrushRing{
-        QVector3D(float(hit->point[0]), float(hit->point[1]), float(hit->point[2])),
-        QVector3D(float(hit->normal[0]), float(hit->normal[1]), float(hit->normal[2])), float(m_sculptPanel->size())});
+    showBrushRing(*hit, m_sculptPanel->size());
+}
+
+SculptStroke MainWindow::newStroke(int brush, bool invert) const
+{
+    SculptStroke s;
+    s.brush = brush;
+    s.invert = invert;
+    s.radius = m_sculptPanel->size();
+    s.strength = m_sculptPanel->strength();
+    s.mirrorX = m_sculptPanel->mirrorX();
+    s.mirrorY = m_sculptPanel->mirrorY();
+    s.mirrorZ = m_sculptPanel->mirrorZ();
+    s.finest = m_sculptPanel->addDetail() ? m_sculptPanel->finestDetail() : 0.0;
+    return s;
 }
 
 void MainWindow::beginStroke(const QVector3D& origin, const QVector3D& direction, Qt::KeyboardModifiers modifiers)
@@ -3229,33 +3277,30 @@ void MainWindow::beginStroke(const QVector3D& origin, const QVector3D& direction
     if (!hit)
         return;  // pressed off the shape: nothing (the view turns with the right button)
     // Before the stroke, for Undo stroke (the last 8; whole meshes, as strokes can add
-    // triangles).
-    m_sculptMode.undo.push_back(m_sculptMode.sculptor->mesh());
+    // triangles), and how many strokes were kept then.
+    m_sculptMode.undo.push_back({m_sculptMode.sculptor->mesh(), m_sculptMode.strokes.size()});
     if (m_sculptMode.undo.size() > 8)
         m_sculptMode.undo.erase(m_sculptMode.undo.begin());
     m_sculptMode.stroking = true;
     m_sculptMode.lastDab.reset();
+    m_sculptMode.recording = -1;
     m_sculptPanel->setDetailEnabled(false);
     m_sculptPanel->setUndoEnabled(true);
     if (m_sculptPanel->brush() == int(sculpt::Brush::Grab) && !modifiers.testFlag(Qt::ShiftModifier)) {
         // Grab: the points under the brush follow the mouse across a plane facing the view.
+        SculptStroke stroke = newStroke(int(sculpt::Brush::Grab), false);
+        const Vec3 from = asStored(hit->point);
+        stroke.dabs.push_back({float(from[0]), float(from[1]), float(from[2])});
+        m_sculptMode.sculptor->setDetail(stroke.finest);
+        m_sculptMode.strokes.push_back(stroke);
         m_sculptMode.grabbing = true;
-        m_sculptMode.grabFrom = hit->point;
-        m_sculptMode.grabFacing = {direction.x(), direction.y(), direction.z()};
-        m_sculptMode.sculptor->beginGrab(hit->point, m_sculptPanel->size(), hit->triangle, sculptSymmetry());
+        m_sculptMode.grabFrom = from;
+        m_sculptMode.grabFacing = m_sculptMode.fromPlate.applyDirection({direction.x(), direction.y(), direction.z()});
+        m_sculptMode.sculptor->beginGrab(from, stroke.radius, m_sculptMode.sculptor->triangleAt(from),
+                                         sculpt::symmetryFor(stroke, m_sculptMode.start));
         return;
     }
     sculptAt(origin, direction, modifiers);
-}
-
-sculpt::Symmetry MainWindow::sculptSymmetry() const
-{
-    sculpt::Symmetry s;
-    s.x = m_sculptPanel->mirrorX();
-    s.y = m_sculptPanel->mirrorY();
-    s.z = m_sculptPanel->mirrorZ();
-    s.centre = m_sculptMode.middle;
-    return s;
 }
 
 void MainWindow::sculptAt(const QVector3D& origin, const QVector3D& direction, Qt::KeyboardModifiers modifiers)
@@ -3263,14 +3308,16 @@ void MainWindow::sculptAt(const QVector3D& origin, const QVector3D& direction, Q
     if (m_sculptMode.grabbing) {
         // Where the ray crosses the plane through the grab point, facing the view.
         const Vec3& n = m_sculptMode.grabFacing;
-        const Vec3 o{origin.x(), origin.y(), origin.z()}, d{direction.x(), direction.y(), direction.z()};
+        const Vec3 o = m_sculptMode.fromPlate.apply({origin.x(), origin.y(), origin.z()});
+        const Vec3 d = m_sculptMode.fromPlate.applyDirection({direction.x(), direction.y(), direction.z()});
         const double along = n[0] * d[0] + n[1] * d[1] + n[2] * d[2];
         if (std::abs(along) < 1e-9)
             return;
         const Vec3& f = m_sculptMode.grabFrom;
         const double t = (n[0] * (f[0] - o[0]) + n[1] * (f[1] - o[1]) + n[2] * (f[2] - o[2])) / along;
-        const Vec3 at{o[0] + d[0] * t, o[1] + d[1] * t, o[2] + d[2] * t};
-        const auto [first, last] = m_sculptMode.sculptor->moveGrab({at[0] - f[0], at[1] - f[1], at[2] - f[2]});
+        const Vec3 offset = asStored({o[0] + d[0] * t - f[0], o[1] + d[1] * t - f[1], o[2] + d[2] * t - f[2]});
+        const auto [first, last] = m_sculptMode.sculptor->moveGrab(offset);
+        m_sculptMode.strokes.back().grab = {float(offset[0]), float(offset[1]), float(offset[2])};
         sculptShown(first, last);
         m_sculptMode.dabs++;
         return;
@@ -3286,23 +3333,35 @@ void MainWindow::sculptAt(const QVector3D& origin, const QVector3D& direction, Q
         if (moved < radius * 0.2)
             return;
     }
+    const int brush = modifiers.testFlag(Qt::ShiftModifier) ? int(sculpt::Brush::Smooth)
+                                                            : std::clamp(m_sculptPanel->brush(), 0, 5);
+    const bool invert = modifiers.testFlag(Qt::ControlModifier);
+    // A stroke is kept as dabs of one brush; holding Shift or Ctrl part way starts another.
+    if (m_sculptMode.recording < 0 || m_sculptMode.strokes.back().brush != brush ||
+        m_sculptMode.strokes.back().invert != invert) {
+        m_sculptMode.strokes.push_back(newStroke(brush, invert));
+        m_sculptMode.recording = int(m_sculptMode.strokes.size()) - 1;
+        m_sculptMode.sculptor->setDetail(m_sculptMode.strokes.back().finest);
+    }
+    SculptStroke& stroke = m_sculptMode.strokes.back();
+    const Vec3 centre = asStored(hit->point);
+    stroke.dabs.push_back({float(centre[0]), float(centre[1]), float(centre[2])});
     sculpt::Dab dab;
-    dab.centre = hit->point;
-    dab.radius = radius;
-    dab.strength = m_sculptPanel->strength();
-    dab.brush = modifiers.testFlag(Qt::ShiftModifier) ? sculpt::Brush::Smooth
-                                                      : sculpt::Brush(std::clamp(m_sculptPanel->brush(), 0, 5));
-    dab.invert = modifiers.testFlag(Qt::ControlModifier);
+    dab.centre = centre;
+    dab.radius = stroke.radius;
+    dab.strength = stroke.strength;
+    dab.brush = sculpt::Brush(stroke.brush);
+    dab.invert = stroke.invert;
     QElapsedTimer timer;
     timer.start();
-    const auto [first, last] = m_sculptMode.sculptor->apply(dab, hit->triangle, sculptSymmetry());
+    // Started from the triangle nearest the dab, as when the stroke is played again.
+    const auto [first, last] = m_sculptMode.sculptor->apply(dab, m_sculptMode.sculptor->triangleAt(centre),
+                                                            sculpt::symmetryFor(stroke, m_sculptMode.start));
     m_sculptMode.lastDab = hit->point;
     m_sculptMode.dabs++;
     m_sculptMode.dabMs += timer.nsecsElapsed() / 1e6;
     sculptShown(first, last);
-    m_viewport->setBrushRing(Viewport::BrushRing{
-        QVector3D(float(hit->point[0]), float(hit->point[1]), float(hit->point[2])),
-        QVector3D(float(hit->normal[0]), float(hit->normal[1]), float(hit->normal[2])), float(radius)});
+    showBrushRing(*hit, radius);
 }
 
 void MainWindow::sculptShown(std::uint32_t first, std::uint32_t last)
@@ -3310,12 +3369,12 @@ void MainWindow::sculptShown(std::uint32_t first, std::uint32_t last)
     const auto version = m_sculptMode.sculptor->topologyVersion();
     if (version != m_sculptMode.topology) {
         m_sculptMode.topology = version;
-        m_viewport->meshGrew(m_sculptMode.target);
+        m_viewport->meshGrew(m_sculptMode.object);
         m_sculptPanel->setStatus(tr("%1 triangles.").arg(QLocale().toString(
                                      qulonglong(m_sculptMode.sculptor->mesh().triangleCount()))),
                                  false);
     } else {
-        m_viewport->meshPointsChanged(m_sculptMode.target, first, last);
+        m_viewport->meshPointsChanged(m_sculptMode.object, first, last);
     }
 }
 
@@ -3323,61 +3382,74 @@ void MainWindow::undoStroke()
 {
     if (!m_sculptMode.active || m_sculptMode.undo.empty())
         return;
-    m_sculptMode.sculptor->setMesh(std::move(m_sculptMode.undo.back()));
+    auto& [mesh, strokes] = m_sculptMode.undo.back();
+    m_sculptMode.sculptor->setMesh(std::move(mesh));
+    m_sculptMode.strokes.resize(strokes);
     m_sculptMode.undo.pop_back();
     sculptShown(0, 0);
     m_sculptPanel->setUndoEnabled(!m_sculptMode.undo.empty());
+    m_sculptPanel->setDetailEnabled(!m_sculptMode.editing && m_sculptMode.strokes.empty());
 }
 
 void MainWindow::finishSculpt()
 {
     if (!m_sculptMode.active || !m_sculptMode.sculptor)
         return;
-    const ObjectId target = m_sculptMode.target;
-    if (m_sculptMode.sculptor->mesh().positions == m_sculptMode.start.positions &&
-        m_sculptMode.sculptor->mesh().indices == m_sculptMode.start.indices) {
-        endSculpt();  // nothing sculpted: the shape stays as it was
+    // Strokes that did nothing (a Grab that never moved) are left out.
+    const std::size_t erased = std::erase_if(m_sculptMode.strokes, [](const SculptStroke& s) {
+        return s.dabs.empty() || (s.brush == int(sculpt::Brush::Grab) && s.grab == std::array<float, 3>{0, 0, 0});
+    });
+    if (m_sculptMode.strokes.size() <= m_sculptMode.kept) {
+        endSculpt();  // nothing new sculpted: the shape stays as it was
         return;
     }
-    // A mesh shape like an imported one: middle of its base at its placement.
-    const Mesh& m = m_sculptMode.sculptor->mesh();
-    const Bounds b = m.bounds();
-    auto data = std::make_shared<MeshData>();
-    const float cx = (b.min[0] + b.max[0]) / 2, cy = (b.min[1] + b.max[1]) / 2, cz = b.min[2];
-    data->positions.resize(m.positions.size());
-    for (std::size_t i = 0; i + 2 < m.positions.size(); i += 3) {
-        data->positions[i] = m.positions[i] - cx;
-        data->positions[i + 1] = m.positions[i + 1] - cy;
-        data->positions[i + 2] = m.positions[i + 2] - cz;
-    }
-    data->indices = m.indices;
-    data->size = {std::max(b.size()[0], 1e-6f), std::max(b.size()[1], 1e-6f), std::max(b.size()[2], 1e-6f)};
-    data->closed = true;
-    Body body;
-    body.id = m_doc.allocateId();
-    body.name = m_doc.find(target)->name;
-    MeshSpec spec;
-    spec.data = data;
-    spec.width = data->size[0];
-    spec.depth = data->size[1];
-    spec.height = data->size[2];
-    body.spec = spec;
-    body.placement.x = cx;
-    body.placement.y = cy;
-    body.placement.z = cz;
+    SculptFinish finish;
+    finish.detail = detailIndex(m_sculptPanel->detail());
+    finish.strokes = m_sculptMode.strokes;
+    // What the strokes made is kept, so the step isn't worked out again from the start
+    // (with none left out above, it is exactly what playing them again gives).
+    if (erased == 0)
+        m_doc.rememberSculpt(m_sculptMode.start, finish, m_sculptMode.sculptor->mesh());
     qInfo().noquote() << "Sculpt: done," << m_sculptMode.dabs << "dabs, average"
                       << (m_sculptMode.dabs ? m_sculptMode.dabMs / m_sculptMode.dabs : 0.0) << "ms each";
+    const ObjectId target = m_sculptMode.target;
+    const bool editing = m_sculptMode.editing;
     endSculpt();
-    m_stack.beginMacro("Sculpt " + body.name);
-    try {
-        for (ObjectId part : m_doc.withDescendants(target))
-            m_stack.execute(std::make_unique<RemoveBodyCommand>(part));
-        m_stack.execute(std::make_unique<AddBodyCommand>(body));
-    } catch (const std::exception& e) {
-        qWarning() << "Sculpt: keeping the result failed:" << e.what();
+    if (editing) {
+        const Body* now = m_doc.find(target);
+        if (!now)
+            return;
+        Body after = *now;
+        after.boolean->sculpt = finish;
+        run(std::make_unique<EditBodyCommand>(*now, after, "Change sculpting"));
+        setSelection(history::objectOf(m_doc, target));
+        return;
     }
-    m_stack.endMacro();
-    setSelection(body.id);
+    BooleanSpec spec;
+    spec.op = BooleanOp::Sculpt;
+    spec.operands = {target};
+    spec.sculpt = finish;
+    {
+        const ObjectId holder = m_doc.parentOf(target);
+        const Transform toStep = holder == kInvalidId ? Transform{} : m_doc.worldTransform(holder).inverse();
+        const auto c = m_doc.worldBounds(target).center();
+        const Vec3 centre = toStep.apply(Vec3{c[0], c[1], c[2]});
+        spec.pivot = {centre[0], centre[1], centre[2]};
+    }
+    Body result;
+    result.id = m_doc.allocateId();
+    result.name = m_doc.uniqueName("Sculpted");
+    result.boolean = spec;
+    const ObjectId id = result.id;
+    if (!m_doc.isTopLevel(target)) {
+        // Rolled back: the step goes in at the bar.
+        const ObjectId object = history::objectOf(m_doc, target);
+        if (run(std::make_unique<InsertStepCommand>(std::move(result), m_doc.parentOf(target))))
+            setSelection(object);
+        return;
+    }
+    if (run(std::make_unique<CombineCommand>(std::move(result))))
+        setSelection(id);
 }
 
 void MainWindow::endSculpt()
@@ -4001,9 +4073,9 @@ void MainWindow::refreshScene()
                     items.push_back(line);
                 }
             }
-            if (m_sculptMode.active && id == m_sculptMode.target && m_sculptMode.display) {
-                item.mesh = m_sculptMode.display;  // being sculpted, in plate coordinates
-                item.model = QMatrix4x4();
+            if (m_sculptMode.active && id == m_sculptMode.object && m_sculptMode.display) {
+                item.mesh = m_sculptMode.display;  // being sculpted, in step coordinates
+                item.model = toQMatrix(m_sculptMode.toPlate);
             }
             if (m_holeMode.active && m_holeMode.preview && id == history::objectOf(m_doc, m_holeMode.target)) {
                 item.mesh = m_holeMode.preview;  // drilled, as it will be (plate coordinates)
@@ -4355,6 +4427,7 @@ void MainWindow::editStep(ObjectId id)
     case BooleanOp::Follow: startFollow(id, true); break;
     case BooleanOp::Pattern: startPattern(id, true); break;
     case BooleanOp::Emboss: startEmboss(id, true); break;
+    case BooleanOp::Sculpt: startSculpt(id, true); break;
     case BooleanOp::Split:
         if (m_doc.isTopLevel(id))
             startSplit(id, true);
@@ -4454,7 +4527,7 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
         const bool opens = sketchedToolOf(id) != kInvalidId ||
                            (body->isBoolean() && (op == BooleanOp::Edges || op == BooleanOp::Shell ||
                                                   op == BooleanOp::Follow || op == BooleanOp::Pattern ||
-                                                  op == BooleanOp::Emboss ||
+                                                  op == BooleanOp::Emboss || op == BooleanOp::Sculpt ||
                                                   (op == BooleanOp::Split && m_doc.isTopLevel(id))));
         if (!opens) {
             // Nothing to open: show or hide what's inside, as a list does.

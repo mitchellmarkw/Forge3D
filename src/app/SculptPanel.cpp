@@ -145,8 +145,9 @@ SculptPanel::SculptPanel(QWidget* parent) : QWidget(parent)
                                "the right button as usual."));
     hint->setWordWrap(true);
     layout->addWidget(hint);
-    auto* note = new QLabel(tr("Prototype: sculpting turns the shape into a mesh, so its steps (sizes, holes, "
-                               "words) can't be changed afterwards. Undo after Done puts it all back."));
+    auto* note = new QLabel(tr("Done keeps the strokes as a step in the shape's history: change a size or a "
+                               "hole below it and they are made again on the new shape. Double-click the step to "
+                               "add more."));
     note->setWordWrap(true);
     note->setStyleSheet(QStringLiteral("color: palette(mid);"));
     layout->addWidget(note);
@@ -229,6 +230,12 @@ bool SculptPanel::addDetail() const
 double SculptPanel::finestDetail() const
 {
     return m_finest->value();
+}
+
+void SculptPanel::setDetail(int index)
+{
+    const QSignalBlocker block(m_detail);
+    m_detail->setCurrentIndex(std::clamp(index, 0, 2));
 }
 
 void SculptPanel::setFinestDetail(double mm)

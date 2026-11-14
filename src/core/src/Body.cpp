@@ -383,6 +383,7 @@ std::string toString(BooleanOp op)
     case BooleanOp::Shell: return "Shell";
     case BooleanOp::Follow: return "Follow";
     case BooleanOp::Pattern: return "Pattern";
+    case BooleanOp::Sculpt: return "Sculpt";
     }
     return "Combine";
 }

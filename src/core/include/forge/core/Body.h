@@ -280,7 +280,7 @@ PrimitiveSpec madeRound(const PrimitiveSpec& spec);
 
 // ---- Combine results ------------------------------------------------------------
 
-enum class BooleanOp { Merge, Subtract, Intersect, Split, Mirror, Group, Emboss, Edges, Shell, Follow, Pattern };
+enum class BooleanOp { Merge, Subtract, Intersect, Split, Mirror, Group, Emboss, Edges, Shell, Follow, Pattern, Sculpt };
 
 // What happens to the picked edges of a shape.
 enum class EdgeFinishKind {
@@ -358,6 +358,30 @@ struct EmbossPicture {
                invert == o.invert && width == o.width && depth == o.depth && raised == o.raised &&
                angle == o.angle;
     }
+};
+
+// One brush stroke of a Sculpt step, kept so it can be played again on a changed shape.
+// Points are in step coordinates.
+struct SculptStroke {
+    int brush = 0;  // sculpt::Brush
+    bool invert = false;
+    double radius = 1.0;
+    double strength = 0.5;  // 0..1
+    bool mirrorX = false;
+    bool mirrorY = false;
+    bool mirrorZ = false;
+    double finest = 0.0;  // detail added under the brush (0: none)
+    std::vector<std::array<float, 3>> dabs;  // where each dab went (Grab: where it started)
+    std::array<float, 3> grab{0.f, 0.f, 0.f};  // Grab: how far it was pulled
+    bool operator==(const SculptStroke&) const = default;
+};
+
+// A Sculpt step: the starting detail and the strokes, in order. The shape under it is
+// divided finely (detail 0 Low, 1 Medium, 2 High) and the strokes played on it.
+struct SculptFinish {
+    int detail = 1;
+    std::vector<SculptStroke> strokes;
+    bool operator==(const SculptFinish&) const = default;
 };
 
 // One picked face, found again by place (like EdgeRef): a point on it, which way it
@@ -458,6 +482,8 @@ struct BooleanSpec {
     // Emboss: the words, or (instead) a picture.
     std::optional<EmbossText> emboss{};
     std::optional<EmbossPicture> picture{};
+    // Sculpt: the strokes.
+    std::optional<SculptFinish> sculpt{};
     // Edges: what to do to which edges.
     std::optional<EdgeFinish> edges{};
     // Shell: how thick, and which faces are left open.

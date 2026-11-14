@@ -303,6 +303,10 @@ void PropertiesPanel::setBody(const Body* body, const QString& context, bool isP
                 button->setToolTip(tr("Give back the shape without the embossed words, where it is"));
             }
             break;
+        case BooleanOp::Sculpt:
+            button->setText(tr("Remove the sculpting"));
+            button->setToolTip(tr("Give back the shape as it was before it was sculpted, where it is"));
+            break;
         case BooleanOp::Group:
             button->setText(tr("Ungroup"));
             button->setToolTip(tr("Let the shapes in this group move on their own again, where they are"));

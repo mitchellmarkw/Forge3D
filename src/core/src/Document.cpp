@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "forge/core/Document.h"
+#include "forge/core/Sculpt.h"
 
 #include "forge/core/Edges.h"
 #include "forge/core/Shell.h"
@@ -218,6 +219,11 @@ void Document::validateBoolean(const Body& body, const std::map<ObjectId, Object
             throw std::invalid_argument("Pattern works on exactly one shape");
         if (!body.boolean->pattern)
             throw std::invalid_argument("Pattern needs its settings");
+    } else if (op == BooleanOp::Sculpt) {
+        if (ops.size() != 1)
+            throw std::invalid_argument("Sculpt works on exactly one shape");
+        if (!body.boolean->sculpt)
+            throw std::invalid_argument("Sculpt needs its strokes");
     } else if (op == BooleanOp::Follow) {
         if (ops.size() != 1)
             throw std::invalid_argument("Follow works on exactly one shape");
@@ -482,8 +488,8 @@ TopoDS_Shape Document::combine(const BooleanSpec& spec) const
     const std::vector<ObjectId>& operands = spec.operands;
     TopoDS_Shape result;
     try {
-        if (op == BooleanOp::Emboss)
-            throw GeometryError("Emboss is worked out by the mesh engine");
+        if (op == BooleanOp::Emboss || op == BooleanOp::Sculpt)
+            throw GeometryError(toString(op) + " is worked out by the mesh engine");
         if (op == BooleanOp::Pattern)
             return patternShape(spec);
         if (op == BooleanOp::Follow) {
@@ -599,6 +605,7 @@ TopoDS_Shape Document::combine(const BooleanSpec& spec) const
             case BooleanOp::Shell:
             case BooleanOp::Follow:
             case BooleanOp::Pattern:
+            case BooleanOp::Sculpt:
                 break;  // handled above / by the mesh engine
             }
         }
@@ -691,7 +698,7 @@ TopoDS_Shape Document::previewCombine(const BooleanSpec& spec) const
             throw std::out_of_range("No body with id " + std::to_string(part));
     if ((spec.op == BooleanOp::Split || spec.op == BooleanOp::Mirror || spec.op == BooleanOp::Emboss ||
          spec.op == BooleanOp::Edges || spec.op == BooleanOp::Shell ||
-         spec.op == BooleanOp::Follow || spec.op == BooleanOp::Pattern) &&
+         spec.op == BooleanOp::Follow || spec.op == BooleanOp::Pattern || spec.op == BooleanOp::Sculpt) &&
         spec.operands.size() != 1)
         throw std::invalid_argument(toString(spec.op) + " works on exactly one shape");
     return combine(spec);
@@ -759,6 +766,7 @@ BooleanSpec Document::passThrough(const BooleanSpec& spec)
     pass.shell.reset();
     pass.follow.reset();
     pass.pattern.reset();
+    pass.sculpt.reset();
     switch (spec.op) {
     case BooleanOp::Merge:
     case BooleanOp::Intersect:
@@ -917,8 +925,8 @@ Body Document::removeStep(ObjectId id)
 
 bool Document::specUsesMesh(const BooleanSpec& spec) const
 {
-    if (spec.op == BooleanOp::Emboss)
-        return true;  // letters following a surface only exist as triangles
+    if (spec.op == BooleanOp::Emboss || spec.op == BooleanOp::Sculpt)
+        return true;  // letters following a surface, and sculpting, only exist as triangles
     for (ObjectId part : spec.operands)
         if (usesMeshEngine(part))
             return true;
@@ -1120,6 +1128,51 @@ MeshSolid Document::patternMeshes(const BooleanSpec& spec) const
     return meshkernel::subtracted(base, copies);
 }
 
+Mesh Document::sculptSurface(ObjectId part) const
+{
+    Mesh surface;
+    if (usesMeshEngine(part)) {
+        meshkernel::triangles(meshkernel::transformed(meshSolid(part), localTransform(part)), surface.positions,
+                              surface.indices);
+        return surface;
+    }
+    // A solid shape: divided much more finely than for showing, so curves stay round
+    // when the triangles are split up (splitting keeps each one flat).
+    const TopoDS_Shape placed =
+        BRepBuilderAPI_Transform(shape(part), toTrsf(localTransform(part)), /*copy=*/true).Shape();
+    Bnd_Box box;
+    BRepBndLib::Add(placed, box);
+    double x0, y0, z0, x1, y1, z1;
+    box.Get(x0, y0, z0, x1, y1, z1);
+    TessellationSettings fine;
+    fine.linearDeflection = std::max(0.001, std::max({x1 - x0, y1 - y0, z1 - z0}) * 2e-4);
+    fine.angularDeflection = 0.06;
+    return tessellate(placed, fine);
+}
+
+Mesh Document::sculptStart(ObjectId part, int detail) const
+{
+    return sculpt::startingMesh(sculptSurface(part), detail);
+}
+
+void Document::rememberSculpt(const Mesh& start, const SculptFinish& finish, const Mesh& sculpted) const
+{
+    std::erase_if(m_knownSculpts, [&](const KnownSculpt& k) { return k.finish == finish; });
+    m_knownSculpts.push_back({start, finish, sculpted});
+    if (m_knownSculpts.size() > 4)
+        m_knownSculpts.erase(m_knownSculpts.begin());
+}
+
+Mesh Document::sculpted(const Mesh& start, const SculptFinish& finish) const
+{
+    for (const KnownSculpt& k : m_knownSculpts)
+        if (k.finish == finish && k.start.positions == start.positions && k.start.indices == start.indices)
+            return k.sculpted;
+    Mesh done = sculpt::replayed(start, finish);
+    rememberSculpt(start, finish, done);
+    return done;
+}
+
 MeshSolid Document::combineMeshes(const BooleanSpec& spec) const
 {
     std::vector<MeshSolid> parts;
@@ -1161,6 +1214,12 @@ MeshSolid Document::combineMeshes(const BooleanSpec& spec) const
     case BooleanOp::Follow:
         throw GeometryError("Follow works on solid shapes, not on imported meshes or shapes made with them.");
     case BooleanOp::Pattern: return patternMeshes(spec);
+    case BooleanOp::Sculpt: {
+        if (!spec.sculpt)
+            throw GeometryError("Sculpt has no strokes");
+        const Mesh done = sculpted(sculptStart(spec.operands.front(), spec.sculpt->detail), *spec.sculpt);
+        return meshkernel::fromTriangles(done.positions, done.indices);
+    }
     case BooleanOp::Emboss: {
         if (!spec.emboss && !spec.picture)
             throw GeometryError("Emboss has no words");

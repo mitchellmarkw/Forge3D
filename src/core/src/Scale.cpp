@@ -104,6 +104,23 @@ void scaleInto(const Document& doc, ObjectId id, const Vec3& factors, const Vec3
         out.push_back(std::move(next));
         return;
     }
+    if (body->boolean->op == BooleanOp::Sculpt && body->boolean->sculpt) {
+        // The strokes go where the surface goes; evenly scaled, the brushes grow too.
+        Body next = *body;
+        for (SculptStroke& st : next.boolean->sculpt->strokes) {
+            for (auto& d : st.dabs)
+                for (std::size_t k = 0; k < 3; ++k)
+                    d[k] = float(factors[k] * (d[k] - anchor[k]) + anchor[k]);
+            for (std::size_t k = 0; k < 3; ++k)
+                st.grab[k] = float(factors[k] * st.grab[k]);
+            if (even(factors)) {
+                st.radius *= factors[0];
+                st.finest *= factors[0];
+            }
+        }
+        out.push_back(std::move(next));
+        return;
+    }
     if (body->boolean->op == BooleanOp::Pattern && body->boolean->pattern) {
         // The copies keep their places in the stretched shape: spacing grows with it.
         Body next = *body;

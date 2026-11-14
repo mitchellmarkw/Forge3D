@@ -481,7 +481,7 @@ Viewport (mouse)  --leftPressed(ray, handle)-->  MainWindow drag controller
   on the three buttons under it) before anything else, and turns the camera with a
   QVariantAnimation over `OrbitCamera::setAngles` (the short way round in yaw).
 
-## Sculpting prototype (slice 17)
+## Sculpting (slices 17–21)
 
 - `sculpt::welded` (shared corners), `sculpt::refined` (edges split at their middles
   until short enough; conforming, so a closed mesh stays closed) and `sculpt::Sculptor`
@@ -507,10 +507,22 @@ Viewport (mouse)  --leftPressed(ray, handle)-->  MainWindow drag controller
   first piece keeping the triangle's slot. `topologyVersion()` tells the app to
   re-upload the whole mesh (`Viewport::meshGrew`) instead of a point range; Undo stroke
   keeps whole meshes.
-- The app works in plate coordinates on a finely re-tessellated copy (B-rep shapes) or
-  the mesh itself; the display item points at the sculptor's mesh (aliasing
-  shared_ptr), and `Viewport::meshPointsChanged` uploads just the changed range with
-  glBufferSubData. Done: a MeshSpec body replaces the shape (one undo step).
+- The display item points at the sculptor's mesh (aliasing shared_ptr), and
+  `Viewport::meshPointsChanged` uploads just the changed range with glBufferSubData.
+- Sculpt steps (slice 21): `BooleanOp::Sculpt`, one operand, `SculptFinish{detail,
+  strokes}`; each `SculptStroke` keeps brush, invert, radius, strength, mirrors, finest
+  detail, its dab centres (floats) and, for Grab, the final offset — all in step
+  coordinates. A mesh-engine op: `Document::sculptStart(part, detail)` is the part's
+  surface (mesh-engine triangles, or the B-rep tessellated finely) placed by
+  `localTransform`, welded and divided to the Detail's triangle count
+  (`sculpt::startingMesh`); `sculpt::replayed` plays every stroke on it (each dab
+  starts from `triangleAt(centre)`, the mirror planes through the start's middle).
+  Change a size below and the strokes play again on the new surface. The app sculpts
+  in step coordinates exactly as replay does (centres and offsets rounded to float,
+  seeds from `triangleAt`), so live and replayed meshes are identical; Done hands the
+  live result to `Document::rememberSculpt` (the last 4, keyed by starting surface and
+  strokes) so making or undoing the step doesn't play it again. Editing a step replays
+  its strokes and appends new ones (Detail fixed). File format 18: `"sculpt"` op.
 
 ## Releases (slice 16)
 

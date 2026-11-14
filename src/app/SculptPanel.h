@@ -12,7 +12,7 @@ class QSlider;
 
 namespace forge::app {
 
-// The Sculpt tool's settings (prototype): the brush, its size and strength, and how
+// The Sculpt tool's settings: the brush, its size and strength, and how
 // fine the mesh is. It only reports changes; the main window does the sculpting.
 class SculptPanel : public QWidget {
     Q_OBJECT
@@ -31,6 +31,7 @@ public:
     double size() const;       // the brush's radius, mm
     double strength() const;   // 0..1
     Detail detail() const;
+    void setDetail(int index);  // 0 Low, 1 Medium, 2 High (no detailChanged)
     void setSize(double radius);
     // Detail where you sculpt: on, and the finest edge (mm).
     bool addDetail() const;

@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.30.0 Beta — Slice 21: Sculpting kept in the history (2026-11-13)
+
+- **Sculpting is now a step** in the shape's history, like Emboss or Shell, instead of
+  turning the shape into a fixed mesh. Done adds a **Sculpted** step showing how many
+  strokes it has.
+- The strokes are kept, not just the result: **change a size, a hole or anything below
+  the step and the strokes are made again** on the new shape, where they were.
+- **Double-click the step** (or right-click → Change...) to add more strokes to it.
+  Undo stroke takes back only the new ones; Esc leaves the step as it was.
+- **Remove the sculpting** in Properties gives back the shape as it was before.
+- Sculpting a shape that is rolled back puts the step in at the rollback bar.
+- Saved in the file (format 18), and grows with the shape when it is resized evenly.
+- 197 unit tests (1 new: strokes played again give exactly the live result, follow a
+  longer box, survive saving and resizing).
+
 ## 0.29.0 Beta — Slice 20: View cube (2026-11-13)
 
 - A **view cube** in the top-right corner of the 3D view, like FreeCAD's: it turns with
