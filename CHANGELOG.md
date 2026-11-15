@@ -11,11 +11,15 @@
   triangles** in Properties (half to start); Properties shows the counts before and
   after. **Remove the simplifying** gives the full shape back. Closed shapes stay
   closed; flat areas lose triangles first, so edges stay sharp.
+- Fixed: sculpting disappeared when the shape under it grew or shrank (a sphere made
+  bigger): each stroke now starts from the nearest point of the surface as it is, so it
+  stays on it.
 - Fixed: Crease, Snake hook and mask strokes were read back from a file as Grab
   (0.31 was never published).
 - Files saved with 0.32 need 0.32 or later (file format 20).
-- 204 unit tests (5 new: remeshing evenly and keeping a mask; simplifying a sphere, a
-  box and a raw tessellation; Simplify steps; every brush saved and read back).
+- 205 unit tests (6 new: remeshing evenly and keeping a mask; simplifying a sphere, a
+  box and a raw tessellation; Simplify steps; every brush saved and read back; strokes
+  on a sphere made bigger and smaller).
 
 ## 0.31.0 Beta — Slice 22: Mask, Crease and Snake hook (2026-11-14)
 

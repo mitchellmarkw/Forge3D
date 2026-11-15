@@ -3320,7 +3320,10 @@ void MainWindow::beginStroke(const QVector3D& origin, const QVector3D& direction
         m_sculptMode.strokes.push_back(stroke);
         m_sculptMode.snaking = true;
         m_sculptMode.grabFacing = m_sculptMode.fromPlate.applyDirection({direction.x(), direction.y(), direction.z()});
-        m_sculptMode.sculptor->beginSnake(from, stroke.radius, stroke.strength, m_sculptMode.sculptor->triangleAt(from),
+        // As replay does it: from the nearest point of the surface, the tips moved to match.
+        const Vec3 start = m_sculptMode.sculptor->onSurface(from);
+        m_sculptMode.snakeShift = {start[0] - from[0], start[1] - from[1], start[2] - from[2]};
+        m_sculptMode.sculptor->beginSnake(start, stroke.radius, stroke.strength, m_sculptMode.sculptor->triangleAt(start),
                                           sculpt::symmetryFor(stroke, m_sculptMode.start));
         return;
     }
@@ -3334,7 +3337,8 @@ void MainWindow::beginStroke(const QVector3D& origin, const QVector3D& direction
         m_sculptMode.grabbing = true;
         m_sculptMode.grabFrom = from;
         m_sculptMode.grabFacing = m_sculptMode.fromPlate.applyDirection({direction.x(), direction.y(), direction.z()});
-        m_sculptMode.sculptor->beginGrab(from, stroke.radius, m_sculptMode.sculptor->triangleAt(from),
+        const Vec3 start = m_sculptMode.sculptor->onSurface(from);  // as replay does it
+        m_sculptMode.sculptor->beginGrab(start, stroke.radius, m_sculptMode.sculptor->triangleAt(start),
                                          sculpt::symmetryFor(stroke, m_sculptMode.start));
         return;
     }
@@ -3377,7 +3381,9 @@ void MainWindow::sculptAt(const QVector3D& origin, const QVector3D& direction, Q
         stroke.dabs.push_back({float(to[0]), float(to[1]), float(to[2])});
         QElapsedTimer timer;
         timer.start();
-        const auto [first, last] = m_sculptMode.sculptor->moveSnake(to);
+        const Vec3& shift = m_sculptMode.snakeShift;
+        const auto [first, last] =
+            m_sculptMode.sculptor->moveSnake({to[0] + shift[0], to[1] + shift[1], to[2] + shift[2]});
         m_sculptMode.dabs++;
         m_sculptMode.dabMs += timer.nsecsElapsed() / 1e6;
         sculptShown(first, last);
@@ -3410,7 +3416,7 @@ void MainWindow::sculptAt(const QVector3D& origin, const QVector3D& direction, Q
     const Vec3 centre = asStored(hit->point);
     stroke.dabs.push_back({float(centre[0]), float(centre[1]), float(centre[2])});
     sculpt::Dab dab;
-    dab.centre = centre;
+    dab.centre = m_sculptMode.sculptor->onSurface(centre);  // as replay does it
     dab.radius = stroke.radius;
     dab.strength = stroke.strength;
     dab.brush = sculpt::Brush(stroke.brush);
@@ -3418,7 +3424,7 @@ void MainWindow::sculptAt(const QVector3D& origin, const QVector3D& direction, Q
     QElapsedTimer timer;
     timer.start();
     // Started from the triangle nearest the dab, as when the stroke is played again.
-    const auto [first, last] = m_sculptMode.sculptor->apply(dab, m_sculptMode.sculptor->triangleAt(centre),
+    const auto [first, last] = m_sculptMode.sculptor->apply(dab, m_sculptMode.sculptor->triangleAt(dab.centre),
                                                             sculpt::symmetryFor(stroke, m_sculptMode.start));
     m_sculptMode.lastDab = hit->point;
     m_sculptMode.dabs++;

@@ -481,6 +481,7 @@ private:
         bool grabbing = false;       // a Grab stroke: pulled across a plane facing the view
         bool snaking = false;        // a Snake hook stroke: likewise, from tip to tip
         Vec3 grabFrom{0.0, 0.0, 0.0};
+        Vec3 snakeShift{0.0, 0.0, 0.0};  // from the pressed point to the surface's nearest
         Vec3 grabFacing{0.0, 0.0, 1.0};
         int dabs = 0;
         double dabMs = 0.0;

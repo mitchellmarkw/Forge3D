@@ -101,6 +101,9 @@ public:
     // A triangle at (or very near) a point on the surface, through the grid; where a dab
     // starts its walk.
     std::uint32_t triangleAt(const Vec3& p) const;
+    // The nearest point of the surface to `p` (near the triangle triangleAt finds). Strokes
+    // are played from here, so they stay on a surface that has grown or shrunk.
+    Vec3 onSurface(const Vec3& p) const;
 
     // Grab: on press, the points under the brush (and their mirror images) are taken
     // with how much each follows; each move puts them at where they were + offset x

@@ -17,7 +17,7 @@ check, download the `Forge3D-windows-x64-…` artifact, unzip and run `Forge3D.e
 | 4 | **Undo stroke** | Back as it was before the remesh | |
 | 5 | Paint a **Mask**, then Remesh | The mask is still there, in the same place | |
 | 6 | Keep sculpting after the remesh, then **Done** | Strokes work as before; Done keeps it all | |
-| 7 | Change the Sphere's size inside the step (click it in Objects) | The strokes and the remesh are done again on the new sphere | |
+| 7 | Change the Sphere's size inside the step (click it in Objects): bigger, back, then smaller | The strokes, horn and remesh are done again on the new sphere every time, in the same places | |
 | 8 | Select a plain Box, **Simplify** | A message that it has too few triangles to simplify | |
 | 9 | Select the sculpted shape (or import a big STL), **Simplify** | A **Simplified** step; Properties shows **Keep: 50 % of the triangles** and the counts before and after; the status bar count drops by about half | |
 | 10 | Change Keep to 10 %, then 2 % | Fewer triangles each time; the shape keeps its look at 10 % and gets rougher at 2 % | |

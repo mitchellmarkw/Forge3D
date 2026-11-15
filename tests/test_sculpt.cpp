@@ -609,3 +609,59 @@ TEST_CASE("Sculpt steps: the strokes stay on the part when it moves or turns", "
     CHECK_THAT(big.max[1] - big.min[1], WithinAbs(2 * (round.max[1] - round.min[1]), 2.0));
     CHECK_THAT((big.max[1] + big.min[1]) / 2, WithinAbs(c2[1], 0.2));
 }
+
+TEST_CASE("Sculpt steps: strokes stay on a part that grows or shrinks", "[sculpt][sculptstep]")
+{
+    Document doc;
+    CommandStack stack(doc);
+    Body ball;
+    ball.id = doc.allocateId();
+    ball.name = "Ball";
+    ball.spec = SphereSpec{10};
+    stack.execute(std::make_unique<AddBodyCommand>(ball));
+    const double top = doc.worldBounds(ball.id).max[2];
+    // A bump on top, a horn out of the side, and a remesh between them.
+    SculptFinish finish;
+    finish.detail = 0;
+    SculptStroke bump;
+    bump.brush = int(sculpt::Brush::Draw);
+    bump.radius = 3;
+    bump.strength = 1;
+    for (int i = 0; i < 4; ++i)
+        bump.dabs.push_back({0.f, 0.f, float(top)});
+    SculptStroke even;
+    even.brush = int(sculpt::Brush::Remesh);
+    even.radius = 0.8;
+    SculptStroke horn;
+    horn.brush = int(sculpt::Brush::SnakeHook);
+    horn.radius = 3;
+    horn.strength = 1;
+    horn.finest = 0.5;
+    const auto mid = doc.worldBounds(ball.id).center();
+    for (int i = 0; i <= 8; ++i)
+        horn.dabs.push_back({float(mid[0] + 10 + i), float(mid[1]), float(mid[2])});
+    finish.strokes = {bump, even, horn};
+    Body step;
+    step.id = doc.allocateId();
+    step.name = "Sculpt";
+    BooleanSpec spec;
+    spec.op = BooleanOp::Sculpt;
+    spec.operands = {ball.id};
+    spec.sculpt = finish;
+    step.boolean = spec;
+    stack.execute(std::make_unique<CombineCommand>(step));
+    const auto check = [&](double radius) {
+        const Bounds ballBox = doc.worldBounds(ball.id);
+        const Bounds b = doc.worldBounds(step.id);
+        INFO("radius " << radius);
+        CHECK(b.max[2] > ballBox.max[2] + 0.4);   // the bump, on the new top
+        CHECK(b.max[0] > ballBox.max[0] + 6.0);   // the horn, out of the new side
+    };
+    check(10);
+    for (double r : {14.0, 7.0}) {
+        Body resized = *doc.find(ball.id);
+        resized.spec = SphereSpec{r};
+        stack.execute(std::make_unique<EditBodyCommand>(*doc.find(ball.id), resized, "Resize"));
+        check(r);
+    }
+}

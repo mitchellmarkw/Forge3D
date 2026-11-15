@@ -1023,6 +1023,61 @@ std::uint32_t Sculptor::triangleAt(const Vec3& point) const
     return m_vt[v].empty() ? 0 : m_vt[v].front();
 }
 
+namespace {
+// The nearest point of triangle abc to q (Ericson, Real-Time Collision Detection 5.1.5).
+V3 closestOnTriangle(V3 q, V3 a, V3 b, V3 c)
+{
+    const V3 ab = b - a, ac = c - a, aq = q - a;
+    const double d1 = dot(ab, aq), d2 = dot(ac, aq);
+    if (d1 <= 0 && d2 <= 0)
+        return a;
+    const V3 bq = q - b;
+    const double d3 = dot(ab, bq), d4 = dot(ac, bq);
+    if (d3 >= 0 && d4 <= d3)
+        return b;
+    const double vc = d1 * d4 - d3 * d2;
+    if (vc <= 0 && d1 >= 0 && d3 <= 0)
+        return a + ab * (d1 / (d1 - d3));
+    const V3 cq = q - c;
+    const double d5 = dot(ab, cq), d6 = dot(ac, cq);
+    if (d6 >= 0 && d5 <= d6)
+        return c;
+    const double vb = d5 * d2 - d1 * d6;
+    if (vb <= 0 && d2 >= 0 && d6 <= 0)
+        return a + ac * (d2 / (d2 - d6));
+    const double va = d3 * d6 - d5 * d4;
+    if (va <= 0 && (d4 - d3) >= 0 && (d5 - d6) >= 0)
+        return b + (c - b) * ((d4 - d3) / ((d4 - d3) + (d5 - d6)));
+    const double den = 1.0 / (va + vb + vc);
+    return a + ab * (vb * den) + ac * (vc * den);
+}
+}  // namespace
+
+Vec3 Sculptor::onSurface(const Vec3& point) const
+{
+    if (m_mesh.indices.empty())
+        return point;
+    const V3 q = toV(point);
+    // The triangles round the corners of the one triangleAt finds (it goes by middles,
+    // so the nearest may be a neighbour).
+    const std::uint32_t near = triangleAt(point);
+    V3 best = q;
+    double bestD = 1e300;
+    for (int k = 0; k < 3; ++k)
+        for (std::uint32_t t : m_vt[m_mesh.indices[3 * std::size_t(near) + k]]) {
+            const std::size_t b = 3 * std::size_t(t);
+            const V3 x = closestOnTriangle(q, at(m_mesh.positions, m_mesh.indices[b]),
+                                           at(m_mesh.positions, m_mesh.indices[b + 1]),
+                                           at(m_mesh.positions, m_mesh.indices[b + 2]));
+            const double d = dot(x - q, x - q);
+            if (d < bestD) {
+                bestD = d;
+                best = x;
+            }
+        }
+    return {best.x, best.y, best.z};
+}
+
 std::size_t trianglesFor(int detail)
 {
     return detail <= 0 ? 40'000 : detail >= 2 ? 500'000 : 150'000;
@@ -1067,17 +1122,21 @@ void replay(Sculptor& sculptor, const SculptStroke& stroke, const Mesh& start)
     if (stroke.brush == int(Brush::SnakeHook)) {
         if (stroke.dabs.empty())
             return;
-        const Vec3 from{stroke.dabs.front()[0], stroke.dabs.front()[1], stroke.dabs.front()[2]};
+        // From the surface, and the tips moved by as much as the start was.
+        const Vec3 raw{stroke.dabs.front()[0], stroke.dabs.front()[1], stroke.dabs.front()[2]};
+        const Vec3 from = sculptor.onSurface(raw);
+        const Vec3 shift{from[0] - raw[0], from[1] - raw[1], from[2] - raw[2]};
         sculptor.beginSnake(from, stroke.radius, stroke.strength, sculptor.triangleAt(from), symmetry);
         for (std::size_t i = 1; i < stroke.dabs.size(); ++i)
-            sculptor.moveSnake({stroke.dabs[i][0], stroke.dabs[i][1], stroke.dabs[i][2]});
+            sculptor.moveSnake({stroke.dabs[i][0] + shift[0], stroke.dabs[i][1] + shift[1],
+                                stroke.dabs[i][2] + shift[2]});
         sculptor.endSnake();
         return;
     }
     if (stroke.brush == int(Brush::Grab)) {
         if (stroke.dabs.empty())
             return;
-        const Vec3 from{stroke.dabs.front()[0], stroke.dabs.front()[1], stroke.dabs.front()[2]};
+        const Vec3 from = sculptor.onSurface({stroke.dabs.front()[0], stroke.dabs.front()[1], stroke.dabs.front()[2]});
         sculptor.beginGrab(from, stroke.radius, sculptor.triangleAt(from), symmetry);
         sculptor.moveGrab({stroke.grab[0], stroke.grab[1], stroke.grab[2]});
         sculptor.endGrab();
@@ -1089,7 +1148,8 @@ void replay(Sculptor& sculptor, const SculptStroke& stroke, const Mesh& start)
     dab.brush = Brush(std::clamp(stroke.brush, 0, int(Brush::Mask)));
     dab.invert = stroke.invert;
     for (const auto& c : stroke.dabs) {
-        dab.centre = {c[0], c[1], c[2]};
+        // On the surface as it is now (the shape under the step may have grown or shrunk).
+        dab.centre = sculptor.onSurface({c[0], c[1], c[2]});
         sculptor.apply(dab, sculptor.triangleAt(dab.centre), symmetry);
     }
 }
