@@ -511,14 +511,16 @@ Viewport (mouse)  --leftPressed(ray, handle)-->  MainWindow drag controller
   `Viewport::meshPointsChanged` uploads just the changed range with glBufferSubData.
 - Sculpt steps (slice 21): `BooleanOp::Sculpt`, one operand, `SculptFinish{detail,
   strokes}`; each `SculptStroke` keeps brush, invert, radius, strength, mirrors, finest
-  detail, its dab centres (floats) and, for Grab, the final offset — all in step
-  coordinates. A mesh-engine op: `Document::sculptStart(part, detail)` is the part's
-  surface (mesh-engine triangles, or the B-rep tessellated finely) placed by
-  `localTransform`, welded and divided to the Detail's triangle count
-  (`sculpt::startingMesh`); `sculpt::replayed` plays every stroke on it (each dab
-  starts from `triangleAt(centre)`, the mirror planes through the start's middle).
-  Change a size below and the strokes play again on the new surface. The app sculpts
-  in step coordinates exactly as replay does (centres and offsets rounded to float,
+  detail, its dab centres (floats) and, for Grab, the final offset — all in the part's
+  own coordinates, so moving or turning the part carries them with it. A mesh-engine
+  op: `Document::sculptStart(part, detail)` is the part's surface (mesh-engine
+  triangles, or the B-rep tessellated finely), unplaced, welded and divided to the
+  Detail's triangle count (`sculpt::startingMesh`); `sculpt::replayed` plays every
+  stroke on it (each dab starts from `triangleAt(centre)`, the mirror planes through
+  the start's middle) and the result is placed by the part's `localTransform`. Change
+  a size below and the strokes play again on the new surface; scaling maps the
+  strokes through the part's old and new placements. The app sculpts in the part's
+  coordinates (`worldTransform(part)` shows it) exactly as replay does (centres and offsets rounded to float,
   seeds from `triangleAt`), so live and replayed meshes are identical; Done hands the
   live result to `Document::rememberSculpt` (the last 4, keyed by starting surface and
   strokes) so making or undoing the step doesn't play it again. Editing a step replays

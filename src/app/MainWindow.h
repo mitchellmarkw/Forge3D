@@ -456,7 +456,7 @@ private:
     ShellPanel* m_shellPanel = nullptr;
 
     // Sculpting: a step whose strokes are kept and played again on its part. The
-    // sculpting happens in step coordinates (toPlate shows it on the plate).
+    // sculpting happens in the part's own coordinates (toPlate shows it on the plate).
     struct SculptMode {
         bool active = false;
         bool editing = false;         // adding strokes to a Sculpt step

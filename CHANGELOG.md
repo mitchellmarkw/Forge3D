@@ -10,10 +10,13 @@
 - **Double-click the step** (or right-click → Change...) to add more strokes to it.
   Undo stroke takes back only the new ones; Esc leaves the step as it was.
 - **Remove the sculpting** in Properties gives back the shape as it was before.
+- The strokes stay on the part: **move or turn the shape inside the step** and they go
+  with it (moving it is instant).
 - Sculpting a shape that is rolled back puts the step in at the rollback bar.
 - Saved in the file (format 18), and grows with the shape when it is resized evenly.
-- 197 unit tests (1 new: strokes played again give exactly the live result, follow a
-  longer box, survive saving and resizing).
+- 198 unit tests (2 new: strokes played again give exactly the live result, follow a
+  longer box, survive saving and resizing; mirrored strokes stay at the corners when
+  the box inside is moved, turned and the whole resized).
 
 ## 0.29.0 Beta — Slice 20: View cube (2026-11-13)
 

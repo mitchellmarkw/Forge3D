@@ -391,3 +391,85 @@ TEST_CASE("Sculpt steps: strokes play back the same, and follow a changed shape"
             CHECK_THAT(b.boolean->sculpt->strokes[0].dabs[0][0], WithinRel(-8.0, 1e-6));
         }
 }
+TEST_CASE("Sculpt steps: the strokes stay on the part when it moves or turns", "[sculpt][sculptstep]")
+{
+    Document doc;
+    CommandStack stack(doc);
+    Body box;
+    box.id = doc.allocateId();
+    box.name = "Box";
+    box.spec = BoxSpec{20, 20, 20};
+    stack.execute(std::make_unique<AddBodyCommand>(box));
+    // An ear near a top corner, mirrored across X: one at each top corner on that side.
+    SculptFinish finish;
+    finish.detail = 0;
+    SculptStroke ear;
+    ear.brush = int(sculpt::Brush::Draw);
+    ear.radius = 3.0;
+    ear.strength = 1.0;
+    ear.mirrorX = true;
+    ear.dabs = {{7.f, 7.f, 20.f}};
+    finish.strokes.push_back(ear);
+    Body step;
+    step.id = doc.allocateId();
+    step.name = "Sculpt";
+    BooleanSpec spec;
+    spec.op = BooleanOp::Sculpt;
+    spec.operands = {box.id};
+    spec.sculpt = finish;
+    step.boolean = spec;
+    stack.execute(std::make_unique<CombineCommand>(step));
+
+    // Where the ears are on the plate: the points well above the box's top, the box's
+    // top found from where it is now.
+    const auto ears = [&] {
+        const Mesh& m = *doc.mesh(step.id);
+        const Transform t = doc.worldTransform(step.id);
+        Bounds b;
+        for (std::size_t i = 0; i < m.positions.size(); i += 3) {
+            const Vec3 w = t.apply(Vec3{m.positions[i], m.positions[i + 1], m.positions[i + 2]});
+            if (w[2] > doc.worldBounds(box.id).max[2] + 0.12)
+                b.expand(float(w[0]), float(w[1]), float(w[2]));
+        }
+        return b;
+    };
+    const Bounds before = ears();
+    REQUIRE(before.valid);
+    CHECK_THAT(before.min[0], WithinAbs(-8.4, 0.6));  // both corners
+    CHECK_THAT(before.max[0], WithinAbs(8.4, 0.6));
+
+    // Move the box inside the step: the ears go with it.
+    Body moved = *doc.find(box.id);
+    moved.placement.x += 15.0;
+    moved.placement.y -= 5.0;
+    stack.execute(std::make_unique<EditBodyCommand>(*doc.find(box.id), moved, "Move"));
+    const Bounds after = ears();
+    REQUIRE(after.valid);
+    CHECK_THAT(after.min[0], WithinAbs(before.min[0] + 15.0, 0.05));
+    CHECK_THAT(after.max[0], WithinAbs(before.max[0] + 15.0, 0.05));
+    CHECK_THAT(after.max[1], WithinAbs(before.max[1] - 5.0, 0.05));
+
+    // Turn it a quarter round Z: the ears are now at the ends across Y.
+    Body turned = *doc.find(box.id);
+    turned.placement.rotationZ = 90.0;
+    stack.execute(std::make_unique<EditBodyCommand>(*doc.find(box.id), turned, "Turn"));
+    const Bounds round = ears();
+    const auto c = doc.worldBounds(box.id).center();
+    CHECK_THAT(round.max[1] - round.min[1], WithinAbs(before.max[0] - before.min[0], 0.1));
+    CHECK_THAT((round.max[1] + round.min[1]) / 2, WithinAbs(c[1], 0.1));
+
+    // Resized evenly as a whole (box turned inside): the ears stay at the corners (a
+    // little wider: the bigger brush raises more above the line measured from).
+    stack.execute(std::make_unique<EditBodiesCommand>(
+        [&] {
+            std::vector<Body> was;
+            for (const Body& b : scaledTree(doc, step.id, {2, 2, 2}, {0, 0, 0}))
+                was.push_back(*doc.find(b.id));
+            return was;
+        }(),
+        scaledTree(doc, step.id, {2, 2, 2}, {0, 0, 0}), "Scale"));
+    const Bounds big = ears();
+    const auto c2 = doc.worldBounds(box.id).center();
+    CHECK_THAT(big.max[1] - big.min[1], WithinAbs(2 * (round.max[1] - round.min[1]), 2.0));
+    CHECK_THAT((big.max[1] + big.min[1]) / 2, WithinAbs(c2[1], 0.2));
+}

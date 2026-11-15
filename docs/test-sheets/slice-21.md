@@ -19,7 +19,8 @@ Windows build check, download the `Forge3D-windows-x64-…` artifact, unzip and 
 | 5 | Add two strokes, click **Undo stroke** once, then **Done** | One new stroke kept; Objects shows "2 strokes" | |
 | 6 | Double-click it again, add a stroke, press **Esc** | The shape is as it was before (2 strokes) | |
 | 7 | Sculpt with **Mirror X** on, and with **Grab**, then Done; change the box's Depth | The mirrored stroke and the pull are made again on the new box | |
-| 8 | Rotate and move the sculpted shape, then double-click it and add a stroke | The brush ring sits on the surface under the mouse and the stroke goes where you drag | |
+| 8 | With Mirror X, put ears at two top corners and Done. Click **1. Box** and change its X, Y and rotation; then click the top shape and move and turn it | The ears stay at the corners every time | |
+| 8b | Double-click the sculpted shape and add a stroke | The brush ring sits on the surface under the mouse and the stroke goes where you drag | |
 | 9 | Save, close, open the file | The sculpted shape is the same; double-click still opens it with its strokes | |
 | 10 | Select the sculpted shape, Properties → **Remove the sculpting** | The plain box comes back where it was | |
 | 11 | Sculpt a Cylinder or Sphere at Detail **High**, about 20 strokes, Done | Done takes no longer than before; Undo/Redo are quick | |

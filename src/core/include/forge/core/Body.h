@@ -361,7 +361,7 @@ struct EmbossPicture {
 };
 
 // One brush stroke of a Sculpt step, kept so it can be played again on a changed shape.
-// Points are in step coordinates.
+// Points are in the sculpted part's own coordinates (they move and turn with it).
 struct SculptStroke {
     int brush = 0;  // sculpt::Brush
     bool invert = false;

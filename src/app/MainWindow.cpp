@@ -3151,10 +3151,8 @@ void MainWindow::startSculpt(ObjectId target, bool editing)
         mode.operand = target;
     }
     try {
-        const ObjectId holder = m_doc.parentOf(target);
-        mode.toPlate = editing             ? m_doc.worldTransform(target)
-                       : holder != kInvalidId ? m_doc.worldTransform(holder)
-                                              : Transform{};
+        // Strokes are kept in the part's own coordinates, so they stay on it when it moves.
+        mode.toPlate = m_doc.worldTransform(mode.operand);
         mode.fromPlate = mode.toPlate.inverse();
         const Bounds b = m_doc.worldBounds(target);
         mode.size = std::max({b.size()[0], b.size()[1], b.size()[2]});
@@ -3192,7 +3190,7 @@ void MainWindow::remeshSculpt()
     timer.start();
     try {
         const int detail = detailIndex(m_sculptPanel->detail());
-        // The step's surface, divided finely, in step coordinates; with the strokes it
+        // The step's surface, divided finely, in its own coordinates; with the strokes it
         // already has, when changing one.
         m_sculptMode.undo.clear();
         m_sculptMode.start = m_doc.sculptStart(m_sculptMode.operand, detail);
@@ -3232,7 +3230,7 @@ std::optional<sculpt::Hit> MainWindow::sculptHit(const QVector3D& origin, const 
 {
     if (!m_sculptMode.sculptor)
         return std::nullopt;
-    // Sculpting happens in step coordinates.
+    // Sculpting happens in the part's own coordinates.
     return m_sculptMode.sculptor->hit(m_sculptMode.fromPlate.apply({origin.x(), origin.y(), origin.z()}),
                                       m_sculptMode.fromPlate.applyDirection({direction.x(), direction.y(), direction.z()}));
 }
@@ -4074,7 +4072,7 @@ void MainWindow::refreshScene()
                 }
             }
             if (m_sculptMode.active && id == m_sculptMode.object && m_sculptMode.display) {
-                item.mesh = m_sculptMode.display;  // being sculpted, in step coordinates
+                item.mesh = m_sculptMode.display;  // being sculpted, in the part's coordinates
                 item.model = toQMatrix(m_sculptMode.toPlate);
             }
             if (m_holeMode.active && m_holeMode.preview && id == history::objectOf(m_doc, m_holeMode.target)) {

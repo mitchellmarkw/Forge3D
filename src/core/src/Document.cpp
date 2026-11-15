@@ -1132,14 +1132,12 @@ Mesh Document::sculptSurface(ObjectId part) const
 {
     Mesh surface;
     if (usesMeshEngine(part)) {
-        meshkernel::triangles(meshkernel::transformed(meshSolid(part), localTransform(part)), surface.positions,
-                              surface.indices);
+        meshkernel::triangles(meshSolid(part), surface.positions, surface.indices);
         return surface;
     }
     // A solid shape: divided much more finely than for showing, so curves stay round
     // when the triangles are split up (splitting keeps each one flat).
-    const TopoDS_Shape placed =
-        BRepBuilderAPI_Transform(shape(part), toTrsf(localTransform(part)), /*copy=*/true).Shape();
+    const TopoDS_Shape& placed = shape(part);
     Bnd_Box box;
     BRepBndLib::Add(placed, box);
     double x0, y0, z0, x1, y1, z1;
@@ -1217,8 +1215,10 @@ MeshSolid Document::combineMeshes(const BooleanSpec& spec) const
     case BooleanOp::Sculpt: {
         if (!spec.sculpt)
             throw GeometryError("Sculpt has no strokes");
-        const Mesh done = sculpted(sculptStart(spec.operands.front(), spec.sculpt->detail), *spec.sculpt);
-        return meshkernel::fromTriangles(done.positions, done.indices);
+        // Sculpted in the part's own coordinates, so the strokes stay on it wherever it goes.
+        const ObjectId part = spec.operands.front();
+        const Mesh done = sculpted(sculptStart(part, spec.sculpt->detail), *spec.sculpt);
+        return meshkernel::transformed(meshkernel::fromTriangles(done.positions, done.indices), localTransform(part));
     }
     case BooleanOp::Emboss: {
         if (!spec.emboss && !spec.picture)

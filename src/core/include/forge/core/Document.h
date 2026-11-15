@@ -150,8 +150,9 @@ public:
     // Imported meshes, and every combined shape with one inside, are worked out by the
     // mesh engine (fast with many triangles); everything else by the B-rep engine.
     bool usesMeshEngine(ObjectId id) const;
-    // A part's surface as triangles in step coordinates (its placement applied): what a
-    // Sculpt step on it starts from, before dividing; and that divided to a detail.
+    // A part's surface as triangles in its own coordinates (its placement not applied, so
+    // strokes stay on it when it moves): what a Sculpt step on it starts from, before
+    // dividing; and that divided to a detail.
     Mesh sculptSurface(ObjectId part) const;
     Mesh sculptStart(ObjectId part, int detail) const;
     // A sculpted surface already worked out (by the Sculpt tool, as it went), kept so
