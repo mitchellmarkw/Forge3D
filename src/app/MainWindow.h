@@ -470,6 +470,7 @@ private:
         std::shared_ptr<sculpt::Sculptor> sculptor;
         std::shared_ptr<const Mesh> display;  // the sculptor's mesh, drawn
         std::vector<SculptStroke> strokes;    // all of them, as kept in the step
+        std::vector<SculptPattern> patterns;  // the Pattern brush's, numbered from the strokes
         std::size_t kept = 0;                 // how many the step had already
         // The mesh before each recent stroke, and how many strokes there were then.
         std::vector<std::pair<Mesh, std::size_t>> undo;
@@ -503,7 +504,9 @@ private:
     void sculptAt(const QVector3D& origin, const QVector3D& direction, Qt::KeyboardModifiers modifiers);
     void undoStroke();
     void wholeMask(int brush);  // Clear or Invert mask, kept as a stroke
-    void evenOutSculpt();       // Remesh: even triangles of the panel's size, kept as a stroke
+    void evenOutSculpt();
+    // A picture file as grey pixels (an SVG drawn on white); null, with a message, if not.
+    std::shared_ptr<const PictureData> loadPictureFile(const QString& path);       // Remesh: even triangles of the panel's size, kept as a stroke
     // Shows what a dab changed: points [first, last), or everything if it added triangles.
     void sculptShown(std::uint32_t first, std::uint32_t last);
     void finishSculpt();

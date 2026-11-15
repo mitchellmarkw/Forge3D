@@ -501,19 +501,26 @@ std::pair<std::uint32_t, std::uint32_t> Sculptor::apply(const Dab& dab, std::uin
 std::pair<std::uint32_t, std::uint32_t> Sculptor::apply(const Dab& dab, std::uint32_t nearTriangle,
                                                         const Symmetry& symmetry)
 {
+    m_dabSymmetry = symmetry;
+    m_dabImage = 0;
     auto range = apply(dab, nearTriangle);
-    if (!symmetry.any())
+    if (!symmetry.any()) {
+        m_dabSymmetry = {};
         return range;
+    }
     const auto images = symmetry.images(dab.centre);
     for (std::size_t i = 1; i < images.size(); ++i) {
         Dab mirrored = dab;
         mirrored.centre = images[i];
+        m_dabImage = i;
         const auto r = applyFrom(mirrored, {nearestPoint(images[i])});
         if (r.first < r.second) {
             range.first = range.first < range.second ? std::min(range.first, r.first) : r.first;
             range.second = std::max(range.second, r.second);
         }
     }
+    m_dabSymmetry = {};
+    m_dabImage = 0;
     return range;
 }
 
@@ -545,7 +552,11 @@ std::pair<std::uint32_t, std::uint32_t> Sculptor::applyFrom(const Dab& dab, cons
     std::uint32_t grownFrom = UINT32_MAX;
     if (m_detail > 0.0 && m_mesh.triangleCount() < m_maxTriangles) {
         const std::size_t before = m_mesh.vertexCount();
-        if (splitAround(touched, std::max(m_detail, dab.radius * 0.08))) {
+        // A pattern needs triangles a good deal smaller than one repeat of it.
+        const double limit = dab.brush == Brush::Pattern && m_pattern
+                                 ? std::max(m_detail, std::min(dab.radius * 0.08, m_pattern->tile / 24.0))
+                                 : std::max(m_detail, dab.radius * 0.08);
+        if (splitAround(touched, limit)) {
             grownFrom = std::uint32_t(before);
             touched = pointsFrom(dab.centre, dab.radius, touched);
             if (touched.empty())
@@ -661,6 +672,63 @@ std::pair<std::uint32_t, std::uint32_t> Sculptor::applyFrom(const Dab& dab, cons
             moved[i] = q - areaNormal * (sign * most * f * f) + toMiddle * (0.2 * strength * f);
         }
         break;
+    case Brush::Pattern: {
+        if (!m_pattern || !m_pattern->image || m_pattern->image->width <= 0 || m_pattern->image->height <= 0)
+            return {0, 0};
+        PatternLayer& layer = *m_pattern;
+        if (!layer.framed) {
+            // The pattern lies flat across the first dab's facing, the same way round each
+            // time (so strokes that meet line up).
+            const V3 n = areaNormal;
+            const V3 ref = std::abs(n.z) < 0.9 ? V3{0, 0, 1} : V3{1, 0, 0};
+            V3 u = cross(n, ref);
+            u = u * (1.0 / len(u));
+            const V3 v = cross(n, u);
+            layer.u = {u.x, u.y, u.z};
+            layer.v = {v.x, v.y, v.z};
+            layer.framed = true;
+        }
+        const PictureData& image = *layer.image;
+        const double tileW = layer.tile, tileH = layer.tile * double(image.height) / double(image.width);
+        const auto height = [&](double s, double t) {
+            // Bilinear, wrapping round: the picture repeats side by side.
+            const double x = (s - std::floor(s)) * image.width - 0.5, y = (t - std::floor(t)) * image.height - 0.5;
+            const int x0 = int(std::floor(x)), y0 = int(std::floor(y));
+            const double fx = x - x0, fy = y - y0;
+            const auto px = [&](int xi, int yi) {
+                xi = ((xi % image.width) + image.width) % image.width;
+                yi = ((yi % image.height) + image.height) % image.height;
+                return image.grey[std::size_t(yi) * image.width + xi] / 255.0;
+            };
+            return (px(x0, y0) * (1 - fx) + px(x0 + 1, y0) * fx) * (1 - fy) +
+                   (px(x0, y0 + 1) * (1 - fx) + px(x0 + 1, y0 + 1) * fx) * fy;
+        };
+        for (std::size_t i = 0; i < touched.size(); ++i) {
+            const std::uint32_t v = touched[i];
+            moved[i] = at(p, v);
+            auto [it, added] = layer.base.try_emplace(v);
+            PatternLayer::Base& base = it->second;
+            if (added) {
+                base.at = {moved[i].x, moved[i].y, moved[i].z};
+                base.facing = {m_mesh.normals[3 * v], m_mesh.normals[3 * v + 1], m_mesh.normals[3 * v + 2]};
+            }
+            const V3 from{base.at[0], base.at[1], base.at[2]};
+            const float w = float(falloff(len(from - c), dab.radius) * (1.0 - double(maskAt(v))));
+            if (!(w > base.done))
+                continue;  // had as much already: going over again doesn't press deeper
+            base.done = w;
+            // Where this point is in the pattern: seen from the first image of the dab
+            // (mirror images show the pattern mirrored).
+            const Vec3 middle = m_dabSymmetry.centre;
+            const Vec3 back = m_dabSymmetry.mirrored({from.x - middle[0], from.y - middle[1], from.z - middle[2]},
+                                                     m_dabImage);
+            const V3 q{back[0] + middle[0], back[1] + middle[1], back[2] + middle[2]};
+            const double h = height(dot(q, V3{layer.u[0], layer.u[1], layer.u[2]}) / tileW,
+                                    dot(q, V3{layer.v[0], layer.v[1], layer.v[2]}) / tileH);
+            moved[i] = from + V3{base.facing[0], base.facing[1], base.facing[2]} * (layer.depth * h * w);
+        }
+        break;
+    }
     case Brush::Grab:
     case Brush::SnakeHook:
     case Brush::Mask:
@@ -669,7 +737,7 @@ std::pair<std::uint32_t, std::uint32_t> Sculptor::applyFrom(const Dab& dab, cons
     case Brush::Remesh:
         return {0, 0};
     }
-    if (!m_mesh.shade.empty() && dab.brush != Brush::Smooth)
+    if (!m_mesh.shade.empty() && dab.brush != Brush::Smooth && dab.brush != Brush::Pattern)
         for (std::size_t i = 0; i < touched.size(); ++i) {
             // Masked points move less (not at all where fully masked).
             const V3 q = at(p, touched[i]);
@@ -722,6 +790,25 @@ bool Sculptor::splitAround(const std::vector<std::uint32_t>& points, double maxE
                                        float(nl > 0 ? n.z / nl : 1)});
                 if (!m_mesh.shade.empty())
                     m_mesh.shade.push_back(0.5f * (m_mesh.shade[a] + m_mesh.shade[b]));
+                if (m_pattern) {
+                    // Under a pattern: the new point's place before it, between its ends'.
+                    const auto fa = m_pattern->base.find(a), fb = m_pattern->base.find(b);
+                    if (fa != m_pattern->base.end() && fb != m_pattern->base.end()) {
+                        PatternLayer::Base mid;
+                        V3 f{0, 0, 0};
+                        for (int k = 0; k < 3; ++k) {
+                            mid.at[k] = 0.5 * (fa->second.at[k] + fb->second.at[k]);
+                            mid.facing[k] = fa->second.facing[k] + fb->second.facing[k];
+                        }
+                        f = {mid.facing[0], mid.facing[1], mid.facing[2]};
+                        const double fl = len(f);
+                        if (fl > 0)
+                            for (int k = 0; k < 3; ++k)
+                                mid.facing[k] /= fl;
+                        mid.done = std::min(fa->second.done, fb->second.done);
+                        m_pattern->base.emplace(m, mid);
+                    }
+                }
                 m_vt.emplace_back();
                 m_mark.push_back(0);
                 middle.emplace(edgeKey(a, b), m);
@@ -929,7 +1016,20 @@ void Sculptor::endSnake()
     m_snake.clear();
 }
 
-static_assert(int(Brush::Remesh) == file::kLastSculptBrush, "files must be able to hold every brush");
+static_assert(int(Brush::Pattern) == file::kLastSculptBrush, "files must be able to hold every brush");
+
+void Sculptor::beginPattern(std::shared_ptr<const PictureData> image, double tile, double depth)
+{
+    m_pattern.emplace();
+    m_pattern->image = std::move(image);
+    m_pattern->tile = std::max(tile, 1e-3);
+    m_pattern->depth = depth;
+}
+
+void Sculptor::endPattern()
+{
+    m_pattern.reset();
+}
 
 void Sculptor::remesh(double edge)
 {
@@ -1103,7 +1203,8 @@ Symmetry symmetryFor(const SculptStroke& stroke, const Mesh& start)
     return s;
 }
 
-void replay(Sculptor& sculptor, const SculptStroke& stroke, const Mesh& start)
+void replay(Sculptor& sculptor, const SculptStroke& stroke, const Mesh& start,
+            const std::vector<SculptPattern>& patterns)
 {
     const Symmetry symmetry = symmetryFor(stroke, start);
     sculptor.setDetail(stroke.finest);
@@ -1142,23 +1243,32 @@ void replay(Sculptor& sculptor, const SculptStroke& stroke, const Mesh& start)
         sculptor.endGrab();
         return;
     }
+    const bool pattern = stroke.brush == int(Brush::Pattern);
+    if (pattern) {
+        if (stroke.pattern < 0 || stroke.pattern >= int(patterns.size()))
+            return;  // its pattern is missing: nothing to press
+        sculptor.beginPattern(patternImage(patterns[std::size_t(stroke.pattern)]), stroke.tile,
+                              patternDepth(stroke));
+    }
     Dab dab;
     dab.radius = stroke.radius;
     dab.strength = stroke.strength;
-    dab.brush = Brush(std::clamp(stroke.brush, 0, int(Brush::Mask)));
+    dab.brush = pattern ? Brush::Pattern : Brush(std::clamp(stroke.brush, 0, int(Brush::Mask)));
     dab.invert = stroke.invert;
     for (const auto& c : stroke.dabs) {
         // On the surface as it is now (the shape under the step may have grown or shrunk).
         dab.centre = sculptor.onSurface({c[0], c[1], c[2]});
         sculptor.apply(dab, sculptor.triangleAt(dab.centre), symmetry);
     }
+    if (pattern)
+        sculptor.endPattern();
 }
 
 Mesh replayed(const Mesh& start, const SculptFinish& finish)
 {
     Sculptor sculptor(start);
     for (const SculptStroke& stroke : finish.strokes)
-        replay(sculptor, stroke, start);
+        replay(sculptor, stroke, start, finish.patterns);
     return sculptor.mesh();
 }
 

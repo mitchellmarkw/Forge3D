@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "forge/core/Body.h"
+
 #include <QWidget>
+
+#include <vector>
 
 class QCheckBox;
 class QComboBox;
@@ -23,8 +27,13 @@ public:
     explicit SculptPanel(QWidget* parent = nullptr);
 
     void start(const QString& title, double suggestedSize);
-    // 0 Draw, 1 Smooth, 2 Inflate, 3 Flatten, 4 Pinch, 5 Clay, 6 Grab (sculpt::Brush order)
+    // The brush chosen, as a sculpt::Brush number.
     int brush() const;
+    // Pattern brush: the pattern chosen and how wide one repeat of it is (mm).
+    SculptPattern pattern() const;
+    double patternSize() const;
+    // A picture of the user's to press in: added to the list and chosen.
+    void addOwnPattern(const SculptPattern& pattern);
     bool mirrorX() const;
     bool mirrorY() const;
     bool mirrorZ() const;
@@ -51,6 +60,8 @@ signals:
     void clearMaskRequested();
     void remeshRequested();
     void invertMaskRequested();
+    // "Your own picture..." was chosen: the main window asks for one (addOwnPattern).
+    void ownPatternRequested();
     void doneRequested();
     void cancelRequested();
 
@@ -67,6 +78,11 @@ private:
     QCheckBox* m_addDetail = nullptr;
     QDoubleSpinBox* m_finest = nullptr;
     QDoubleSpinBox* m_remeshSize = nullptr;
+    QWidget* m_patternBox = nullptr;     // shown for the Pattern brush only
+    QComboBox* m_pattern = nullptr;      // built-ins, own pictures, then "Your own picture..."
+    QDoubleSpinBox* m_patternSize = nullptr;
+    std::vector<SculptPattern> m_patterns;  // in the list's order (without the last item)
+    int m_lastPattern = 0;
     QPushButton* m_undo = nullptr;
 };
 

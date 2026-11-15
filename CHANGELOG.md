@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.33.0 Beta — Slice 24: Pattern brush (2026-11-14)
+
+- **Pattern** brush: presses a repeating pattern into the surface where you drag:
+  **Scales**, **Hexagons**, **Woven cloth**, **Skin** or **Bricks**, or **Your own
+  picture...** (light parts stand highest; it repeats side by side). **Pattern size**
+  sets how wide one repeat is, Strength how deep it goes; Ctrl engraves it instead.
+- Going over the same place again doesn't press it any deeper, so strokes can overlap
+  freely; strokes that meet line up, and Mirror works (the other side mirrored).
+- Detail is added under the brush finely enough for the pattern.
+- Kept in the Sculpted step like any stroke (your own pictures are saved in the file),
+  played again when the shape changes, and grows with the shape when it's resized.
+- Files saved with 0.33 need 0.33 or later (file format 21).
+- 206 unit tests (1 new: the built-in patterns repeat seamlessly; pressed in to their
+  depth and no deeper; engraved; kept, played back and saved, with a picture of one's
+  own).
+
 ## 0.32.0 Beta — Slice 23: Remesh and Simplify (2026-11-14)
 
 - **Remesh** (in the Sculpt panel): makes the whole shape of even triangles of the

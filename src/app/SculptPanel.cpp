@@ -46,38 +46,98 @@ SculptPanel::SculptPanel(QWidget* parent) : QWidget(parent)
     layout->addWidget(m_status);
 
     m_brush = new QComboBox;
-    m_brush->addItem(tr("Draw"));
-    m_brush->addItem(tr("Smooth"));
-    m_brush->addItem(tr("Inflate"));
-    m_brush->addItem(tr("Flatten"));
-    m_brush->addItem(tr("Pinch"));
-    m_brush->addItem(tr("Clay"));
-    m_brush->addItem(tr("Grab"));
-    m_brush->addItem(tr("Crease"));
-    m_brush->addItem(tr("Snake hook"));
-    m_brush->addItem(tr("Mask"));
+    // Each item's data is its sculpt::Brush number (the list isn't in that order).
+    const std::pair<const char*, int> brushes[] = {
+        {QT_TR_NOOP("Draw"), 0},    {QT_TR_NOOP("Smooth"), 1},  {QT_TR_NOOP("Inflate"), 2},
+        {QT_TR_NOOP("Flatten"), 3}, {QT_TR_NOOP("Pinch"), 4},   {QT_TR_NOOP("Clay"), 5},
+        {QT_TR_NOOP("Grab"), 6},    {QT_TR_NOOP("Crease"), 7},  {QT_TR_NOOP("Snake hook"), 8},
+        {QT_TR_NOOP("Pattern"), 13}, {QT_TR_NOOP("Mask"), 9},
+    };
+    for (const auto& [name, id] : brushes)
+        m_brush->addItem(tr(name), id);
     m_brush->setToolTip(tr("Hold Shift with any brush to smooth"));
     layout->addWidget(labelled(tr("Brush:"), m_brush));
     m_brushHint = new QLabel;
     m_brushHint->setWordWrap(true);
     m_brushHint->setStyleSheet(QStringLiteral("color: palette(mid);"));
     layout->addWidget(m_brushHint);
-    const auto describe = [this](int brush) {
-        static const char* hints[] = {
-            QT_TR_NOOP("Pushes the surface out where you drag. Ctrl: pushes in."),
-            QT_TR_NOOP("Evens out bumps and dents."),
-            QT_TR_NOOP("Swells the surface out like a balloon, each spot along its own facing. Ctrl: shrinks."),
-            QT_TR_NOOP("Presses the area flat."),
-            QT_TR_NOOP("Draws the surface together under the brush, for sharp creases and edges. Ctrl: pushes apart."),
-            QT_TR_NOOP("Builds up in flat layers, like adding strips of clay. Ctrl: digs out."),
-            QT_TR_NOOP("Pulls a whole area along with the mouse, like soft toffee."),
-            QT_TR_NOOP("Cuts a sharp, narrow groove where you drag, for folds and seams. Ctrl: a sharp ridge."),
-            QT_TR_NOOP("Pulls the surface out after the mouse, for horns, tails and tentacles. Drag away "
-                       "from the shape."),
-            QT_TR_NOOP("Paints a mask (shown dark): the other brushes leave masked parts alone. Ctrl: "
-                       "unpaints."),
-        };
-        m_brushHint->setText(tr(hints[std::clamp(brush, 0, 9)]));
+
+    // The Pattern brush's pattern (its label above it) and repeat size.
+    m_patternBox = new QWidget;
+    auto* patternLayout = new QVBoxLayout(m_patternBox);
+    patternLayout->setContentsMargins(0, 0, 0, 0);
+    m_pattern = new QComboBox;
+    const std::pair<const char*, const char*> builtIn[] = {
+        {"scales", QT_TR_NOOP("Scales")}, {"hexagons", QT_TR_NOOP("Hexagons")}, {"weave", QT_TR_NOOP("Woven cloth")},
+        {"skin", QT_TR_NOOP("Skin")},     {"bricks", QT_TR_NOOP("Bricks")},
+    };
+    for (const auto& [name, label] : builtIn) {
+        SculptPattern p;
+        p.name = name;
+        m_patterns.push_back(p);
+        m_pattern->addItem(tr(label));
+    }
+    m_pattern->addItem(tr("Your own picture..."));
+    m_pattern->setToolTip(tr("What the brush presses in. It repeats side by side; light parts stand highest."));
+    patternLayout->addWidget(labelled(tr("Pattern:"), m_pattern));
+    auto* patternForm = new QFormLayout;
+    patternForm->setContentsMargins(0, 0, 0, 0);
+    m_patternSize = new QDoubleSpinBox;
+    m_patternSize->setRange(0.2, 100.0);
+    m_patternSize->setDecimals(1);
+    m_patternSize->setSingleStep(0.5);
+    m_patternSize->setValue(4.0);
+    m_patternSize->setSuffix(tr(" mm"));
+    m_patternSize->setToolTip(tr("How wide one repeat of the pattern is. Strength sets how deep it goes."));
+    patternForm->addRow(tr("Pattern size:"), m_patternSize);
+    patternLayout->addLayout(patternForm);
+    layout->addWidget(m_patternBox);
+    connect(m_pattern, &QComboBox::activated, this, [this](int index) {
+        if (index == m_pattern->count() - 1) {
+            // "Your own picture...": keep the last choice until a picture comes.
+            const QSignalBlocker block(m_pattern);
+            m_pattern->setCurrentIndex(m_lastPattern);
+            emit ownPatternRequested();
+            return;
+        }
+        m_lastPattern = index;
+    });
+
+    const auto describe = [this](int index) {
+        const int brush = m_brush->itemData(index).toInt();
+        const char* hint = "";
+        switch (brush) {
+        case 0: hint = QT_TR_NOOP("Pushes the surface out where you drag. Ctrl: pushes in."); break;
+        case 1: hint = QT_TR_NOOP("Evens out bumps and dents."); break;
+        case 2:
+            hint = QT_TR_NOOP("Swells the surface out like a balloon, each spot along its own facing. Ctrl: shrinks.");
+            break;
+        case 3: hint = QT_TR_NOOP("Presses the area flat."); break;
+        case 4:
+            hint = QT_TR_NOOP("Draws the surface together under the brush, for sharp creases and edges. Ctrl: pushes "
+                              "apart.");
+            break;
+        case 5: hint = QT_TR_NOOP("Builds up in flat layers, like adding strips of clay. Ctrl: digs out."); break;
+        case 6: hint = QT_TR_NOOP("Pulls a whole area along with the mouse, like soft toffee."); break;
+        case 7:
+            hint = QT_TR_NOOP("Cuts a sharp, narrow groove where you drag, for folds and seams. Ctrl: a sharp ridge.");
+            break;
+        case 8:
+            hint = QT_TR_NOOP("Pulls the surface out after the mouse, for horns, tails and tentacles. Drag away "
+                              "from the shape.");
+            break;
+        case 9:
+            hint = QT_TR_NOOP("Paints a mask (shown dark): the other brushes leave masked parts alone. Ctrl: "
+                              "unpaints.");
+            break;
+        case 13:
+            hint = QT_TR_NOOP("Presses a repeating pattern into the surface where you drag (scales, cloth, skin...). "
+                              "Going over again doesn't press deeper. Ctrl: engraves it.");
+            break;
+        default: break;
+        }
+        m_brushHint->setText(tr(hint));
+        m_patternBox->setVisible(brush == 13);
     };
     connect(m_brush, &QComboBox::currentIndexChanged, this, describe);
     describe(0);
@@ -222,7 +282,28 @@ void SculptPanel::start(const QString& title, double suggestedSize)
 
 int SculptPanel::brush() const
 {
-    return m_brush->currentIndex();
+    return m_brush->currentData().toInt();
+}
+
+SculptPattern SculptPanel::pattern() const
+{
+    const int i = std::clamp(m_pattern->currentIndex(), 0, int(m_patterns.size()) - 1);
+    return m_patterns[std::size_t(i)];
+}
+
+double SculptPanel::patternSize() const
+{
+    return m_patternSize->value();
+}
+
+void SculptPanel::addOwnPattern(const SculptPattern& pattern)
+{
+    // Before "Your own picture...", which stays last.
+    const int at = m_pattern->count() - 1;
+    m_patterns.push_back(pattern);
+    m_pattern->insertItem(at, QString::fromStdString(pattern.name));
+    m_pattern->setCurrentIndex(at);
+    m_lastPattern = at;
 }
 
 bool SculptPanel::mirrorX() const

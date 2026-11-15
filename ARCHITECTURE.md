@@ -530,6 +530,17 @@ Viewport (mouse)  --leftPressed(ray, handle)-->  MainWindow drag controller
   `Remesh` is a stroke with the size as radius (`Sculptor::remesh`). `BooleanOp::Simplify`
   (`SimplifyFinish{keep}`) is a mesh-engine one-part step; the app refuses shapes under
   2,000 triangles. File format 20 (and `kLastSculptBrush`, checked against the enum).
+- Pattern brush (slice 24, `Patterns.cpp`): built-in patterns are 256-wide grey pictures
+  made in code (two repeats of the feature across, seamless, stretched to full range,
+  made once); a user's is a `PictureData`. `SculptFinish::patterns` holds those a step
+  uses; a stroke has `pattern` (its number) and `tile` (mm per repeat). Between
+  `beginPattern`/`endPattern` the Sculptor keeps, per point, where it was, its normal
+  and the most weight it has had: a dab sets it to start + normal × depth × height × w
+  only where w (falloff × (1 − mask)) beats that, so overlaps don't deepen. The
+  picture lies flat across the first dab's facing (u = n × Z, or × X near vertical),
+  sampled bilinearly with wrap at start·u / tile; mirror images sample their point
+  mirrored back. Detail under it: down to tile / 24. Depth = ±strength × tile × 0.3.
+  File format 21.
 - The display item points at the sculptor's mesh (aliasing shared_ptr), and
   `Viewport::meshPointsChanged` uploads just the changed range with glBufferSubData.
 - Sculpt steps (slice 21): `BooleanOp::Sculpt`, one operand, `SculptFinish{detail,

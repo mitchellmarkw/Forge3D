@@ -40,7 +40,16 @@ enum class Brush {
     MaskClear,   // a whole-mesh step: no mask anywhere
     MaskInvert,  // a whole-mesh step: masked and free swapped
     Remesh,      // a whole-mesh step: even triangles of a size (the stroke's radius)
+    Pattern,     // press a repeating pattern in (see beginPattern); engrave, inverted
 };
+
+// The grey picture of a pattern: built-in ones are made (the same every time, and
+// repeating seamlessly), a user's is their picture. Throws if a built-in name is unknown.
+std::shared_ptr<const PictureData> patternImage(const SculptPattern& pattern);
+// The built-in patterns' names, in the order to offer them.
+const std::vector<std::string>& builtInPatterns();
+// How deep a Pattern stroke presses (negative: engraved): a share of its repeat size.
+double patternDepth(const SculptStroke& stroke);
 
 // Mirror planes through `centre`, each across one axis: what the brush does on one side
 // happens on the other too.
@@ -121,6 +130,12 @@ public:
 
     // The mask (the mesh's shade): 1 where brushes can't reach, 0 where they act fully.
     // Both return the points changed.
+    // Pattern: dabs between beginPattern and endPattern press `image` in (light parts
+    // highest), repeating every `tile` mm across the surface, up to `depth` mm (below the
+    // surface if negative). Going over the same place again doesn't press it deeper.
+    void beginPattern(std::shared_ptr<const PictureData> image, double tile, double depth);
+    void endPattern();
+
     std::pair<std::uint32_t, std::uint32_t> clearMask();
     std::pair<std::uint32_t, std::uint32_t> invertMask();
     // The whole mesh made of even triangles about `edge` across (see remesh::remeshed);
@@ -158,6 +173,22 @@ private:
         Vec3 tip;
         std::vector<std::uint32_t> seeds;  // the points pulled last time, to walk out from
     };
+    struct PatternLayer {
+        std::shared_ptr<const PictureData> image;
+        double tile = 1.0;
+        double depth = 0.0;
+        bool framed = false;  // u, v set (from the first dab's facing)
+        std::array<double, 3> u{1, 0, 0}, v{0, 1, 0};
+        struct Base {
+            std::array<double, 3> at;      // where the point was before the pattern
+            std::array<double, 3> facing;  // its normal then
+            float done = 0.0f;             // the most of the pattern it has had (0..1)
+        };
+        std::unordered_map<std::uint32_t, Base> base;
+    };
+    std::optional<PatternLayer> m_pattern;
+    Symmetry m_dabSymmetry;           // of the dab being applied, and which image of it
+    std::size_t m_dabImage = 0;
     std::vector<SnakeImage> m_snake;
     Symmetry m_snakeSymmetry;
     double m_snakeRadius = 0.0;
@@ -188,7 +219,8 @@ Mesh startingMesh(const Mesh& surface, int detail);
 // The mirror planes for a stroke, through the middle of the starting mesh.
 Symmetry symmetryFor(const SculptStroke& stroke, const Mesh& start);
 // One recorded stroke played on a sculptor (as when it was made).
-void replay(Sculptor& sculptor, const SculptStroke& stroke, const Mesh& start);
+void replay(Sculptor& sculptor, const SculptStroke& stroke, const Mesh& start,
+            const std::vector<SculptPattern>& patterns = {});
 // Every stroke played on the starting mesh: the sculpted surface.
 Mesh replayed(const Mesh& start, const SculptFinish& finish);
 

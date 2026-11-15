@@ -1239,6 +1239,22 @@ void MainWindow::createDocks()
     });
     connect(m_sculptPanel, &SculptPanel::undoRequested, this, &MainWindow::undoStroke);
     connect(m_sculptPanel, &SculptPanel::remeshRequested, this, &MainWindow::evenOutSculpt);
+    connect(m_sculptPanel, &SculptPanel::ownPatternRequested, this, [this] {
+        const QString path = QFileDialog::getOpenFileName(
+            this, tr("Choose a picture to use as a pattern"), startFolder(),
+            tr("Pictures (*.png *.jpg *.jpeg *.bmp *.gif *.svg);;All files (*)"));
+        if (path.isEmpty())
+            return;
+        rememberFolderOf(path);
+        const auto image = loadPictureFile(path);
+        if (!image)
+            return;
+        SculptPattern own;
+        own.name = QFileInfo(path).fileName().toStdString();
+        own.builtIn = false;
+        own.image = image;
+        m_sculptPanel->addOwnPattern(own);
+    });
     connect(m_sculptPanel, &SculptPanel::clearMaskRequested, this,
             [this] { wholeMask(int(sculpt::Brush::MaskClear)); });
     connect(m_sculptPanel, &SculptPanel::invertMaskRequested, this,
@@ -1874,6 +1890,8 @@ void MainWindow::onLeftReleased(bool wasDrag)
             m_sculptMode.sculptor->endGrab();
         if (m_sculptMode.snaking && m_sculptMode.sculptor)
             m_sculptMode.sculptor->endSnake();
+        if (m_sculptMode.sculptor)
+            m_sculptMode.sculptor->endPattern();
         m_sculptMode.grabbing = false;
         m_sculptMode.snaking = false;
         return;
@@ -3172,6 +3190,7 @@ void MainWindow::startSculpt(ObjectId target, bool editing)
             return;
         mode.operand = body->boolean->operands.front();
         mode.strokes = body->boolean->sculpt->strokes;
+        mode.patterns = body->boolean->sculpt->patterns;
         mode.kept = mode.strokes.size();
     } else {
         mode.operand = target;
@@ -3228,7 +3247,7 @@ void MainWindow::remeshSculpt()
         m_sculptPanel->setFinestDetail(std::max(0.01, std::round(edge * 0.5 * 100.0) / 100.0));
         m_sculptMode.sculptor = std::make_shared<sculpt::Sculptor>(m_sculptMode.start);
         for (const SculptStroke& stroke : m_sculptMode.strokes)
-            sculpt::replay(*m_sculptMode.sculptor, stroke, m_sculptMode.start);
+            sculpt::replay(*m_sculptMode.sculptor, stroke, m_sculptMode.start, m_sculptMode.patterns);
         if (!m_sculptMode.strokes.empty())
             m_sculptPanel->setFinestDetail(m_sculptMode.strokes.back().finest > 0.0 ? m_sculptMode.strokes.back().finest
                                                                                      : m_sculptPanel->finestDetail());
@@ -3402,13 +3421,31 @@ void MainWindow::sculptAt(const QVector3D& origin, const QVector3D& direction, Q
     }
     int brush = modifiers.testFlag(Qt::ShiftModifier) ? int(sculpt::Brush::Smooth) : m_sculptPanel->brush();
     if (brush == int(sculpt::Brush::Grab) || brush == int(sculpt::Brush::SnakeHook) || brush < 0 ||
-        brush > int(sculpt::Brush::Mask))
+        (brush > int(sculpt::Brush::Mask) && brush != int(sculpt::Brush::Pattern)))
         brush = int(sculpt::Brush::Smooth);
     const bool invert = modifiers.testFlag(Qt::ControlModifier);
     // A stroke is kept as dabs of one brush; holding Shift or Ctrl part way starts another.
     if (m_sculptMode.recording < 0 || m_sculptMode.strokes.back().brush != brush ||
         m_sculptMode.strokes.back().invert != invert) {
-        m_sculptMode.strokes.push_back(newStroke(brush, invert));
+        SculptStroke next = newStroke(brush, invert);
+        m_sculptMode.sculptor->endPattern();
+        if (brush == int(sculpt::Brush::Pattern)) {
+            // The pattern goes in the step's list (once), and is pressed in until release.
+            const SculptPattern chosen = m_sculptPanel->pattern();
+            auto found = std::find(m_sculptMode.patterns.begin(), m_sculptMode.patterns.end(), chosen);
+            if (found == m_sculptMode.patterns.end())
+                found = m_sculptMode.patterns.insert(m_sculptMode.patterns.end(), chosen);
+            next.pattern = int(found - m_sculptMode.patterns.begin());
+            next.tile = m_sculptPanel->patternSize();
+            try {
+                m_sculptMode.sculptor->beginPattern(sculpt::patternImage(chosen), next.tile,
+                                                    sculpt::patternDepth(next));
+            } catch (const std::exception& e) {
+                statusBar()->showMessage(QString::fromUtf8(e.what()), 6000);
+                return;
+            }
+        }
+        m_sculptMode.strokes.push_back(next);
         m_sculptMode.recording = int(m_sculptMode.strokes.size()) - 1;
         m_sculptMode.sculptor->setDetail(m_sculptMode.strokes.back().finest);
     }
@@ -3525,6 +3562,18 @@ void MainWindow::finishSculpt()
     SculptFinish finish;
     finish.detail = detailIndex(m_sculptPanel->detail());
     finish.strokes = m_sculptMode.strokes;
+    // Only the patterns the strokes use, numbered afresh.
+    {
+        std::vector<int> renumber(m_sculptMode.patterns.size(), -1);
+        for (SculptStroke& st : finish.strokes)
+            if (st.pattern >= 0 && st.pattern < int(renumber.size())) {
+                if (renumber[std::size_t(st.pattern)] < 0) {
+                    renumber[std::size_t(st.pattern)] = int(finish.patterns.size());
+                    finish.patterns.push_back(m_sculptMode.patterns[std::size_t(st.pattern)]);
+                }
+                st.pattern = renumber[std::size_t(st.pattern)];
+            }
+    }
     // What the strokes made is kept, so the step isn't worked out again from the start
     // (with none left out above, it is exactly what playing them again gives).
     if (erased == 0)
@@ -3647,16 +3696,8 @@ void MainWindow::endSculpt()
     refreshCommandState();
 }
 
-void MainWindow::choosePicture()
+std::shared_ptr<const PictureData> MainWindow::loadPictureFile(const QString& path)
 {
-    if (!m_embossMode.active)
-        return;
-    const QString path = QFileDialog::getOpenFileName(
-        this, tr("Choose a picture"), startFolder(),
-        tr("Pictures (*.png *.jpg *.jpeg *.bmp *.gif *.svg);;All files (*)"));
-    if (path.isEmpty())
-        return;
-    rememberFolderOf(path);
     QImage image;
     if (path.endsWith(QStringLiteral(".svg"), Qt::CaseInsensitive)) {
         // Drawn at the size kept (its longest side picture::kMaxSide), on white.
@@ -3677,7 +3718,7 @@ void MainWindow::choosePicture()
     if (image.isNull()) {
         QMessageBox::warning(this, tr("Forge3D"),
                              tr("Could not read %1 as a picture.").arg(QFileInfo(path).fileName()));
-        return;
+        return nullptr;
     }
     image = image.convertToFormat(QImage::Format_RGBA8888);
     std::vector<std::uint8_t> rgba(std::size_t(image.width()) * image.height() * 4);
@@ -3685,13 +3726,28 @@ void MainWindow::choosePicture()
         std::memcpy(rgba.data() + std::size_t(y) * image.width() * 4, image.constScanLine(y),
                     std::size_t(image.width()) * 4);
     try {
-        m_embossPanel->setPicture(QFileInfo(path).fileName().toStdString(),
-                                  picture::fromRgba(image.width(), image.height(), rgba));
+        return picture::fromRgba(image.width(), image.height(), rgba);
     } catch (const std::exception& e) {
         QMessageBox::warning(this, tr("Forge3D"), QString::fromUtf8(e.what()));
-        return;
+        return nullptr;
     }
-    qInfo().noquote() << "Emboss picture:" << path << image.width() << "x" << image.height();
+}
+
+void MainWindow::choosePicture()
+{
+    if (!m_embossMode.active)
+        return;
+    const QString path = QFileDialog::getOpenFileName(
+        this, tr("Choose a picture"), startFolder(),
+        tr("Pictures (*.png *.jpg *.jpeg *.bmp *.gif *.svg);;All files (*)"));
+    if (path.isEmpty())
+        return;
+    rememberFolderOf(path);
+    const auto image = loadPictureFile(path);
+    if (!image)
+        return;
+    m_embossPanel->setPicture(QFileInfo(path).fileName().toStdString(), image);
+    qInfo().noquote() << "Emboss picture:" << path << image->width << "x" << image->height;
     updateEmbossPreview();
 }
 
