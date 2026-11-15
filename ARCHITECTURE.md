@@ -677,3 +677,21 @@ and sharp across edges.
 - Every source file starts with `// SPDX-License-Identifier: GPL-3.0-or-later`.
 - Log with `qInfo()`, `qWarning()`, `qCritical()` in app code; they go to the log file.
 - Each delivered slice gets a test sheet in `docs/test-sheets/` and a `CHANGELOG.md` entry.
+
+## Measure (slice 25)
+
+- `measure::Shape` (core, `Measure.h`) prepares a placed solid (`pickableShape`): its
+  real edges (two faces; no seams) as polylines, their end corners, a `FaceFinder`, and
+  face triangles on demand. A `Target` is a face, an edge or a point (plate
+  coordinates). `describe` reads the OCCT geometry (BRepAdaptor: line, circle/arc;
+  plane, cylinder, cone, sphere, torus; lengths and areas by GCPnts / BRepGProp).
+  `between` takes the nearest points (BRepExtrema_DistShapeShape; a point is a vertex),
+  the acute angle between directions (a line against a face measured from the face),
+  how far apart parallel faces / lines lie, centre to centre (points, or parallel
+  axes), and a centre or face-parallel axis to a flat face.
+- The app: `pick` finds the shape under the mouse; then a corner within 10 px, else an
+  edge within 8 px (not hidden behind the shape), else the face; Shift or a mesh shape:
+  the exact point. Shapes are prepared once per Measure session (cleared on any
+  document change). Highlights are ghost items (orange hover, red picks, green nearest
+  line, blue centre line); the panel shows rich text.
+

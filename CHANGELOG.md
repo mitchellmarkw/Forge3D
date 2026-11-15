@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.34.0 Beta — Slice 25: Measure (2026-11-14)
+
+- **Measure** (on the Build, Design and Print tabs): click a **face**, an **edge** or a
+  **corner** of a shape (hold **Shift** for an exact point; on imported meshes, points
+  only). What's under the mouse lights up orange; what's picked turns red.
+- One thing picked: a flat face's **area**; a round face's or edge's **diameter**
+  (holes, pegs, cylinders); a straight edge's **length**; cones, balls and rings too;
+  a point's position.
+- Two things: the **distance** where they come nearest (drawn in green, with how far
+  along X, Y and Z), the **angle** between them, whether they're **parallel** and how
+  far **apart**, **centre to centre** of two holes, pegs or circles, and a hole's
+  **centre to a face** (drawn in blue).
+- A third click starts again; **Clear** too. Numbers can be selected and copied.
+- 208 unit tests (2 new: faces and edges described; distances, angles and centres
+  between them).
+
 ## 0.33.0 Beta — Slice 24: Pattern brush (2026-11-14)
 
 - **Pattern** brush: presses a repeating pattern into the surface where you drag:

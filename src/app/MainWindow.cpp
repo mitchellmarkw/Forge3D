@@ -10,6 +10,8 @@
 #include "HolePanel.h"
 #include "PatternPanel.h"
 #include "ShellPanel.h"
+#include "MeasurePanel.h"
+#include "forge/core/Picking.h"
 #include "SketchPanel.h"
 #include "SketchView.h"
 #include "SculptPanel.h"
@@ -69,6 +71,8 @@
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QTextBrowser>
+#include <QTextDocument>
+#include <QCursor>
 #include <QDialogButtonBox>
 #include <QFile>
 #include <QGuiApplication>
@@ -300,6 +304,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
             edgesHover(o, d, px);
         if (m_sculptMode.active)
             sculptHover(o, d);
+        if (m_measureMode.active)
+            measureHover(o, d, px);
     });
     connect(m_viewport, &Viewport::leftPressed, this, &MainWindow::onLeftPressed);
     connect(m_viewport, &Viewport::leftDragged, this, &MainWindow::onLeftDragged);
@@ -316,6 +322,13 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
     m_doc.addListener([this](const Document::Change& change) {
         if (change.kind == Document::ChangeKind::Removed)  // e.g. undo of an Add
             std::erase(m_selection, change.id);
+        if (m_measureMode.active) {
+            // The shapes changed (an undo, say): what was picked may be gone.
+            m_measureMode.shapes.clear();
+            m_measureMode.picks.clear();
+            m_measureMode.hover.reset();
+            QTimer::singleShot(0, this, &MainWindow::showMeasurements);
+        }
         scheduleSceneRefresh();
     });
     m_stack.setListener([this] { refreshCommandState(); });
@@ -465,6 +478,8 @@ void MainWindow::createActions()
             m_layFlat->setChecked(false);
         else if (m_sculptMode.active)
             endSculpt();
+        else if (m_measureMode.active)
+            endMeasure();
         else if (m_splitMode.active)
             endSplit();  // Esc leaves the Split tool without cutting
         else if (m_embossMode.active)
@@ -592,6 +607,10 @@ void MainWindow::createActions()
         }
         startSculpt(history::tip(m_doc, id), false);
     });
+    m_measureAction = new QAction(tr("Measure"), this);
+    m_measureAction->setToolTip(tr("Measure: click faces, edges, corners or points to see sizes, distances and "
+                                   "angles"));
+    connect(m_measureAction, &QAction::triggered, this, &MainWindow::startMeasure);
     m_simplifyAction = new QAction(tr("Simplify"), this);
     m_simplifyAction->setToolTip(tr("Simplify: fewer triangles for the selected shape, keeping its look (for big "
                                     "imported or sculpted meshes). Set how many to keep in Properties."));
@@ -883,6 +902,7 @@ void MainWindow::createToolBar()
         {m_emboss, "emboss"},
         {m_sculptAction, "sculpt"},
         {m_simplifyAction, "simplify"},
+        {m_measureAction, "measure"},
         {m_layFlat, "lay-on-face"},
         {m_sitOnPlate, "sit-on-plate"},
         {m_export, "export"},
@@ -994,6 +1014,7 @@ void MainWindow::createToolBar()
               {align, menuButton(m_mirrorMenu), button(m_patternAction), button(m_group), button(m_duplicate)});
     }
     group(build, tr("Remove"), {button(m_delete), button(m_clear)});
+    group(build, tr("Check"), {button(m_measureAction)});
     build.row->addStretch(1);
 
     Page design = page(tr("Design"), tr("Features: sketches, holes, shells, edges, text and cuts"));
@@ -1012,6 +1033,7 @@ void MainWindow::createToolBar()
           {button(m_holeAction), button(m_shellAction), button(m_followAction), button(m_patternAction),
            button(m_edgesAction)});
     group(design, tr("Change"), {button(m_split), button(m_emboss)});
+    group(design, tr("Check"), {button(m_measureAction)});
     group(design, tr("Undo"), {shortButton(m_undo, tr("Undo")), shortButton(m_redo, tr("Redo"))});
     design.row->addStretch(1);
 
@@ -1030,6 +1052,7 @@ void MainWindow::createToolBar()
     Page print = page(tr("Print"), tr("Get it to the printer"));
     group(print, tr("Place"), {button(m_layFlat), button(m_sitOnPlate)});
     group(print, tr("Out"), {button(m_export), button(m_sendToSlicer)});
+    group(print, tr("Check"), {button(m_measureAction)});
     group(print, tr("Undo"), {shortButton(m_undo, tr("Undo")), shortButton(m_redo, tr("Redo"))});
     print.row->addStretch(1);
 
@@ -1232,6 +1255,14 @@ void MainWindow::createDocks()
     m_sculptPanel = new SculptPanel;
     stackLayout->addWidget(m_sculptPanel);
     m_sculptPanel->hide();
+    m_measurePanel = new MeasurePanel;
+    stackLayout->addWidget(m_measurePanel);
+    m_measurePanel->hide();
+    connect(m_measurePanel, &MeasurePanel::clearRequested, this, [this] {
+        m_measureMode.picks.clear();
+        showMeasurements();
+    });
+    connect(m_measurePanel, &MeasurePanel::doneRequested, this, &MainWindow::endMeasure);
     connect(m_sculptPanel, &SculptPanel::detailChanged, this, &MainWindow::remeshSculpt);
     connect(m_sculptPanel, &SculptPanel::addDetailChanged, this, [this] {
         if (m_sculptMode.sculptor)
@@ -1476,6 +1507,10 @@ void MainWindow::onViewportClicked(const QVector3D& origin, const QVector3D& dir
         edgesClick(origin, direction);
         return;
     }
+    if (m_measureMode.active) {
+        measureClick(origin, direction);
+        return;
+    }
     if (m_sketchMode.picking) {
         sketchFaceClick(origin, direction);
         return;
@@ -1574,6 +1609,8 @@ void MainWindow::onLeftPressed(const QVector3D& origin, const QVector3D& directi
 {
     m_dragState = Drag{};
     m_pressOnHandle = false;
+    if (m_measureMode.active)
+        return;  // measuring: clicks pick, nothing moves
     if (m_sculptMode.active) {
         beginStroke(origin, direction, modifiers);
         return;
@@ -2254,6 +2291,10 @@ constexpr std::uint64_t kSplitHeadItem = ~std::uint64_t{0} - 3;
 constexpr std::uint64_t kEmbossWordsItem = ~std::uint64_t{0} - 4;
 constexpr std::uint64_t kEdgesPickedItem = ~std::uint64_t{0} - 5;
 constexpr std::uint64_t kEdgesHoverItem = ~std::uint64_t{0} - 6;
+constexpr std::uint64_t kMeasurePickedItem = ~std::uint64_t{0} - 7;
+constexpr std::uint64_t kMeasureHoverItem = ~std::uint64_t{0} - 8;
+constexpr std::uint64_t kMeasureLineItem = ~std::uint64_t{0} - 9;
+constexpr std::uint64_t kMeasureCentreItem = ~std::uint64_t{0} - 10;
 
 // Thin six-sided tubes along lines: how picked edges are drawn.
 std::shared_ptr<const Mesh> tubes(const std::vector<const std::vector<Vec3>*>& lines, float radius)
@@ -2881,7 +2922,7 @@ bool MainWindow::toolOpen() const
 {
     return m_splitMode.active || m_embossMode.active || m_edgesMode.active || m_sketchMode.picking ||
            m_sketchMode.active || m_holeMode.active || m_shellMode.active || m_followMode.active ||
-           m_patternMode.active || m_sculptMode.active;
+           m_patternMode.active || m_sculptMode.active || m_measureMode.active;
 }
 
 void MainWindow::startEmboss(ObjectId target, bool editing)
@@ -3618,6 +3659,323 @@ void MainWindow::finishSculpt()
     }
     if (run(std::make_unique<CombineCommand>(std::move(result))))
         setSelection(id);
+}
+
+// ---- Measure ----------------------------------------------------------------------
+
+namespace {
+QString mm(double v)
+{
+    return QString::number(v, 'f', 2);
+}
+
+QString aboutText(const measure::About& a)
+{
+    using K = measure::About::Kind;
+    switch (a.kind) {
+    case K::Point:
+        return MainWindow::tr("Point at X %1, Y %2, Z %3 mm").arg(mm(a.point[0]), mm(a.point[1]), mm(a.point[2]));
+    case K::Line: return MainWindow::tr("Straight edge, <b>%1 mm</b> long").arg(mm(a.length));
+    case K::Circle:
+        return MainWindow::tr("Round edge: <b>Ø %1 mm</b> (radius %2), %3 mm round")
+            .arg(mm(2 * a.radius), mm(a.radius), mm(a.length));
+    case K::Arc:
+        return MainWindow::tr("Curved edge (part of a circle): <b>radius %1 mm</b>, %2 mm long")
+            .arg(mm(a.radius), mm(a.length));
+    case K::Curve: return MainWindow::tr("Curved edge, <b>%1 mm</b> long").arg(mm(a.length));
+    case K::Flat: return MainWindow::tr("Flat face: <b>%1 mm²</b>").arg(mm(a.area));
+    case K::Cylinder:
+        return MainWindow::tr("Round face (a cylinder or hole): <b>Ø %1 mm</b> (radius %2), %3 mm²")
+            .arg(mm(2 * a.radius), mm(a.radius), mm(a.area));
+    case K::Cone:
+        return MainWindow::tr("Cone-shaped face: <b>%1°</b> each side of its middle, %2 mm²")
+            .arg(QString::number(a.halfAngle, 'f', 1), mm(a.area));
+    case K::Sphere:
+        return MainWindow::tr("Ball-shaped face: <b>Ø %1 mm</b> (radius %2), %3 mm²")
+            .arg(mm(2 * a.radius), mm(a.radius), mm(a.area));
+    case K::Torus:
+        return MainWindow::tr("Ring-shaped face: tube <b>Ø %1 mm</b>, ring radius %2 mm, %3 mm²")
+            .arg(mm(2 * a.radius), mm(a.bigRadius), mm(a.area));
+    case K::Surface: return MainWindow::tr("Curved face: <b>%1 mm²</b>").arg(mm(a.area));
+    }
+    return {};
+}
+
+// A small cross, to show a point picked.
+std::shared_ptr<const Mesh> crossAt(const Vec3& p, float size, float radius)
+{
+    std::vector<std::vector<Vec3>> arms;
+    for (int axis = 0; axis < 3; ++axis) {
+        Vec3 a = p, b = p;
+        a[axis] -= size;
+        b[axis] += size;
+        arms.push_back({a, b});
+    }
+    std::vector<const std::vector<Vec3>*> lines;
+    for (const auto& arm : arms)
+        lines.push_back(&arm);
+    return tubes(lines, radius);
+}
+
+// Several meshes as one.
+std::shared_ptr<const Mesh> joined(const std::vector<std::shared_ptr<const Mesh>>& meshes)
+{
+    auto out = std::make_shared<Mesh>();
+    for (const auto& m : meshes) {
+        if (!m)
+            continue;
+        const auto base = std::uint32_t(out->positions.size() / 3);
+        out->positions.insert(out->positions.end(), m->positions.begin(), m->positions.end());
+        out->normals.insert(out->normals.end(), m->normals.begin(), m->normals.end());
+        for (std::uint32_t i : m->indices)
+            out->indices.push_back(base + i);
+    }
+    return out;
+}
+}  // namespace
+
+void MainWindow::startMeasure()
+{
+    if (toolOpen())
+        return;
+    if (m_dragState.kind != Drag::Kind::None)
+        cancelDrag();
+    m_measureMode = MeasureMode{};
+    m_measureMode.active = true;
+    m_propsDockWidth = m_propsDock->width();
+    m_properties->hide();
+    m_measurePanel->show();
+    showMeasurements();
+    statusBar()->showMessage(tr("Measure: click a face, an edge or a corner (Shift: an exact point). Esc closes."));
+    refreshScene();
+    refreshCommandState();
+}
+
+void MainWindow::endMeasure()
+{
+    if (!m_measureMode.active)
+        return;
+    m_measureMode = MeasureMode{};
+    m_measurePanel->hide();
+    m_properties->show();
+    QTimer::singleShot(0, this, [this] { resizeDocks({m_propsDock}, {m_propsDockWidth}, Qt::Horizontal); });
+    statusBar()->clearMessage();
+    refreshScene();
+    refreshCommandState();
+}
+
+std::optional<MainWindow::MeasureMode::Thing> MainWindow::measureThingAt(const QVector3D& origin,
+                                                                         const QVector3D& direction,
+                                                                         const QPointF& pixel)
+{
+    const QVector3D dir = direction.normalized();
+    Ray ray;
+    ray.origin = {origin.x(), origin.y(), origin.z()};
+    ray.direction = {dir.x(), dir.y(), dir.z()};
+    const auto hit = pick(m_doc, ray);
+    if (!hit)
+        return std::nullopt;
+    MeasureMode::Thing thing;
+    thing.object = hit->id;
+    thing.target = {measure::Target::Kind::Point, {}, hit->point};
+    const float size = std::max(0.05f, m_viewport->camera().distance() * 0.012f);
+    const float radius = std::max(0.01f, m_viewport->camera().distance() * 0.0018f);
+    const auto asPoint = [&](const Vec3& p) {
+        thing.target = {measure::Target::Kind::Point, {}, p};
+        thing.index = -1;
+        thing.mesh = crossAt(p, size, radius);
+        return thing;
+    };
+    if (QApplication::keyboardModifiers().testFlag(Qt::ShiftModifier) || m_doc.usesMeshEngine(hit->id))
+        return asPoint(hit->point);  // an exact point (meshes have no faces or edges to pick)
+
+    // The solid, ready for picking on (worked out once while measuring).
+    std::shared_ptr<measure::Shape> shape;
+    if (const auto found = m_measureMode.shapes.find(hit->id); found != m_measureMode.shapes.end()) {
+        shape = found->second;
+    } else {
+        try {
+            shape = std::make_shared<measure::Shape>(pickableShape(m_doc, hit->id));
+        } catch (const std::exception& e) {
+            qWarning() << "Measure: no faces to pick:" << e.what();
+        }
+        m_measureMode.shapes[hit->id] = shape;
+    }
+    if (!shape)
+        return asPoint(hit->point);
+    const auto onTop = shape->faceUnder({origin.x(), origin.y(), origin.z()}, {dir.x(), dir.y(), dir.z()});
+    const double slack = std::max(shape->size() * 0.01, 0.2);
+    const auto visible = [&](const QVector3D& p) {
+        return !onTop || QVector3D::dotProduct(p - origin, dir) <= onTop->distance + slack;
+    };
+    // A corner within a few pixels.
+    double bestPx = 10.0;
+    std::optional<Vec3> corner;
+    for (const Vec3& c : shape->corners()) {
+        const QVector3D p{float(c[0]), float(c[1]), float(c[2])};
+        const auto s = m_viewport->projectToScreen(p);
+        if (!s)
+            continue;
+        const double px = std::hypot(s->x() - pixel.x(), s->y() - pixel.y());
+        if (px < bestPx && visible(p)) {
+            bestPx = px;
+            corner = c;
+        }
+    }
+    if (corner)
+        return asPoint(*corner);
+    // An edge within a few pixels.
+    int bestEdge = -1;
+    bestPx = 8.0;
+    Vec3 onEdge{0, 0, 0};
+    const auto& lines = shape->edgeLines();
+    for (std::size_t i = 0; i < lines.size(); ++i)
+        for (std::size_t k = 0; k + 1 < lines[i].size(); ++k) {
+            const QVector3D a(lines[i][k][0], lines[i][k][1], lines[i][k][2]);
+            const QVector3D b(lines[i][k + 1][0], lines[i][k + 1][1], lines[i][k + 1][2]);
+            const auto pa = m_viewport->projectToScreen(a), pb = m_viewport->projectToScreen(b);
+            if (!pa || !pb)
+                continue;
+            const QPointF ab = *pb - *pa, ap = pixel - *pa;
+            const double l2 = QPointF::dotProduct(ab, ab);
+            const double t = l2 > 0 ? std::clamp(QPointF::dotProduct(ap, ab) / l2, 0.0, 1.0) : 0.0;
+            const QPointF d = ap - ab * t;
+            const double px = std::hypot(d.x(), d.y());
+            const QVector3D p = a + (b - a) * float(t);
+            if (px >= bestPx || !visible(p))
+                continue;
+            bestPx = px;
+            bestEdge = int(i);
+            onEdge = {p.x(), p.y(), p.z()};
+        }
+    if (bestEdge >= 0) {
+        thing.target = shape->edge(bestEdge, onEdge);
+        thing.index = bestEdge;
+        thing.mesh = tubes({&lines[std::size_t(bestEdge)]}, radius * 1.4f);
+        return thing;
+    }
+    if (!onTop)
+        return asPoint(hit->point);
+    thing.target = shape->face(onTop->face, onTop->point);
+    thing.index = onTop->face;
+    // The same face as last time: keep its mesh (big faces are slow to divide again).
+    if (m_measureMode.hover && m_measureMode.hover->object == thing.object &&
+        m_measureMode.hover->target.kind == measure::Target::Kind::Face && m_measureMode.hover->index == thing.index)
+        thing.mesh = m_measureMode.hover->mesh;
+    else
+        thing.mesh = std::make_shared<const Mesh>(shape->faceMesh(onTop->face));
+    return thing;
+}
+
+void MainWindow::measureHover(const QVector3D& origin, const QVector3D& direction, const QPointF& pixel)
+{
+    std::optional<MeasureMode::Thing> thing;
+    try {
+        thing = measureThingAt(origin, direction, pixel);
+    } catch (const std::exception& e) {
+        qWarning() << "Measure:" << e.what();
+    }
+    const bool same = thing && m_measureMode.hover && thing->object == m_measureMode.hover->object &&
+                      thing->target.kind == m_measureMode.hover->target.kind &&
+                      thing->index == m_measureMode.hover->index &&
+                      (thing->index >= 0 || thing->target.point == m_measureMode.hover->target.point);
+    if (same || (!thing && !m_measureMode.hover))
+        return;
+    m_measureMode.hover = thing;
+    m_measureMode.hoverMesh = thing ? thing->mesh : nullptr;
+    QString text;
+    if (thing) {
+        try {
+            QTextDocument plain;
+            plain.setHtml(aboutText(measure::describe(thing->target)));
+            text = plain.toPlainText();
+        } catch (const std::exception&) {
+        }
+    }
+    m_measurePanel->setHover(text);
+    refreshScene();
+}
+
+void MainWindow::measureClick(const QVector3D& origin, const QVector3D& direction)
+{
+    // What the mouse is over (worked out on hover; again here if it moved without one).
+    std::optional<MeasureMode::Thing> thing = m_measureMode.hover;
+    if (!thing) {
+        const auto px = m_viewport->mapFromGlobal(QCursor::pos());
+        try {
+            thing = measureThingAt(origin, direction, QPointF(px));
+        } catch (const std::exception& e) {
+            qWarning() << "Measure:" << e.what();
+        }
+    }
+    if (!thing) {
+        statusBar()->showMessage(tr("Measure: click on a shape. Esc closes."), 4000);
+        return;
+    }
+    if (m_measureMode.picks.size() >= 2)
+        m_measureMode.picks.clear();  // a third click starts again
+    m_measureMode.picks.push_back(*thing);
+    showMeasurements();
+}
+
+void MainWindow::showMeasurements()
+{
+    auto& mode = m_measureMode;
+    if (!mode.active)
+        return;
+    mode.lineMesh.reset();
+    mode.centreMesh.reset();
+    std::vector<std::shared_ptr<const Mesh>> picked;
+    for (const auto& p : mode.picks)
+        picked.push_back(p.mesh);
+    mode.pickedMesh = picked.empty() ? nullptr : joined(picked);
+    if (!mode.hover)
+        mode.hoverMesh.reset();
+    if (mode.picks.empty()) {
+        m_measurePanel->setResult(tr("Nothing picked yet."));
+        refreshScene();
+        return;
+    }
+    QString html;
+    try {
+        const measure::About first = measure::describe(mode.picks[0].target);
+        if (mode.picks.size() == 1) {
+            html = tr("<b>1.</b> %1<br><br>Click a second thing to measure between them.").arg(aboutText(first));
+        } else {
+            const measure::About second = measure::describe(mode.picks[1].target);
+            const measure::Between b = measure::between(mode.picks[0].target, mode.picks[1].target);
+            html = tr("<b>1.</b> %1<br><b>2.</b> %2<hr>").arg(aboutText(first), aboutText(second));
+            const Vec3 d{std::abs(b.to[0] - b.from[0]), std::abs(b.to[1] - b.from[1]), std::abs(b.to[2] - b.from[2])};
+            html += b.distance < 1e-6 ? tr("They <b>touch</b>.")
+                                      : tr("<b>Distance: %1 mm</b> at the nearest (green)<br>"
+                                           "&nbsp;&nbsp;X %2, Y %3, Z %4 mm")
+                                            .arg(mm(b.distance), mm(d[0]), mm(d[1]), mm(d[2]));
+            if (b.parallel) {
+                html += tr("<br><b>Parallel</b>");
+                if (b.apart)
+                    html += tr(", <b>%1 mm</b> apart").arg(mm(*b.apart));
+            } else if (b.angle) {
+                html += tr("<br><b>Angle: %1°</b>").arg(QString::number(*b.angle, 'f', 1));
+            }
+            if (b.centres)
+                html += tr("<br><b>Centre to centre: %1 mm</b> (blue)").arg(mm(*b.centres));
+            if (b.centreToFace)
+                html += tr("<br><b>Centre to the face: %1 mm</b> (blue)").arg(mm(*b.centreToFace));
+            const float radius = std::max(0.01f, m_viewport->camera().distance() * 0.0015f);
+            if (b.distance > 1e-6) {
+                const std::vector<Vec3> line{b.from, b.to};
+                mode.lineMesh = tubes({&line}, radius);
+            }
+            if ((b.centres && *b.centres > 1e-6) || (b.centreToFace && *b.centreToFace > 1e-6)) {
+                const std::vector<Vec3> line{b.centreFrom, b.centreTo};
+                mode.centreMesh = tubes({&line}, radius);
+            }
+        }
+    } catch (const std::exception& e) {
+        html = tr("Could not measure that: %1").arg(QString::fromUtf8(e.what()).toHtmlEscaped());
+    }
+    m_measurePanel->setResult(html);
+    refreshScene();
 }
 
 void MainWindow::simplifySelected()
@@ -4391,6 +4749,24 @@ void MainWindow::refreshScene()
     if (m_splitMode.active && !m_doc.find(m_splitMode.target))
         endSplit();  // e.g. Undo removed the shape being cut
     addSplitItems(items);
+    if (m_measureMode.active) {
+        // Measured things: picked in red, under the mouse in orange; the nearest-points
+        // line in green, centre to centre in blue. Seen through the shapes.
+        for (const auto& [mesh, colour, tag] :
+             {std::tuple{m_measureMode.pickedMesh, QVector3D(0.9f, 0.15f, 0.1f), kMeasurePickedItem},
+              std::tuple{m_measureMode.hoverMesh, QVector3D(1.0f, 0.6f, 0.0f), kMeasureHoverItem},
+              std::tuple{m_measureMode.lineMesh, QVector3D(0.1f, 0.7f, 0.2f), kMeasureLineItem},
+              std::tuple{m_measureMode.centreMesh, QVector3D(0.15f, 0.35f, 0.95f), kMeasureCentreItem}}) {
+            if (!mesh || mesh->empty())
+                continue;
+            DisplayItem item;
+            item.id = tag;
+            item.mesh = mesh;
+            item.color = colour;
+            item.ghost = true;
+            items.push_back(std::move(item));
+        }
+    }
     m_viewport->setItems(std::move(items));
 
     const Body* selected = m_doc.find(selectedOne());

@@ -30,6 +30,7 @@ add_executable(forge_tests
     test_updates.cpp
     test_sculpt.cpp
     test_remesh.cpp
+    test_measure.cpp
 )
 target_link_libraries(forge_tests PRIVATE
     Forge3D::core

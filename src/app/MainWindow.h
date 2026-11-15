@@ -7,6 +7,7 @@
 #include "forge/core/Document.h"
 #include "forge/core/Edges.h"
 #include "forge/core/Emboss.h"
+#include "forge/core/Measure.h"
 #include "forge/core/Sculpt.h"
 #include "forge/core/Sketch.h"
 #include "forge/core/Split.h"
@@ -22,6 +23,7 @@
 #include <QString>
 #include <QVector3D>
 
+#include <map>
 #include <memory>
 #include <set>
 #include <vector>
@@ -50,6 +52,7 @@ class PropertiesPanel;
 class SplitPanel;
 class EmbossPanel;
 class Tour;
+class MeasurePanel;
 class SculptPanel;
 class EdgesPanel;
 class FollowPanel;
@@ -488,6 +491,31 @@ private:
         double dabMs = 0.0;
     };
     SculptMode m_sculptMode;
+
+    // Measuring: things picked on the shapes, and what they measure.
+    struct MeasureMode {
+        bool active = false;
+        std::map<ObjectId, std::shared_ptr<measure::Shape>> shapes;  // solids, ready to pick on
+        struct Thing {
+            measure::Target target;
+            ObjectId object = kInvalidId;
+            int index = -1;  // the edge or face number (-1: a point)
+            std::shared_ptr<const Mesh> mesh;  // how it's shown picked
+        };
+        std::optional<Thing> hover;
+        std::vector<Thing> picks;  // one or two
+        std::shared_ptr<const Mesh> hoverMesh, pickedMesh, lineMesh, centreMesh;
+    };
+    MeasureMode m_measureMode;
+    MeasurePanel* m_measurePanel = nullptr;
+    QAction* m_measureAction = nullptr;
+    void startMeasure();
+    void endMeasure();
+    std::optional<MeasureMode::Thing> measureThingAt(const QVector3D& origin, const QVector3D& direction,
+                                                     const QPointF& pixel);
+    void measureHover(const QVector3D& origin, const QVector3D& direction, const QPointF& pixel);
+    void measureClick(const QVector3D& origin, const QVector3D& direction);
+    void showMeasurements();
     SculptPanel* m_sculptPanel = nullptr;
     QAction* m_sculptAction = nullptr;
     QAction* m_simplifyAction = nullptr;
