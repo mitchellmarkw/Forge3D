@@ -28,13 +28,16 @@ namespace {
 const char* kMeshVertexShader = R"(#version 330 core
 layout(location = 0) in vec3 aPosition;
 layout(location = 1) in vec3 aNormal;
+layout(location = 2) in float aShade;
 uniform mat4 uMvp;
 uniform mat4 uModelView;
 uniform mat3 uNormalMatrix;
 out vec3 vNormal;
 out vec3 vViewPos;
+out float vShade;
 void main() {
     vNormal = uNormalMatrix * aNormal;
+    vShade = aShade;
     vViewPos = (uModelView * vec4(aPosition, 1.0)).xyz;
     gl_Position = uMvp * vec4(aPosition, 1.0);
 }
@@ -43,6 +46,7 @@ void main() {
 const char* kMeshFragmentShader = R"(#version 330 core
 in vec3 vNormal;
 in vec3 vViewPos;
+in float vShade;  // sculpting's mask: 1 = masked, drawn dark
 uniform vec3 uColor;
 uniform float uSelected;  // 0 or 1
 uniform float uAlpha;     // 1 = solid, less = see-through (ghost)
@@ -55,7 +59,8 @@ void main() {
     float diffuse = max(dot(n, key), 0.0);
     float head = max(dot(n, toEye), 0.0);
     float spec = pow(max(dot(n, normalize(key + toEye)), 0.0), 48.0) * 0.20;
-    vec3 color = uColor * (0.28 + 0.62 * diffuse + 0.15 * head) + vec3(spec);
+    vec3 base = mix(uColor, vec3(0.16, 0.16, 0.20), clamp(vShade, 0.0, 1.0) * 0.8);
+    vec3 color = base * (0.28 + 0.62 * diffuse + 0.15 * head) + vec3(spec);
     // Selection: lighten the body and add a bright cyan glow toward its silhouette.
     // Cyan is not in the body palette, so it reads as "selected" on any colour.
     float rim = pow(1.0 - max(dot(n, toEye), 0.0), 1.5);
@@ -140,6 +145,7 @@ void Viewport::GpuMesh::destroy()
         vao->destroy();
     positions.destroy();
     normals.destroy();
+    shade.destroy();
     indices.destroy();
     indexCount = 0;
     source.reset();
@@ -443,6 +449,16 @@ void Viewport::upload(GpuMesh& gpu, const std::shared_ptr<const forge::Mesh>& me
     glEnableVertexAttribArray(1);
     glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 0, nullptr);
 
+    // The mask (sculpting), or none: always a buffer, so the attribute is always there.
+    if (mesh->shade.size() == mesh->vertexCount()) {
+        fill(gpu.shade, mesh->shade.data(), mesh->shade.size() * sizeof(float));
+    } else {
+        const std::vector<float> none(mesh->vertexCount(), 0.0f);
+        fill(gpu.shade, none.data(), none.size() * sizeof(float));
+    }
+    glEnableVertexAttribArray(2);
+    glVertexAttribPointer(2, 1, GL_FLOAT, GL_FALSE, 0, nullptr);
+
     // The index buffer binding is stored in the VAO, so bind it while the VAO is bound.
     fill(gpu.indices, mesh->indices.data(), mesh->indices.size() * sizeof(std::uint32_t));
 
@@ -478,6 +494,16 @@ void Viewport::syncGpuMeshes()
         gpu.positions.write(offset, mesh.positions.data() + 3 * range.first, bytes);
         gpu.normals.bind();
         gpu.normals.write(offset, mesh.normals.data() + 3 * range.first, bytes);
+        // The mask over the same points (zeros if it was cleared).
+        const std::size_t count = last - range.first;
+        gpu.shade.bind();
+        if (mesh.shade.size() == mesh.vertexCount()) {
+            gpu.shade.write(int(range.first * sizeof(float)), mesh.shade.data() + range.first,
+                            int(count * sizeof(float)));
+        } else {
+            const std::vector<float> none(count, 0.0f);
+            gpu.shade.write(int(range.first * sizeof(float)), none.data(), int(count * sizeof(float)));
+        }
     }
     m_movedPoints.clear();
     if (!m_itemsDirty)

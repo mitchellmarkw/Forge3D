@@ -1013,8 +1013,9 @@ void MainWindow::createToolBar()
     Page sculpt = page(tr("Sculpt"), tr("Sculpting brushes"));
     {
         group(sculpt, tr("Brushes"), {button(m_sculptAction)});
-        auto* note = new QLabel(tr("Select a shape, then Sculpt: Draw, Smooth, Inflate, Flatten, Pinch, Clay and "
-                                   "Grab brushes, mirrored across X, Y or Z if you like."));
+        auto* note = new QLabel(tr("Select a shape, then Sculpt: Draw, Smooth, Inflate, Flatten, Pinch, Clay, Grab, "
+                                   "Crease and Snake hook brushes, a mask to protect parts, mirrored across X, Y or Z "
+                                   "if you like."));
         note->setStyleSheet(QStringLiteral("color: palette(mid);"));
         sculpt.row->addWidget(note);
         sculpt.row->addStretch(1);
@@ -1231,6 +1232,10 @@ void MainWindow::createDocks()
             m_sculptMode.sculptor->setDetail(m_sculptPanel->addDetail() ? m_sculptPanel->finestDetail() : 0.0);
     });
     connect(m_sculptPanel, &SculptPanel::undoRequested, this, &MainWindow::undoStroke);
+    connect(m_sculptPanel, &SculptPanel::clearMaskRequested, this,
+            [this] { wholeMask(int(sculpt::Brush::MaskClear)); });
+    connect(m_sculptPanel, &SculptPanel::invertMaskRequested, this,
+            [this] { wholeMask(int(sculpt::Brush::MaskInvert)); });
     connect(m_sculptPanel, &SculptPanel::doneRequested, this, &MainWindow::finishSculpt);
     connect(m_sculptPanel, &SculptPanel::cancelRequested, this, &MainWindow::endSculpt);
     m_shellTimer = new QTimer(this);
@@ -1849,7 +1854,10 @@ void MainWindow::onLeftReleased(bool wasDrag)
         m_sculptMode.lastDab.reset();
         if (m_sculptMode.grabbing && m_sculptMode.sculptor)
             m_sculptMode.sculptor->endGrab();
+        if (m_sculptMode.snaking && m_sculptMode.sculptor)
+            m_sculptMode.sculptor->endSnake();
         m_sculptMode.grabbing = false;
+        m_sculptMode.snaking = false;
         return;
     }
     Drag d = m_dragState;
@@ -3284,6 +3292,19 @@ void MainWindow::beginStroke(const QVector3D& origin, const QVector3D& direction
     m_sculptMode.recording = -1;
     m_sculptPanel->setDetailEnabled(false);
     m_sculptPanel->setUndoEnabled(true);
+    if (m_sculptPanel->brush() == int(sculpt::Brush::SnakeHook) && !modifiers.testFlag(Qt::ShiftModifier)) {
+        // Snake hook: the tip follows the mouse across planes facing the view.
+        SculptStroke stroke = newStroke(int(sculpt::Brush::SnakeHook), false);
+        const Vec3 from = asStored(hit->point);
+        stroke.dabs.push_back({float(from[0]), float(from[1]), float(from[2])});
+        m_sculptMode.sculptor->setDetail(stroke.finest);
+        m_sculptMode.strokes.push_back(stroke);
+        m_sculptMode.snaking = true;
+        m_sculptMode.grabFacing = m_sculptMode.fromPlate.applyDirection({direction.x(), direction.y(), direction.z()});
+        m_sculptMode.sculptor->beginSnake(from, stroke.radius, stroke.strength, m_sculptMode.sculptor->triangleAt(from),
+                                          sculpt::symmetryFor(stroke, m_sculptMode.start));
+        return;
+    }
     if (m_sculptPanel->brush() == int(sculpt::Brush::Grab) && !modifiers.testFlag(Qt::ShiftModifier)) {
         // Grab: the points under the brush follow the mouse across a plane facing the view.
         SculptStroke stroke = newStroke(int(sculpt::Brush::Grab), false);
@@ -3320,6 +3341,29 @@ void MainWindow::sculptAt(const QVector3D& origin, const QVector3D& direction, Q
         m_sculptMode.dabs++;
         return;
     }
+    if (m_sculptMode.snaking) {
+        // The next tip: where the ray crosses a plane through the last one, facing the view.
+        const Vec3& n = m_sculptMode.grabFacing;
+        const Vec3 o = m_sculptMode.fromPlate.apply({origin.x(), origin.y(), origin.z()});
+        const Vec3 d = m_sculptMode.fromPlate.applyDirection({direction.x(), direction.y(), direction.z()});
+        const double along = n[0] * d[0] + n[1] * d[1] + n[2] * d[2];
+        if (std::abs(along) < 1e-9)
+            return;
+        SculptStroke& stroke = m_sculptMode.strokes.back();
+        const Vec3 f{stroke.dabs.back()[0], stroke.dabs.back()[1], stroke.dabs.back()[2]};
+        const double t = (n[0] * (f[0] - o[0]) + n[1] * (f[1] - o[1]) + n[2] * (f[2] - o[2])) / along;
+        const Vec3 to = asStored({o[0] + d[0] * t, o[1] + d[1] * t, o[2] + d[2] * t});
+        if (std::hypot(to[0] - f[0], to[1] - f[1], to[2] - f[2]) < stroke.radius * 0.15)
+            return;  // steps about a seventh of the brush, so the pull is even
+        stroke.dabs.push_back({float(to[0]), float(to[1]), float(to[2])});
+        QElapsedTimer timer;
+        timer.start();
+        const auto [first, last] = m_sculptMode.sculptor->moveSnake(to);
+        m_sculptMode.dabs++;
+        m_sculptMode.dabMs += timer.nsecsElapsed() / 1e6;
+        sculptShown(first, last);
+        return;
+    }
     const auto hit = sculptHit(origin, direction);
     if (!hit)
         return;
@@ -3331,8 +3375,10 @@ void MainWindow::sculptAt(const QVector3D& origin, const QVector3D& direction, Q
         if (moved < radius * 0.2)
             return;
     }
-    const int brush = modifiers.testFlag(Qt::ShiftModifier) ? int(sculpt::Brush::Smooth)
-                                                            : std::clamp(m_sculptPanel->brush(), 0, 5);
+    int brush = modifiers.testFlag(Qt::ShiftModifier) ? int(sculpt::Brush::Smooth) : m_sculptPanel->brush();
+    if (brush == int(sculpt::Brush::Grab) || brush == int(sculpt::Brush::SnakeHook) || brush < 0 ||
+        brush > int(sculpt::Brush::Mask))
+        brush = int(sculpt::Brush::Smooth);
     const bool invert = modifiers.testFlag(Qt::ControlModifier);
     // A stroke is kept as dabs of one brush; holding Shift or Ctrl part way starts another.
     if (m_sculptMode.recording < 0 || m_sculptMode.strokes.back().brush != brush ||
@@ -3376,6 +3422,23 @@ void MainWindow::sculptShown(std::uint32_t first, std::uint32_t last)
     }
 }
 
+void MainWindow::wholeMask(int brush)
+{
+    if (!m_sculptMode.active || !m_sculptMode.sculptor || m_sculptMode.stroking)
+        return;
+    if (brush == int(sculpt::Brush::MaskClear) && m_sculptMode.sculptor->mesh().shade.empty())
+        return;  // no mask to clear
+    m_sculptMode.undo.push_back({m_sculptMode.sculptor->mesh(), m_sculptMode.strokes.size()});
+    if (m_sculptMode.undo.size() > 8)
+        m_sculptMode.undo.erase(m_sculptMode.undo.begin());
+    m_sculptMode.strokes.push_back(newStroke(brush, false));
+    const auto [first, last] = brush == int(sculpt::Brush::MaskClear) ? m_sculptMode.sculptor->clearMask()
+                                                                      : m_sculptMode.sculptor->invertMask();
+    sculptShown(first, last);
+    m_sculptPanel->setDetailEnabled(false);
+    m_sculptPanel->setUndoEnabled(true);
+}
+
 void MainWindow::undoStroke()
 {
     if (!m_sculptMode.active || m_sculptMode.undo.empty())
@@ -3395,7 +3458,10 @@ void MainWindow::finishSculpt()
         return;
     // Strokes that did nothing (a Grab that never moved) are left out.
     const std::size_t erased = std::erase_if(m_sculptMode.strokes, [](const SculptStroke& s) {
-        return s.dabs.empty() || (s.brush == int(sculpt::Brush::Grab) && s.grab == std::array<float, 3>{0, 0, 0});
+        if (s.brush == int(sculpt::Brush::MaskClear) || s.brush == int(sculpt::Brush::MaskInvert))
+            return false;
+        return s.dabs.empty() || (s.brush == int(sculpt::Brush::Grab) && s.grab == std::array<float, 3>{0, 0, 0}) ||
+               (s.brush == int(sculpt::Brush::SnakeHook) && s.dabs.size() < 2);
     });
     if (m_sculptMode.strokes.size() <= m_sculptMode.kept) {
         endSculpt();  // nothing new sculpted: the shape stays as it was

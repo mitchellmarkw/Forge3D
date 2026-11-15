@@ -44,7 +44,8 @@ namespace forge::file {
 //      deflated, in base64)
 //  18  sculpt steps (operation "sculpt": detail and strokes: brush, size, strength,
 //      mirrors, detail, dab points, Grab offset)
-inline constexpr int kFormatVersion = 18;
+//  19  sculpt brushes Crease, Snake hook and the mask (paint, clear, invert)
+inline constexpr int kFormatVersion = 19;
 inline constexpr const char* kExtension = ".f3d";
 inline constexpr const char* kDocumentEntry = "document.json";
 

@@ -53,6 +53,9 @@ SculptPanel::SculptPanel(QWidget* parent) : QWidget(parent)
     m_brush->addItem(tr("Pinch"));
     m_brush->addItem(tr("Clay"));
     m_brush->addItem(tr("Grab"));
+    m_brush->addItem(tr("Crease"));
+    m_brush->addItem(tr("Snake hook"));
+    m_brush->addItem(tr("Mask"));
     m_brush->setToolTip(tr("Hold Shift with any brush to smooth"));
     layout->addWidget(labelled(tr("Brush:"), m_brush));
     m_brushHint = new QLabel;
@@ -68,11 +71,29 @@ SculptPanel::SculptPanel(QWidget* parent) : QWidget(parent)
             QT_TR_NOOP("Draws the surface together under the brush, for sharp creases and edges. Ctrl: pushes apart."),
             QT_TR_NOOP("Builds up in flat layers, like adding strips of clay. Ctrl: digs out."),
             QT_TR_NOOP("Pulls a whole area along with the mouse, like soft toffee."),
+            QT_TR_NOOP("Cuts a sharp, narrow groove where you drag, for folds and seams. Ctrl: a sharp ridge."),
+            QT_TR_NOOP("Pulls the surface out after the mouse, for horns, tails and tentacles. Drag away "
+                       "from the shape."),
+            QT_TR_NOOP("Paints a mask (shown dark): the other brushes leave masked parts alone. Ctrl: "
+                       "unpaints."),
         };
-        m_brushHint->setText(tr(hints[std::clamp(brush, 0, 6)]));
+        m_brushHint->setText(tr(hints[std::clamp(brush, 0, 9)]));
     };
     connect(m_brush, &QComboBox::currentIndexChanged, this, describe);
     describe(0);
+
+    // The whole mask at once.
+    auto* maskButtons = new QHBoxLayout;
+    auto* clearMask = new QPushButton(tr("Clear mask"));
+    clearMask->setToolTip(tr("Take the mask off everywhere"));
+    auto* invertMask = new QPushButton(tr("Invert mask"));
+    invertMask->setToolTip(tr("Mask what's free and free what's masked"));
+    maskButtons->addWidget(clearMask);
+    maskButtons->addWidget(invertMask);
+    maskButtons->addStretch(1);
+    layout->addLayout(maskButtons);
+    connect(clearMask, &QPushButton::clicked, this, &SculptPanel::clearMaskRequested);
+    connect(invertMask, &QPushButton::clicked, this, &SculptPanel::invertMaskRequested);
 
     // Mirror: the label above its three ticks.
     auto* mirrorBox = new QWidget;

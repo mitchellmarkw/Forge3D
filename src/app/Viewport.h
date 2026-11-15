@@ -125,6 +125,7 @@ private:
         std::unique_ptr<QOpenGLVertexArrayObject> vao;
         QOpenGLBuffer positions{QOpenGLBuffer::VertexBuffer};
         QOpenGLBuffer normals{QOpenGLBuffer::VertexBuffer};
+        QOpenGLBuffer shade{QOpenGLBuffer::VertexBuffer};  // one float per point: the mask
         QOpenGLBuffer indices{QOpenGLBuffer::IndexBuffer};
         int indexCount = 0;
         void destroy();

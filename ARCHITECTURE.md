@@ -481,7 +481,7 @@ Viewport (mouse)  --leftPressed(ray, handle)-->  MainWindow drag controller
   on the three buttons under it) before anything else, and turns the camera with a
   QVariantAnimation over `OrbitCamera::setAngles` (the short way round in yaw).
 
-## Sculpting (slices 17–21)
+## Sculpting (slices 17–22)
 
 - `sculpt::welded` (shared corners), `sculpt::refined` (edges split at their middles
   until short enough; conforming, so a closed mesh stays closed) and `sculpt::Sculptor`
@@ -507,6 +507,17 @@ Viewport (mouse)  --leftPressed(ray, handle)-->  MainWindow drag controller
   first piece keeping the triangle's slot. `topologyVersion()` tells the app to
   re-upload the whole mesh (`Viewport::meshGrew`) instead of a point range; Undo stroke
   keeps whole meshes.
+- Mask, Crease, Snake hook (slice 22): the mask is `Mesh::shade` (one float per point,
+  0..1, empty when none; split points take the average of their edge's ends). Brush
+  moves are scaled by 1 − mask (Smooth per round, Grab and Snake per point). The
+  viewport always uploads a shade buffer (attribute 2, zeros when none) and darkens by
+  it; point-range updates write it too. Crease: Draw inwards with falloff² plus a pinch
+  towards the centre. Snake hook (`beginSnake`/`moveSnake`): per image a tip and the
+  points pulled last time; each move splits stretched edges round the tip, then moves
+  the points by (to − tip) × falloff × (0.5 + 0.5 × strength) and the tip follows by
+  the same factor. Kept as strokes: Mask dabs; MaskClear / MaskInvert with no dabs;
+  Snake hook dabs are the tips in turn (the app takes each from a plane through the
+  last one, facing the view). File format 19.
 - The display item points at the sculptor's mesh (aliasing shared_ptr), and
   `Viewport::meshPointsChanged` uploads just the changed range with glBufferSubData.
 - Sculpt steps (slice 21): `BooleanOp::Sculpt`, one operand, `SculptFinish{detail,

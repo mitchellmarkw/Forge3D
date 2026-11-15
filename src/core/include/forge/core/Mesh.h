@@ -26,6 +26,9 @@ struct Mesh {
     std::vector<float> positions;
     std::vector<float> normals;
     std::vector<std::uint32_t> indices;
+    // Optional, one per vertex, 0..1: how much of it is shaded (sculpting's mask, drawn
+    // darker). Empty: none.
+    std::vector<float> shade;
 
     std::size_t vertexCount() const { return positions.size() / 3; }
     std::size_t triangleCount() const { return indices.size() / 3; }
