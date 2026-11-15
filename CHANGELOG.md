@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.32.0 Beta — Slice 23: Remesh and Simplify (2026-11-14)
+
+- **Remesh** (in the Sculpt panel): makes the whole shape of even triangles of the
+  **Triangle size** you set. Tidies up areas stretched by Snake hook or Grab, and thins
+  out over-detailed ones. Kept as a step in the strokes, so it's done again when the
+  shape under it changes; a mask comes along with it; Undo stroke takes it back.
+- **Simplify** (Sculpt tab): fewer triangles for any big shape (imported scans and
+  models, or sculpted shapes), keeping its look. It's a step: set **Keep: % of the
+  triangles** in Properties (half to start); Properties shows the counts before and
+  after. **Remove the simplifying** gives the full shape back. Closed shapes stay
+  closed; flat areas lose triangles first, so edges stay sharp.
+- Fixed: Crease, Snake hook and mask strokes were read back from a file as Grab
+  (0.31 was never published).
+- Files saved with 0.32 need 0.32 or later (file format 20).
+- 204 unit tests (5 new: remeshing evenly and keeping a mask; simplifying a sphere, a
+  box and a raw tessellation; Simplify steps; every brush saved and read back).
+
 ## 0.31.0 Beta — Slice 22: Mask, Crease and Snake hook (2026-11-14)
 
 - **Mask** brush: paint over parts you want to protect (they turn dark); the other

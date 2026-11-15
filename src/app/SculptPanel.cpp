@@ -161,6 +161,23 @@ SculptPanel::SculptPanel(QWidget* parent) : QWidget(parent)
     });
     connect(m_finest, &QDoubleSpinBox::valueChanged, this, &SculptPanel::addDetailChanged);
 
+    // Remesh: the whole shape made of even triangles of this size.
+    auto* remeshRow = new QHBoxLayout;
+    auto* remesh = new QPushButton(tr("Remesh"));
+    remesh->setToolTip(tr("Make the whole shape of even triangles of this size: tidies up stretched areas "
+                          "(after Snake hook or Grab) and thins out over-detailed ones"));
+    m_remeshSize = new QDoubleSpinBox;
+    m_remeshSize->setRange(0.01, 50.0);
+    m_remeshSize->setDecimals(2);
+    m_remeshSize->setSingleStep(0.05);
+    m_remeshSize->setSuffix(tr(" mm"));
+    m_remeshSize->setToolTip(tr("How big the triangles are made: smaller is finer, but heavier"));
+    remeshRow->addWidget(remesh);
+    remeshRow->addWidget(new QLabel(tr("Triangle size:")));
+    remeshRow->addWidget(m_remeshSize, 1);
+    layout->addLayout(remeshRow);
+    connect(remesh, &QPushButton::clicked, this, &SculptPanel::remeshRequested);
+
     auto* hint = new QLabel(tr("Drag with the left button over the shape to sculpt. Hold <b>Ctrl</b> for the "
                                "opposite, <b>Shift</b> to smooth. <b>[</b> and <b>]</b> change the size. Turn the view with "
                                "the right button as usual."));
@@ -257,6 +274,16 @@ void SculptPanel::setDetail(int index)
 {
     const QSignalBlocker block(m_detail);
     m_detail->setCurrentIndex(std::clamp(index, 0, 2));
+}
+
+double SculptPanel::remeshSize() const
+{
+    return m_remeshSize->value();
+}
+
+void SculptPanel::setRemeshSize(double mm)
+{
+    m_remeshSize->setValue(mm);
 }
 
 void SculptPanel::setFinestDetail(double mm)

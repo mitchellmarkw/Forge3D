@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "forge/core/Sculpt.h"
 
+#include "forge/core/FileFormat.h"
+#include "forge/core/Remesh.h"
+
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
@@ -517,7 +520,7 @@ std::pair<std::uint32_t, std::uint32_t> Sculptor::apply(const Dab& dab, std::uin
 std::pair<std::uint32_t, std::uint32_t> Sculptor::applyFrom(const Dab& dab, const std::vector<std::uint32_t>& seeds)
 {
     if (!(dab.radius > 0.0) || dab.brush == Brush::Grab || dab.brush == Brush::SnakeHook ||
-        dab.brush == Brush::MaskClear || dab.brush == Brush::MaskInvert)
+        dab.brush == Brush::MaskClear || dab.brush == Brush::MaskInvert || dab.brush == Brush::Remesh)
         return {0, 0};
     std::vector<std::uint32_t> touched = pointsFrom(dab.centre, dab.radius, seeds);
     if (touched.empty())
@@ -663,6 +666,7 @@ std::pair<std::uint32_t, std::uint32_t> Sculptor::applyFrom(const Dab& dab, cons
     case Brush::Mask:
     case Brush::MaskClear:
     case Brush::MaskInvert:
+    case Brush::Remesh:
         return {0, 0};
     }
     if (!m_mesh.shade.empty() && dab.brush != Brush::Smooth)
@@ -925,6 +929,15 @@ void Sculptor::endSnake()
     m_snake.clear();
 }
 
+static_assert(int(Brush::Remesh) == file::kLastSculptBrush, "files must be able to hold every brush");
+
+void Sculptor::remesh(double edge)
+{
+    m_grab.clear();
+    m_snake.clear();
+    setMesh(remesh::remeshed(m_mesh, edge));
+}
+
 std::pair<std::uint32_t, std::uint32_t> Sculptor::clearMask()
 {
     if (m_mesh.shade.empty())
@@ -1041,6 +1054,10 @@ void replay(Sculptor& sculptor, const SculptStroke& stroke, const Mesh& start)
     sculptor.setDetail(stroke.finest);
     if (stroke.brush == int(Brush::MaskClear)) {
         sculptor.clearMask();
+        return;
+    }
+    if (stroke.brush == int(Brush::Remesh)) {
+        sculptor.remesh(stroke.radius);
         return;
     }
     if (stroke.brush == int(Brush::MaskInvert)) {

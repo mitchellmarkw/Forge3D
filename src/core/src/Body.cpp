@@ -384,6 +384,7 @@ std::string toString(BooleanOp op)
     case BooleanOp::Follow: return "Follow";
     case BooleanOp::Pattern: return "Pattern";
     case BooleanOp::Sculpt: return "Sculpt";
+    case BooleanOp::Simplify: return "Simplify";
     }
     return "Combine";
 }

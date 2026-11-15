@@ -39,6 +39,7 @@ enum class Brush {
     Mask,     // paint where the other brushes can't reach (unpaint, inverted)
     MaskClear,   // a whole-mesh step: no mask anywhere
     MaskInvert,  // a whole-mesh step: masked and free swapped
+    Remesh,      // a whole-mesh step: even triangles of a size (the stroke's radius)
 };
 
 // Mirror planes through `centre`, each across one axis: what the brush does on one side
@@ -119,6 +120,9 @@ public:
     // Both return the points changed.
     std::pair<std::uint32_t, std::uint32_t> clearMask();
     std::pair<std::uint32_t, std::uint32_t> invertMask();
+    // The whole mesh made of even triangles about `edge` across (see remesh::remeshed);
+    // the mask comes along.
+    void remesh(double edge);
     float maskAt(std::uint32_t point) const { return m_mesh.shade.empty() ? 0.0f : m_mesh.shade[point]; }
 
     // Puts every point back as given (an undo); normals recomputed.

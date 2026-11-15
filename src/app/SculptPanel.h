@@ -31,7 +31,9 @@ public:
     double size() const;       // the brush's radius, mm
     double strength() const;   // 0..1
     Detail detail() const;
-    void setDetail(int index);  // 0 Low, 1 Medium, 2 High (no detailChanged)
+    void setDetail(int index);
+    double remeshSize() const;
+    void setRemeshSize(double mm);  // 0 Low, 1 Medium, 2 High (no detailChanged)
     void setSize(double radius);
     // Detail where you sculpt: on, and the finest edge (mm).
     bool addDetail() const;
@@ -47,6 +49,7 @@ signals:
     void addDetailChanged();
     void undoRequested();
     void clearMaskRequested();
+    void remeshRequested();
     void invertMaskRequested();
     void doneRequested();
     void cancelRequested();
@@ -63,6 +66,7 @@ private:
     QComboBox* m_detail = nullptr;
     QCheckBox* m_addDetail = nullptr;
     QDoubleSpinBox* m_finest = nullptr;
+    QDoubleSpinBox* m_remeshSize = nullptr;
     QPushButton* m_undo = nullptr;
 };
 

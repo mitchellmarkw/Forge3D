@@ -481,7 +481,7 @@ Viewport (mouse)  --leftPressed(ray, handle)-->  MainWindow drag controller
   on the three buttons under it) before anything else, and turns the camera with a
   QVariantAnimation over `OrbitCamera::setAngles` (the short way round in yaw).
 
-## Sculpting (slices 17–22)
+## Sculpting (slices 17–23)
 
 - `sculpt::welded` (shared corners), `sculpt::refined` (edges split at their middles
   until short enough; conforming, so a closed mesh stays closed) and `sculpt::Sculptor`
@@ -518,6 +518,18 @@ Viewport (mouse)  --leftPressed(ray, handle)-->  MainWindow drag controller
   the same factor. Kept as strokes: Mask dabs; MaskClear / MaskInvert with no dabs;
   Snake hook dabs are the tips in turn (the app takes each from a plane through the
   last one, facing the view). File format 19.
+- Remesh and Simplify (slice 23, `Remesh.h`): both work on a `Work` mesh (triangles and
+  points that can die or be added, per-point triangle lists, open-edge points found
+  once and never touched). `remeshed` (Botsch–Kobbelt): split edges > 4/3 L, collapse
+  < 4/5 L to the middle (link condition, no fold-over, no edge > 4/3 L), flip towards
+  valence 6, slide points to their neighbours' middle along the surface, then put each
+  on the nearest point of the original (a grid of its triangles; the mask is
+  interpolated from there); 4 rounds. `simplified` (Garland–Heckbert): welds, then
+  collapses edges by least quadric error (optimal point, else the better end or the
+  middle) from a heap with per-point stamps until the count is reached. Sculpt brush
+  `Remesh` is a stroke with the size as radius (`Sculptor::remesh`). `BooleanOp::Simplify`
+  (`SimplifyFinish{keep}`) is a mesh-engine one-part step; the app refuses shapes under
+  2,000 triangles. File format 20 (and `kLastSculptBrush`, checked against the enum).
 - The display item points at the sculptor's mesh (aliasing shared_ptr), and
   `Viewport::meshPointsChanged` uploads just the changed range with glBufferSubData.
 - Sculpt steps (slice 21): `BooleanOp::Sculpt`, one operand, `SculptFinish{detail,

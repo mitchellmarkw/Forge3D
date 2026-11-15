@@ -280,7 +280,7 @@ PrimitiveSpec madeRound(const PrimitiveSpec& spec);
 
 // ---- Combine results ------------------------------------------------------------
 
-enum class BooleanOp { Merge, Subtract, Intersect, Split, Mirror, Group, Emboss, Edges, Shell, Follow, Pattern, Sculpt };
+enum class BooleanOp { Merge, Subtract, Intersect, Split, Mirror, Group, Emboss, Edges, Shell, Follow, Pattern, Sculpt, Simplify };
 
 // What happens to the picked edges of a shape.
 enum class EdgeFinishKind {
@@ -384,6 +384,12 @@ struct SculptFinish {
     bool operator==(const SculptFinish&) const = default;
 };
 
+// A Simplify step: the part's triangles thinned to this share of them (0.01..1).
+struct SimplifyFinish {
+    double keep = 0.5;
+    bool operator==(const SimplifyFinish&) const = default;
+};
+
 // One picked face, found again by place (like EdgeRef): a point on it, which way it
 // faces there, and (once located) where that point sits in the part's box.
 struct FaceRef {
@@ -484,6 +490,8 @@ struct BooleanSpec {
     std::optional<EmbossPicture> picture{};
     // Sculpt: the strokes.
     std::optional<SculptFinish> sculpt{};
+    // Simplify: how many of the triangles to keep.
+    std::optional<SimplifyFinish> simplify{};
     // Edges: what to do to which edges.
     std::optional<EdgeFinish> edges{};
     // Shell: how thick, and which faces are left open.

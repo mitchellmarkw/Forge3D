@@ -488,6 +488,8 @@ private:
     SculptMode m_sculptMode;
     SculptPanel* m_sculptPanel = nullptr;
     QAction* m_sculptAction = nullptr;
+    QAction* m_simplifyAction = nullptr;
+    void simplifySelected();
     QAction* m_sculptSmaller = nullptr;
     QAction* m_sculptBigger = nullptr;
     void startSculpt(ObjectId target, bool editing);
@@ -500,6 +502,7 @@ private:
     void sculptAt(const QVector3D& origin, const QVector3D& direction, Qt::KeyboardModifiers modifiers);
     void undoStroke();
     void wholeMask(int brush);  // Clear or Invert mask, kept as a stroke
+    void evenOutSculpt();       // Remesh: even triangles of the panel's size, kept as a stroke
     // Shows what a dab changed: points [first, last), or everything if it added triangles.
     void sculptShown(std::uint32_t first, std::uint32_t last);
     void finishSculpt();
