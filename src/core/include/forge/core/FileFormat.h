@@ -45,7 +45,11 @@ namespace forge::file {
 //  18  sculpt steps (operation "sculpt": detail and strokes: brush, size, strength,
 //      mirrors, detail, dab points, Grab offset)
 //  19  sculpt brushes Crease, Snake hook and the mask (paint, clear, invert)
-inline constexpr int kFormatVersion = 19;
+//  20  simplify steps (operation "simplify": the share of triangles kept); Remesh in
+//      sculpting (a stroke with the triangle size as its radius)
+inline constexpr int kFormatVersion = 20;
+// The highest sculpt::Brush number a file may hold (Remesh).
+inline constexpr int kLastSculptBrush = 12;
 inline constexpr const char* kExtension = ".f3d";
 inline constexpr const char* kDocumentEntry = "document.json";
 

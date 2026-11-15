@@ -202,6 +202,11 @@ std::string describe(const Document& doc, ObjectId id)
         }
         return count;
     }
+    case BooleanOp::Simplify: {
+        if (!spec.simplify)
+            return {};
+        return num(spec.simplify->keep * 100.0) + "% of the triangles";
+    }
     case BooleanOp::Sculpt: {
         if (!spec.sculpt)
             return {};

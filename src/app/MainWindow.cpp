@@ -592,6 +592,10 @@ void MainWindow::createActions()
         }
         startSculpt(history::tip(m_doc, id), false);
     });
+    m_simplifyAction = new QAction(tr("Simplify"), this);
+    m_simplifyAction->setToolTip(tr("Simplify: fewer triangles for the selected shape, keeping its look (for big "
+                                    "imported or sculpted meshes). Set how many to keep in Properties."));
+    connect(m_simplifyAction, &QAction::triggered, this, &MainWindow::simplifySelected);
     m_sculptSmaller = new QAction(this);
     m_sculptSmaller->setShortcut(Qt::Key_BracketLeft);
     connect(m_sculptSmaller, &QAction::triggered, this, [this] {
@@ -878,6 +882,7 @@ void MainWindow::createToolBar()
         {m_split, "split"},
         {m_emboss, "emboss"},
         {m_sculptAction, "sculpt"},
+        {m_simplifyAction, "simplify"},
         {m_layFlat, "lay-on-face"},
         {m_sitOnPlate, "sit-on-plate"},
         {m_export, "export"},
@@ -1013,6 +1018,7 @@ void MainWindow::createToolBar()
     Page sculpt = page(tr("Sculpt"), tr("Sculpting brushes"));
     {
         group(sculpt, tr("Brushes"), {button(m_sculptAction)});
+        group(sculpt, tr("Triangles"), {button(m_simplifyAction)});
         auto* note = new QLabel(tr("Select a shape, then Sculpt: Draw, Smooth, Inflate, Flatten, Pinch, Clay, Grab, "
                                    "Crease and Snake hook brushes, a mask to protect parts, mirrored across X, Y or Z "
                                    "if you like."));
@@ -1232,6 +1238,7 @@ void MainWindow::createDocks()
             m_sculptMode.sculptor->setDetail(m_sculptPanel->addDetail() ? m_sculptPanel->finestDetail() : 0.0);
     });
     connect(m_sculptPanel, &SculptPanel::undoRequested, this, &MainWindow::undoStroke);
+    connect(m_sculptPanel, &SculptPanel::remeshRequested, this, &MainWindow::evenOutSculpt);
     connect(m_sculptPanel, &SculptPanel::clearMaskRequested, this,
             [this] { wholeMask(int(sculpt::Brush::MaskClear)); });
     connect(m_sculptPanel, &SculptPanel::invertMaskRequested, this,
@@ -1305,6 +1312,17 @@ void MainWindow::createDocks()
         run(std::make_unique<EditBodyCommand>(*body, after, on ? "Through all" : "Not through all"));
     });
     connect(m_properties, &PropertiesPanel::keepRoundChanged, this, [this](bool on) { m_keepRound = on; });
+    connect(m_properties, &PropertiesPanel::simplifyKeepRequested, this, [this](ObjectId id, double keep) {
+        const Body* body = m_doc.find(id);
+        if (!body || !body->isBoolean() || !body->boolean->simplify ||
+            std::abs(body->boolean->simplify->keep - keep) < 1e-9)
+            return;
+        Body after = *body;
+        after.boolean->simplify->keep = keep;
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        run(std::make_unique<EditBodyCommand>(*body, after, "Simplify"));
+        QApplication::restoreOverrideCursor();
+    });
     connect(m_properties, &PropertiesPanel::sitOnPlateRequested, this, [this](ObjectId id) {
         try {
             const Placement resting = sitOnPlate(m_doc, id);
@@ -3204,8 +3222,9 @@ void MainWindow::remeshSculpt()
         m_sculptMode.start = m_doc.sculptStart(m_sculptMode.operand, detail);
         const Bounds b = m_sculptMode.start.bounds();
         m_sculptMode.middle = {b.center()[0], b.center()[1], b.center()[2]};
-        // The finest added detail: half the starting triangles' edges.
+        // The finest added detail: half the starting triangles' edges; Remesh starts at their size.
         const double edge = sculpt::edgeForTriangles(m_sculptMode.start, m_sculptMode.start.triangleCount());
+        m_sculptPanel->setRemeshSize(std::max(0.01, std::round(edge * 100.0) / 100.0));
         m_sculptPanel->setFinestDetail(std::max(0.01, std::round(edge * 0.5 * 100.0) / 100.0));
         m_sculptMode.sculptor = std::make_shared<sculpt::Sculptor>(m_sculptMode.start);
         for (const SculptStroke& stroke : m_sculptMode.strokes)
@@ -3301,7 +3320,10 @@ void MainWindow::beginStroke(const QVector3D& origin, const QVector3D& direction
         m_sculptMode.strokes.push_back(stroke);
         m_sculptMode.snaking = true;
         m_sculptMode.grabFacing = m_sculptMode.fromPlate.applyDirection({direction.x(), direction.y(), direction.z()});
-        m_sculptMode.sculptor->beginSnake(from, stroke.radius, stroke.strength, m_sculptMode.sculptor->triangleAt(from),
+        // As replay does it: from the nearest point of the surface, the tips moved to match.
+        const Vec3 start = m_sculptMode.sculptor->onSurface(from);
+        m_sculptMode.snakeShift = {start[0] - from[0], start[1] - from[1], start[2] - from[2]};
+        m_sculptMode.sculptor->beginSnake(start, stroke.radius, stroke.strength, m_sculptMode.sculptor->triangleAt(start),
                                           sculpt::symmetryFor(stroke, m_sculptMode.start));
         return;
     }
@@ -3315,7 +3337,8 @@ void MainWindow::beginStroke(const QVector3D& origin, const QVector3D& direction
         m_sculptMode.grabbing = true;
         m_sculptMode.grabFrom = from;
         m_sculptMode.grabFacing = m_sculptMode.fromPlate.applyDirection({direction.x(), direction.y(), direction.z()});
-        m_sculptMode.sculptor->beginGrab(from, stroke.radius, m_sculptMode.sculptor->triangleAt(from),
+        const Vec3 start = m_sculptMode.sculptor->onSurface(from);  // as replay does it
+        m_sculptMode.sculptor->beginGrab(start, stroke.radius, m_sculptMode.sculptor->triangleAt(start),
                                          sculpt::symmetryFor(stroke, m_sculptMode.start));
         return;
     }
@@ -3358,7 +3381,9 @@ void MainWindow::sculptAt(const QVector3D& origin, const QVector3D& direction, Q
         stroke.dabs.push_back({float(to[0]), float(to[1]), float(to[2])});
         QElapsedTimer timer;
         timer.start();
-        const auto [first, last] = m_sculptMode.sculptor->moveSnake(to);
+        const Vec3& shift = m_sculptMode.snakeShift;
+        const auto [first, last] =
+            m_sculptMode.sculptor->moveSnake({to[0] + shift[0], to[1] + shift[1], to[2] + shift[2]});
         m_sculptMode.dabs++;
         m_sculptMode.dabMs += timer.nsecsElapsed() / 1e6;
         sculptShown(first, last);
@@ -3391,7 +3416,7 @@ void MainWindow::sculptAt(const QVector3D& origin, const QVector3D& direction, Q
     const Vec3 centre = asStored(hit->point);
     stroke.dabs.push_back({float(centre[0]), float(centre[1]), float(centre[2])});
     sculpt::Dab dab;
-    dab.centre = centre;
+    dab.centre = m_sculptMode.sculptor->onSurface(centre);  // as replay does it
     dab.radius = stroke.radius;
     dab.strength = stroke.strength;
     dab.brush = sculpt::Brush(stroke.brush);
@@ -3399,7 +3424,7 @@ void MainWindow::sculptAt(const QVector3D& origin, const QVector3D& direction, Q
     QElapsedTimer timer;
     timer.start();
     // Started from the triangle nearest the dab, as when the stroke is played again.
-    const auto [first, last] = m_sculptMode.sculptor->apply(dab, m_sculptMode.sculptor->triangleAt(centre),
+    const auto [first, last] = m_sculptMode.sculptor->apply(dab, m_sculptMode.sculptor->triangleAt(dab.centre),
                                                             sculpt::symmetryFor(stroke, m_sculptMode.start));
     m_sculptMode.lastDab = hit->point;
     m_sculptMode.dabs++;
@@ -3420,6 +3445,35 @@ void MainWindow::sculptShown(std::uint32_t first, std::uint32_t last)
     } else {
         m_viewport->meshPointsChanged(m_sculptMode.object, first, last);
     }
+}
+
+void MainWindow::evenOutSculpt()
+{
+    if (!m_sculptMode.active || !m_sculptMode.sculptor || m_sculptMode.stroking)
+        return;
+    SculptStroke stroke = newStroke(int(sculpt::Brush::Remesh), false);
+    stroke.radius = m_sculptPanel->remeshSize();
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    QElapsedTimer timer;
+    timer.start();
+    m_sculptMode.undo.push_back({m_sculptMode.sculptor->mesh(), m_sculptMode.strokes.size()});
+    if (m_sculptMode.undo.size() > 8)
+        m_sculptMode.undo.erase(m_sculptMode.undo.begin());
+    try {
+        m_sculptMode.sculptor->remesh(stroke.radius);
+    } catch (const std::exception& e) {
+        m_sculptMode.undo.pop_back();
+        QApplication::restoreOverrideCursor();
+        QMessageBox::information(this, tr("Forge3D"), QString::fromUtf8(e.what()));
+        return;
+    }
+    m_sculptMode.strokes.push_back(stroke);
+    QApplication::restoreOverrideCursor();
+    qInfo().noquote() << "Sculpt: remeshed to" << m_sculptMode.sculptor->mesh().triangleCount() << "triangles in"
+                      << timer.elapsed() << "ms";
+    sculptShown(0, 0);
+    m_sculptPanel->setDetailEnabled(false);
+    m_sculptPanel->setUndoEnabled(true);
 }
 
 void MainWindow::wholeMask(int brush)
@@ -3458,7 +3512,8 @@ void MainWindow::finishSculpt()
         return;
     // Strokes that did nothing (a Grab that never moved) are left out.
     const std::size_t erased = std::erase_if(m_sculptMode.strokes, [](const SculptStroke& s) {
-        if (s.brush == int(sculpt::Brush::MaskClear) || s.brush == int(sculpt::Brush::MaskInvert))
+        if (s.brush == int(sculpt::Brush::MaskClear) || s.brush == int(sculpt::Brush::MaskInvert) ||
+            s.brush == int(sculpt::Brush::Remesh))
             return false;
         return s.dabs.empty() || (s.brush == int(sculpt::Brush::Grab) && s.grab == std::array<float, 3>{0, 0, 0}) ||
                (s.brush == int(sculpt::Brush::SnakeHook) && s.dabs.size() < 2);
@@ -3514,6 +3569,68 @@ void MainWindow::finishSculpt()
     }
     if (run(std::make_unique<CombineCommand>(std::move(result))))
         setSelection(id);
+}
+
+void MainWindow::simplifySelected()
+{
+    const ObjectId id = selectedOne();
+    if (toolOpen() || id == kInvalidId || m_selection.size() != 1 || !m_doc.isTopLevel(id)) {
+        statusBar()->showMessage(tr("Simplify: select one shape on the plate first."), 6000);
+        return;
+    }
+    const ObjectId target = history::tip(m_doc, id);
+    if (const QString open = openMeshIn({target}); !open.isEmpty()) {
+        QMessageBox::information(this, tr("Forge3D"),
+                                 tr("'%1' has gaps in its surface (it isn't watertight), so it can't be simplified.")
+                                     .arg(open));
+        return;
+    }
+    try {
+        // A light shape (a plain box: 12 triangles) would only lose its shape.
+        const std::size_t triangles = m_doc.mesh(target)->triangleCount();
+        if (triangles < 2000) {
+            QMessageBox::information(this, tr("Forge3D"),
+                                     tr("'%1' has only %2 triangles, so simplifying it wouldn't help. Simplify is "
+                                        "for big meshes: imported scans and models, or sculpted shapes.")
+                                         .arg(QString::fromStdString(m_doc.find(id)->name))
+                                         .arg(triangles));
+            return;
+        }
+    } catch (const std::exception&) {
+    }
+    BooleanSpec spec;
+    spec.op = BooleanOp::Simplify;
+    spec.operands = {target};
+    spec.simplify = SimplifyFinish{};
+    {
+        const ObjectId holder = m_doc.parentOf(target);
+        const Transform toStep = holder == kInvalidId ? Transform{} : m_doc.worldTransform(holder).inverse();
+        const auto c = m_doc.worldBounds(target).center();
+        const Vec3 centre = toStep.apply(Vec3{c[0], c[1], c[2]});
+        spec.pivot = {centre[0], centre[1], centre[2]};
+    }
+    Body result;
+    result.id = m_doc.allocateId();
+    result.name = m_doc.uniqueName("Simplified");
+    result.boolean = spec;
+    const ObjectId newId = result.id;
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    bool done = false;
+    if (!m_doc.isTopLevel(target)) {
+        // Rolled back: the step goes in at the bar.
+        const ObjectId object = history::objectOf(m_doc, target);
+        done = run(std::make_unique<InsertStepCommand>(std::move(result), m_doc.parentOf(target)));
+        if (done)
+            setSelection(object);
+    } else {
+        done = run(std::make_unique<CombineCommand>(std::move(result)));
+        if (done)
+            setSelection(newId);
+    }
+    QApplication::restoreOverrideCursor();
+    if (done)
+        statusBar()->showMessage(tr("Simplified to half the triangles. Change how many to keep in Properties."),
+                                 8000);
 }
 
 void MainWindow::endSculpt()
@@ -4278,6 +4395,17 @@ void MainWindow::refreshScene()
                                    selected->boolean->emboss && !selected->boolean->emboss->raised ? tr("engraved")
                                                                                                     : tr("raised"));
                 break;
+            case BooleanOp::Simplify: {
+                context = tr("Made from: %1").arg(names.join(QString()));
+                try {
+                    const auto before = m_doc.mesh(selected->boolean->operands.front())->triangleCount();
+                    const auto after = m_doc.mesh(selected->id)->triangleCount();
+                    context += tr(", %1 triangles now %2.")
+                                   .arg(QLocale().toString(qulonglong(before)), QLocale().toString(qulonglong(after)));
+                } catch (const std::exception&) {
+                }
+                break;
+            }
             default: context = tr("Made from: %1").arg(names.join(joiner)); break;
             }
         } else if (const auto* mesh = std::get_if<MeshSpec>(&selected->spec);
@@ -4329,6 +4457,7 @@ void MainWindow::refreshScene()
         m_layFlat->setChecked(false);
     m_sitOnPlate->setEnabled(!m_selection.empty() && !toolOpen());
     m_sculptAction->setEnabled(m_selection.size() == 1 && m_doc.isTopLevel(m_selection.front()) && !toolOpen());
+    m_simplifyAction->setEnabled(m_sculptAction->isEnabled());
     m_split->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen() && !rolled);
     m_emboss->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_edgesAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());

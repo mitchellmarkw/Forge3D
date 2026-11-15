@@ -127,6 +127,21 @@ PropertiesPanel::PropertiesPanel(QWidget* parent) : QWidget(parent)
             emit throughAllRequested(m_body->id, on);
     });
     general->addRow(m_throughAll);
+    m_keep = new QDoubleSpinBox;
+    m_keep->setRange(1.0, 100.0);
+    m_keep->setDecimals(0);
+    m_keep->setSingleStep(5.0);
+    m_keep->setSuffix(tr(" % of the triangles"));
+    m_keep->setKeyboardTracking(false);  // simplifying a big mesh takes a moment: once, when done typing
+    m_keep->setToolTip(tr("How many of the shape's triangles to keep. Fewer is lighter to print and send, "
+                          "but loses fine detail."));
+    connect(m_keep, &QDoubleSpinBox::valueChanged, this, [this](double percent) {
+        if (m_body)
+            emit simplifyKeepRequested(m_body->id, percent / 100.0);
+    });
+    m_keepRow = m_keep;
+    m_keepLabel = new QLabel(tr("Keep:"));
+    general->addRow(m_keepLabel, m_keep);
     layout->addLayout(general);
 
     // A Text shape's words
@@ -270,6 +285,13 @@ void PropertiesPanel::setBody(const Body* body, const QString& context, bool isP
         const QSignalBlocker block(m_throughAll);
         m_throughAll->setChecked(body->boolean->throughAll);
     }
+    const bool simplify = body->isBoolean() && body->boolean->op == BooleanOp::Simplify && body->boolean->simplify;
+    m_keepRow->setVisible(simplify && !isPart);
+    m_keepLabel->setVisible(simplify && !isPart);
+    if (simplify) {
+        const QSignalBlocker block(m_keep);
+        m_keep->setValue(body->boolean->simplify->keep * 100.0);
+    }
     const auto* textSpec = body->isBoolean() ? nullptr : std::get_if<TextSpec>(&body->spec);
     m_textGroup->setVisible(textSpec != nullptr);
     if (textSpec) {
@@ -302,6 +324,10 @@ void PropertiesPanel::setBody(const Body* body, const QString& context, bool isP
                 button->setText(tr("Remove the words"));
                 button->setToolTip(tr("Give back the shape without the embossed words, where it is"));
             }
+            break;
+        case BooleanOp::Simplify:
+            button->setText(tr("Remove the simplifying"));
+            button->setToolTip(tr("Give back the shape with all its triangles, where it is"));
             break;
         case BooleanOp::Sculpt:
             button->setText(tr("Remove the sculpting"));

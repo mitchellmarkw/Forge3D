@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "forge/core/Document.h"
+#include "forge/core/Remesh.h"
 #include "forge/core/Sculpt.h"
 
 #include "forge/core/Edges.h"
@@ -219,6 +220,11 @@ void Document::validateBoolean(const Body& body, const std::map<ObjectId, Object
             throw std::invalid_argument("Pattern works on exactly one shape");
         if (!body.boolean->pattern)
             throw std::invalid_argument("Pattern needs its settings");
+    } else if (op == BooleanOp::Simplify) {
+        if (ops.size() != 1)
+            throw std::invalid_argument("Simplify works on exactly one shape");
+        if (!body.boolean->simplify || !(body.boolean->simplify->keep > 0.0) || body.boolean->simplify->keep > 1.0)
+            throw std::invalid_argument("Simplify needs a share of the triangles to keep, above 0 and up to all");
     } else if (op == BooleanOp::Sculpt) {
         if (ops.size() != 1)
             throw std::invalid_argument("Sculpt works on exactly one shape");
@@ -488,7 +494,7 @@ TopoDS_Shape Document::combine(const BooleanSpec& spec) const
     const std::vector<ObjectId>& operands = spec.operands;
     TopoDS_Shape result;
     try {
-        if (op == BooleanOp::Emboss || op == BooleanOp::Sculpt)
+        if (op == BooleanOp::Emboss || op == BooleanOp::Sculpt || op == BooleanOp::Simplify)
             throw GeometryError(toString(op) + " is worked out by the mesh engine");
         if (op == BooleanOp::Pattern)
             return patternShape(spec);
@@ -606,6 +612,7 @@ TopoDS_Shape Document::combine(const BooleanSpec& spec) const
             case BooleanOp::Follow:
             case BooleanOp::Pattern:
             case BooleanOp::Sculpt:
+            case BooleanOp::Simplify:
                 break;  // handled above / by the mesh engine
             }
         }
@@ -698,7 +705,8 @@ TopoDS_Shape Document::previewCombine(const BooleanSpec& spec) const
             throw std::out_of_range("No body with id " + std::to_string(part));
     if ((spec.op == BooleanOp::Split || spec.op == BooleanOp::Mirror || spec.op == BooleanOp::Emboss ||
          spec.op == BooleanOp::Edges || spec.op == BooleanOp::Shell ||
-         spec.op == BooleanOp::Follow || spec.op == BooleanOp::Pattern || spec.op == BooleanOp::Sculpt) &&
+         spec.op == BooleanOp::Follow || spec.op == BooleanOp::Pattern || spec.op == BooleanOp::Sculpt ||
+         spec.op == BooleanOp::Simplify) &&
         spec.operands.size() != 1)
         throw std::invalid_argument(toString(spec.op) + " works on exactly one shape");
     return combine(spec);
@@ -767,6 +775,7 @@ BooleanSpec Document::passThrough(const BooleanSpec& spec)
     pass.follow.reset();
     pass.pattern.reset();
     pass.sculpt.reset();
+    pass.simplify.reset();
     switch (spec.op) {
     case BooleanOp::Merge:
     case BooleanOp::Intersect:
@@ -925,7 +934,7 @@ Body Document::removeStep(ObjectId id)
 
 bool Document::specUsesMesh(const BooleanSpec& spec) const
 {
-    if (spec.op == BooleanOp::Emboss || spec.op == BooleanOp::Sculpt)
+    if (spec.op == BooleanOp::Emboss || spec.op == BooleanOp::Sculpt || spec.op == BooleanOp::Simplify)
         return true;  // letters following a surface, and sculpting, only exist as triangles
     for (ObjectId part : spec.operands)
         if (usesMeshEngine(part))
@@ -1219,6 +1228,15 @@ MeshSolid Document::combineMeshes(const BooleanSpec& spec) const
         const ObjectId part = spec.operands.front();
         const Mesh done = sculpted(sculptStart(part, spec.sculpt->detail), *spec.sculpt);
         return meshkernel::transformed(meshkernel::fromTriangles(done.positions, done.indices), localTransform(part));
+    }
+    case BooleanOp::Simplify: {
+        if (!spec.simplify)
+            throw GeometryError("Simplify has no settings");
+        Mesh surface;
+        meshkernel::triangles(parts.front(), surface.positions, surface.indices);
+        const auto want = std::size_t(std::llround(double(surface.triangleCount()) * spec.simplify->keep));
+        const Mesh fewer = remesh::simplified(surface, std::max<std::size_t>(want, 4));
+        return meshkernel::fromTriangles(fewer.positions, fewer.indices);
     }
     case BooleanOp::Emboss: {
         if (!spec.emboss && !spec.picture)

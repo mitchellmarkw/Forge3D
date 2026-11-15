@@ -54,6 +54,8 @@ signals:
     void editEdgesRequested();
     // Subtract: tools go right through ("through all").
     void throughAllRequested(ObjectId id, bool on);
+    // Simplify: the share of triangles to keep (0.01..1).
+    void simplifyKeepRequested(ObjectId id, double keep);
 
 private:
     QDoubleSpinBox* makeLength(const QString& tip);
@@ -79,6 +81,9 @@ private:
     QWidget* m_editEmbossButton = nullptr;
     QWidget* m_editEdgesButton = nullptr;
     QCheckBox* m_throughAll = nullptr;
+    QWidget* m_keepRow = nullptr;
+    QWidget* m_keepLabel = nullptr;
+    QDoubleSpinBox* m_keep = nullptr;
     QWidget* m_textGroup = nullptr;  // the words of a Text shape
     WordsEditor* m_words = nullptr;
     QDoubleSpinBox* m_letterHeight = nullptr;

@@ -163,6 +163,7 @@ const char* opName(BooleanOp op)
     case BooleanOp::Follow: return "follow";
     case BooleanOp::Pattern: return "pattern";
     case BooleanOp::Sculpt: return "sculpt";
+    case BooleanOp::Simplify: return "simplify";
     }
     return "merge";
 }
@@ -224,6 +225,8 @@ json bodyToJson(const Body& b)
             }
             j["sculpt"] = json{{"detail", sc->detail}, {"strokes", strokes}};
         }
+        if (const auto& sf = b.boolean->simplify)
+            j["simplify"] = json{{"keep", sf->keep}};
         if (const auto& p = b.boolean->pattern) {
             static const char* kinds[] = {"row", "grid", "circle"};
             j["pattern"] = json{{"kind", kinds[int(p->kind)]}, {"feature", p->feature},  {"dir1", p->dir1},
@@ -378,6 +381,8 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
             spec.op = BooleanOp::Pattern;
         else if (op == "sculpt" && version >= 18)
             spec.op = BooleanOp::Sculpt;
+        else if (op == "simplify" && version >= 20)
+            spec.op = BooleanOp::Simplify;
         else
             damaged(where + ": unknown combine operation '" + op + "'");
         const auto operands = j.find("operands");
@@ -463,7 +468,7 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
                     if (!s.is_object())
                         damaged(where + ": a sculpting stroke is unreadable");
                     SculptStroke st;
-                    st.brush = std::clamp(s.value("brush", 0), 0, 6);
+                    st.brush = std::clamp(s.value("brush", 0), 0, kLastSculptBrush);
                     st.invert = s.value("invert", false);
                     st.radius = s.value("radius", 1.0);
                     st.strength = s.value("strength", 0.5);
@@ -479,6 +484,12 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
                     sc.strokes.push_back(std::move(st));
                 }
             spec.sculpt = std::move(sc);
+        }
+        if (spec.op == BooleanOp::Simplify) {
+            const auto sj = j.find("simplify");
+            if (sj == j.end() || !sj->is_object())
+                damaged(where + ": missing how much to simplify");
+            spec.simplify = SimplifyFinish{std::clamp(sj->value("keep", 0.5), 0.01, 1.0)};
         }
         if (spec.op == BooleanOp::Pattern) {
             const auto pj = j.find("pattern");
