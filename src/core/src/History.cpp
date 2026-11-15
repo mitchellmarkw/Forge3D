@@ -202,6 +202,12 @@ std::string describe(const Document& doc, ObjectId id)
         }
         return count;
     }
+    case BooleanOp::Sculpt: {
+        if (!spec.sculpt)
+            return {};
+        const std::size_t n = spec.sculpt->strokes.size();
+        return std::to_string(n) + (n == 1 ? " stroke" : " strokes");
+    }
     case BooleanOp::Pattern: {
         if (!spec.pattern)
             return {};

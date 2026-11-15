@@ -104,6 +104,37 @@ void scaleInto(const Document& doc, ObjectId id, const Vec3& factors, const Vec3
         out.push_back(std::move(next));
         return;
     }
+    if (body->boolean->op == BooleanOp::Sculpt && body->boolean->sculpt) {
+        // The strokes are kept in the part's own coordinates: they go where its surface
+        // goes (seen from here, then back into the part as it is after scaling).
+        // Evenly scaled, the brushes grow too.
+        const ObjectId part = body->boolean->operands.front();
+        const Transform before = doc.localTransform(part);
+        Transform after = before;
+        for (const Body& b : out)
+            if (b.id == part)
+                after = placementTransform(b.placement, pivotOf(b));
+        const Transform back = after.inverse();
+        Body next = *body;
+        for (SculptStroke& st : next.boolean->sculpt->strokes) {
+            for (auto& d : st.dabs) {
+                const Vec3 q = before.apply(Vec3{d[0], d[1], d[2]});
+                const Vec3 r = back.apply(Vec3{factors[0] * (q[0] - anchor[0]) + anchor[0],
+                                               factors[1] * (q[1] - anchor[1]) + anchor[1],
+                                               factors[2] * (q[2] - anchor[2]) + anchor[2]});
+                d = {float(r[0]), float(r[1]), float(r[2])};
+            }
+            const Vec3 g = before.applyDirection(Vec3{st.grab[0], st.grab[1], st.grab[2]});
+            const Vec3 h = back.applyDirection(Vec3{factors[0] * g[0], factors[1] * g[1], factors[2] * g[2]});
+            st.grab = {float(h[0]), float(h[1]), float(h[2])};
+            if (even(factors)) {
+                st.radius *= factors[0];
+                st.finest *= factors[0];
+            }
+        }
+        out.push_back(std::move(next));
+        return;
+    }
     if (body->boolean->op == BooleanOp::Pattern && body->boolean->pattern) {
         // The copies keep their places in the stretched shape: spacing grows with it.
         Body next = *body;

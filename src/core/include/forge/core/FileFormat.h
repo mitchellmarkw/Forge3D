@@ -42,7 +42,9 @@ namespace forge::file {
 //  16  pattern steps (operation "pattern": kind, what, directions, counts, spacing, circle)
 //  17  emboss pictures ("picture": logo or relief, settings, and the image's grey pixels,
 //      deflated, in base64)
-inline constexpr int kFormatVersion = 17;
+//  18  sculpt steps (operation "sculpt": detail and strokes: brush, size, strength,
+//      mirrors, detail, dab points, Grab offset)
+inline constexpr int kFormatVersion = 18;
 inline constexpr const char* kExtension = ".f3d";
 inline constexpr const char* kDocumentEntry = "document.json";
 

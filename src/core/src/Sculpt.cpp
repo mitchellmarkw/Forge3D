@@ -843,6 +843,97 @@ Vec3 Symmetry::mirrored(const Vec3& v, std::size_t image) const
     return out;
 }
 
+std::uint32_t Sculptor::triangleAt(const Vec3& point) const
+{
+    // The triangle nearest the point among those in its cell and the cells round it.
+    const std::int64_t ci = std::int64_t(std::floor(point[0] / m_cell)), cj = std::int64_t(std::floor(point[1] / m_cell)),
+                       ck = std::int64_t(std::floor(point[2] / m_cell));
+    const V3 p = toV(point);
+    double best = 1e300;
+    std::int64_t found = -1;
+    for (std::int64_t i = ci - 1; i <= ci + 1; ++i)
+        for (std::int64_t j = cj - 1; j <= cj + 1; ++j)
+            for (std::int64_t k = ck - 1; k <= ck + 1; ++k) {
+                const auto cell = m_cells.find(cellKey(i, j, k));
+                if (cell == m_cells.end())
+                    continue;
+                for (std::uint32_t t : cell->second) {
+                    const std::size_t b = 3 * std::size_t(t);
+                    const V3 c = (at(m_mesh.positions, m_mesh.indices[b]) + at(m_mesh.positions, m_mesh.indices[b + 1]) +
+                                  at(m_mesh.positions, m_mesh.indices[b + 2])) *
+                                 (1.0 / 3.0);
+                    const V3 d = c - p;
+                    const double d2 = dot(d, d);
+                    if (d2 < best) {
+                        best = d2;
+                        found = t;
+                    }
+                }
+            }
+    if (found >= 0)
+        return std::uint32_t(found);
+    // Far from everything: the triangle round the nearest point.
+    const std::uint32_t v = nearestPoint(point);
+    return m_vt[v].empty() ? 0 : m_vt[v].front();
+}
+
+std::size_t trianglesFor(int detail)
+{
+    return detail <= 0 ? 40'000 : detail >= 2 ? 500'000 : 150'000;
+}
+
+Mesh startingMesh(const Mesh& surface, int detail)
+{
+    const Bounds b = surface.bounds();
+    const Mesh shared = welded(surface, std::max(1e-6, double(b.radius()) * 1e-6));
+    const std::size_t want = trianglesFor(detail);
+    // Splitting halves edges, so the count lands within about 2x of the aim either way.
+    return refined(shared, edgeForTriangles(shared, want) * 1.4, want * 3);
+}
+
+Symmetry symmetryFor(const SculptStroke& stroke, const Mesh& start)
+{
+    Symmetry s;
+    s.x = stroke.mirrorX;
+    s.y = stroke.mirrorY;
+    s.z = stroke.mirrorZ;
+    const auto c = start.bounds().center();
+    s.centre = {c[0], c[1], c[2]};
+    return s;
+}
+
+void replay(Sculptor& sculptor, const SculptStroke& stroke, const Mesh& start)
+{
+    const Symmetry symmetry = symmetryFor(stroke, start);
+    sculptor.setDetail(stroke.finest);
+    if (stroke.brush == int(Brush::Grab)) {
+        if (stroke.dabs.empty())
+            return;
+        const Vec3 from{stroke.dabs.front()[0], stroke.dabs.front()[1], stroke.dabs.front()[2]};
+        sculptor.beginGrab(from, stroke.radius, sculptor.triangleAt(from), symmetry);
+        sculptor.moveGrab({stroke.grab[0], stroke.grab[1], stroke.grab[2]});
+        sculptor.endGrab();
+        return;
+    }
+    Dab dab;
+    dab.radius = stroke.radius;
+    dab.strength = stroke.strength;
+    dab.brush = Brush(std::clamp(stroke.brush, 0, int(Brush::Clay)));
+    dab.invert = stroke.invert;
+    for (const auto& c : stroke.dabs) {
+        dab.centre = {c[0], c[1], c[2]};
+        sculptor.apply(dab, sculptor.triangleAt(dab.centre), symmetry);
+    }
+}
+
+Mesh replayed(const Mesh& start, const SculptFinish& finish)
+{
+    Sculptor sculptor(start);
+    for (const SculptStroke& stroke : finish.strokes)
+        replay(sculptor, stroke, start);
+    return sculptor.mesh();
+}
+
 void Sculptor::setPositions(const std::vector<float>& positions)
 {
     if (positions.size() != m_mesh.positions.size())
