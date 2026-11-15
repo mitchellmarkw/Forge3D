@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.31.0 Beta — Slice 22: Mask, Crease and Snake hook (2026-11-14)
+
+- **Mask** brush: paint over parts you want to protect (they turn dark); the other
+  brushes leave them alone, or touch them less where the mask is light. Ctrl unpaints.
+  **Clear mask** and **Invert mask** buttons work on the whole shape.
+- **Crease** brush: cuts a sharp, narrow groove where you drag, for folds, seams and
+  wrinkles. Ctrl makes a sharp ridge.
+- **Snake hook** brush: pulls the surface out after the mouse, for horns, tails and
+  tentacles; detail is added as it stretches, and it works with Mirror.
+- All three are kept in the Sculpted step like the other strokes: the mask comes back
+  when you double-click the step to add more, and Undo stroke takes back mask changes.
+- Files saved with 0.31 need 0.31 or later (file format 19).
+- 199 unit tests (1 new: Crease, Snake hook, and the mask painting, inverting and
+  clearing, live and played back).
+
 ## 0.30.0 Beta — Slice 21: Sculpting kept in the history (2026-11-13)
 
 - **Sculpting is now a step** in the shape's history, like Emboss or Shell, instead of

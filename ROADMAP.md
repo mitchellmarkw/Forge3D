@@ -42,7 +42,8 @@ Gate to Phase 2: a new user prints a customised part within 10 minutes.
 | 18 | More brushes (Inflate, Flatten, Pinch, Clay, Grab) and mirror symmetry (X / Y / Z) | Done (0.27.0) |
 | 19 | Detail where you sculpt (triangles added under the brush) and faster picking | Done (0.28.0) |
 | 20 | View cube: which side faces you; click a side, edge or corner to look from there | Done (0.29.0) |
-| 21 | Sculpting kept in the history (a Sculpt step on top of the parametric steps) | **Delivered for testing** |
+| 21 | Sculpting kept in the history (a Sculpt step on top of the parametric steps) | Done (0.30.0, released) |
+| 22 | Mask (paint, clear, invert), Crease and Snake hook brushes | **Delivered for testing** |
 
 Separate track: sculpt-engine prototype (one Draw brush on a 1M-triangle mesh at 60 fps).
 

@@ -11,7 +11,7 @@
 #include <unordered_map>
 #include <vector>
 
-// Sculpting (prototype): brushes that push and smooth a dense triangle mesh.
+// Sculpting: brushes that push, smooth and mask a dense triangle mesh.
 namespace forge::sculpt {
 
 // Points at the same place (within `tolerance`) made one, so the triangles share them
@@ -34,6 +34,11 @@ enum class Brush {
     Pinch,    // draw points together towards the middle, for sharp creases (apart, inverted)
     Clay,     // build up in flat layers (dig, inverted)
     Grab,     // pull the area along with the mouse (see beginGrab)
+    Crease,   // cut a sharp groove: in and drawn together (a sharp ridge, inverted)
+    SnakeHook,  // pull the surface out after the mouse, for horns and tails (see beginSnake)
+    Mask,     // paint where the other brushes can't reach (unpaint, inverted)
+    MaskClear,   // a whole-mesh step: no mask anywhere
+    MaskInvert,  // a whole-mesh step: masked and free swapped
 };
 
 // Mirror planes through `centre`, each across one axis: what the brush does on one side
@@ -102,6 +107,20 @@ public:
     void beginGrab(const Vec3& centre, double radius, std::uint32_t nearTriangle, const Symmetry& symmetry);
     std::pair<std::uint32_t, std::uint32_t> moveGrab(const Vec3& offset);
     void endGrab();
+    // Snake hook: on press, the tip is the point under the brush; each move pulls the
+    // surface round the tip after it to `to` (and the mirror images likewise), adding
+    // detail as it stretches.
+    void beginSnake(const Vec3& centre, double radius, double strength, std::uint32_t nearTriangle,
+                    const Symmetry& symmetry);
+    std::pair<std::uint32_t, std::uint32_t> moveSnake(const Vec3& to);
+    void endSnake();
+
+    // The mask (the mesh's shade): 1 where brushes can't reach, 0 where they act fully.
+    // Both return the points changed.
+    std::pair<std::uint32_t, std::uint32_t> clearMask();
+    std::pair<std::uint32_t, std::uint32_t> invertMask();
+    float maskAt(std::uint32_t point) const { return m_mesh.shade.empty() ? 0.0f : m_mesh.shade[point]; }
+
     // Puts every point back as given (an undo); normals recomputed.
     void setPositions(const std::vector<float>& positions);
 
@@ -127,6 +146,15 @@ private:
     };
     std::vector<Grabbed> m_grab;
     Symmetry m_grabSymmetry;
+
+    struct SnakeImage {
+        Vec3 tip;
+        std::vector<std::uint32_t> seeds;  // the points pulled last time, to walk out from
+    };
+    std::vector<SnakeImage> m_snake;
+    Symmetry m_snakeSymmetry;
+    double m_snakeRadius = 0.0;
+    double m_snakeFollow = 1.0;
 
     Mesh m_mesh;
     std::vector<std::vector<std::uint32_t>> m_vt;  // the triangles round each point

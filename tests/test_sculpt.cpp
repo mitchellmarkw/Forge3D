@@ -215,6 +215,142 @@ TEST_CASE("Sculpt: the other brushes", "[sculpt]")
     }
 }
 
+TEST_CASE("Sculpt: Crease, Snake hook and the mask", "[sculpt][mask]")
+{
+    const Mesh start = sculpt::refined(box(20), 0.5, 10'000'000);
+    const auto topAt = [](const sculpt::Sculptor& s, double x, double y) {
+        return s.hit({x, y, 50}, {0, 0, -1})->point[2];
+    };
+    const auto under = [](const sculpt::Sculptor& s, double x, double y) {
+        return s.hit({x, y, 50}, {0, 0, -1})->triangle;
+    };
+    sculpt::Dab dab;
+    dab.radius = 4.0;
+    dab.strength = 1.0;
+
+    SECTION("Crease cuts a narrow groove; inverted, a ridge")
+    {
+        sculpt::Sculptor s(start);
+        dab.brush = sculpt::Brush::Crease;
+        for (double x = -5; x <= 5; x += 0.8) {
+            dab.centre = {x, 0, 20};
+            s.apply(dab, under(s, x, 0));
+        }
+        CHECK(topAt(s, 0, 0) < 20.0 - 0.2);
+        CHECK(topAt(s, 0, 3.0) > topAt(s, 0, 0) + 0.15);  // narrow: shallower just off it
+        CHECK(closed(s.mesh()));
+        sculpt::Sculptor t(start);
+        dab.invert = true;
+        dab.centre = {0, 0, 20};
+        t.apply(dab, under(t, 0, 0));
+        CHECK(topAt(t, 0, 0) > 20.0 + 0.1);
+    }
+
+    SECTION("Snake hook pulls the surface out after the mouse, adding detail")
+    {
+        sculpt::Sculptor s(start);
+        s.setDetail(0.3);
+        const std::size_t before = s.mesh().triangleCount();
+        s.beginSnake({0, 0, 20}, 3.0, 1.0, under(s, 0, 0), {});
+        for (double z = 21; z <= 32; z += 1.0)
+            s.moveSnake({0.0, 0.0, z});
+        s.endSnake();
+        CHECK(s.mesh().bounds().max[2] > 31.0);  // a horn about 12 long
+        CHECK_THAT(topAt(s, 8, 8), WithinAbs(20.0, 1e-4));  // the rest untouched
+        CHECK(s.mesh().triangleCount() > before);
+        CHECK(closed(s.mesh()));
+
+        // Mirrored across X: two horns.
+        sculpt::Sculptor m(start);
+        sculpt::Symmetry sym;
+        sym.x = true;
+        m.beginSnake({5, 0, 20}, 3.0, 1.0, under(m, 5, 0), sym);
+        for (double z = 21; z <= 30; z += 1.0)
+            m.moveSnake({5.0, 0.0, z});
+        m.endSnake();
+        CHECK(topAt(m, 5, 0) > 28.0);
+        CHECK(topAt(m, -5, 0) > 28.0);
+        CHECK(closed(m.mesh()));
+    }
+
+    SECTION("Masked areas don't move; inverted, the rest doesn't; cleared, all do")
+    {
+        sculpt::Sculptor s(start);
+        dab.brush = sculpt::Brush::Mask;
+        dab.radius = 4.0;
+        for (double x = -9; x <= 0; x += 1.0)
+            for (double y = -9; y <= 9; y += 1.0) {
+                dab.centre = {x, y, 20};
+                s.apply(dab, under(s, x, y));
+            }
+        REQUIRE(s.mesh().shade.size() == s.mesh().vertexCount());
+        const auto drawAcross = [&](sculpt::Sculptor& t) {
+            sculpt::Dab d;
+            d.brush = sculpt::Brush::Draw;
+            d.radius = 3.0;
+            d.strength = 1.0;
+            for (double x = -6; x <= 6; x += 0.6) {
+                d.centre = {x, 0, 20};
+                t.apply(d, t.triangleAt(d.centre));
+            }
+        };
+        drawAcross(s);
+        CHECK_THAT(topAt(s, -6, 0), WithinAbs(20.0, 1e-4));  // masked
+        CHECK(topAt(s, 6, 0) > 20.2);                                  // free
+        // Detail added under a mask keeps it masked.
+        sculpt::Sculptor d(start);
+        d.setDetail(0.1);
+        sculpt::Dab paint = dab;
+        paint.centre = {-6, 0, 20};
+        d.apply(paint, under(d, -6, 0));
+        drawAcross(d);
+        CHECK(d.mesh().shade.size() == d.mesh().vertexCount());
+        CHECK_THAT(topAt(d, -6, 0), WithinAbs(20.0, 1e-3));
+
+        const double right = topAt(s, 6, 0);
+        s.invertMask();
+        drawAcross(s);
+        CHECK(topAt(s, -6, 0) > 20.2);                       // now free
+        CHECK_THAT(topAt(s, 6, 0), WithinAbs(right, 1e-4));  // now masked: as it was
+        s.clearMask();
+        CHECK(s.mesh().shade.empty());
+        CHECK(closed(s.mesh()));
+    }
+
+    SECTION("Recorded mask, crease and snake strokes play back")
+    {
+        SculptFinish finish;
+        SculptStroke mask;
+        mask.brush = int(sculpt::Brush::Mask);
+        mask.radius = 5;
+        mask.strength = 1;
+        mask.dabs = {{-6.f, 0.f, 20.f}};
+        SculptStroke invert;
+        invert.brush = int(sculpt::Brush::MaskInvert);
+        SculptStroke clear;
+        clear.brush = int(sculpt::Brush::MaskClear);
+        SculptStroke crease;
+        crease.brush = int(sculpt::Brush::Crease);
+        crease.radius = 3;
+        crease.strength = 1;
+        crease.dabs = {{-6.f, 0.f, 20.f}, {6.f, 0.f, 20.f}};
+        SculptStroke snake;
+        snake.brush = int(sculpt::Brush::SnakeHook);
+        snake.radius = 3;
+        snake.strength = 1;
+        snake.finest = 0.3;
+        snake.dabs = {{0.f, 6.f, 20.f}, {0.f, 6.f, 22.f}, {0.f, 6.f, 24.f}};
+        finish.strokes = {mask, invert, crease, clear, snake};
+        const Mesh out = sculpt::replayed(start, finish);
+        sculpt::Sculptor s(out);
+        CHECK(topAt(s, -6, 0) < 20.0 - 0.1);                           // inside the inverted mask's hole
+        CHECK_THAT(topAt(s, 6, 0), WithinAbs(20.0, 1e-4));     // masked after inverting
+        CHECK(topAt(s, 0, 6) > 23.0);                                  // the horn
+        CHECK(out.shade.empty());
+        CHECK(closed(out));
+    }
+}
+
 TEST_CASE("Sculpt: symmetry does the same on the other side", "[sculpt]")
 {
     sculpt::Sculptor s(sculpt::refined(box(20), 0.5, 10'000'000));

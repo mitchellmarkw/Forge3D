@@ -479,6 +479,7 @@ private:
         std::optional<Vec3> lastDab;
         Vec3 middle{0.0, 0.0, 0.0};  // of the starting surface, for the mirror planes
         bool grabbing = false;       // a Grab stroke: pulled across a plane facing the view
+        bool snaking = false;        // a Snake hook stroke: likewise, from tip to tip
         Vec3 grabFrom{0.0, 0.0, 0.0};
         Vec3 grabFacing{0.0, 0.0, 1.0};
         int dabs = 0;
@@ -498,6 +499,7 @@ private:
     void beginStroke(const QVector3D& origin, const QVector3D& direction, Qt::KeyboardModifiers modifiers);
     void sculptAt(const QVector3D& origin, const QVector3D& direction, Qt::KeyboardModifiers modifiers);
     void undoStroke();
+    void wholeMask(int brush);  // Clear or Invert mask, kept as a stroke
     // Shows what a dab changed: points [first, last), or everything if it added triangles.
     void sculptShown(std::uint32_t first, std::uint32_t last);
     void finishSculpt();

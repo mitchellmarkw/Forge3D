@@ -46,6 +46,8 @@ signals:
     void detailChanged();
     void addDetailChanged();
     void undoRequested();
+    void clearMaskRequested();
+    void invertMaskRequested();
     void doneRequested();
     void cancelRequested();
 

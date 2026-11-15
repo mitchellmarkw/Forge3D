@@ -516,11 +516,27 @@ std::pair<std::uint32_t, std::uint32_t> Sculptor::apply(const Dab& dab, std::uin
 
 std::pair<std::uint32_t, std::uint32_t> Sculptor::applyFrom(const Dab& dab, const std::vector<std::uint32_t>& seeds)
 {
-    if (!(dab.radius > 0.0) || dab.brush == Brush::Grab)
+    if (!(dab.radius > 0.0) || dab.brush == Brush::Grab || dab.brush == Brush::SnakeHook ||
+        dab.brush == Brush::MaskClear || dab.brush == Brush::MaskInvert)
         return {0, 0};
     std::vector<std::uint32_t> touched = pointsFrom(dab.centre, dab.radius, seeds);
     if (touched.empty())
         return {0, 0};
+    if (dab.brush == Brush::Mask) {
+        // Paints the mask only: no point moves, no detail is added.
+        if (m_mesh.shade.size() != m_mesh.vertexCount())
+            m_mesh.shade.assign(m_mesh.vertexCount(), 0.0f);
+        const V3 c = toV(dab.centre);
+        const double amount = (dab.invert ? -1.0 : 1.0) * std::clamp(dab.strength, 0.0, 1.0);
+        std::uint32_t lo = UINT32_MAX, hi = 0;
+        for (std::uint32_t v : touched) {
+            const double w = falloff(len(at(m_mesh.positions, v) - c), dab.radius);
+            m_mesh.shade[v] = float(std::clamp(m_mesh.shade[v] + amount * std::min(1.0, 2.0 * w), 0.0, 1.0));
+            lo = std::min(lo, v);
+            hi = std::max(hi, v + 1);
+        }
+        return {lo, hi};
+    }
     // Detail where the brush is: first split long edges under it, so the shape it makes
     // has the triangles to show it.
     std::uint32_t grownFrom = UINT32_MAX;
@@ -619,7 +635,8 @@ std::pair<std::uint32_t, std::uint32_t> Sculptor::applyFrom(const Dab& dab, cons
             for (std::size_t i = 0; i < touched.size(); ++i) {
                 const std::uint32_t v = touched[i];
                 const V3 q = at(p, v);
-                moved[i] = q + (neighbourMiddle(v, current) - q) * (strength * falloff(len(q - c), dab.radius));
+                moved[i] = q + (neighbourMiddle(v, current) - q) *
+                                   (strength * falloff(len(q - c), dab.radius) * (1.0 - double(maskAt(v))));
             }
             for (std::size_t i = 0; i < touched.size(); ++i) {
                 const std::uint32_t v = touched[i];
@@ -630,9 +647,30 @@ std::pair<std::uint32_t, std::uint32_t> Sculptor::applyFrom(const Dab& dab, cons
         }
         break;
     }
+    case Brush::Crease:
+        // In along the area's facing with a sharp middle, and drawn together towards it:
+        // a narrow groove (a ridge, inverted).
+        for (std::size_t i = 0; i < touched.size(); ++i) {
+            const V3 q = at(p, touched[i]);
+            const double f = falloff(len(q - c), dab.radius);
+            V3 toMiddle = c - q;
+            toMiddle = toMiddle - areaNormal * dot(toMiddle, areaNormal);
+            moved[i] = q - areaNormal * (sign * most * f * f) + toMiddle * (0.2 * strength * f);
+        }
+        break;
     case Brush::Grab:
+    case Brush::SnakeHook:
+    case Brush::Mask:
+    case Brush::MaskClear:
+    case Brush::MaskInvert:
         return {0, 0};
     }
+    if (!m_mesh.shade.empty() && dab.brush != Brush::Smooth)
+        for (std::size_t i = 0; i < touched.size(); ++i) {
+            // Masked points move less (not at all where fully masked).
+            const V3 q = at(p, touched[i]);
+            moved[i] = q + (moved[i] - q) * (1.0 - double(m_mesh.shade[touched[i]]));
+        }
     for (std::size_t i = 0; i < touched.size(); ++i) {
         const std::uint32_t v = touched[i];
         p[3 * v] = float(moved[i].x);
@@ -678,6 +716,8 @@ bool Sculptor::splitAround(const std::vector<std::uint32_t>& points, double maxE
                 m_mesh.normals.insert(m_mesh.normals.end(),
                                       {float(nl > 0 ? n.x / nl : 0), float(nl > 0 ? n.y / nl : 0),
                                        float(nl > 0 ? n.z / nl : 1)});
+                if (!m_mesh.shade.empty())
+                    m_mesh.shade.push_back(0.5f * (m_mesh.shade[a] + m_mesh.shade[b]));
                 m_vt.emplace_back();
                 m_mark.push_back(0);
                 middle.emplace(edgeKey(a, b), m);
@@ -780,7 +820,7 @@ void Sculptor::beginGrab(const Vec3& centre, double radius, std::uint32_t nearTr
                 continue;  // where the images overlap, the first one takes it
             taken[v] = 1;
             const auto& q = m_mesh.positions;
-            m_grab.push_back({v, float(falloff(len(at(q, v) - c), radius)),
+            m_grab.push_back({v, float(falloff(len(at(q, v) - c), radius) * (1.0f - maskAt(v))),
                               {q[3 * v], q[3 * v + 1], q[3 * v + 2]}, std::uint8_t(i)});
         }
     }
@@ -807,6 +847,99 @@ std::pair<std::uint32_t, std::uint32_t> Sculptor::moveGrab(const Vec3& offset)
 void Sculptor::endGrab()
 {
     m_grab.clear();
+}
+
+void Sculptor::beginSnake(const Vec3& centre, double radius, double strength, std::uint32_t nearTriangle,
+                          const Symmetry& symmetry)
+{
+    m_snake.clear();
+    m_snakeSymmetry = symmetry;
+    m_snakeRadius = radius;
+    // How closely the tip follows the mouse: all the way at full strength.
+    m_snakeFollow = 0.5 + 0.5 * std::clamp(strength, 0.0, 1.0);
+    if (!(radius > 0.0) || 3 * std::size_t(nearTriangle) + 2 >= m_mesh.indices.size())
+        return;
+    const auto images = symmetry.images(centre);
+    for (std::size_t i = 0; i < images.size(); ++i) {
+        SnakeImage image;
+        image.tip = images[i];
+        if (i == 0)
+            for (int k = 0; k < 3; ++k)
+                image.seeds.push_back(m_mesh.indices[3 * std::size_t(nearTriangle) + k]);
+        else
+            image.seeds = {nearestPoint(images[i])};
+        m_snake.push_back(std::move(image));
+    }
+}
+
+std::pair<std::uint32_t, std::uint32_t> Sculptor::moveSnake(const Vec3& to)
+{
+    if (m_snake.empty())
+        return {0, 0};
+    const Vec3 delta{to[0] - m_snake[0].tip[0], to[1] - m_snake[0].tip[1], to[2] - m_snake[0].tip[2]};
+    const std::size_t before = m_mesh.vertexCount();
+    bool grew = false;
+    std::vector<std::uint32_t> movedAll;
+    std::vector<char> taken;
+    for (std::size_t i = 0; i < m_snake.size(); ++i) {
+        SnakeImage& image = m_snake[i];
+        std::vector<std::uint32_t> touched = pointsFrom(image.tip, m_snakeRadius, image.seeds);
+        if (touched.empty())
+            continue;
+        // Stretched edges get split, so the pulled-out part stays smooth.
+        if (m_detail > 0.0 && m_mesh.triangleCount() < m_maxTriangles &&
+            splitAround(touched, std::max(m_detail, m_snakeRadius * 0.08))) {
+            grew = true;
+            touched = pointsFrom(image.tip, m_snakeRadius, touched);
+        }
+        if (taken.size() < m_mesh.vertexCount())
+            taken.resize(m_mesh.vertexCount(), 0);
+        const Vec3 d = m_snakeSymmetry.mirrored(delta, i);
+        const V3 tip = toV(image.tip);
+        std::vector<std::uint32_t> mine;
+        for (std::uint32_t v : touched) {
+            if (taken[v])
+                continue;  // where the images overlap, the first one takes it
+            taken[v] = 1;
+            const double w = falloff(len(at(m_mesh.positions, v) - tip), m_snakeRadius) * m_snakeFollow *
+                             (1.0 - double(maskAt(v)));
+            for (int k = 0; k < 3; ++k)
+                m_mesh.positions[3 * std::size_t(v) + k] += float(d[k] * w);
+            mine.push_back(v);
+        }
+        for (int k = 0; k < 3; ++k)
+            image.tip[k] += d[k] * m_snakeFollow;
+        image.seeds = touched;
+        movedAll.insert(movedAll.end(), mine.begin(), mine.end());
+    }
+    auto range = normalsAround(movedAll);
+    if (grew) {
+        range.first = std::min(range.first, std::uint32_t(before));
+        range.second = std::uint32_t(m_mesh.vertexCount());
+    }
+    return range;
+}
+
+void Sculptor::endSnake()
+{
+    m_snake.clear();
+}
+
+std::pair<std::uint32_t, std::uint32_t> Sculptor::clearMask()
+{
+    if (m_mesh.shade.empty())
+        return {0, 0};
+    m_mesh.shade.clear();
+    return {0, std::uint32_t(m_mesh.vertexCount())};
+}
+
+std::pair<std::uint32_t, std::uint32_t> Sculptor::invertMask()
+{
+    if (m_mesh.shade.size() != m_mesh.vertexCount())
+        m_mesh.shade.assign(m_mesh.vertexCount(), 0.0f);
+    for (float& m : m_mesh.shade)
+        m = 1.0f - m;
+    return {0, std::uint32_t(m_mesh.vertexCount())};
 }
 
 std::vector<Vec3> Symmetry::images(const Vec3& p) const
@@ -906,6 +1039,24 @@ void replay(Sculptor& sculptor, const SculptStroke& stroke, const Mesh& start)
 {
     const Symmetry symmetry = symmetryFor(stroke, start);
     sculptor.setDetail(stroke.finest);
+    if (stroke.brush == int(Brush::MaskClear)) {
+        sculptor.clearMask();
+        return;
+    }
+    if (stroke.brush == int(Brush::MaskInvert)) {
+        sculptor.invertMask();
+        return;
+    }
+    if (stroke.brush == int(Brush::SnakeHook)) {
+        if (stroke.dabs.empty())
+            return;
+        const Vec3 from{stroke.dabs.front()[0], stroke.dabs.front()[1], stroke.dabs.front()[2]};
+        sculptor.beginSnake(from, stroke.radius, stroke.strength, sculptor.triangleAt(from), symmetry);
+        for (std::size_t i = 1; i < stroke.dabs.size(); ++i)
+            sculptor.moveSnake({stroke.dabs[i][0], stroke.dabs[i][1], stroke.dabs[i][2]});
+        sculptor.endSnake();
+        return;
+    }
     if (stroke.brush == int(Brush::Grab)) {
         if (stroke.dabs.empty())
             return;
@@ -918,7 +1069,7 @@ void replay(Sculptor& sculptor, const SculptStroke& stroke, const Mesh& start)
     Dab dab;
     dab.radius = stroke.radius;
     dab.strength = stroke.strength;
-    dab.brush = Brush(std::clamp(stroke.brush, 0, int(Brush::Clay)));
+    dab.brush = Brush(std::clamp(stroke.brush, 0, int(Brush::Mask)));
     dab.invert = stroke.invert;
     for (const auto& c : stroke.dabs) {
         dab.centre = {c[0], c[1], c[2]};
