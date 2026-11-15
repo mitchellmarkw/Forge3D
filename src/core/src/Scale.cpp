@@ -130,6 +130,7 @@ void scaleInto(const Document& doc, ObjectId id, const Vec3& factors, const Vec3
             if (even(factors)) {
                 st.radius *= factors[0];
                 st.finest *= factors[0];
+                st.tile *= factors[0];
             }
         }
         out.push_back(std::move(next));

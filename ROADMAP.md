@@ -44,7 +44,8 @@ Gate to Phase 2: a new user prints a customised part within 10 minutes.
 | 20 | View cube: which side faces you; click a side, edge or corner to look from there | Done (0.29.0) |
 | 21 | Sculpting kept in the history (a Sculpt step on top of the parametric steps) | Done (0.30.0, released) |
 | 22 | Mask (paint, clear, invert), Crease and Snake hook brushes | Done (0.31.0) |
-| 23 | Remesh (even triangles, in sculpting) and Simplify (a step for any shape) | Done (0.32.0) |
+| 23 | Remesh (even triangles, in sculpting) and Simplify (a step for any shape) | Done (0.32.0, released) |
+| 24 | Pattern brush: built-in patterns or a picture pressed in, repeating | **Delivered for testing** |
 
 Separate track: sculpt-engine prototype (one Draw brush on a 1M-triangle mesh at 60 fps).
 

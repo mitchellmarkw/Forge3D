@@ -665,3 +665,146 @@ TEST_CASE("Sculpt steps: strokes stay on a part that grows or shrinks", "[sculpt
         check(r);
     }
 }
+
+TEST_CASE("Sculpt: the Pattern brush", "[sculpt][pattern]")
+{
+    SECTION("The built-in patterns repeat seamlessly")
+    {
+        for (const std::string& name : sculpt::builtInPatterns()) {
+            SculptPattern pat;
+            pat.name = name;
+            const auto image = sculpt::patternImage(pat);
+            REQUIRE(image);
+            INFO(name);
+            CHECK(image->width >= 128);
+            CHECK(image->grey.size() == std::size_t(image->width) * image->height);
+            // Across the seam it changes no more than from one column to the next inside.
+            double seam = 0.0, inside = 0.0;
+            for (int y = 0; y < image->height; ++y) {
+                const auto g = [&](int x) { return double(image->grey[std::size_t(y) * image->width + x]); };
+                seam += std::abs(g(image->width - 1) - g(0));
+                inside += std::abs(g(image->width / 2) - g(image->width / 2 - 1));
+            }
+            CHECK(seam < inside * 3.0 + 4.0 * image->height);
+            const auto min = *std::min_element(image->grey.begin(), image->grey.end());
+            const auto max = *std::max_element(image->grey.begin(), image->grey.end());
+            CHECK(max - min > 150);  // a real pattern, not flat
+        }
+        SculptPattern unknown;
+        unknown.name = "nonsense";
+        CHECK_THROWS(sculpt::patternImage(unknown));
+    }
+
+    SECTION("Pressed in up to its depth; going over again doesn't press deeper; Ctrl engraves")
+    {
+        const Mesh start = sculpt::refined(box(20), 0.25, 10'000'000);
+        SculptPattern pat;
+        pat.name = "bricks";
+        const double tile = 4.0, depth = 0.6;
+        sculpt::Sculptor s(start);
+        s.beginPattern(sculpt::patternImage(pat), tile, depth);
+        sculpt::Dab dab;
+        dab.brush = sculpt::Brush::Pattern;
+        dab.radius = 4.0;
+        dab.strength = 1.0;
+        for (int pass = 0; pass < 3; ++pass)
+            for (double x = -5; x <= 5; x += 0.8) {
+                dab.centre = {x, 0, 20};
+                s.apply(dab, s.triangleAt(dab.centre));
+            }
+        s.endPattern();
+        double top = 0, high = 0;
+        int raised = 0, low = 0;
+        for (std::size_t v = 0; v < s.mesh().vertexCount(); ++v) {
+            const float z = s.mesh().positions[3 * v + 2];
+            if (std::abs(s.mesh().positions[3 * v]) < 3 && std::abs(s.mesh().positions[3 * v + 1]) < 1.5 &&
+                z > 19.9) {
+                top = std::max(top, double(z));
+                (z > 20.0 + depth * 0.7 ? raised : low)++;
+            }
+            high = std::max(high, double(z));
+        }
+        CHECK(high <= 20.0 + depth + 1e-4);  // never more than its depth, however often
+        CHECK(top > 20.0 + depth * 0.9);
+        CHECK(raised > 20);  // the bricks
+        CHECK(low > 5);      // the mortar between
+        CHECK(closed(s.mesh()));
+
+        sculpt::Sculptor e(start);
+        e.beginPattern(sculpt::patternImage(pat), tile, -depth);
+        dab.centre = {0, 0, 20};
+        e.apply(dab, e.triangleAt(dab.centre));
+        e.endPattern();
+        CHECK(e.mesh().bounds().max[2] <= 20.0 + 1e-4);
+        CHECK(e.mesh().bounds().min[2] >= -1e-4);
+        double deepest = 20.0;
+        for (std::size_t v = 0; v < e.mesh().vertexCount(); ++v)
+            if (std::abs(e.mesh().positions[3 * v]) < 1 && std::abs(e.mesh().positions[3 * v + 1]) < 1)
+                deepest = std::min(deepest, double(e.mesh().positions[3 * v + 2]));
+        CHECK(deepest < 20.0 - depth * 0.8);
+    }
+
+    SECTION("Kept as strokes: played back, saved with the step (a picture of one's own too)")
+    {
+        Document doc;
+        CommandStack stack(doc);
+        Body b;
+        b.id = doc.allocateId();
+        b.name = "Box";
+        b.spec = BoxSpec{20, 20, 20};
+        stack.execute(std::make_unique<AddBodyCommand>(b));
+        SculptFinish finish;
+        finish.detail = 0;
+        SculptPattern scales;
+        scales.name = "scales";
+        SculptPattern own;
+        own.name = "dots.png";
+        own.builtIn = false;
+        auto pic = std::make_shared<PictureData>();
+        pic->width = 8;
+        pic->height = 8;
+        pic->grey.assign(64, 0);
+        pic->grey[27] = pic->grey[28] = pic->grey[35] = pic->grey[36] = 255;  // a dot in the middle
+        own.image = pic;
+        finish.patterns = {scales, own};
+        for (int k = 0; k < 2; ++k) {
+            SculptStroke st;
+            st.brush = int(sculpt::Brush::Pattern);
+            st.radius = 3;
+            st.strength = 1;
+            st.finest = 0.2;
+            st.pattern = k;
+            st.tile = 3;
+            st.mirrorX = k == 1;
+            for (double x = -2; x <= 2; x += 0.7)
+                st.dabs.push_back({float(x + 6 * k - 3), float(4 * k - 2), 20.f});
+            finish.strokes.push_back(st);
+        }
+        Body step;
+        step.id = doc.allocateId();
+        step.name = "Sculpt";
+        BooleanSpec spec;
+        spec.op = BooleanOp::Sculpt;
+        spec.operands = {b.id};
+        spec.sculpt = finish;
+        step.boolean = spec;
+        stack.execute(std::make_unique<CombineCommand>(step));
+        CHECK(doc.worldBounds(step.id).max[2] > 20.5);
+
+        const Mesh first = sculpt::replayed(doc.sculptStart(b.id, 0), finish);
+        const Mesh second = sculpt::replayed(doc.sculptStart(b.id, 0), finish);
+        CHECK(first.positions == second.positions);
+
+        const auto loaded = file::fromJson(file::toJson(doc, "test"));
+        Document other;
+        other.replaceAll(loaded);
+        CHECK(*other.find(step.id) == *doc.find(step.id));
+        CHECK_THAT(meshkernel::volume(other.meshSolid(step.id)),
+                   WithinRel(meshkernel::volume(doc.meshSolid(step.id)), 1e-9));
+
+        // Resized evenly: the pattern grows with it.
+        for (const Body& x : scaledTree(doc, step.id, {2, 2, 2}, {0, 0, 0}))
+            if (x.id == step.id)
+                CHECK_THAT(x.boolean->sculpt->strokes[0].tile, WithinRel(6.0, 1e-9));
+    }
+}

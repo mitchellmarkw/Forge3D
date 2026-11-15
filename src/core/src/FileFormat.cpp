@@ -138,6 +138,36 @@ constexpr const char* kFormatName = "forge3d-document";
     throw FileError("This file is damaged or is not a Forge3D file.\n(" + detail + ")");
 }
 
+// A picture's grey pixels, deflated and in base64.
+json pictureToJson(const PictureData& image)
+{
+    const auto& g = image.grey;
+    std::vector<unsigned char> packed(mz_compressBound(mz_ulong(g.size())));
+    mz_ulong packedSize = mz_ulong(packed.size());
+    if (mz_compress2(packed.data(), &packedSize, g.data(), mz_ulong(g.size()), MZ_BEST_COMPRESSION) != MZ_OK)
+        throw FileError("Could not store a picture (out of memory?).");
+    return json{{"width", image.width},
+                {"height", image.height},
+                {"grey", toBase64(std::string(reinterpret_cast<const char*>(packed.data()), packedSize))}};
+}
+
+std::shared_ptr<const PictureData> pictureFromJson(const json& im, const std::string& where)
+{
+    auto data = std::make_shared<PictureData>();
+    data->width = im.value("width", 0);
+    data->height = im.value("height", 0);
+    if (data->width <= 0 || data->height <= 0 || data->width > 100000 || data->height > 100000)
+        damaged(where + ": the picture's size is unreadable");
+    const std::string packed = fromBase64(im.value("grey", std::string()));
+    data->grey.resize(std::size_t(data->width) * std::size_t(data->height));
+    mz_ulong size = mz_ulong(data->grey.size());
+    if (mz_uncompress(data->grey.data(), &size, reinterpret_cast<const unsigned char*>(packed.data()),
+                      mz_ulong(packed.size())) != MZ_OK ||
+        size != data->grey.size())
+        damaged(where + ": the picture is damaged");
+    return data;
+}
+
 json placementToJson(const Placement& p)
 {
     return json{{"x", p.x},
@@ -218,12 +248,27 @@ json bodyToJson(const Body& b)
                 dabs.reserve(st.dabs.size() * 3);
                 for (const auto& d : st.dabs)
                     dabs.insert(dabs.end(), d.begin(), d.end());
-                strokes.push_back(json{{"brush", st.brush},       {"invert", st.invert},   {"radius", st.radius},
-                                       {"strength", st.strength}, {"mirrorX", st.mirrorX}, {"mirrorY", st.mirrorY},
-                                       {"mirrorZ", st.mirrorZ},   {"finest", st.finest},   {"dabs", dabs},
-                                       {"grab", st.grab}});
+                json sj{{"brush", st.brush},       {"invert", st.invert},   {"radius", st.radius},
+                        {"strength", st.strength}, {"mirrorX", st.mirrorX}, {"mirrorY", st.mirrorY},
+                        {"mirrorZ", st.mirrorZ},   {"finest", st.finest},   {"dabs", dabs},
+                        {"grab", st.grab}};
+                if (st.pattern >= 0) {
+                    sj["pattern"] = st.pattern;
+                    sj["tile"] = st.tile;
+                }
+                strokes.push_back(std::move(sj));
             }
             j["sculpt"] = json{{"detail", sc->detail}, {"strokes", strokes}};
+            if (!sc->patterns.empty()) {
+                json patterns = json::array();
+                for (const SculptPattern& p : sc->patterns) {
+                    json pj{{"name", p.name}, {"builtIn", p.builtIn}};
+                    if (!p.builtIn && p.image)
+                        pj["image"] = pictureToJson(*p.image);
+                    patterns.push_back(std::move(pj));
+                }
+                j["sculpt"]["patterns"] = patterns;
+            }
         }
         if (const auto& sf = b.boolean->simplify)
             j["simplify"] = json{{"keep", sf->keep}};
@@ -253,16 +298,8 @@ json bodyToJson(const Body& b)
         if (const auto& p = b.boolean->picture) {
             json pj{{"name", p->name},   {"relief", p->relief}, {"threshold", p->threshold}, {"invert", p->invert},
                     {"width", p->width}, {"depth", p->depth},   {"raised", p->raised},       {"angle", p->angle}};
-            if (p->image) {
-                const auto& g = p->image->grey;
-                std::vector<unsigned char> packed(mz_compressBound(mz_ulong(g.size())));
-                mz_ulong packedSize = mz_ulong(packed.size());
-                if (mz_compress2(packed.data(), &packedSize, g.data(), mz_ulong(g.size()), MZ_BEST_COMPRESSION) != MZ_OK)
-                    throw FileError("Could not store a picture (out of memory?).");
-                pj["image"] = json{{"width", p->image->width},
-                                   {"height", p->image->height},
-                                   {"grey", toBase64(std::string(reinterpret_cast<const char*>(packed.data()), packedSize))}};
-            }
+            if (p->image)
+                pj["image"] = pictureToJson(*p->image);
             j["picture"] = pj;
         }
         if (const auto& e = b.boolean->emboss) {
@@ -476,6 +513,8 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
                     st.mirrorY = s.value("mirrorY", false);
                     st.mirrorZ = s.value("mirrorZ", false);
                     st.finest = s.value("finest", 0.0);
+                    st.pattern = s.value("pattern", -1);
+                    st.tile = s.value("tile", 0.0);
                     const auto dabs = s.value("dabs", std::vector<float>{});
                     for (std::size_t i = 0; i + 2 < dabs.size(); i += 3)
                         st.dabs.push_back({dabs[i], dabs[i + 1], dabs[i + 2]});
@@ -483,6 +522,24 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
                         st.grab = {g->at(0).get<float>(), g->at(1).get<float>(), g->at(2).get<float>()};
                     sc.strokes.push_back(std::move(st));
                 }
+            if (const auto pats = sj->find("patterns"); pats != sj->end() && pats->is_array())
+                for (const auto& pj : *pats) {
+                    if (!pj.is_object())
+                        damaged(where + ": a sculpting pattern is unreadable");
+                    SculptPattern pat;
+                    pat.name = pj.value("name", std::string());
+                    pat.builtIn = pj.value("builtIn", true);
+                    if (!pat.builtIn) {
+                        const auto im = pj.find("image");
+                        if (im == pj.end() || !im->is_object())
+                            damaged(where + ": a sculpting pattern's picture is missing");
+                        pat.image = pictureFromJson(*im, where);
+                    }
+                    sc.patterns.push_back(std::move(pat));
+                }
+            for (SculptStroke& st : sc.strokes)
+                if (st.pattern >= int(sc.patterns.size()))
+                    damaged(where + ": a sculpting stroke's pattern is missing");
             spec.sculpt = std::move(sc);
         }
         if (spec.op == BooleanOp::Simplify) {
@@ -594,21 +651,8 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
             pic.depth = number(p, "depth", where);
             pic.raised = p.value("raised", true);
             pic.angle = p.value("angle", 0.0);
-            if (const auto im = p.find("image"); im != p.end() && im->is_object()) {
-                auto data = std::make_shared<PictureData>();
-                data->width = im->value("width", 0);
-                data->height = im->value("height", 0);
-                if (data->width <= 0 || data->height <= 0 || data->width > 100000 || data->height > 100000)
-                    damaged(where + ": the picture's size is unreadable");
-                const std::string packed = fromBase64(im->value("grey", std::string()));
-                data->grey.resize(std::size_t(data->width) * std::size_t(data->height));
-                mz_ulong size = mz_ulong(data->grey.size());
-                if (mz_uncompress(data->grey.data(), &size, reinterpret_cast<const unsigned char*>(packed.data()),
-                                  mz_ulong(packed.size())) != MZ_OK ||
-                    size != data->grey.size())
-                    damaged(where + ": the picture is damaged");
-                pic.image = std::move(data);
-            }
+            if (const auto im = p.find("image"); im != p.end() && im->is_object())
+                pic.image = pictureFromJson(*im, where);
             spec.picture = std::move(pic);
         } else if (spec.op == BooleanOp::Emboss) {
             const auto e = j.find("emboss");

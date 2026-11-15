@@ -50,6 +50,7 @@ add_library(forge_core STATIC
     src/Updates.cpp
     src/Sculpt.cpp
     src/Remesh.cpp
+    src/Patterns.cpp
     src/Transform.cpp
 )
 add_library(Forge3D::core ALIAS forge_core)
