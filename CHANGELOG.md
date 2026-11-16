@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.40.0 Beta — Slice 31: Section view (2026-11-16)
+
+- **View → Section View**: cuts the view open so you can look inside a model: wall
+  thicknesses, holes that don't go through, how parts sit inside each other. A small
+  **Section View** panel opens under Objects:
+  - **Cut across**: left to right (X), front to back (Y) or bottom to top (Z).
+  - **Where**: a slider through the model, an exact position in mm, and **Middle of
+    the model**.
+  - **Show the other side** swaps which part is hidden.
+- Cut faces are drawn in a flat, darker shade of the shape's colour.
+- Only the view is cut. The model stays whole: saving, exporting and printing aren't
+  affected, and every tool keeps working while the view is cut open. Close the panel
+  (or untick View → Section View) to see everything again.
+- Good to know: a click can still pick a shape through the part that's hidden.
+
 ## 0.39.0 Beta — Slice 30: Text in sketches (2026-11-16)
 
 - **Text** tool in the sketcher (W): click where the words start, then type them and

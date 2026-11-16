@@ -13,6 +13,7 @@
 #include <QOpenGLWidget>
 #include <QPointF>
 #include <QVector3D>
+#include <QVector4D>
 
 #include <cstdint>
 #include <memory>
@@ -86,6 +87,17 @@ public:
     };
     void setBrushRing(const std::optional<BrushRing>& ring);
 
+    // Section view: everything on the side of the plane that `normal` points to is left
+    // undrawn (where dot(normal, point) > offset, plate mm), and the insides showing
+    // through the cut are drawn flat, like a cut face. None: everything is drawn.
+    struct Section {
+        QVector3D normal{0, 0, 1};
+        float offset = 0.0f;
+    };
+    void setSection(const std::optional<Section>& section);
+    // The box round what's shown (ghosts and see-through helpers aside), plate mm.
+    Bounds sceneBounds() const;
+
     const view::OrbitCamera& camera() const { return m_camera; }
     std::optional<QPointF> projectToScreen(const QVector3D& point) const;
 
@@ -150,6 +162,7 @@ private:
 
     // The view cube
     bool m_viewCube = true;
+    std::optional<Section> m_section;
     std::optional<int> m_cubeHover;
     std::optional<int> m_cubeButtonHover;
     QVariantAnimation* m_turn = nullptr;

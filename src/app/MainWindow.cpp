@@ -11,6 +11,7 @@
 #include "PatternPanel.h"
 #include "ShellPanel.h"
 #include "MeasurePanel.h"
+#include "SectionPanel.h"
 #include "ThreadPanel.h"
 #include "forge/core/Thread.h"
 #include "forge/core/Picking.h"
@@ -1434,9 +1435,53 @@ void MainWindow::createDocks()
                 run(std::make_unique<SetPlacementCommand>(id, wanted, /*mergeable=*/false));
             });
 
+    // Section view (left, under Objects): shown only while the view is cut open.
+    m_sectionPanel = new SectionPanel;
+    m_sectionDock = new QDockWidget(tr("Section View"), this);
+    m_sectionDock->setObjectName(QStringLiteral("SectionDock"));
+    m_sectionDock->setWidget(m_sectionPanel);
+    addDockWidget(Qt::LeftDockWidgetArea, m_sectionDock);
+    m_sectionDock->hide();
+    connect(m_sectionDock, &QDockWidget::visibilityChanged, this, [this] { applySection(true); });
+    connect(m_sectionPanel, &SectionPanel::axisChanged, this, [this] { applySection(true); });
+    connect(m_sectionPanel, &SectionPanel::changed, this, [this] { applySection(false); });
+    QAction* section = m_sectionDock->toggleViewAction();
+    section->setText(tr("&Section View"));
+    section->setToolTip(tr("Cut the view open to look inside the model (the model itself isn't changed)"));
+    section->setStatusTip(section->toolTip());
+    m_viewMenu->addAction(section);
+    m_viewMenu->addSeparator();
     // Let the user bring closed panels back.
     m_viewMenu->addAction(objectsDock->toggleViewAction());
     m_viewMenu->addAction(propsDock->toggleViewAction());
+}
+
+void MainWindow::applySection(bool newRange)
+{
+    if (!m_sectionDock || !m_sectionPanel)
+        return;
+    if (!m_sectionDock->isVisible()) {
+        m_viewport->setSection(std::nullopt);
+        return;
+    }
+    const int axis = m_sectionPanel->axis();
+    if (newRange) {
+        const Bounds box = m_viewport->sceneBounds();
+        // setRange comes back here (changed) to draw it.
+        if (box.valid)
+            m_sectionPanel->setRange(box.min[std::size_t(axis)], box.max[std::size_t(axis)], true);
+        else
+            m_sectionPanel->setRange(-50.0, 50.0, true);
+        return;
+    }
+    // Hidden by default: the right (X), the front (Y), the top (Z): the sides the view
+    // usually looks from.
+    const bool hideHigh = (axis != 1) != m_sectionPanel->otherSide();
+    Viewport::Section cut;
+    cut.normal = QVector3D(axis == 0 ? 1.0f : 0.0f, axis == 1 ? 1.0f : 0.0f, axis == 2 ? 1.0f : 0.0f) *
+                 (hideHigh ? 1.0f : -1.0f);
+    cut.offset = float(m_sectionPanel->position()) * (hideHigh ? 1.0f : -1.0f);
+    m_viewport->setSection(cut);
 }
 
 void MainWindow::createStatusBar()

@@ -53,6 +53,7 @@ class SplitPanel;
 class EmbossPanel;
 class Tour;
 class MeasurePanel;
+class SectionPanel;
 class SculptPanel;
 class EdgesPanel;
 class FollowPanel;
@@ -519,6 +520,9 @@ private:
     };
     MeasureMode m_measureMode;
     MeasurePanel* m_measurePanel = nullptr;
+    SectionPanel* m_sectionPanel = nullptr;
+    QDockWidget* m_sectionDock = nullptr;
+    void applySection(bool newRange);
     QAction* m_measureAction = nullptr;
     void startMeasure();
     void endMeasure();
