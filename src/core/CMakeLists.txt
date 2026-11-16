@@ -44,6 +44,7 @@ add_library(forge_core STATIC
     src/Split.cpp
     src/Tessellator.cpp
     src/Sketch.cpp
+    src/SketchEdit.cpp
     src/SketchShape.cpp
     src/Text.cpp
     src/Picture.cpp

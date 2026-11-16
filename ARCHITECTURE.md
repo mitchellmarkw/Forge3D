@@ -732,3 +732,36 @@ and sharp across edges.
   the sketch on screen into the current outline or the profile/path before switching
   (`loftStep`, `sweepStage`); neighbouring outlines (or the profile edge-on and an
   upright guide) are grey reference lines. File format 23.
+
+## Sketch tools (slice 28)
+
+- `SketchEdit.h` (core): `roundCorner`, `trimPiece` / `trim`, `offset`, `mirror`. Each
+  edits the `Sketch` and adds the rules that hold the result; they throw
+  `std::invalid_argument` with a user message and change nothing when they can't.
+- Round corner: the two lines are shortened to new points, an arc joins them (two
+  Tangent rules and a Radius dimension), and the corner point stays on two helper
+  lines Parallel to the lines (sharing their new ends, so in line with them). A
+  length on either line becomes a Distance from its far end to the corner; Equal
+  rules on them are dropped.
+- Trim: `cutsOf` finds where other curves cross a curve (line/line, line/circle,
+  circle/circle, within both curves); the piece between the cuts either side of the
+  click goes. Ends: the end point is replaced (PointOn the cutting curve, or an
+  existing point there). Middle: a second curve is added (lines: Parallel + PointOn;
+  arcs: the same centre + Equal). Circles become arcs. Lengths on a cut line go.
+- Offset: `chainOf` walks the joined lines and arcs (no branching); each joint moves
+  to where the two offset curves meet (smooth joints: straight out); closed chains
+  use the signed area to know which way is out. Copies: lines Parallel to the
+  originals, arcs on the same centre point, Tangent rules copied, and a `Rule::Gap`
+  dimension (two lines: the copy's start a signed distance left of the original;
+  circles / arcs: the difference in radius) for each run of pieces joined by Tangent
+  rules (a run shares one gap). File format 24.
+- Mirror: each point gets an image held by a Symmetric rule (points on the axis are
+  shared); arcs swap start and end; circles get an Equal rule. `endsOntoLine` first
+  moves loose ends within 3% of the picked curves' size onto the axis (PointOn), and
+  the app calls `straighten` (an axis within 10° of upright / level is turned to it,
+  its PointOn points with it, and gets a Vertical / Horizontal rule) when the rules
+  allow. Both place the points directly: left to the solver, a PointOn pull can send
+  the line's free end far away.
+- The app: `SketchView::change` wraps a tool (undo snapshot, solve, put back with the
+  reason on failure). Trim is a tool mode (`Tool::Trim`, hover shows `trimPiece`);
+  the others act on the picks and ask for a size.

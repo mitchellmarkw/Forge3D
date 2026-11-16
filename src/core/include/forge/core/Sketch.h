@@ -48,6 +48,9 @@ enum class Rule {
     DistanceY,      // a, b: points `value` apart up (signed, b - a)
     Radius,         // a: circle / arc of radius `value`
     Angle,          // a, b: lines at `value` degrees (a to b, anticlockwise); b = -1: a from across
+    Gap,            // a, b: curves `value` apart (an offset copy and its original). Two lines: a's
+                    // start is `value` to the left of b (signed); circles / arcs: a's radius is
+                    // `value` more than b's (signed)
 };
 
 struct Constraint {

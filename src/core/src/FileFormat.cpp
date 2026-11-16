@@ -70,7 +70,7 @@ std::string fromBase64(const std::string& text)
 const char* const kGeoKinds[] = {"line", "circle", "arc"};
 const char* const kRules[] = {"horizontal", "vertical", "parallel", "perpendicular", "equal",  "tangent",
                               "pointOn",    "coincident", "symmetric", "midpoint", "fixed", "distance",
-                              "distanceX", "distanceY", "radius", "angle"};
+                              "distanceX", "distanceY", "radius", "angle", "gap"};
 
 json sketchToJson(const sketch::Sketch& s)
 {

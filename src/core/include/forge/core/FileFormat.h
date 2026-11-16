@@ -52,7 +52,7 @@ namespace forge::file {
 //  22  thread steps (operation "thread": the round face picked, size, pitch, fit, hand)
 //  23  lofts (outlines stacked at heights) and sweeps (an outline along a drawn path
 //      or a spiral)
-inline constexpr int kFormatVersion = 23;
+inline constexpr int kFormatVersion = 24;
 // The highest sculpt::Brush number a file may hold (Pattern).
 inline constexpr int kLastSculptBrush = 13;
 inline constexpr const char* kExtension = ".f3d";

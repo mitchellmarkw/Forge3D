@@ -117,7 +117,13 @@ void SketchView::setTool(Tool tool)
     case Tool::Point:
         emit message(tr("Point: click to put a point (a hole goes at each point on its own)."), false);
         break;
+    case Tool::Trim:
+        emit message(tr("Trim: click a piece of a line or curve to take it away, back to where other lines "
+                        "cross it (the piece shows red). Esc when done."),
+                     false);
+        break;
     }
+    m_trimPiece.reset();
     update();
 }
 
@@ -228,7 +234,15 @@ std::optional<SketchView::Pick> SketchView::pickAt(const QPointF& pixel) const
     }
     if (best)
         return best;
-    bestD = kPickPixels;
+    if (const int g = geoAt(pixel); g >= 0)
+        return Pick{Pick::Geo, g};
+    return std::nullopt;
+}
+
+int SketchView::geoAt(const QPointF& pixel) const
+{
+    int best = -1;
+    double bestD = kPickPixels;
     for (std::size_t i = 0; i < m_sketch.geos.size(); ++i) {
         const Geo& g = m_sketch.geos[i];
         double d = 1e300;
@@ -250,7 +264,7 @@ std::optional<SketchView::Pick> SketchView::pickAt(const QPointF& pixel) const
         }
         if (d < bestD) {
             bestD = d;
-            best = Pick{Pick::Geo, int(i)};
+            best = int(i);
         }
     }
     return best;
@@ -336,6 +350,15 @@ void SketchView::clickTool(const Snap& snapIn)
     Snap snap = snapIn;
     switch (m_tool) {
     case Tool::Select: return;
+    case Tool::Trim: {
+        const int geo = geoAt(m_cursorPixel);
+        if (geo < 0)
+            return;
+        const Point at = toSketch(m_cursorPixel);
+        change([&] { trim(m_sketch, geo, at); }, QString());
+        m_trimPiece.reset();
+        return;
+    }
     case Tool::Point: {
         if (snap.point >= 0)
             return;  // already a point there
@@ -633,14 +656,15 @@ void SketchView::editDimension(int index)
     Constraint& c = m_sketch.constraints[std::size_t(index)];
     if (!isDimension(c.rule))
         return;
-    const bool signedValue = c.rule == Rule::DistanceX || c.rule == Rule::DistanceY;
+    const bool gap = c.rule == Rule::Gap;
+    const bool signedValue = c.rule == Rule::DistanceX || c.rule == Rule::DistanceY || gap;
     const bool angle = c.rule == Rule::Angle;
     QString label = angle ? tr("Angle (degrees):")
                     : c.rule == Rule::Radius ? tr("Radius (mm):")
                                              : tr("Distance (mm):");
     bool accepted = false;
     const double shown = signedValue ? std::abs(c.value) : c.value;
-    const double value = QInputDialog::getDouble(this, tr("Dimension"), label, shown, angle ? -360.0 : signedValue ? 0.0 : 0.001,
+    const double value = QInputDialog::getDouble(this, tr("Dimension"), label, shown, angle ? -360.0 : signedValue && !gap ? 0.0 : 0.001,
                                                  angle ? 360.0 : 100000.0, 3, &accepted);
     if (!accepted)
         return;
@@ -684,6 +708,137 @@ void SketchView::toggleConstruction()
     for (int g : geos)
         m_sketch.geos[std::size_t(g)].construction = to;
     solveNow();
+}
+
+template <typename Change> bool SketchView::change(Change&& change, const QString& done)
+{
+    const Sketch before = m_sketch;
+    remember();
+    QString problem;
+    try {
+        change();
+        const Solved result = solve(m_sketch);
+        if (!result.ok)
+            problem = tr("That doesn't work with the sketch's other rules, so nothing was changed.");
+    } catch (const std::exception& e) {
+        problem = QString::fromUtf8(e.what());
+    }
+    if (!problem.isEmpty()) {
+        m_sketch = before;
+        m_undo.pop_back();
+        solveNow();
+        emit message(problem, true);
+        return false;
+    }
+    m_picks.clear();
+    m_hover.reset();
+    solveNow();
+    if (!done.isEmpty())
+        emit message(done, false);
+    return true;
+}
+
+void SketchView::roundCorners()
+{
+    const std::vector<int> points = picked(Pick::Point);
+    if (points.empty()) {
+        emit message(tr("Pick the corners to round (click a corner point; Ctrl+click for more), then Round corner."),
+                     true);
+        return;
+    }
+    bool accepted = false;
+    const double radius = QInputDialog::getDouble(this, tr("Round corner"), tr("Radius (mm):"), m_lastRadius, 0.01,
+                                                  100000.0, 2, &accepted);
+    if (!accepted)
+        return;
+    m_lastRadius = radius;
+    change(
+        [&] {
+            // Rounding adds points but never renumbers them, so the picks stay good.
+            for (int p : points)
+                roundCorner(m_sketch, p, radius);
+        },
+        tr("Rounded. Double-click the R dimension to change the radius."));
+}
+
+void SketchView::offsetPicked()
+{
+    const std::vector<int> geos = picked(Pick::Geo);
+    if (geos.empty()) {
+        emit message(tr("Pick a line, arc or circle of the outline to copy, then Offset."), true);
+        return;
+    }
+    bool accepted = false;
+    const double distance = QInputDialog::getDouble(
+        this, tr("Offset"), tr("How far out (mm; a minus number goes inwards):"), m_lastOffset, -100000.0, 100000.0,
+        2, &accepted);
+    if (!accepted)
+        return;
+    m_lastOffset = distance;
+    change([&] { offset(m_sketch, geos, distance); },
+           tr("Offset. The copy is held that far from the original: double-click a Gap to change it."));
+}
+
+void SketchView::mirrorPicked()
+{
+    // The line to mirror about: the one helper line picked, or else the line picked last.
+    int axis = -1, helpers = 0;
+    for (const Pick& p : m_picks)
+        if (p.kind == Pick::Geo && m_sketch.geos[std::size_t(p.index)].kind == GeoKind::Line &&
+            m_sketch.geos[std::size_t(p.index)].construction) {
+            axis = p.index;
+            ++helpers;
+        }
+    if (helpers != 1) {
+        axis = -1;
+        for (const Pick& p : m_picks)
+            if (p.kind == Pick::Geo && m_sketch.geos[std::size_t(p.index)].kind == GeoKind::Line)
+                axis = p.index;
+    }
+    std::vector<int> geos;
+    for (int g : picked(Pick::Geo))
+        if (g != axis)
+            geos.push_back(g);
+    std::vector<int> points;
+    const std::vector<int> loose = loosePoints(m_sketch);
+    for (int p : picked(Pick::Point))
+        if (std::find(loose.begin(), loose.end(), p) != loose.end())
+            points.push_back(p);
+    if (axis < 0 || (geos.empty() && points.empty())) {
+        emit message(tr("Pick what to mirror (Ctrl+click for more), Ctrl+click the line to mirror it about last "
+                        "(or a helper line, in any order), then Mirror."),
+                     true);
+        return;
+    }
+    bool straightened = false;
+    const bool done = change(
+        [&] {
+            // A mirror line that's nearly upright or level is meant to be: make it so
+            // first (if the sketch's rules allow), or the two halves wouldn't meet.
+            const Sketch asDrawn = m_sketch;
+            if (straighten(m_sketch, geos, axis)) {
+                bool ok = false;
+                try {
+                    ok = solve(m_sketch).ok;
+                } catch (const std::exception&) {
+                }
+                if (ok)
+                    straightened = true;
+                else
+                    m_sketch = asDrawn;
+            }
+            mirror(m_sketch, geos, points, axis);
+        },
+        QString());
+    if (done)
+        emit message(straightened ? tr("Mirrored. The mirror line leaned a little, so it was made %1 first "
+                                       "(Undo puts everything back).")
+                                        .arg(std::abs(m_sketch.points[std::size_t(m_sketch.geos[std::size_t(axis)].a)].x -
+                                                      m_sketch.points[std::size_t(m_sketch.geos[std::size_t(axis)].b)].x) < 1e-6
+                                                 ? tr("upright")
+                                                 : tr("level"))
+                                  : tr("Mirrored. The copy stays a mirror image of the original."),
+                     false);
 }
 
 void SketchView::deleteSelection()
@@ -759,6 +914,7 @@ QPointF SketchView::ruleAnchor(const Constraint& c, int index) const
     case Rule::Equal:
     case Rule::Tangent:
     case Rule::Radius:
+    case Rule::Gap:
     case Rule::Angle: at = geoMid(c.a); break;
     case Rule::PointOn:
     case Rule::Fixed: at = P(c.a); break;
@@ -902,6 +1058,16 @@ void SketchView::paintEvent(QPaintEvent*)
         p.drawRoundedRect(box, 3, 3);
         p.setPen(failing ? QColor(200, 30, 30) : QColor(40, 40, 60));
         p.drawText(box, Qt::AlignCenter, text);
+    }
+
+    // What Trim would take away
+    if (m_tool == Tool::Trim && m_trimPiece && m_trimPiece->path.size() >= 2) {
+        QPolygonF line;
+        for (const Point& q : m_trimPiece->path)
+            line << toScreen(q);
+        p.setPen(QPen(QColor(215, 40, 40), 3.5, Qt::SolidLine, Qt::RoundCap));
+        p.setBrush(Qt::NoBrush);
+        p.drawPolyline(line);
     }
 
     // What's being drawn
@@ -1057,6 +1223,12 @@ void SketchView::mouseMoveEvent(QMouseEvent* event)
             }
         } catch (const std::exception&) {
         }
+        update();
+        return;
+    }
+    if (m_tool == Tool::Trim) {
+        const int geo = geoAt(pos);
+        m_trimPiece = geo >= 0 ? trimPiece(m_sketch, geo, toSketch(pos)) : std::nullopt;
         update();
         return;
     }
