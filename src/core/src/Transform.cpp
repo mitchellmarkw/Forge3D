@@ -113,7 +113,8 @@ Vec3 halfExtents(const PrimitiveSpec& spec)
                     }
                 return {std::max(x, 0.5), std::max(y, 0.5), p.length / 2.0};
             }
-            else if constexpr (std::is_same_v<T, RevolveSpec> || std::is_same_v<T, HoleSpec>) {
+            else if constexpr (std::is_same_v<T, RevolveSpec> || std::is_same_v<T, HoleSpec> ||
+                               std::is_same_v<T, LoftSpec> || std::is_same_v<T, SweepSpec>) {
                 // As far as the solid reaches from the sketch origin, either way.
                 try {
                     Bnd_Box box;
@@ -396,6 +397,11 @@ void resizeOne(PrimitiveSpec& spec, int axis, double value, const ResizeOptions&
                 const double current = 2.0 * halfExtents(PrimitiveSpec{p})[std::size_t(axis)];
                 if (current > 0.0)
                     sketch::scale(p.sketch, value / current, value / current);
+            } else if constexpr (std::is_same_v<T, LoftSpec> || std::is_same_v<T, SweepSpec>) {
+                // Resized evenly (its outlines, heights and path all together).
+                const double current = 2.0 * halfExtents(PrimitiveSpec{p})[std::size_t(axis)];
+                if (current > 0.0)
+                    p = std::get<T>(scaled(PrimitiveSpec{p}, value / current));
             } else if constexpr (std::is_same_v<T, HoleSpec>) {
                 if (axis == 2) {
                     p.depth = value;

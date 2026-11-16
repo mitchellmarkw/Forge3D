@@ -190,6 +190,34 @@ struct RevolveSpec {
     bool operator==(const RevolveSpec&) const = default;
 };
 
+// A solid blended between outlines stacked up (+Z) from the sketch plane: the first
+// at height 0, each next higher (a square base to a round top, a vase).
+struct LoftSection {
+    sketch::Sketch sketch;  // one closed outline
+    double height = 0.0;    // above the sketch plane
+    bool operator==(const LoftSection&) const = default;
+};
+struct LoftSpec {
+    std::vector<LoftSection> sections;  // at least two, bottom first, each higher
+    bool ruled = false;                 // straight sides between them (else a smooth blend)
+    bool operator==(const LoftSpec&) const = default;
+};
+
+// A cross-section swept along a path. Along a drawn path: the outline drawn in the
+// sketch plane, the path drawn standing up from it (path sketch X along the sketch's X,
+// its Y up out of the plane, +Z), starting at the sketch's origin. Along a spiral (a
+// spring, a coil): the outline drawn as seen from the side, going round the sketch's Y
+// line (like Revolve) and rising `pitch` along it each turn.
+struct SweepSpec {
+    sketch::Sketch profile;
+    bool spiral = false;
+    sketch::Sketch path;   // a drawn path: lines and arcs joined end to end
+    double pitch = 5.0;    // a spiral: how far it rises each turn
+    double turns = 3.0;
+    bool leftHand = false;
+    bool operator==(const SweepSpec&) const = default;
+};
+
 // Holes drilled down (-Z) from the sketch plane at every loose point of the sketch
 // (points not used by any line or circle). The tool body of a Hole step (a Subtract).
 enum class HoleKind { Plain, Counterbored, Countersunk };
@@ -231,11 +259,12 @@ struct MeshSpec {
 
 using PrimitiveSpec =
     std::variant<BoxSpec, CylinderSpec, SphereSpec, ConeSpec, TorusSpec, TubeSpec, WedgeSpec, PyramidSpec, TextSpec,
-                 PadSpec, RevolveSpec, HoleSpec, MeshSpec>;
+                 PadSpec, RevolveSpec, HoleSpec, LoftSpec, SweepSpec, MeshSpec>;
 
 // The kinds of primitive the Add Shape menu offers (every kind but those made from a
-// sketch (pad, revolve, hole) and an imported mesh, the last four), and a new one of each.
-inline constexpr std::size_t kPrimitiveKindCount = std::variant_size_v<PrimitiveSpec> - 4;
+// sketch (pad, revolve, hole, loft, sweep) and an imported mesh, the last six), and a
+// new one of each.
+inline constexpr std::size_t kPrimitiveKindCount = std::variant_size_v<PrimitiveSpec> - 6;
 // Made from a sketch: a pad, revolve or hole.
 bool isSketched(const PrimitiveSpec& spec);
 const sketch::Sketch* sketchOf(const PrimitiveSpec& spec);

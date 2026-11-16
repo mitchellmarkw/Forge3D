@@ -186,6 +186,11 @@ private:
                     bool onFace, const SketchPanel::Options& options);
     void startSketchEdit(ObjectId id);     // a pad, or the Merge / Subtract step holding one
     void finishSketch();
+    // Loft and Sweep: keep what's drawn in the stage open; go to another outline (step
+    // -1 below, +1 above) or between the outline and the path.
+    void storeSketchStage();
+    void loftStep(int step);
+    void sweepStage(bool path);
     void endSketch();
     void updateSketchStatus();
     void lockForSketch(bool on);  // every other command off while sketching
@@ -433,6 +438,11 @@ private:
         ObjectId step = kInvalidId;    // the Merge / Subtract step holding it
         Transform frame;               // sketch -> plate coordinates
         int plane = -1;                // a middle plane (0 front, 1 side, 2 top), or -1
+        std::vector<std::vector<QPointF>> reference;  // the face's outlines, shown in grey
+        LoftSpec loft;                 // Make: Loft: the outlines so far
+        int outline = 0;               // the one open
+        SweepSpec sweep;               // Make: Sweep: the outline and the path
+        bool pathStage = false;        // the path is open (not the outline)
     };
     SketchMode m_sketchMode;
     QMenu* m_sketchMenu = nullptr;

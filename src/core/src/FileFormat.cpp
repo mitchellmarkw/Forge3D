@@ -325,6 +325,24 @@ json bodyToJson(const Body& b)
         j["midplane"] = pad->midplane;
         j["sketch"] = sketchToJson(pad->sketch);
     }
+    if (const auto* l = std::get_if<LoftSpec>(&b.spec)) {
+        json sections = json::array();
+        for (const LoftSection& s : l->sections)
+            sections.push_back(json{{"height", s.height}, {"sketch", sketchToJson(s.sketch)}});
+        j["sections"] = sections;
+        j["ruled"] = l->ruled;
+    }
+    if (const auto* w = std::get_if<SweepSpec>(&b.spec)) {
+        j["profile"] = sketchToJson(w->profile);
+        j["spiral"] = w->spiral;
+        if (w->spiral) {
+            j["pitch"] = w->pitch;
+            j["turns"] = w->turns;
+            j["leftHand"] = w->leftHand;
+        } else {
+            j["path"] = sketchToJson(w->path);
+        }
+    }
     if (const auto* r = std::get_if<RevolveSpec>(&b.spec)) {
         j["axis"] = r->axis;
         j["angle"] = r->angle;
@@ -744,6 +762,37 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
             damaged(where + ": missing sketch");
         pad.sketch = sketchFromJson(*sk, where);
         b.spec = pad;
+    } else if (t == "loft" && version >= 23) {
+        LoftSpec l;
+        l.ruled = j.value("ruled", false);
+        const auto sections = j.find("sections");
+        if (sections == j.end() || !sections->is_array())
+            damaged(where + ": missing the loft's outlines");
+        for (const auto& s : *sections) {
+            const auto sk = s.find("sketch");
+            if (!s.is_object() || sk == s.end() || !sk->is_object())
+                damaged(where + ": a loft outline is damaged");
+            l.sections.push_back({sketchFromJson(*sk, where), s.value("height", 0.0)});
+        }
+        b.spec = l;
+    } else if (t == "sweep" && version >= 23) {
+        SweepSpec w;
+        const auto profile = j.find("profile");
+        if (profile == j.end() || !profile->is_object())
+            damaged(where + ": missing the sweep's outline");
+        w.profile = sketchFromJson(*profile, where);
+        w.spiral = j.value("spiral", false);
+        if (w.spiral) {
+            w.pitch = j.value("pitch", 5.0);
+            w.turns = j.value("turns", 3.0);
+            w.leftHand = j.value("leftHand", false);
+        } else {
+            const auto path = j.find("path");
+            if (path == j.end() || !path->is_object())
+                damaged(where + ": missing the sweep's path");
+            w.path = sketchFromJson(*path, where);
+        }
+        b.spec = w;
     } else if (t == "revolve" && version >= 14) {
         RevolveSpec r;
         r.axis = j.value("axis", -1);

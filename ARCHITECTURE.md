@@ -710,3 +710,25 @@ and sharp across edges.
   trimmed (Manifold intersection) to the face's length. The step subtracts them from
   the part with the mesh engine. File format 22.
 
+## Loft and sweep (slice 27)
+
+- Two more `PrimitiveSpec` kinds made from sketches (before `MeshSpec`, so
+  `kPrimitiveKindCount` is size − 6): `LoftSpec{sections (sketch, height), ruled}` and
+  `SweepSpec{profile, spiral, path, pitch, turns, leftHand}`. They have no size
+  fields: `halfExtents` reads the shape's box and `setSize` / scaling are even only
+  (`scaled()` scales the sketches, heights and pitch).
+- `loftShape`: each section's outer wire, raised to its height (heights must
+  increase; one closed shape each), through `BRepOffsetAPI_ThruSections` (solid,
+  ruled or smooth).
+- `sweepShape`: `BRepOffsetAPI_MakePipeShell` with the profile's face wire. A drawn
+  path is joined into one wire, turned round if drawn from the far end (it must start
+  at the sketch origin, where the outline is), and stood up (sketch Y → Z); corrected
+  Frenet off, round-corner transitions. A spiral is a 2D line on a
+  `Geom_CylindricalSurface` round the sketch's Y axis (radius = the profile's centre),
+  swept with a fixed binormal (`SetMode(gp::DY())`); the profile must sit on one side
+  of the axis and the pitch must exceed its height. On the plate a spiral uses the
+  upright transform, as Revolve does.
+- The app: `SketchMode` keeps the loft/sweep being drawn; `storeSketchStage` saves
+  the sketch on screen into the current outline or the profile/path before switching
+  (`loftStep`, `sweepStage`); neighbouring outlines (or the profile edge-on and an
+  upright guide) are grey reference lines. File format 23.

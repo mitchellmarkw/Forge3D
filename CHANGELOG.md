@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.36.0 Beta — Slice 27: Loft and sweep (2026-11-16)
+
+- **Loft** (in the sketcher, **Make:**): blends one outline into others stacked above
+  it, such as a square base to a round top, a vase or a funnel. Draw the first outline,
+  click **Add one above** and change the copy into the next one at its height; the
+  outlines either side show in grey. **Below** / **Above** move between them, **Remove
+  this outline** takes one out, and **Straight sides** gives flat faces between them
+  instead of a smooth blend.
+- **Sweep** (in the sketcher, **Make:**): moves an outline along a path.
+  - **Along: a path you draw**: draw the outline, click **Draw the path ▶** and draw
+    the path standing up from it (lines and arcs, such as a pipe, a handle or a bent
+    rod). Corners are rounded off.
+  - **Along: a spiral**: a spring or coil. Draw the outline to one side of the up-down
+    line; set **Pitch** (rise per turn), **Turns** and **left-hand**.
+- Both are shapes in the history: double-click to change the outlines, heights, path
+  or spiral. They resize evenly (keep proportions), and add, subtract and round off
+  like other shapes.
+- Files saved with 0.36 need 0.36 or later (file format 23).
+- 213 unit tests (3 new: lofts, paths and springs, saving and resizing).
+
 ## 0.35.0 Beta — Slice 26: Threads (2026-11-16)
 
 - **Thread** (Design tab): cuts a screw thread into a round face of a shape. Click the

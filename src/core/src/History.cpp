@@ -159,6 +159,12 @@ std::string describe(const Document& doc, ObjectId id)
                            (p.reversed ? " down" : p.midplane ? " both ways" : "");
                 else if constexpr (std::is_same_v<T, RevolveSpec>)
                     return std::string("sketch, spun ") + num(p.angle) + "\xC2\xB0";
+                else if constexpr (std::is_same_v<T, LoftSpec>)
+                    return std::to_string(p.sections.size()) + " outlines, " +
+                           num(p.sections.empty() ? 0.0 : p.sections.back().height) + " mm high";
+                else if constexpr (std::is_same_v<T, SweepSpec>)
+                    return p.spiral ? "spiral, " + num(p.turns) + " turns" + (p.leftHand ? ", left-hand" : "")
+                                    : std::string("swept along a path");
                 else if constexpr (std::is_same_v<T, HoleSpec>)
                     return describeHoles(p);
                 else if constexpr (std::is_same_v<T, MeshSpec>)

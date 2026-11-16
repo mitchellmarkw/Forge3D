@@ -19,6 +19,16 @@ TopoDS_Shape faces(const Sketch& s);
 // The pad's solid.
 TopoDS_Shape padShape(const PadSpec& pad);
 
+// The loft's solid: a smooth (or ruled) blend through its outlines, bottom to top.
+TopoDS_Shape loftShape(const LoftSpec& loft);
+// The sweep's solid: the outline swept along the drawn path or round the spiral.
+TopoDS_Shape sweepShape(const SweepSpec& sweep);
+// The drawn path of a sweep, as a wire in the sweep's own coordinates (standing up
+// from the sketch plane); throws GeometryError if it isn't one joined line.
+TopoDS_Shape sweepPath(const SweepSpec& sweep);
+// A sketch's lines and curves as polylines (sketch coordinates), to show as a reference.
+std::vector<std::vector<Point>> outlinesOf(const Sketch& s);
+
 // The revolve's solid: the sketch's outlines spun around its axis line.
 TopoDS_Shape revolveShape(const RevolveSpec& revolve);
 // The cutters of a Hole step: one per loose point of its sketch, going down (-Z) from

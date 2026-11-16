@@ -4,6 +4,7 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDoubleSpinBox>
+#include <QFormLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -42,9 +43,13 @@ SketchPanel::SketchPanel(QWidget* parent) : QWidget(parent)
     m_make->addItem(tr("Pocket (cut the outline in)"), int(Make::Pocket));
     m_make->addItem(tr("Revolve (spin it round a helper line)"), int(Make::Revolve));
     m_make->addItem(tr("Groove (spin it round, cutting in)"), int(Make::Groove));
+    m_make->addItem(tr("Loft (blend up to other outlines)"), int(Make::Loft));
+    m_make->addItem(tr("Sweep (along a path, or a spiral)"), int(Make::Sweep));
     m_make->setToolTip(tr("Pad adds a solid shaped like the outline; Pocket cuts it into the shape you sketched "
                           "on. Revolve spins the outline round a helper line (a knob, a bottle); Groove cuts "
-                          "that in."));
+                          "that in. Loft blends the outline into others drawn above it (a square base to a "
+                          "round top). Sweep moves the outline along a path you draw (a pipe, a handle) or "
+                          "round a spiral (a spring)."));
     makeLayout->addWidget(m_make);
     makeLayout->addSpacing(8);
     m_lengthLabel = new QLabel;
@@ -78,6 +83,77 @@ SketchPanel::SketchPanel(QWidget* parent) : QWidget(parent)
     makeLayout->addWidget(m_otherWay);
     makeLayout->addWidget(m_bothWays);
     makeLayout->addWidget(m_throughAll);
+
+    // Loft: the outlines one by one, each at its height.
+    m_loftGroup = new QWidget;
+    auto* loft = new QVBoxLayout(m_loftGroup);
+    loft->setContentsMargins(0, 0, 0, 0);
+    m_loftOutline = new QLabel;
+    QFont boldish = m_loftOutline->font();
+    boldish.setBold(true);
+    m_loftOutline->setFont(boldish);
+    loft->addWidget(m_loftOutline);
+    m_loftHeightLabel = new QLabel(tr("Height of this outline:"));
+    loft->addWidget(m_loftHeightLabel);
+    m_loftHeight = new QDoubleSpinBox;
+    m_loftHeight->setRange(0.0, 10000.0);
+    m_loftHeight->setDecimals(2);
+    m_loftHeight->setSingleStep(1.0);
+    m_loftHeight->setSuffix(tr(" mm"));
+    m_loftHeight->setToolTip(tr("How far above the first outline (the sketch plane) this one is"));
+    loft->addWidget(m_loftHeight);
+    auto* steps = new QHBoxLayout;
+    m_below = new QPushButton(tr("◀ Below"));
+    m_below->setToolTip(tr("Go to the outline below this one"));
+    m_above = new QPushButton;
+    steps->addWidget(m_below);
+    steps->addWidget(m_above);
+    loft->addLayout(steps);
+    m_removeOutline = new QPushButton(tr("Remove this outline"));
+    m_removeOutline->setToolTip(tr("Take this outline out of the loft (the first one can't be removed)"));
+    loft->addWidget(m_removeOutline);
+    m_ruled = new QCheckBox(tr("Straight sides (not a smooth blend)"));
+    loft->addWidget(m_ruled);
+    auto* loftHelp = new QLabel(tr("Each outline is one closed shape. The next one starts as a copy of this one: "
+                                   "change it to what it becomes higher up (the one below shows in grey)."));
+    loftHelp->setWordWrap(true);
+    loftHelp->setStyleSheet(QStringLiteral("color: palette(mid);"));
+    loft->addWidget(loftHelp);
+    makeLayout->addWidget(m_loftGroup);
+
+    // Sweep: along a path drawn standing up from the outline, or round a spiral.
+    m_sweepGroup = new QWidget;
+    auto* sweep = new QVBoxLayout(m_sweepGroup);
+    sweep->setContentsMargins(0, 0, 0, 0);
+    sweep->addWidget(new QLabel(tr("Along:")));
+    m_along = new QComboBox;
+    m_along->addItem(tr("A path you draw"));
+    m_along->addItem(tr("A spiral (a spring, a coil)"));
+    sweep->addWidget(m_along);
+    m_spiralGroup = new QWidget;
+    auto* spiral = new QFormLayout(m_spiralGroup);
+    spiral->setContentsMargins(0, 0, 0, 0);
+    m_pitch = new QDoubleSpinBox;
+    m_pitch->setRange(0.1, 10000.0);
+    m_pitch->setDecimals(2);
+    m_pitch->setSuffix(tr(" mm"));
+    m_pitch->setToolTip(tr("How far it rises each turn (more than the outline's height, or the turns touch)"));
+    spiral->addRow(tr("Pitch:"), m_pitch);
+    m_turns = new QDoubleSpinBox;
+    m_turns->setRange(0.1, 1000.0);
+    m_turns->setDecimals(2);
+    m_turns->setToolTip(tr("How many times round"));
+    spiral->addRow(tr("Turns:"), m_turns);
+    m_leftHand = new QCheckBox(tr("Turns the other way (left-hand)"));
+    spiral->addRow(m_leftHand);
+    sweep->addWidget(m_spiralGroup);
+    m_pathButton = new QPushButton;
+    sweep->addWidget(m_pathButton);
+    m_sweepHelp = new QLabel;
+    m_sweepHelp->setWordWrap(true);
+    m_sweepHelp->setStyleSheet(QStringLiteral("color: palette(mid);"));
+    sweep->addWidget(m_sweepHelp);
+    makeLayout->addWidget(m_sweepGroup);
     layout->addWidget(makeGroup);
 
     auto* help = new QLabel(tr("<b>Draw</b>: Line (L), Rectangle (R), Circle (C), Arc (A), Slot (S), Point (P). "
@@ -106,6 +182,12 @@ SketchPanel::SketchPanel(QWidget* parent) : QWidget(parent)
     layout->addStretch(1);
 
     connect(m_make, &QComboBox::currentIndexChanged, this, &SketchPanel::updateLabels);
+    connect(m_make, &QComboBox::currentIndexChanged, this, &SketchPanel::makeChanged);
+    connect(m_along, &QComboBox::currentIndexChanged, this, &SketchPanel::updateLabels);
+    connect(m_below, &QPushButton::clicked, this, [this] { emit outlineRequested(-1); });
+    connect(m_above, &QPushButton::clicked, this, [this] { emit outlineRequested(1); });
+    connect(m_removeOutline, &QPushButton::clicked, this, [this] { emit outlineRequested(0); });
+    connect(m_pathButton, &QPushButton::clicked, this, [this] { emit pathRequested(!m_pathStage); });
     connect(m_bothWays, &QCheckBox::toggled, this, &SketchPanel::updateLabels);
     connect(m_otherWay, &QCheckBox::toggled, this, &SketchPanel::updateLabels);
     connect(m_throughAll, &QCheckBox::toggled, this, &SketchPanel::updateLabels);
@@ -137,6 +219,17 @@ void SketchPanel::start(const QString& title, bool onFace, bool editing, const O
     m_otherWay->setChecked(options.otherWay);
     m_bothWays->setChecked(options.bothWays);
     m_throughAll->setChecked(options.throughAll);
+    m_ruled->setChecked(options.ruled);
+    {
+        const QSignalBlocker b4(m_along);
+        m_along->setCurrentIndex(options.spiral ? 1 : 0);
+    }
+    m_pitch->setValue(options.pitch);
+    m_turns->setValue(options.turns);
+    m_leftHand->setChecked(options.leftHand);
+    m_pathStage = false;
+    m_outline = 0;
+    m_outlines = 1;
     m_finish->setText(tr("Finish"));
     m_finish->setToolTip(editing ? tr("Change it to this sketch") : tr("Make it from this sketch"));
     setMessage({}, false);
@@ -182,6 +275,50 @@ bool SketchPanel::throughAll() const
     return m_throughAll->isChecked() && make() == Make::Pocket;
 }
 
+void SketchPanel::setLoftOutline(int index, int count, double height)
+{
+    m_outline = index;
+    m_outlines = count;
+    m_loftHeight->setValue(height);
+    updateLabels();
+}
+
+double SketchPanel::loftHeight() const
+{
+    return m_outline == 0 ? 0.0 : m_loftHeight->value();
+}
+
+bool SketchPanel::ruled() const
+{
+    return m_ruled->isChecked();
+}
+
+bool SketchPanel::spiral() const
+{
+    return m_along->currentIndex() == 1;
+}
+
+double SketchPanel::pitch() const
+{
+    return m_pitch->value();
+}
+
+double SketchPanel::turns() const
+{
+    return m_turns->value();
+}
+
+bool SketchPanel::leftHand() const
+{
+    return m_leftHand->isChecked();
+}
+
+void SketchPanel::setSweepStage(bool path)
+{
+    m_pathStage = path;
+    updateLabels();
+}
+
 void SketchPanel::setStatus(const QString& text, bool problem, bool held)
 {
     m_status->setText(text);
@@ -201,6 +338,41 @@ void SketchPanel::updateLabels()
     const Make kind = make();
     const bool spin = revolve();
     const bool cut = pocket();
+    const bool loft = kind == Make::Loft, sweep = kind == Make::Sweep;
+    m_loftGroup->setVisible(loft);
+    m_sweepGroup->setVisible(sweep);
+    if (loft) {
+        m_loftOutline->setText(tr("Outline %1 of %2").arg(m_outline + 1).arg(std::max(m_outlines, 2)));
+        m_loftHeightLabel->setEnabled(m_outline > 0);
+        m_loftHeight->setEnabled(m_outline > 0);
+        m_below->setEnabled(m_outline > 0);
+        m_removeOutline->setEnabled(m_outline > 0);
+        m_above->setText(m_outline + 1 >= m_outlines ? tr("Add one above ▶") : tr("Above ▶"));
+        m_above->setToolTip(m_outline + 1 >= m_outlines ? tr("Draw another outline higher up (it starts as a copy)")
+                                                        : tr("Go to the outline above this one"));
+    }
+    if (sweep) {
+        const bool spiralling = spiral();
+        m_spiralGroup->setVisible(spiralling);
+        m_pathButton->setVisible(!spiralling);
+        m_pathButton->setText(m_pathStage ? tr("◀ Back to the outline") : tr("Draw the path ▶"));
+        m_sweepHelp->setText(spiralling ? tr("Draw the outline as seen from the side, to one side of the up-down "
+                                             "line through the dot: it goes round that line, rising as it goes.")
+                             : m_pathStage ? tr("The path, seen from the side: it starts at the dot (where the "
+                                                "outline is, the grey line across) and goes up out of the "
+                                                "sketch. Lines and arcs, joined end to end.")
+                                           : tr("Draw the outline (one closed shape), then the path it goes along."));
+    }
+    m_makeLabel->setEnabled(!m_pathStage && m_outline == 0);
+    m_make->setEnabled(!m_pathStage && m_outline == 0);
+    if (loft || sweep) {
+        for (QWidget* w : {static_cast<QWidget*>(m_lengthLabel), static_cast<QWidget*>(m_length),
+                           static_cast<QWidget*>(m_angleLabel), static_cast<QWidget*>(m_angle),
+                           static_cast<QWidget*>(m_axisHelp), static_cast<QWidget*>(m_otherWay),
+                           static_cast<QWidget*>(m_bothWays), static_cast<QWidget*>(m_throughAll)})
+            w->setVisible(false);
+        return;
+    }
     m_lengthLabel->setText(cut ? tr("Depth:") : tr("Length:"));
     m_length->setToolTip(cut ? tr("How deep the pocket goes into the shape")
                              : tr("How far the outline is pushed out"));
@@ -209,6 +381,7 @@ void SketchPanel::updateLabels()
     m_angleLabel->setVisible(spin);
     m_angle->setVisible(spin);
     m_axisHelp->setVisible(spin);
+    m_otherWay->setVisible(true);
     m_bothWays->setVisible(true);
     m_throughAll->setVisible(kind == Make::Pocket);
     m_otherWay->setToolTip(spin  ? tr("Spin the other way round")

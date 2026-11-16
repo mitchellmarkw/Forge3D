@@ -4,6 +4,15 @@
 #include "forge/core/Document.h"  // GeometryError
 
 #include <BRepAdaptor_Curve.hxx>
+#include <BRepAlgoAPI_Cut.hxx>
+#include <BRepLib.hxx>
+#include <BRepOffsetAPI_MakePipeShell.hxx>
+#include <BRepOffsetAPI_ThruSections.hxx>
+#include <Geom2d_Line.hxx>
+#include <Geom2d_TrimmedCurve.hxx>
+#include <Geom_CylindricalSurface.hxx>
+#include <gp_Ax3.hxx>
+#include <gp_Lin2d.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
@@ -41,6 +50,7 @@
 #include <TopoDS_Edge.hxx>
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Wire.hxx>
+#include <TopoDS_Vertex.hxx>
 #include <gp_Ax2.hxx>
 #include <gp_Circ.hxx>
 #include <gp_Pln.hxx>
@@ -48,6 +58,7 @@
 #include <gp_Vec.hxx>
 
 #include <algorithm>
+#include <cstdio>
 #include <cmath>
 #include <numbers>
 
@@ -257,6 +268,246 @@ TopoDS_Shape padShape(const PadSpec& pad)
         return unify.Shape();
     } catch (const Standard_Failure& e) {
         throw GeometryError(std::string("The sketch could not be pushed up: ") + e.GetMessageString());
+    }
+}
+
+namespace {
+
+// The faces of a sketch, one by one.
+std::vector<TopoDS_Face> faceList(const Sketch& s)
+{
+    std::vector<TopoDS_Face> out;
+    for (TopExp_Explorer it(faces(s), TopAbs_FACE); it.More(); it.Next())
+        out.push_back(TopoDS::Face(it.Current()));
+    return out;
+}
+
+TopoDS_Shape fused(const std::vector<TopoDS_Shape>& solids, const char* what)
+{
+    if (solids.empty())
+        throw GeometryError(std::string("Nothing to make the ") + what + " from");
+    TopoDS_Shape result = solids.front();
+    for (std::size_t i = 1; i < solids.size(); ++i) {
+        BRepAlgoAPI_Fuse fuse(result, solids[i]);
+        if (!fuse.IsDone() || fuse.HasErrors())
+            throw GeometryError(std::string("The parts of the ") + what + " overlap in a way that can't be joined");
+        result = fuse.Shape();
+    }
+    return result;
+}
+
+// One face's outline swept (holes swept too and cut out) by a pipe set up by `setUp`.
+template <typename SetUp>
+TopoDS_Shape sweptFace(const TopoDS_Face& face, const TopoDS_Wire& spine, SetUp setUp)
+{
+    const auto sweepWire = [&](const TopoDS_Wire& wire) {
+        BRepOffsetAPI_MakePipeShell pipe(spine);
+        setUp(pipe);
+        pipe.Add(wire);
+        pipe.Build();
+        if (!pipe.IsDone() || !pipe.MakeSolid())
+            throw GeometryError("The outline could not be swept along the path (does it turn too tightly for the "
+                                "outline's size?)");
+        return pipe.Shape();
+    };
+    const TopoDS_Wire outer = BRepTools::OuterWire(face);
+    TopoDS_Shape solid = sweepWire(outer);
+    for (TopExp_Explorer it(face, TopAbs_WIRE); it.More(); it.Next()) {
+        const TopoDS_Wire w = TopoDS::Wire(it.Current());
+        if (w.IsSame(outer))
+            continue;
+        BRepAlgoAPI_Cut cut(solid, sweepWire(w));
+        if (!cut.IsDone() || cut.HasErrors())
+            throw GeometryError("A hole in the outline could not be swept");
+        solid = cut.Shape();
+    }
+    return solid;
+}
+
+Bnd_Box boxOf(const TopoDS_Shape& shape)
+{
+    Bnd_Box box;
+    BRepBndLib::Add(shape, box);
+    return box;
+}
+
+}  // namespace
+
+std::vector<std::vector<Point>> outlinesOf(const Sketch& s)
+{
+    std::vector<std::vector<Point>> out;
+    for (const Geo& g : s.geos) {
+        if (g.construction)
+            continue;
+        const Point a = s.points[std::size_t(g.a)];
+        if (g.kind == GeoKind::Line) {
+            out.push_back({a, s.points[std::size_t(g.b)]});
+            continue;
+        }
+        const double r = radiusOf(s, g);
+        double a0 = 0.0, span = 2.0 * std::numbers::pi;
+        if (g.kind == GeoKind::Arc) {
+            const Point p0 = s.points[std::size_t(g.b)], p1 = s.points[std::size_t(g.c)];
+            a0 = std::atan2(p0.y - a.y, p0.x - a.x);
+            span = std::atan2(p1.y - a.y, p1.x - a.x) - a0;
+            if (span <= 0)
+                span += 2.0 * std::numbers::pi;
+        }
+        std::vector<Point> line;
+        const int n = std::max(8, int(48 * span / (2.0 * std::numbers::pi)));
+        for (int i = 0; i <= n; ++i) {
+            const double t = a0 + span * i / n;
+            line.push_back({a.x + r * std::cos(t), a.y + r * std::sin(t)});
+        }
+        out.push_back(std::move(line));
+    }
+    return out;
+}
+
+TopoDS_Shape loftShape(const LoftSpec& loft)
+{
+    if (loft.sections.size() < 2)
+        throw GeometryError("A loft needs at least two outlines: add one above the first.");
+    try {
+        BRepOffsetAPI_ThruSections through(/*isSolid=*/true, loft.ruled);
+        double last = -1e300;
+        for (std::size_t i = 0; i < loft.sections.size(); ++i) {
+            const LoftSection& section = loft.sections[i];
+            if (!(section.height > last))
+                throw GeometryError("Each outline of a loft must be higher than the one before it.");
+            last = section.height;
+            const std::vector<TopoDS_Face> list = faceList(section.sketch);
+            if (list.size() != 1)
+                throw GeometryError("Outline " + std::to_string(i + 1) +
+                                    " of the loft must be one closed shape (it has " + std::to_string(list.size()) +
+                                    ").");
+            TopoDS_Wire wire = BRepTools::OuterWire(list.front());
+            if (section.height != 0.0) {
+                gp_Trsf up;
+                up.SetTranslation(gp_Vec(0, 0, section.height));
+                wire = TopoDS::Wire(BRepBuilderAPI_Transform(wire, up, true).Shape());
+            }
+            through.AddWire(wire);
+        }
+        through.CheckCompatibility(Standard_True);
+        through.Build();
+        if (!through.IsDone())
+            throw GeometryError("The outlines could not be blended into one shape.");
+        return through.Shape();
+    } catch (const Standard_Failure& e) {
+        throw GeometryError(std::string("The loft could not be made: ") + e.GetMessageString());
+    }
+}
+
+TopoDS_Shape sweepPath(const SweepSpec& sweep)
+{
+    Handle(TopTools_HSequenceOfShape) edges = new TopTools_HSequenceOfShape;
+    const Sketch& s = sweep.path;
+    for (const Geo& g : s.geos) {
+        if (g.construction)
+            continue;
+        switch (g.kind) {
+        case GeoKind::Line: {
+            const gp_Pnt a = at(s, g.a), b = at(s, g.b);
+            if (a.Distance(b) > 1e-9)
+                edges->Append(BRepBuilderAPI_MakeEdge(a, b).Edge());
+            break;
+        }
+        case GeoKind::Arc: {
+            const double r = radiusOf(s, g);
+            if (!(r > 1e-9))
+                break;
+            GC_MakeArcOfCircle arc(gp_Circ(gp_Ax2(at(s, g.a), gp::DZ()), r), at(s, g.b), at(s, g.c), true);
+            if (arc.IsDone())
+                edges->Append(BRepBuilderAPI_MakeEdge(arc.Value(), at(s, g.b), at(s, g.c)).Edge());
+            break;
+        }
+        case GeoKind::Circle:
+            throw GeometryError("A sweep's path can't be a whole circle: use arcs, or a Revolve.");
+        }
+    }
+    if (edges->Length() == 0)
+        throw GeometryError("Draw the path: lines and arcs joined end to end, starting at the dot.");
+    Handle(TopTools_HSequenceOfShape) joined;
+    ShapeAnalysis_FreeBounds::ConnectEdgesToWires(edges, 1e-6, /*shared=*/false, joined);
+    if (joined->Length() != 1)
+        throw GeometryError("The path must be one line, joined end to end (it's in " +
+                            std::to_string(joined->Length()) + " pieces).");
+    TopoDS_Wire wire = TopoDS::Wire(joined->Value(1));
+    // It starts at the origin (where the outline is): turned round if drawn the other way.
+    TopoDS_Vertex first, last;
+    TopExp::Vertices(wire, first, last);
+    const double tolerance = 1e-6 * std::max(1.0, std::sqrt(boxOf(wire).SquareExtent()));
+    const auto atOrigin = [&](const TopoDS_Vertex& v) {
+        return !v.IsNull() && BRep_Tool::Pnt(v).Distance(gp::Origin()) <= std::max(tolerance, 1e-6);
+    };
+    if (!atOrigin(first)) {
+        if (!atOrigin(last))
+            throw GeometryError("Start the path at the dot (where the outline is).");
+        BRepBuilderAPI_MakeWire reversed;
+        std::vector<TopoDS_Edge> order;
+        for (BRepTools_WireExplorer it(wire); it.More(); it.Next())
+            order.push_back(it.Current());
+        for (auto it = order.rbegin(); it != order.rend(); ++it)
+            reversed.Add(TopoDS::Edge(it->Reversed()));
+        wire = reversed.Wire();
+    }
+    // Standing up: the path sketch's Y is the sweep's Z.
+    gp_Trsf stand;
+    stand.SetRotation(gp_Ax1(gp::Origin(), gp::DX()), std::numbers::pi / 2);
+    return BRepBuilderAPI_Transform(wire, stand, true).Shape();
+}
+
+TopoDS_Shape sweepShape(const SweepSpec& sweep)
+{
+    try {
+        const std::vector<TopoDS_Face> list = faceList(sweep.profile);
+        std::vector<TopoDS_Shape> solids;
+        if (!sweep.spiral) {
+            const TopoDS_Wire spine = TopoDS::Wire(sweepPath(sweep));
+            for (const TopoDS_Face& f : list)
+                solids.push_back(sweptFace(f, spine, [](BRepOffsetAPI_MakePipeShell& pipe) {
+                    pipe.SetMode(Standard_False);  // corrected Frenet: no twisting along the way
+                    pipe.SetTransitionMode(BRepBuilderAPI_RoundCorner);
+                }));
+            return fused(solids, "sweep");
+        }
+        // A spiral round the sketch's Y line, through the outline's middle.
+        if (!(sweep.pitch > 0.0) || !(sweep.turns > 0.0))
+            throw GeometryError("A spiral needs a pitch and a number of turns above zero.");
+        const Bnd_Box box = boxOf(faces(sweep.profile));
+        double x0, y0, z0, x1, y1, z1;
+        box.Get(x0, y0, z0, x1, y1, z1);
+        if (x0 < -1e-9 && x1 > 1e-9)
+            throw GeometryError("Keep the outline to one side of the up-down line through the dot: the spiral "
+                                "goes round that line.");
+        if (sweep.pitch <= (y1 - y0) + 1e-6)
+        {
+            char height[32];
+            std::snprintf(height, sizeof height, "%.2f", y1 - y0);
+            throw GeometryError(std::string("The pitch must be more than the outline's height (") + height +
+                                " mm), or the turns run into each other.");
+        }
+        const bool left = x1 <= 1e-9;  // drawn on the left of the line
+        const double radius = std::abs((x0 + x1) / 2), middleY = (y0 + y1) / 2;
+        // On a cylinder round Y: the helix is a straight line in its (angle, height) space.
+        const gp_Ax3 frame(gp::Origin(), gp::DY(), left ? gp::DX().Reversed() : gp::DX());
+        Handle(Geom_CylindricalSurface) cylinder = new Geom_CylindricalSurface(frame, radius);
+        const double hand = (sweep.leftHand ? -1.0 : 1.0) * (left ? -1.0 : 1.0);
+        const gp_Dir2d along(hand * 2.0 * std::numbers::pi, sweep.pitch);
+        const double length = sweep.turns * std::hypot(2.0 * std::numbers::pi, sweep.pitch);
+        Handle(Geom2d_TrimmedCurve) line =
+            new Geom2d_TrimmedCurve(new Geom2d_Line(gp_Pnt2d(0.0, middleY), along), 0.0, length);
+        TopoDS_Edge helix = BRepBuilderAPI_MakeEdge(line, cylinder).Edge();
+        BRepLib::BuildCurves3d(helix);
+        const TopoDS_Wire spine = BRepBuilderAPI_MakeWire(helix).Wire();
+        for (const TopoDS_Face& f : list)
+            solids.push_back(sweptFace(f, spine, [](BRepOffsetAPI_MakePipeShell& pipe) {
+                pipe.SetMode(gp::DY());  // keeps facing the axis, as a spring does
+            }));
+        return fused(solids, "spiral");
+    } catch (const Standard_Failure& e) {
+        throw GeometryError(std::string("The sweep could not be made: ") + e.GetMessageString());
     }
 }
 
