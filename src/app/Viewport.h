@@ -12,6 +12,7 @@
 #include <QOpenGLVertexArrayObject>
 #include <QOpenGLWidget>
 #include <QPointF>
+#include <QSizeF>
 #include <QVector3D>
 #include <QVector4D>
 
@@ -87,6 +88,17 @@ public:
     };
     void setBrushRing(const std::optional<BrushRing>& ring);
 
+    // What dragging with the left button does: the tool in use (select, move, handles:
+    // the usual), or turning, sliding or zooming the view (as the right / middle button
+    // and wheel always do).
+    enum class LeftDrag { Tool, Orbit, Pan, Zoom };
+    void setLeftDrag(LeftDrag what);
+    LeftDrag leftDrag() const { return m_leftNav; }
+
+    // The build plate's size (the grid drawn), mm: across (X) and front to back (Y).
+    void setPlateSize(float x, float y);
+    QSizeF plateSize() const { return {m_plateX, m_plateY}; }
+
     // Section view: everything on the side of the plane that `normal` points to is left
     // undrawn (where dot(normal, point) > offset, plate mm), and the insides showing
     // through the cut are drawn flat, like a cut face. None: everything is drawn.
@@ -133,7 +145,7 @@ protected:
     void keyPressEvent(QKeyEvent* event) override;
 
 private:
-    enum class DragMode { None, Orbit, Pan };
+    enum class DragMode { None, Orbit, Pan, Zoom };
 
     // GPU copy of one mesh.
     struct GpuMesh {
@@ -188,6 +200,10 @@ private:
 
     // Build plate grid
     int m_plateVertexCount = 0;
+    float m_plateX = 220.0f, m_plateY = 220.0f;
+    bool m_plateDirty = false;
+    LeftDrag m_leftNav = LeftDrag::Tool;
+    Qt::CursorShape restingCursor() const;
     QOpenGLVertexArrayObject m_plateVao;
     QOpenGLBuffer m_plateBuffer{QOpenGLBuffer::VertexBuffer};
     std::unique_ptr<QOpenGLShaderProgram> m_lineShader;

@@ -1,6 +1,13 @@
 <RCC>
   <qresource prefix="/icons">
     <file alias="add-shape.svg">icons/add-shape.svg</file>
+    <file alias="orbit.svg">icons/orbit.svg</file>
+    <file alias="pan.svg">icons/pan.svg</file>
+    <file alias="zoom.svg">icons/zoom.svg</file>
+    <file alias="fit.svg">icons/fit.svg</file>
+    <file alias="reset-view.svg">icons/reset-view.svg</file>
+    <file alias="section.svg">icons/section.svg</file>
+    <file alias="plate.svg">icons/plate.svg</file>
     <file alias="align.svg">icons/align.svg</file>
     <file alias="clear-plate.svg">icons/clear-plate.svg</file>
     <file alias="delete.svg">icons/delete.svg</file>

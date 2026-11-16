@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.41.0 Beta — Slice 32: Recent files, plate size, the ribbon (2026-11-16)
+
+- **File → Open Recent**: the last six models opened or saved, newest first (press
+  its number to open one). A file that has been moved or deleted is taken off the
+  list when you pick it. **Clear This List** empties it.
+- **Build Plate Size** (Edit menu, View menu, and the View tab): set the grid to your
+  printer's bed, from a list of common sizes (180 × 180 up to 360 × 360 mm) or any
+  size typed in. The plate now has a darker line round its edge, so it's easy to see
+  whether a design fits. Remembered for every model.
+- **The ribbon, reorganised**, with a new **View** tab:
+  - **Build**: File, Add, Handles, Remove.
+  - **Design**: Combine and Arrange (moved from Build), Sketch, Features, Change, and
+    Place (Lay on Face / Sit on Plate, moved from Print).
+  - **Sculpt**: Brushes, Triangles.
+  - **View**: **Workspace** (Orbit, Pan, Zoom, Fit, Reset View), **Objects** (Section
+    View) and **Plate** (Plate Size).
+  - **Print/Save** (was Print): Save, Export, Send to Slicer.
+  - **Check** (Measure) and **Undo** are on every tab.
+- **Orbit / Pan / Zoom** (View tab): click one and dragging with the **left** button
+  turns, slides or zooms the view, for a touchpad or a mouse without a middle button.
+  It stays on (the button shows pressed) until you click it again; the right button,
+  middle button and wheel keep working as always.
+- The tour and the Quick Start guide's words follow the new tabs. (The guide's
+  pictures still show the old ribbon.)
+
 ## 0.40.1 Beta — Section view for one shape (2026-11-16)
 
 - Section View has a **Cut:** choice: **Everything on the plate** (as before) or
