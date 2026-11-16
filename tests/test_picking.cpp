@@ -82,3 +82,33 @@ TEST_CASE("a ray pointing away does not hit", "[picking]")
     CHECK_FALSE(pick(doc, Ray{{0, 0, 500}, {0, 0, 1}}));
     CHECK_FALSE(pick(doc, Ray{{0, 0, 500}, {0, 0, 0}}));  // zero direction
 }
+
+TEST_CASE("a section view's hidden side isn't picked", "[picking]")
+{
+    Document doc;
+    const ObjectId box = addBox(doc, 20, {});
+    Placement beside;
+    beside.x = 40;
+    const ObjectId other = addBox(doc, 20, beside);
+
+    // Everything above Z = 10 is hidden: the ray lands inside the box, on its floor.
+    PickClip clip;
+    clip.normal = {0, 0, 1};
+    clip.offset = 10.0;
+    const auto hit = pick(doc, straightDown(0, 0), &clip);
+    REQUIRE(hit);
+    CHECK(hit->id == box);
+    CHECK_THAT(hit->point[2], WithinAbs(0.0, 1e-6));
+
+    // Hidden altogether (the cut below it): the ray goes through to nothing.
+    clip.offset = -1.0;
+    CHECK_FALSE(pick(doc, straightDown(0, 0), &clip));
+
+    // Only one shape cut: the other is picked on its top as usual.
+    clip.only = {box};
+    const auto whole = pick(doc, straightDown(40, 0), &clip);
+    REQUIRE(whole);
+    CHECK(whole->id == other);
+    CHECK_THAT(whole->point[2], WithinAbs(20.0, 1e-6));
+    CHECK_FALSE(pick(doc, straightDown(0, 0), &clip));
+}

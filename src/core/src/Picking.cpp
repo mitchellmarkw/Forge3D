@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "forge/core/Picking.h"
 
+#include <algorithm>
+
 #include "forge/core/Document.h"
 #include "forge/core/Transform.h"
 
@@ -44,7 +46,7 @@ double intersect(V3 o, V3 d, V3 a, V3 b, V3 c)
 
 }  // namespace
 
-std::optional<PickHit> pick(const Document& doc, const Ray& ray)
+std::optional<PickHit> pick(const Document& doc, const Ray& ray, const PickClip* clip)
 {
     const double len = std::sqrt(ray.direction[0] * ray.direction[0] + ray.direction[1] * ray.direction[1] +
                                  ray.direction[2] * ray.direction[2]);
@@ -62,6 +64,8 @@ std::optional<PickHit> pick(const Document& doc, const Ray& ray)
         const V3 o{lo[0], lo[1], lo[2]};
         const V3 d{ld[0], ld[1], ld[2]};
 
+        const bool clipped =
+            clip && (clip->only.empty() || std::find(clip->only.begin(), clip->only.end(), id) != clip->only.end());
         const auto mesh = doc.mesh(id);
         const auto& P = mesh->positions;
         const auto vertex = [&P](std::uint32_t i) {
@@ -71,6 +75,13 @@ std::optional<PickHit> pick(const Document& doc, const Ray& ray)
             const double hit = intersect(o, d, vertex(mesh->indices[t]), vertex(mesh->indices[t + 1]),
                                          vertex(mesh->indices[t + 2]));
             if (hit > 1e-9 && (!best || hit < best->distance)) {
+                if (clipped) {
+                    // On the side a section view hides: as if it weren't there.
+                    const double x = ray.origin[0] + worldDir.x * hit, y = ray.origin[1] + worldDir.y * hit,
+                                 z = ray.origin[2] + worldDir.z * hit;
+                    if (clip->normal[0] * x + clip->normal[1] * y + clip->normal[2] * z > clip->offset)
+                        continue;
+                }
                 best = PickHit{id, hit,
                                {ray.origin[0] + worldDir.x * hit, ray.origin[1] + worldDir.y * hit,
                                 ray.origin[2] + worldDir.z * hit}};

@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.44.0 Beta — Slice 35: Backup settings, section clicks, measurement labels (2026-11-16)
+
+- **Edit → Backup Copies…**: how often a backup copy of unsaved work is made, from
+  **2 to 60 minutes**, or **off** altogether (unticking "Keep a backup copy of unsaved
+  work"). Turning it off also removes this session's backup.
+- **Section View and clicks**: with the view cut open, a click no longer picks a shape
+  through the part that's hidden. It lands on what you can see: the cut face, the
+  inside, or the shape behind. (Selecting, dragging, Lay on Face and Measure.)
+- **Measure shows its numbers in the view**: the distance between the two things you
+  picked is written on its green line (and centre to centre on the blue one), as well
+  as in the panel.
+- **Keep on Screen** (Measure panel): leaves that measurement showing and clears the
+  picks, so you can measure something else and see several at once. Kept ones stay
+  after Done. **Remove Kept** takes them away; they're also taken away when the model
+  changes, since the numbers might no longer be true.
+- 222 unit tests (1 new: picking with a section).
+
 ## 0.43.0 Beta — Slice 34: Backup copies and recovery (2026-11-16)
 
 - While you work, Forge3D keeps a **backup copy** of a model with unsaved changes,

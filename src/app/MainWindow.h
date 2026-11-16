@@ -16,6 +16,8 @@
 #include "forge/view/Gizmo.h"
 
 #include "SketchPanel.h"
+#include "Viewport.h"
+#include "forge/core/Picking.h"
 
 #include <QMainWindow>
 #include <QPointer>
@@ -24,6 +26,7 @@
 #include <QVector3D>
 
 #include <map>
+#include <functional>
 #include <memory>
 
 #include <QLockFile>
@@ -342,6 +345,7 @@ private:
     QString m_recoveryPath;                     // this session's backup (.f3d; a .json beside it says what of)
     std::unique_ptr<QLockFile> m_recoveryLock;  // held while this session lives
     quint64 m_docSerial = 0, m_autosavedSerial = 0;
+    std::function<void()> m_applyBackupSettings;
     QLabel* m_glInfo = nullptr;
     QMenu* m_viewMenu = nullptr;
     QMenu* m_recentMenu = nullptr;
@@ -543,6 +547,11 @@ private:
         std::shared_ptr<const Mesh> hoverMesh, pickedMesh, lineMesh, centreMesh;
     };
     MeasureMode m_measureMode;
+    std::vector<Viewport::Label> m_measureLabels;  // the measurement being shown
+    std::vector<Viewport::Label> m_keptLabels;     // kept on screen (until the model changes)
+    void showLabels();
+    std::optional<PickHit> pickShown(const Ray& ray) const;  // not through a section view's hidden side
+    void chooseBackups();
     MeasurePanel* m_measurePanel = nullptr;
     SectionPanel* m_sectionPanel = nullptr;
     QDockWidget* m_sectionDock = nullptr;

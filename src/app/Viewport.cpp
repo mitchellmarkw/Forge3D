@@ -3,6 +3,7 @@
 
 #include "ViewCube.h"
 
+#include <QFontMetricsF>
 #include <QPainter>
 #include <QVariantAnimation>
 
@@ -173,6 +174,12 @@ void Viewport::setItems(std::vector<DisplayItem> items)
     m_itemsDirty = true;
     noteSectionShapes();
     checkFit();
+    update();
+}
+
+void Viewport::setLabels(std::vector<Label> labels)
+{
+    m_labels = std::move(labels);
     update();
 }
 
@@ -781,6 +788,33 @@ void Viewport::paintGL()
 
     drawGizmo(viewProj);
     drawBrushRing(viewProj);
+
+    if (!m_labels.empty()) {
+        QPainter painter(this);
+        painter.setRenderHint(QPainter::Antialiasing);
+        QFont font = painter.font();
+        font.setBold(true);
+        painter.setFont(font);
+        const QFontMetricsF metrics(font);
+        for (const Label& label : m_labels) {
+            const auto a = projectToScreen(label.from), b = projectToScreen(label.to);
+            if (!a || !b)
+                continue;
+            painter.setPen(QPen(label.colour, 2.0));
+            painter.drawLine(*a, *b);
+            painter.setBrush(label.colour);
+            painter.drawEllipse(*a, 3.0, 3.0);
+            painter.drawEllipse(*b, 3.0, 3.0);
+            const QPointF mid = (*a + *b) / 2.0;
+            QRectF box(0, 0, metrics.horizontalAdvance(label.text) + 12, metrics.height() + 4);
+            box.moveCenter(mid);
+            painter.setPen(QPen(label.colour, 1.2));
+            painter.setBrush(QColor(255, 255, 255, 235));
+            painter.drawRoundedRect(box, 4, 4);
+            painter.setPen(QColor(25, 30, 40));
+            painter.drawText(box, Qt::AlignCenter, label.text);
+        }
+    }
 
     if (m_viewCube) {
         QPainter painter(this);
