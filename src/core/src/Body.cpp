@@ -187,6 +187,28 @@ struct Traits<RevolveSpec> {
 };
 
 template <>
+struct Traits<LoftSpec> {
+    static constexpr const char* name = "Loft";
+    static constexpr const char* file = "loft";
+    static const std::vector<Field<LoftSpec>>& fields()
+    {
+        static const std::vector<Field<LoftSpec>> f{};  // all in its sketches and heights
+        return f;
+    }
+};
+
+template <>
+struct Traits<SweepSpec> {
+    static constexpr const char* name = "Sweep";
+    static constexpr const char* file = "sweep";
+    static const std::vector<Field<SweepSpec>>& fields()
+    {
+        static const std::vector<Field<SweepSpec>> f{};  // all in its sketches (and the spiral's pitch)
+        return f;
+    }
+};
+
+template <>
 struct Traits<HoleSpec> {
     static constexpr const char* name = "Hole";
     static constexpr const char* file = "hole";
@@ -293,6 +315,16 @@ PrimitiveSpec scaled(const PrimitiveSpec& spec, double factor)
         sketch::scale(pad->sketch, factor, factor);
     if (auto* revolve = std::get_if<RevolveSpec>(&out))
         sketch::scale(revolve->sketch, factor, factor);
+    if (auto* loft = std::get_if<LoftSpec>(&out))
+        for (LoftSection& section : loft->sections) {
+            sketch::scale(section.sketch, factor, factor);
+            section.height *= factor;
+        }
+    if (auto* sweep = std::get_if<SweepSpec>(&out)) {
+        sketch::scale(sweep->profile, factor, factor);
+        sketch::scale(sweep->path, factor, factor);
+        sweep->pitch *= factor;
+    }
     if (auto* hole = std::get_if<HoleSpec>(&out)) {
         sketch::scale(hole->sketch, factor, factor);
         hole->headDiameter *= factor;
@@ -315,6 +347,10 @@ const sketch::Sketch* sketchOf(const PrimitiveSpec& spec)
         return &p->sketch;
     if (const auto* r = std::get_if<RevolveSpec>(&spec))
         return &r->sketch;
+    if (const auto* l = std::get_if<LoftSpec>(&spec))
+        return l->sections.empty() ? nullptr : &l->sections.front().sketch;
+    if (const auto* w = std::get_if<SweepSpec>(&spec))
+        return &w->profile;
     if (const auto* h = std::get_if<HoleSpec>(&spec))
         return &h->sketch;
     return nullptr;

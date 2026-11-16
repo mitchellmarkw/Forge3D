@@ -270,6 +270,10 @@ PrimitiveSpec scaledSpec(const PrimitiveSpec& spec, const Vec3& f)
                     throw NotScalable("This sketch has curves, slopes or angles, so it can only be resized evenly "
                                       "across (its height can change freely)");
                 p.length *= f[2];
+            } else if constexpr (std::is_same_v<T, LoftSpec> || std::is_same_v<T, SweepSpec>) {
+                if (std::abs(f[0] - f[1]) > 1e-12 || std::abs(f[0] - f[2]) > 1e-12)
+                    throw NotScalable("A loft or a sweep can only be resized evenly");
+                p = std::get<T>(scaled(PrimitiveSpec{p}, f[0]));
             } else if constexpr (std::is_same_v<T, RevolveSpec>) {
                 // Spun round: only even resizing keeps it what it is.
                 if (std::abs(f[0] - f[1]) > 1e-12 || std::abs(f[0] - f[2]) > 1e-12)

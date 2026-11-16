@@ -1145,6 +1145,8 @@ void MainWindow::createDocks()
     stackLayout->addWidget(m_sketchPanel);
     m_sketchPanel->hide();
     connect(m_sketchPanel, &SketchPanel::finishRequested, this, &MainWindow::finishSketch);
+    connect(m_sketchPanel, &SketchPanel::outlineRequested, this, &MainWindow::loftStep);
+    connect(m_sketchPanel, &SketchPanel::pathRequested, this, &MainWindow::sweepStage);
     connect(m_sketchPanel, &SketchPanel::cancelRequested, this, &MainWindow::endSketch);
     connect(m_sketchView, &SketchView::changed, this, &MainWindow::updateSketchStatus);
     connect(m_sketchView, &SketchView::message, this, [this](const QString& text, bool problem) {
@@ -5831,6 +5833,19 @@ void MainWindow::startSketchEdit(ObjectId id)
         options.otherWay = cuts ? !pad->reversed : pad->reversed;
         options.bothWays = pad->midplane;
         options.throughAll = step && step->boolean->throughAll;
+    } else if (const auto* loft = std::get_if<LoftSpec>(&tool->spec)) {
+        if (loft->sections.empty())
+            return;
+        drawn = loft->sections.front().sketch;
+        options.make = SketchPanel::Make::Loft;
+        options.ruled = loft->ruled;
+    } else if (const auto* sweep = std::get_if<SweepSpec>(&tool->spec)) {
+        drawn = sweep->profile;
+        options.make = SketchPanel::Make::Sweep;
+        options.spiral = sweep->spiral;
+        options.pitch = sweep->pitch;
+        options.turns = sweep->turns;
+        options.leftHand = sweep->leftHand;
     } else if (const auto* revolve = std::get_if<RevolveSpec>(&tool->spec)) {
         drawn = revolve->sketch;
         axis = revolve->axis;
@@ -5864,6 +5879,12 @@ void MainWindow::startSketchEdit(ObjectId id)
         }
     }
     openSketch(drawn, std::move(reference), tr("Change the sketch of '%1'").arg(name), step != nullptr, options);
+    if (const auto* loft = std::get_if<LoftSpec>(&tool->spec)) {
+        m_sketchMode.loft = *loft;
+        m_sketchPanel->setLoftOutline(0, int(loft->sections.size()), 0.0);
+    }
+    if (const auto* sweep = std::get_if<SweepSpec>(&tool->spec))
+        m_sketchMode.sweep = *sweep;
     if (axis >= 0)
         m_sketchView->pickGeo(axis);  // the line it spins round
 }
@@ -5878,6 +5899,7 @@ void MainWindow::openSketch(const sketch::Sketch& sketch, std::vector<std::vecto
     if (m_edgesMode.active)
         endEdges();
     m_sketchMode.active = true;
+    m_sketchMode.reference = reference;
     const bool editing = m_sketchMode.pad != kInvalidId;
     m_central->setCurrentWidget(m_sketchView);
     if (m_holeMode.positioning)
@@ -5950,7 +5972,7 @@ void MainWindow::updateSketchStatus()
                                         "and rules to pin it down.)")
                                          .arg(solved.freedom);
     }
-    if (!loose.empty() && m_followMode.sketching != 1)  // a path may well have ends
+    if (!loose.empty() && m_followMode.sketching != 1 && !m_sketchMode.pathStage)  // a path may well have ends
         text += QStringLiteral("\n") + (loose.size() == 1 ? tr("1 loose end (red): the outline isn't closed there.")
                                                           : tr("%1 loose ends (red): the outline isn't closed there.")
                                                                 .arg(loose.size()));
@@ -5982,7 +6004,30 @@ void MainWindow::finishSketch()
     const Make make = m_sketchPanel->make();
     const bool cut = m_sketchPanel->pocket();
     PrimitiveSpec spec;
-    if (m_sketchPanel->revolve()) {
+    if (make == Make::Loft) {
+        storeSketchStage();
+        LoftSpec loft = m_sketchMode.loft;
+        loft.ruled = m_sketchPanel->ruled();
+        if (loft.sections.size() < 2) {
+            m_sketchPanel->setMessage(tr("A loft blends between outlines: click \"Add one above\" and draw the "
+                                         "next one first."),
+                                      true);
+            return;
+        }
+        spec = loft;
+    } else if (make == Make::Sweep) {
+        storeSketchStage();
+        SweepSpec sweep = m_sketchMode.sweep;
+        sweep.spiral = m_sketchPanel->spiral();
+        sweep.pitch = m_sketchPanel->pitch();
+        sweep.turns = m_sketchPanel->turns();
+        sweep.leftHand = m_sketchPanel->leftHand();
+        if (!sweep.spiral && sweep.path.geos.empty()) {
+            m_sketchPanel->setMessage(tr("Draw the path it goes along first: click \"Draw the path\"."), true);
+            return;
+        }
+        spec = sweep;
+    } else if (m_sketchPanel->revolve()) {
         RevolveSpec revolve;
         revolve.sketch = m_sketchView->sketch();
         // The axis: the picked line, else the only helper line.
@@ -6054,8 +6099,8 @@ void MainWindow::finishSketch()
         return;
     }
 
-    static const char* toolNames[] = {"Pad", "Pocket", "Revolve", "Groove"};
-    static const char* resultNames[] = {"Padded", "Pocketed", "Revolved", "Grooved"};
+    static const char* toolNames[] = {"Pad", "Pocket", "Revolve", "Groove", "Loft", "Sweep"};
+    static const char* resultNames[] = {"Padded", "Pocketed", "Revolved", "Grooved", "Lofted", "Swept"};
     Body body;
     body.id = m_doc.allocateId();
     body.spec = spec;
@@ -6063,7 +6108,8 @@ void MainWindow::finishSketch()
     body.placement = placementFromTransform(mode.frame, pivotOf(body.spec));
     const ObjectId toolId = body.id;
     if (mode.target == kInvalidId) {  // on the plate
-        if (mode.plane < 0 && std::holds_alternative<RevolveSpec>(spec)) {
+        const auto* sweep = std::get_if<SweepSpec>(&spec);
+        if (mode.plane < 0 && (std::holds_alternative<RevolveSpec>(spec) || (sweep && sweep->spiral))) {
             // Spun round: the sketch is the side view, standing up (its Y is the plate's Z),
             // and the shape sits on the plate.
             Transform upright;
@@ -6085,6 +6131,104 @@ void MainWindow::finishSketch()
         return;
     addWithStep(mode.target, std::move(body), cut ? BooleanOp::Subtract : BooleanOp::Merge, throughAll,
                 toolNames[int(make)], resultNames[int(make)], shapeBounds(solid, mode.frame));
+}
+
+void MainWindow::storeSketchStage()
+{
+    auto& mode = m_sketchMode;
+    if (!mode.active)
+        return;
+    const auto make = m_sketchPanel->make();
+    if (make == SketchPanel::Make::Loft) {
+        if (mode.loft.sections.size() <= std::size_t(mode.outline))
+            mode.loft.sections.resize(std::size_t(mode.outline) + 1);
+        LoftSection& section = mode.loft.sections[std::size_t(mode.outline)];
+        section.sketch = m_sketchView->sketch();
+        section.height = mode.outline == 0 ? 0.0 : m_sketchPanel->loftHeight();
+    } else if (make == SketchPanel::Make::Sweep) {
+        (mode.pathStage ? mode.sweep.path : mode.sweep.profile) = m_sketchView->sketch();
+    }
+}
+
+namespace {
+std::vector<std::vector<QPointF>> asReference(const sketch::Sketch& s)
+{
+    std::vector<std::vector<QPointF>> out;
+    for (const auto& line : sketch::outlinesOf(s)) {
+        std::vector<QPointF> q;
+        for (const auto& p : line)
+            q.emplace_back(p.x, p.y);
+        out.push_back(std::move(q));
+    }
+    return out;
+}
+}  // namespace
+
+void MainWindow::loftStep(int step)
+{
+    auto& mode = m_sketchMode;
+    if (!mode.active)
+        return;
+    storeSketchStage();
+    auto& sections = mode.loft.sections;
+    if (step == 0) {
+        // Remove this one (never the first, on the sketch plane): show the one below.
+        if (mode.outline <= 0 || mode.outline >= int(sections.size()))
+            return;
+        sections.erase(sections.begin() + mode.outline);
+        step = -1;
+    }
+    const int next = mode.outline + step;
+    if (next < 0)
+        return;
+    if (next >= int(sections.size())) {
+        // A new outline above: a copy of the top one, as far above it again.
+        LoftSection above = sections.back();
+        const double gap = sections.size() >= 2 ? sections.back().height - sections[sections.size() - 2].height : 20.0;
+        above.height = sections.back().height + std::max(gap, 1.0);
+        sections.push_back(above);
+    }
+    mode.outline = next;
+    // The outlines either side in grey (and the face, for the first).
+    std::vector<std::vector<QPointF>> reference = next == 0 ? mode.reference : std::vector<std::vector<QPointF>>{};
+    for (int k : {next - 1, next + 1})
+        if (k >= 0 && k < int(sections.size()))
+            for (auto& line : asReference(sections[std::size_t(k)].sketch))
+                reference.push_back(std::move(line));
+    m_sketchView->start(sections[std::size_t(next)].sketch, std::move(reference));
+    m_sketchPanel->setLoftOutline(next, int(sections.size()), sections[std::size_t(next)].height);
+    m_sketchPanel->setMessage({}, false);
+    updateSketchStatus();
+}
+
+void MainWindow::sweepStage(bool path)
+{
+    auto& mode = m_sketchMode;
+    if (!mode.active || path == mode.pathStage)
+        return;
+    storeSketchStage();
+    mode.pathStage = path;
+    std::vector<std::vector<QPointF>> reference;
+    if (path) {
+        // The outline seen edge-on: a grey line across, where the path starts.
+        double lo = 0.0, hi = 0.0;
+        for (const auto& line : sketch::outlinesOf(mode.sweep.profile))
+            for (const auto& p : line) {
+                lo = std::min(lo, p.x);
+                hi = std::max(hi, p.x);
+            }
+        reference.push_back({QPointF(lo, 0.0), QPointF(hi, 0.0)});
+        // And a guide straight up from it, the way a path usually starts (and room to draw).
+        reference.push_back({QPointF(0.0, 0.0), QPointF(0.0, std::max(20.0, 5.0 * (hi - lo)))});
+    } else {
+        reference = mode.reference;
+    }
+    m_sketchView->start(path ? mode.sweep.path : mode.sweep.profile, std::move(reference));
+    if (path && mode.sweep.path.geos.empty())
+        m_sketchView->setTool(SketchView::Tool::Line);
+    m_sketchPanel->setSweepStage(path);
+    m_sketchPanel->setMessage({}, false);
+    updateSketchStatus();
 }
 
 void MainWindow::endSketch()
