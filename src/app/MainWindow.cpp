@@ -55,6 +55,11 @@
 #include <QComboBox>
 #include <QDialog>
 #include <QDockWidget>
+#include <QElapsedTimer>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QLocale>
+#include <QLockFile>
 #include <QDoubleSpinBox>
 #include <QSignalBlocker>
 #include <QFileDialog>
@@ -304,6 +309,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
     // The first time Forge3D runs, the tour starts by itself (once).
     // After the tour (or straight away, once it's been seen): whether to look for updates.
     connect(this, &MainWindow::firstFrameRendered, this, [this] {
+        QTimer::singleShot(300, this, &MainWindow::offerRecovery);
         if (!Preferences().value(QStringLiteral("tour/seen"), false).toBool())
             QTimer::singleShot(600, this, &MainWindow::startTour);
         else
@@ -331,6 +337,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
     createStatusBar();
 
     m_doc.addListener([this](const Document::Change& change) {
+        ++m_docSerial;
         if (change.kind == Document::ChangeKind::Removed)  // e.g. undo of an Add
             std::erase(m_selection, change.id);
         if (m_measureMode.active) {
@@ -347,6 +354,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
     refreshScene();
     refreshCommandState();
     m_viewport->resetView();
+    startAutosave();
 }
 
 MainWindow::~MainWindow()
@@ -4350,6 +4358,7 @@ void MainWindow::newDocument()
     m_selection.clear();
     m_expanded.clear();
     m_filePath.clear();
+    removeRecovery();
     refreshCommandState();
     m_viewport->resetView();
     qInfo() << "New document";
@@ -4381,10 +4390,190 @@ bool MainWindow::openFile(const QString& path)
     m_filePath = QFileInfo(path).absoluteFilePath();
     rememberFolderOf(path);
     noteRecentFile(m_filePath);
+    removeRecovery();
     refreshCommandState();
     refreshScene();
     m_viewport->fitView();
     qInfo().noquote() << "Opened" << m_filePath << "-" << m_doc.bodyCount() << "bodies";
+    return true;
+}
+
+// ---- Backup copies and recovery -------------------------------------------------
+
+namespace {
+QString recoveryFolder()
+{
+    return QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation) + QStringLiteral("/recovery");
+}
+QString besideBackup(const QString& backup, const char* extension)
+{
+    return backup.left(backup.size() - 4) + QString::fromLatin1(extension);  // in place of ".f3d"
+}
+void removeBackup(const QString& backup)
+{
+    QFile::remove(backup);
+    QFile::remove(besideBackup(backup, ".json"));
+    QFile::remove(besideBackup(backup, ".lock"));
+}
+}  // namespace
+
+void MainWindow::startAutosave()
+{
+    QDir().mkpath(recoveryFolder());
+    m_recoveryPath = QStringLiteral("%1/%2-%3.f3d")
+                         .arg(recoveryFolder())
+                         .arg(QDateTime::currentMSecsSinceEpoch())
+                         .arg(QCoreApplication::applicationPid());
+    // Held while this session is alive, so another Forge3D starting up knows this
+    // backup isn't left over from a crash.
+    m_recoveryLock = std::make_unique<QLockFile>(besideBackup(m_recoveryPath, ".lock"));
+    m_recoveryLock->setStaleLockTime(0);
+    m_recoveryLock->tryLock(0);
+    bool ok = false;
+    const int seconds = qEnvironmentVariableIntValue("FORGE3D_AUTOSAVE_SECONDS", &ok);
+    m_autosaveTimer = new QTimer(this);
+    m_autosaveTimer->setInterval(ok && seconds > 0 ? seconds * 1000 : 2 * 60 * 1000);
+    connect(m_autosaveTimer, &QTimer::timeout, this, &MainWindow::autosaveNow);
+    m_autosaveTimer->start();
+}
+
+void MainWindow::autosaveNow()
+{
+    // Only what isn't saved, only when it changed since the last backup, and not in
+    // the middle of a drag.
+    if (m_recoveryPath.isEmpty() || m_stack.isClean() || m_docSerial == m_autosavedSerial || m_doc.bodyCount() == 0)
+        return;
+    if (QGuiApplication::mouseButtons() != Qt::NoButton) {
+        QTimer::singleShot(5000, this, &MainWindow::autosaveNow);
+        return;
+    }
+    QElapsedTimer took;
+    took.start();
+    try {
+        // Written beside it first, then swapped in: a crash while writing leaves the last good one.
+        const QString writing = m_recoveryPath + QStringLiteral(".part");
+        file::save(m_doc, toPath(writing), std::string(build::kAppName) + " " + build::kVersion);
+        QFile::remove(m_recoveryPath);
+        if (!QFile::rename(writing, m_recoveryPath))
+            throw std::runtime_error("could not put the backup in place");
+        QFile about(besideBackup(m_recoveryPath, ".json"));
+        if (about.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+            const QJsonObject o{{QStringLiteral("original"), m_filePath},
+                                {QStringLiteral("saved"), QDateTime::currentDateTime().toString(Qt::ISODate)}};
+            about.write(QJsonDocument(o).toJson());
+        }
+        m_autosavedSerial = m_docSerial;
+        qInfo() << "Backup copy written in" << took.elapsed() << "ms";
+    } catch (const std::exception& e) {
+        qWarning() << "Backup copy failed:" << e.what();
+    }
+}
+
+void MainWindow::removeRecovery()
+{
+    if (m_recoveryPath.isEmpty())
+        return;
+    QFile::remove(m_recoveryPath);
+    QFile::remove(m_recoveryPath + QStringLiteral(".part"));
+    QFile::remove(besideBackup(m_recoveryPath, ".json"));
+    m_autosavedSerial = m_docSerial;
+}
+
+void MainWindow::offerRecovery()
+{
+    // Backups whose session is gone (its lock can be taken): Forge3D didn't close properly.
+    QDir folder(recoveryFolder());
+    QStringList left;
+    for (const QFileInfo& info : folder.entryInfoList({QStringLiteral("*.f3d")}, QDir::Files, QDir::Time)) {
+        const QString backup = info.absoluteFilePath();
+        if (backup == m_recoveryPath)
+            continue;
+        QLockFile lock(besideBackup(backup, ".lock"));
+        lock.setStaleLockTime(0);
+        if (!lock.tryLock(0))
+            continue;  // that Forge3D is still running
+        lock.unlock();
+        left << backup;
+    }
+    // Locks and half-written backups nobody owns any more.
+    for (const QFileInfo& info : folder.entryInfoList({QStringLiteral("*.lock"), QStringLiteral("*.part"), QStringLiteral("*.json")}, QDir::Files)) {
+        const QString path = info.absoluteFilePath();
+        const QString backup = info.suffix() == QLatin1String("part") ? path.left(path.size() - 5)
+                                                                      : path.left(path.size() - info.suffix().size() - 1) + QStringLiteral(".f3d");
+        if (backup == m_recoveryPath || QFile::exists(backup))
+            continue;
+        if (info.suffix() == QLatin1String("lock")) {
+            QLockFile lock(path);
+            lock.setStaleLockTime(0);
+            if (!lock.tryLock(0))
+                continue;
+            lock.unlock();
+        }
+        QFile::remove(path);
+    }
+    for (const QString& backup : left) {
+        QString original, when;
+        QFile about(besideBackup(backup, ".json"));
+        if (about.open(QIODevice::ReadOnly)) {
+            const QJsonObject o = QJsonDocument::fromJson(about.readAll()).object();
+            original = o.value(QStringLiteral("original")).toString();
+            when = QLocale().toString(QDateTime::fromString(o.value(QStringLiteral("saved")).toString(), Qt::ISODate),
+                                      QLocale::ShortFormat);
+        }
+        if (when.isEmpty())
+            when = QLocale().toString(QFileInfo(backup).lastModified(), QLocale::ShortFormat);
+        const QString name = original.isEmpty() ? tr("a model that was never saved")
+                                                : QFileInfo(original).fileName();
+        QMessageBox box(this);
+        box.setIcon(QMessageBox::Question);
+        box.setWindowTitle(tr("Recover your work?"));
+        box.setText(tr("Forge3D didn't close properly last time. It kept a backup copy of %1, made %2.")
+                        .arg(name, when));
+        box.setInformativeText(tr("Recover opens the backup with its changes not yet saved, so you can look "
+                                  "at it and then Save. Nothing on disk is replaced until you save."));
+        QPushButton* recover = box.addButton(tr("Recover"), QMessageBox::AcceptRole);
+        QPushButton* discard = box.addButton(tr("Throw It Away"), QMessageBox::DestructiveRole);
+        box.addButton(tr("Ask Me Next Time"), QMessageBox::RejectRole);
+        box.setDefaultButton(recover);
+        box.exec();
+        if (box.clickedButton() == discard) {
+            removeBackup(backup);
+            qInfo().noquote() << "Backup thrown away:" << backup;
+        } else if (box.clickedButton() == recover) {
+            if (!m_stack.isClean() && !confirmDiscardChanges())
+                return;
+            if (recoverFrom(backup)) {
+                m_filePath = original;
+                refreshCommandState();
+                removeBackup(backup);
+                autosaveNow();  // protected again straight away, under this session
+                return;         // one at a time; any others are offered next time
+            }
+        } else {
+            return;
+        }
+    }
+}
+
+bool MainWindow::recoverFrom(const QString& backup)
+{
+    try {
+        std::vector<Body> bodies = file::load(toPath(backup));
+        m_doc.replaceAll(std::move(bodies));
+    } catch (const std::exception& e) {
+        qWarning().noquote() << "Recovery failed:" << backup << "-" << e.what();
+        QMessageBox::critical(this, tr("Could not recover the backup"), QString::fromUtf8(e.what()));
+        return false;
+    }
+    m_stack.clear();
+    m_stack.setModified();  // not saved anywhere yet
+    m_selection.clear();
+    m_expanded.clear();
+    refreshCommandState();
+    refreshScene();
+    m_viewport->fitView();
+    statusBar()->showMessage(tr("Recovered. Save it (Ctrl+S) to keep it."), 10000);
+    qInfo().noquote() << "Recovered from" << backup << "-" << m_doc.bodyCount() << "bodies";
     return true;
 }
 
@@ -4940,6 +5129,7 @@ bool MainWindow::saveTo(const QString& path)
     m_filePath = QFileInfo(path).absoluteFilePath();
     rememberFolderOf(path);
     noteRecentFile(m_filePath);
+    removeRecovery();
     m_stack.setClean();  // also refreshes the title
     statusBar()->showMessage(tr("Saved %1").arg(QDir::toNativeSeparators(m_filePath)), 4000);
     qInfo().noquote() << "Saved" << m_filePath << "-" << m_doc.bodyCount() << "bodies";
@@ -4961,10 +5151,13 @@ bool MainWindow::confirmDiscardChanges()
 
 void MainWindow::closeEvent(QCloseEvent* event)
 {
-    if (confirmDiscardChanges())
+    if (confirmDiscardChanges()) {
+        removeRecovery();  // closed properly: nothing to recover
+        m_recoveryLock.reset();
         event->accept();
-    else
+    } else {
         event->ignore();
+    }
 }
 
 // ---- Keeping the UI in step ----------------------------------------------------

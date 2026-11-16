@@ -116,6 +116,12 @@ void CommandStack::setClean()
     changed();
 }
 
+void CommandStack::setModified()
+{
+    m_cleanIndex = -1;
+    changed();
+}
+
 bool CommandStack::isClean() const
 {
     return m_cleanIndex == static_cast<long long>(m_index);

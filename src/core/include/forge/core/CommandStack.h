@@ -43,6 +43,8 @@ public:
 
     // "Clean" = matches what is saved on disk. Used for the * in the title bar.
     void setClean();
+    // The document no longer matches anything on disk (a recovered backup, say).
+    void setModified();
     bool isClean() const;
 
     void clear();
