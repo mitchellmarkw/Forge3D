@@ -330,6 +330,16 @@ private:
     QLabel* m_modelInfo = nullptr;
     QLabel* m_glInfo = nullptr;
     QMenu* m_viewMenu = nullptr;
+    QMenu* m_recentMenu = nullptr;
+    QAction* m_plateSizeAction = nullptr;
+    QAction* m_sectionAction = nullptr;
+    QAction* m_navOrbit = nullptr;
+    QAction* m_navPan = nullptr;
+    QAction* m_navZoom = nullptr;
+    void noteRecentFile(const QString& path);  // empty: just rebuild the menu
+    void forgetRecentFile(const QString& path);
+    void choosePlateSize();
+    void applyPlateSize();
 
     QAction* m_new = nullptr;
     QAction* m_open = nullptr;

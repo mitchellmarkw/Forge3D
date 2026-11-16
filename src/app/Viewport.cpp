@@ -105,7 +105,6 @@ void main() { fragColor = vec4(vColor, 1.0); }
 
 // ---- Look -----------------------------------------------------------------------
 
-constexpr float kPlateSize = 220.0f;  // mm; a common printer bed. Configurable later.
 constexpr float kMinorStep = 10.0f;
 constexpr float kMajorStep = 50.0f;
 const QVector3D kBackground(0.93f, 0.94f, 0.96f);
@@ -171,6 +170,31 @@ void Viewport::setItems(std::vector<DisplayItem> items)
     m_items = std::move(items);
     m_itemsDirty = true;
     noteSectionShapes();
+    update();
+}
+
+void Viewport::setLeftDrag(LeftDrag what)
+{
+    m_leftNav = what;
+    setCursor(restingCursor());
+}
+
+Qt::CursorShape Viewport::restingCursor() const
+{
+    switch (m_leftNav) {
+    case LeftDrag::Orbit: return Qt::SizeAllCursor;
+    case LeftDrag::Pan: return Qt::OpenHandCursor;
+    case LeftDrag::Zoom: return Qt::SizeVerCursor;
+    case LeftDrag::Tool: break;
+    }
+    return Qt::ArrowCursor;
+}
+
+void Viewport::setPlateSize(float x, float y)
+{
+    m_plateX = std::clamp(x, 20.0f, 2000.0f);
+    m_plateY = std::clamp(y, 20.0f, 2000.0f);
+    m_plateDirty = true;
     update();
 }
 
@@ -243,7 +267,7 @@ void Viewport::fitView()
         const auto c = all.center();
         m_camera.fitSphere(QVector3D(c[0], c[1], c[2]), all.radius());
     } else {
-        m_camera.fitSphere(QVector3D(0, 0, 0), kPlateSize * 0.5f);
+        m_camera.fitSphere(QVector3D(0, 0, 0), std::max(m_plateX, m_plateY) * 0.5f);
     }
     update();
 }
@@ -454,32 +478,42 @@ void Viewport::buildPlateGeometry()
         }
     };
 
-    const float half = kPlateSize * 0.5f;
+    const float halfX = m_plateX * 0.5f, halfY = m_plateY * 0.5f;
     const QVector3D minor(0.80f, 0.81f, 0.84f);
     const QVector3D major(0.62f, 0.64f, 0.68f);
+    const QVector3D edge(0.42f, 0.44f, 0.50f);
     const QVector3D xAxis(0.85f, 0.25f, 0.25f);
     const QVector3D yAxis(0.25f, 0.65f, 0.30f);
 
-    const int steps = static_cast<int>(kPlateSize / kMinorStep);
-    for (int i = 0; i <= steps; ++i) {
-        const float v = -half + static_cast<float>(i) * kMinorStep;
-        if (qFuzzyIsNull(v))
-            continue;  // the axes are drawn separately
-        const bool isMajor = qFuzzyIsNull(std::fmod(std::abs(v), kMajorStep));
-        const QVector3D& c = isMajor ? major : minor;
-        addLine(v, -half, v, half, c);
-        addLine(-half, v, half, v, c);
+    // Lines every 10 mm counted from the middle (every 50 mm darker), then the plate's edge.
+    for (int k = 1; static_cast<float>(k) * kMinorStep < halfX - 1e-3f; ++k) {
+        const float v = static_cast<float>(k) * kMinorStep;
+        const QVector3D& c = k % static_cast<int>(kMajorStep / kMinorStep) == 0 ? major : minor;
+        addLine(v, -halfY, v, halfY, c);
+        addLine(-v, -halfY, -v, halfY, c);
     }
-    addLine(-half, 0.0f, 0.0f, 0.0f, major);
-    addLine(0.0f, -half, 0.0f, 0.0f, major);
-    addLine(0.0f, 0.0f, half, 0.0f, xAxis);  // +X in red
-    addLine(0.0f, 0.0f, 0.0f, half, yAxis);  // +Y in green
+    for (int k = 1; static_cast<float>(k) * kMinorStep < halfY - 1e-3f; ++k) {
+        const float v = static_cast<float>(k) * kMinorStep;
+        const QVector3D& c = k % static_cast<int>(kMajorStep / kMinorStep) == 0 ? major : minor;
+        addLine(-halfX, v, halfX, v, c);
+        addLine(-halfX, -v, halfX, -v, c);
+    }
+    addLine(-halfX, -halfY, halfX, -halfY, edge);
+    addLine(halfX, -halfY, halfX, halfY, edge);
+    addLine(halfX, halfY, -halfX, halfY, edge);
+    addLine(-halfX, halfY, -halfX, -halfY, edge);
+    addLine(-halfX, 0.0f, 0.0f, 0.0f, major);
+    addLine(0.0f, -halfY, 0.0f, 0.0f, major);
+    addLine(0.0f, 0.0f, halfX, 0.0f, xAxis);  // +X in red
+    addLine(0.0f, 0.0f, 0.0f, halfY, yAxis);  // +Y in green
 
     m_plateVertexCount = static_cast<int>(vertices.size() / 6);
 
-    m_plateVao.create();
+    if (!m_plateVao.isCreated())
+        m_plateVao.create();
     QOpenGLVertexArrayObject::Binder bind(&m_plateVao);
-    m_plateBuffer.create();
+    if (!m_plateBuffer.isCreated())
+        m_plateBuffer.create();
     m_plateBuffer.bind();
     m_plateBuffer.allocate(vertices.data(), static_cast<int>(vertices.size() * sizeof(float)));
     glEnableVertexAttribArray(0);
@@ -613,6 +647,10 @@ void Viewport::paintGL()
     const QMatrix4x4 viewProj = m_camera.projectionMatrix(aspect) * view;
 
     // Build plate
+    if (m_plateDirty) {
+        m_plateDirty = false;
+        buildPlateGeometry();
+    }
     m_lineShader->bind();
     m_lineShader->setUniformValue("uMvp", viewProj);
     {
@@ -781,6 +819,13 @@ void Viewport::mousePressEvent(QMouseEvent* event)
             turnTo(all[std::size_t(*piece)].lookFrom);
             return;
         }
+        if (m_leftNav != LeftDrag::Tool) {
+            // The left button works the view (View tab: Orbit / Pan / Zoom).
+            m_drag = m_leftNav == LeftDrag::Orbit ? DragMode::Orbit
+                     : m_leftNav == LeftDrag::Pan ? DragMode::Pan
+                                                  : DragMode::Zoom;
+            return;
+        }
         m_leftPressed = true;
         m_leftDragging = false;
         m_leftPressAt = event->position();
@@ -828,13 +873,18 @@ void Viewport::mouseMoveEvent(QMouseEvent* event)
         m_camera.pan(static_cast<float>(delta.x()), static_cast<float>(delta.y()), static_cast<float>(height()));
         update();
         break;
+    case DragMode::Zoom:
+        // Up the screen zooms in: about a wheel notch every 25 pixels.
+        m_camera.zoom(static_cast<float>(-delta.y()) / 25.0f);
+        update();
+        break;
     case DragMode::None: {
         const auto piece = viewCubePieceAt(event->position());
         const auto button = viewCubeButtonAt(event->position());
         if (piece != m_cubeHover || button != m_cubeButtonHover) {
             m_cubeHover = piece;
             m_cubeButtonHover = button;
-            setCursor(piece || button ? Qt::PointingHandCursor : Qt::ArrowCursor);
+            setCursor(piece || button ? Qt::PointingHandCursor : restingCursor());
             setToolTip(button ? (*button == 1 ? tr("Back to the starting view")
                                               : *button == 0 ? tr("Turn the view 90° left") : tr("Turn the view 90° right"))
                               : piece ? tr("Look from this side (or edge, or corner)") : QString());
@@ -870,7 +920,7 @@ void Viewport::mouseReleaseEvent(QMouseEvent* event)
         updateHover(event->position());
         return;
     }
-    if (m_drag != DragMode::None && !(event->buttons() & (Qt::RightButton | Qt::MiddleButton)))
+    if (m_drag != DragMode::None && !(event->buttons() & (Qt::RightButton | Qt::MiddleButton | Qt::LeftButton)))
         m_drag = DragMode::None;
     QOpenGLWidget::mouseReleaseEvent(event);
 }

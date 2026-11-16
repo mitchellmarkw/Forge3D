@@ -807,3 +807,15 @@ and sharp across edges.
 - `SectionPanel` in its own dock (hidden until View → Section View); the dock's
   visibility is the on/off switch. `MainWindow::applySection` sets the slider's reach
   from `Viewport::sceneBounds()` when it opens or the axis changes.
+
+## Recent files, plate size, ribbon (slice 32)
+
+- Recent files: `file/recent` in Preferences (native separators, newest first, six),
+  noted by `openFile` and `saveTo`; `noteRecentFile({})` rebuilds the menu.
+- Plate: `Viewport::setPlateSize` (grid lines counted from the middle, an edge line;
+  rebuilt in `paintGL` when dirty); `plate/x`, `plate/y` in Preferences (an app
+  setting, not saved in models).
+- Ribbon: five tabs (Build, Design, Sculpt, View, Print/Save); `common()` adds Check
+  and Undo to each. `Viewport::setLeftDrag` makes the left button orbit, pan or zoom
+  (an `ExclusiveOptional` action group: one or none); the Section dock follows
+  `m_sectionAction`.

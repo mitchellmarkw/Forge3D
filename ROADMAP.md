@@ -54,6 +54,7 @@ Gate to Phase 2: a new user prints a customised part within 10 minutes.
 | 30 | Text in sketches: words whose letters are outlines | Done (0.39.0) |
 | 31 | Section view: cut the view open to look inside | Done (0.40.0) |
 | 31+ | Section view for only the selected shape | Done (0.40.1, released) |
+| 32 | Open Recent; build plate size; the ribbon reorganised, with a View tab (Orbit / Pan / Zoom on the left button) | **Delivered for testing** |
 
 Separate track: sculpt-engine prototype (one Draw brush on a 1M-triangle mesh at 60 fps).
 

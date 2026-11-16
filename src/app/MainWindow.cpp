@@ -51,7 +51,11 @@
 #include <QCloseEvent>
 #include <QDesktopServices>
 #include <QDir>
+#include <QComboBox>
+#include <QDialog>
 #include <QDockWidget>
+#include <QDoubleSpinBox>
+#include <QSignalBlocker>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QDragEnterEvent>
@@ -182,6 +186,9 @@ QString startFolder()
         return remembered;
     return QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
 }
+
+const char* const kRecentKey = "file/recent";
+constexpr int kRecentCount = 6;
 
 void rememberFolderOf(const QString& filePath)
 {
@@ -797,6 +804,55 @@ void MainWindow::createActions()
     m_resetView = new QAction(tr("&Reset view"), this);
     m_resetView->setShortcut(Qt::Key_Home);
     connect(m_resetView, &QAction::triggered, m_viewport, &Viewport::resetView);
+    m_fit->setToolTip(tr("Fit: show the whole model (F)"));
+    m_resetView->setToolTip(tr("Reset View: back to the starting view (Home)"));
+
+    // The left mouse button working the view. One at a time, or none (the usual:
+    // the left button selects and moves, the right button turns the view).
+    auto* nav = new QActionGroup(this);
+    nav->setExclusionPolicy(QActionGroup::ExclusionPolicy::ExclusiveOptional);
+    const auto navAction = [this, nav](const QString& name, const QString& tip, Viewport::LeftDrag what) {
+        auto* a = new QAction(name, this);
+        a->setCheckable(true);
+        a->setToolTip(tip);
+        a->setStatusTip(tip);
+        nav->addAction(a);
+        connect(a, &QAction::toggled, this, [this, a, what, name](bool on) {
+            if (on) {
+                m_viewport->setLeftDrag(what);
+                statusBar()->showMessage(tr("%1 is on: drag with the left button in the view. Click %1 again "
+                                            "to go back to selecting and moving shapes.")
+                                             .arg(name));
+            } else if (m_viewport->leftDrag() == what) {
+                m_viewport->setLeftDrag(Viewport::LeftDrag::Tool);
+                statusBar()->clearMessage();
+            }
+        });
+        return a;
+    };
+    m_navOrbit = navAction(tr("Orbit"),
+                           tr("Orbit: while this is on, dragging with the left button turns the view (as the "
+                              "right button always does). Click again to turn it off."),
+                           Viewport::LeftDrag::Orbit);
+    m_navPan = navAction(tr("Pan"),
+                         tr("Pan: while this is on, dragging with the left button slides the view (as the middle "
+                            "button always does). Click again to turn it off."),
+                         Viewport::LeftDrag::Pan);
+    m_navZoom = navAction(tr("Zoom"),
+                          tr("Zoom: while this is on, dragging up and down with the left button zooms (as the "
+                             "wheel always does). Click again to turn it off."),
+                          Viewport::LeftDrag::Zoom);
+
+    m_sectionAction = new QAction(tr("&Section View"), this);
+    m_sectionAction->setCheckable(true);
+    m_sectionAction->setToolTip(tr("Section View: cut the view open to look inside the model (the model itself "
+                                   "isn't changed)"));
+    m_sectionAction->setStatusTip(m_sectionAction->toolTip());
+
+    m_plateSizeAction = new QAction(tr("Build &Plate Size..."), this);
+    m_plateSizeAction->setToolTip(tr("Plate Size: set the grid to the size of your printer's bed"));
+    m_plateSizeAction->setStatusTip(m_plateSizeAction->toolTip());
+    connect(m_plateSizeAction, &QAction::triggered, this, &MainWindow::choosePlateSize);
 }
 
 void MainWindow::createMenus()
@@ -804,6 +860,9 @@ void MainWindow::createMenus()
     QMenu* file = menuBar()->addMenu(tr("&File"));
     file->addAction(m_new);
     file->addAction(m_open);
+    m_recentMenu = file->addMenu(tr("Open &Recent"));
+    m_recentMenu->setToolTipsVisible(true);
+    noteRecentFile({});
     file->addSeparator();
     file->addAction(m_save);
     file->addAction(m_saveAs);
@@ -849,12 +908,19 @@ void MainWindow::createMenus()
     edit->addMenu(m_mirrorMenu);
     edit->addAction(m_group);
 
+    edit->addSeparator();
+    edit->addAction(m_plateSizeAction);
+
     QMenu* add = menuBar()->addMenu(tr("&Add"));
     add->addActions(m_addMenu->actions());
 
     QMenu* view = menuBar()->addMenu(tr("&View"));
     view->addAction(m_fit);
     view->addAction(m_resetView);
+    view->addSeparator();
+    view->addAction(m_navOrbit);
+    view->addAction(m_navPan);
+    view->addAction(m_navZoom);
     auto* viewCube = view->addAction(tr("View &Cube"));
     viewCube->setCheckable(true);
     viewCube->setToolTip(tr("The cube in the top-right corner of the view: it shows which side faces you, and "
@@ -865,6 +931,9 @@ void MainWindow::createMenus()
         m_viewport->setViewCubeVisible(on);
         Preferences().setValue(QStringLiteral("view/cube"), on);
     });
+    view->addSeparator();
+    view->addAction(m_plateSizeAction);
+    applyPlateSize();
     view->addSeparator();
     m_viewMenu = view;  // the panels' show/hide entries are added in createDocks()
 
@@ -932,6 +1001,13 @@ void MainWindow::createToolBar()
         {m_sitOnPlate, "sit-on-plate"},
         {m_export, "export"},
         {m_sendToSlicer, "send-to-slicer"},
+        {m_navOrbit, "orbit"},
+        {m_navPan, "pan"},
+        {m_navZoom, "zoom"},
+        {m_fit, "fit"},
+        {m_resetView, "reset-view"},
+        {m_sectionAction, "section"},
+        {m_plateSizeAction, "plate"},
     };
     for (const auto& [action, name] : pictures)
         action->setIcon(ribbonIcon(QString::fromLatin1(name)));
@@ -1020,9 +1096,23 @@ void MainWindow::createToolBar()
         return static_cast<QWidget*>(b);
     };
 
-    Page build = page(tr("Build"), tr("Shapes: add, move, combine and arrange them"));
+    // Check and Undo are on every tab.
+    const auto common = [&](Page& p) {
+        group(p, tr("Check"), {button(m_measureAction)});
+        group(p, tr("Undo"), {shortButton(m_undo, tr("Undo")), shortButton(m_redo, tr("Redo"))});
+        p.row->addStretch(1);
+    };
+    const auto named = [&](QAction* action, const QString& name) {
+        auto* b = static_cast<QToolButton*>(button(action));
+        // (A tool button takes its action's text again whenever the action changes.)
+        const auto keep = [b, name] { b->setText(name); };
+        keep();
+        connect(action, &QAction::changed, b, keep);
+        return static_cast<QWidget*>(b);
+    };
+
+    Page build = page(tr("Build"), tr("Shapes: open, add, move, turn and resize them"));
     group(build, tr("File"), {button(m_open), button(m_save), button(m_import)});
-    group(build, tr("Undo"), {shortButton(m_undo, tr("Undo")), shortButton(m_redo, tr("Redo"))});
     {
         QWidget* add = menuButton(m_addMenu);
         add->setObjectName(QStringLiteral("AddShapeButton"));
@@ -1031,18 +1121,16 @@ void MainWindow::createToolBar()
     group(build, tr("Handles"),
           {button(m_modeMove), button(m_modeRotate), button(m_modeResize), button(m_snapAction),
            button(m_uniformAction)});
-    group(build, tr("Combine"), {button(m_merge), button(m_subtract), button(m_intersect), button(m_separate)});
+    group(build, tr("Remove"), {button(m_delete), button(m_clear)});
+    common(build);
+
+    Page design = page(tr("Design"), tr("Combine and arrange shapes; sketches, holes, shells, edges, text and cuts"));
+    group(design, tr("Combine"), {button(m_merge), button(m_subtract), button(m_intersect), button(m_separate)});
     {
         QWidget* align = menuButton(m_alignMenu, tr("Align"));
         align->setObjectName(QStringLiteral("AlignShapesButton"));
-        group(build, tr("Arrange"),
-              {align, menuButton(m_mirrorMenu), button(m_patternAction), button(m_group), button(m_duplicate)});
+        group(design, tr("Arrange"), {align, menuButton(m_mirrorMenu), button(m_group), button(m_duplicate)});
     }
-    group(build, tr("Remove"), {button(m_delete), button(m_clear)});
-    group(build, tr("Check"), {button(m_measureAction)});
-    build.row->addStretch(1);
-
-    Page design = page(tr("Design"), tr("Features: sketches, holes, shells, edges, text and cuts"));
     {
         // Sketch: click for a face (or the plate); the arrow offers the middle planes.
         auto* sketchButton = new QToolButton;
@@ -1058,28 +1146,25 @@ void MainWindow::createToolBar()
           {button(m_holeAction), button(m_threadAction), button(m_shellAction), button(m_followAction),
            button(m_patternAction), button(m_edgesAction)});
     group(design, tr("Change"), {button(m_split), button(m_emboss)});
-    group(design, tr("Check"), {button(m_measureAction)});
-    group(design, tr("Undo"), {shortButton(m_undo, tr("Undo")), shortButton(m_redo, tr("Redo"))});
-    design.row->addStretch(1);
+    group(design, tr("Place"), {button(m_layFlat), button(m_sitOnPlate)});
+    common(design);
 
     Page sculpt = page(tr("Sculpt"), tr("Sculpting brushes"));
-    {
-        group(sculpt, tr("Brushes"), {button(m_sculptAction)});
-        group(sculpt, tr("Triangles"), {button(m_simplifyAction)});
-        auto* note = new QLabel(tr("Select a shape, then Sculpt: Draw, Smooth, Inflate, Flatten, Pinch, Clay, Grab, "
-                                   "Crease and Snake hook brushes, a mask to protect parts, mirrored across X, Y or Z "
-                                   "if you like."));
-        note->setStyleSheet(QStringLiteral("color: palette(mid);"));
-        sculpt.row->addWidget(note);
-        sculpt.row->addStretch(1);
-    }
+    group(sculpt, tr("Brushes"), {button(m_sculptAction)});
+    group(sculpt, tr("Triangles"), {button(m_simplifyAction)});
+    common(sculpt);
 
-    Page print = page(tr("Print"), tr("Get it to the printer"));
-    group(print, tr("Place"), {button(m_layFlat), button(m_sitOnPlate)});
-    group(print, tr("Out"), {button(m_export), button(m_sendToSlicer)});
-    group(print, tr("Check"), {button(m_measureAction)});
-    group(print, tr("Undo"), {shortButton(m_undo, tr("Undo")), shortButton(m_redo, tr("Redo"))});
-    print.row->addStretch(1);
+    Page viewPage = page(tr("View"), tr("Turn, slide and zoom the view; look inside; the build plate"));
+    group(viewPage, tr("Workspace"),
+          {button(m_navOrbit), button(m_navPan), button(m_navZoom), named(m_fit, tr("Fit")),
+           named(m_resetView, tr("Reset View"))});
+    group(viewPage, tr("Objects"), {named(m_sectionAction, tr("Section View"))});
+    group(viewPage, tr("Plate"), {named(m_plateSizeAction, tr("Plate Size"))});
+    common(viewPage);
+
+    Page print = page(tr("Print/Save"), tr("Save it, or get it to the printer"));
+    group(print, tr("Out"), {button(m_save), button(m_export), button(m_sendToSlicer)});
+    common(print);
 
     // Keep the tab you were on.
     Preferences settings;
@@ -1449,11 +1534,9 @@ void MainWindow::createDocks()
     });
     connect(m_sectionPanel, &SectionPanel::axisChanged, this, [this] { applySection(true); });
     connect(m_sectionPanel, &SectionPanel::changed, this, [this] { applySection(false); });
-    QAction* section = m_sectionDock->toggleViewAction();
-    section->setText(tr("&Section View"));
-    section->setToolTip(tr("Cut the view open to look inside the model (the model itself isn't changed)"));
-    section->setStatusTip(section->toolTip());
-    m_viewMenu->addAction(section);
+    connect(m_sectionAction, &QAction::toggled, m_sectionDock, &QDockWidget::setVisible);
+    connect(m_sectionDock, &QDockWidget::visibilityChanged, m_sectionAction, &QAction::setChecked);
+    m_viewMenu->addAction(m_sectionAction);
     m_viewMenu->addSeparator();
     // Let the user bring closed panels back.
     m_viewMenu->addAction(objectsDock->toggleViewAction());
@@ -4285,11 +4368,167 @@ bool MainWindow::openFile(const QString& path)
     m_expanded.clear();
     m_filePath = QFileInfo(path).absoluteFilePath();
     rememberFolderOf(path);
+    noteRecentFile(m_filePath);
     refreshCommandState();
     refreshScene();
     m_viewport->fitView();
     qInfo().noquote() << "Opened" << m_filePath << "-" << m_doc.bodyCount() << "bodies";
     return true;
+}
+
+void MainWindow::noteRecentFile(const QString& path)
+{
+    Preferences settings;
+    QStringList recent = settings.value(QString::fromLatin1(kRecentKey)).toStringList();
+    if (!path.isEmpty()) {
+        // Newest first, each file once (Windows paths: whatever the capitals).
+        const QString full = QDir::toNativeSeparators(QFileInfo(path).absoluteFilePath());
+        for (int i = recent.size(); i-- > 0;)
+            if (recent[i].compare(full, Qt::CaseInsensitive) == 0)
+                recent.removeAt(i);
+        recent.prepend(full);
+        while (recent.size() > kRecentCount)
+            recent.removeLast();
+        settings.setValue(QString::fromLatin1(kRecentKey), recent);
+    }
+    if (!m_recentMenu)
+        return;
+    m_recentMenu->clear();
+    int number = 1;
+    for (const QString& file : recent) {
+        // "&1 name.f3d": the number is the key to press; the folder shows as the tip.
+        QAction* action = m_recentMenu->addAction(
+            QStringLiteral("&%1  %2").arg(number++).arg(QFileInfo(file).fileName().replace(QLatin1Char('&'), QLatin1String("&&"))));
+        action->setToolTip(file);
+        action->setStatusTip(file);
+        connect(action, &QAction::triggered, this, [this, file] {
+            if (!QFileInfo::exists(file)) {
+                QMessageBox::information(this, tr("Open Recent"),
+                                         tr("%1 isn't there any more (moved, renamed or deleted), so it has been "
+                                            "taken off the list.")
+                                             .arg(file));
+                forgetRecentFile(file);
+                return;
+            }
+            if (confirmDiscardChanges())
+                openFile(file);
+        });
+    }
+    if (recent.isEmpty()) {
+        m_recentMenu->addAction(tr("(No files opened or saved yet)"))->setEnabled(false);
+    } else {
+        m_recentMenu->addSeparator();
+        connect(m_recentMenu->addAction(tr("&Clear This List")), &QAction::triggered, this, [this] {
+            Preferences().remove(QString::fromLatin1(kRecentKey));
+            noteRecentFile({});
+        });
+    }
+}
+
+void MainWindow::forgetRecentFile(const QString& path)
+{
+    Preferences settings;
+    QStringList recent = settings.value(QString::fromLatin1(kRecentKey)).toStringList();
+    recent.removeAll(path);
+    settings.setValue(QString::fromLatin1(kRecentKey), recent);
+    noteRecentFile({});
+}
+
+// ---- Build plate ----------------------------------------------------------------
+
+void MainWindow::applyPlateSize()
+{
+    const Preferences settings;
+    m_viewport->setPlateSize(settings.value(QStringLiteral("plate/x"), 220.0).toFloat(),
+                             settings.value(QStringLiteral("plate/y"), 220.0).toFloat());
+}
+
+void MainWindow::choosePlateSize()
+{
+    struct Preset {
+        const char* name;
+        double x, y;
+    };
+    // Common printer beds (X across, Y front to back).
+    static const Preset presets[] = {
+        {"180 x 180 mm (Prusa MINI, Bambu Lab A1 mini)", 180, 180},
+        {"220 x 220 mm (Creality Ender 3, many others)", 220, 220},
+        {"235 x 235 mm", 235, 235},
+        {"250 x 210 mm (Prusa MK3 / MK4)", 250, 210},
+        {"256 x 256 mm (Bambu Lab X1 / P1 / A1)", 256, 256},
+        {"270 x 270 mm", 270, 270},
+        {"300 x 300 mm", 300, 300},
+        {"350 x 350 mm", 350, 350},
+        {"360 x 360 mm (Prusa XL)", 360, 360},
+    };
+    const QSizeF now = m_viewport->plateSize();
+    QDialog dialog(this);
+    dialog.setWindowTitle(tr("Build Plate Size"));
+    auto* layout = new QVBoxLayout(&dialog);
+    layout->setSpacing(2);
+    layout->addWidget(new QLabel(tr("Printer bed:")));  // the label rests on top of its list
+    auto* list = new QComboBox;
+    for (const Preset& p : presets)
+        list->addItem(QString::fromLatin1(p.name).replace(QLatin1String(" x "), QStringLiteral(" \u00D7 ")));
+    list->addItem(tr("Another size (type it below)"));
+    layout->addWidget(list);
+    layout->addSpacing(8);
+    const auto spin = [](double value) {
+        auto* s = new QDoubleSpinBox;
+        s->setRange(20.0, 2000.0);
+        s->setDecimals(0);
+        s->setSingleStep(10.0);
+        s->setSuffix(tr(" mm"));
+        s->setValue(value);
+        return s;
+    };
+    layout->addWidget(new QLabel(tr("Across (X):")));
+    auto* x = spin(now.width());
+    layout->addWidget(x);
+    layout->addWidget(new QLabel(tr("Front to back (Y):")));
+    auto* y = spin(now.height());
+    layout->addWidget(y);
+    layout->addSpacing(8);
+    auto* note = new QLabel(tr("The grid is drawn this size, with a darker line round its edge, so you can see "
+                               "whether a design fits your printer. It's remembered for every model."));
+    note->setWordWrap(true);
+    note->setStyleSheet(QStringLiteral("color: palette(mid);"));
+    layout->addWidget(note);
+    layout->addSpacing(8);
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+    layout->addWidget(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+
+    const int other = list->count() - 1;
+    const auto matching = [&] {
+        for (int i = 0; i < other; ++i)
+            if (presets[i].x == x->value() && presets[i].y == y->value())
+                return i;
+        return other;
+    };
+    list->setCurrentIndex(matching());
+    connect(list, &QComboBox::activated, &dialog, [&](int index) {
+        if (index >= other)
+            return;
+        const QSignalBlocker a(x), b(y);
+        x->setValue(presets[index].x);
+        y->setValue(presets[index].y);
+    });
+    const auto typed = [&] { list->setCurrentIndex(matching()); };
+    connect(x, &QDoubleSpinBox::valueChanged, &dialog, typed);
+    connect(y, &QDoubleSpinBox::valueChanged, &dialog, typed);
+
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+    Preferences settings;
+    settings.setValue(QStringLiteral("plate/x"), x->value());
+    settings.setValue(QStringLiteral("plate/y"), y->value());
+    applyPlateSize();
+    if (m_doc.bodyCount() == 0)
+        m_viewport->resetView();
+    statusBar()->showMessage(tr("Build plate: %1 \u00D7 %2 mm").arg(x->value()).arg(y->value()), 4000);
+    qInfo() << "Build plate size" << x->value() << "x" << y->value();
 }
 
 bool MainWindow::save()
@@ -4671,6 +4910,7 @@ bool MainWindow::saveTo(const QString& path)
     }
     m_filePath = QFileInfo(path).absoluteFilePath();
     rememberFolderOf(path);
+    noteRecentFile(m_filePath);
     m_stack.setClean();  // also refreshes the title
     statusBar()->showMessage(tr("Saved %1").arg(QDir::toNativeSeparators(m_filePath)), 4000);
     qInfo().noquote() << "Saved" << m_filePath << "-" << m_doc.bodyCount() << "bodies";
@@ -5525,21 +5765,22 @@ void MainWindow::startTour()
             "right mouse button; the wheel zooms."),
          onTab(m_modeMove, 0), tab(0)},
         {tr("Combine shapes"),
-         tr("Select two shapes (<b>Ctrl+click</b> adds to the selection), then <b>Merge</b> joins them and "
+         tr("Select two shapes (<b>Ctrl+click</b> adds to the selection). On the <b>Design</b> tab, "
+            "<b>Merge</b> joins them and "
             "<b>Subtract</b> cuts the others out of the first one you picked: that's how you make a hole."),
-         onTab(m_subtract, 0), tab(0)},
+         onTab(m_subtract, 1), tab(1)},
         {tr("Every step, kept"),
          tr("<b>Objects</b> lists your shapes and the steps that made them. <b>Double-click</b> a step to "
             "change it later; everything after it follows."),
          [this] { return m_objects->parentWidget(); }, tab(0)},
         {tr("Words and pictures"),
-         tr("On the <b>Design</b> tab, <b>Emboss</b> raises or engraves your name, or a logo or photo, on "
+         tr("Also on the <b>Design</b> tab, <b>Emboss</b> raises or engraves your name, or a logo or photo, on "
             "any surface, even round a cylinder. Holes, shells, rounded edges and sketches are here too."),
          onTab(m_emboss, 1), tab(1)},
         {tr("Ready to print"),
-         tr("On the <b>Print</b> tab, <b>Lay on Face</b> puts the best face down, and <b>Send to Slicer</b> "
-            "opens it in your slicer (or <b>Export</b> saves an STL or 3MF)."),
-         onTab(m_sendToSlicer, 3), tab(3)},
+         tr("On the <b>Print/Save</b> tab, <b>Send to Slicer</b> opens it in your slicer (or <b>Export</b> "
+            "saves an STL or 3MF). If it needs a different face down first, <b>Design → Lay on Face</b>."),
+         onTab(m_sendToSlicer, 4), tab(4)},
         {tr("That's it"),
          tr("<b>Help → Quick Start Guide</b> walks through a first print (a key tag with your name) with "
             "pictures. <b>Help → Take the Tour</b> shows this again. Point at any button for a tip, and "
