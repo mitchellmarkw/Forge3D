@@ -801,6 +801,9 @@ and sharp across edges.
   closed solid seen through the cut) in a flat darker shade lit as the cut plane: the
   cut reads as a filled face without building any geometry. Nothing in the document or
   picking changes.
+- `Section::selectedOnly`: the viewport remembers the ids of the selected items
+  (`noteSectionShapes`, on every `setItems`; an empty selection keeps the last ones)
+  and switches `uClipOn` per item. `sceneBounds(cutOnly)` gives the slider its reach.
 - `SectionPanel` in its own dock (hidden until View → Section View); the dock's
   visibility is the on/off switch. `MainWindow::applySection` sets the slider's reach
   from `Viewport::sceneBounds()` when it opens or the axis changes.

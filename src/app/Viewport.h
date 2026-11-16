@@ -93,10 +93,14 @@ public:
     struct Section {
         QVector3D normal{0, 0, 1};
         float offset = 0.0f;
+        // Cut only the selected shapes (the ones selected last, when nothing is now);
+        // the rest are drawn whole.
+        bool selectedOnly = false;
     };
     void setSection(const std::optional<Section>& section);
     // The box round what's shown (ghosts and see-through helpers aside), plate mm.
-    Bounds sceneBounds() const;
+    // cutOnly: just the shapes a selected-only section cuts (all, if there are none).
+    Bounds sceneBounds(bool cutOnly = false) const;
 
     const view::OrbitCamera& camera() const { return m_camera; }
     std::optional<QPointF> projectToScreen(const QVector3D& point) const;
@@ -163,6 +167,8 @@ private:
     // The view cube
     bool m_viewCube = true;
     std::optional<Section> m_section;
+    std::set<std::uint64_t> m_sectionIds;  // the shapes a selected-only section cuts
+    void noteSectionShapes();
     std::optional<int> m_cubeHover;
     std::optional<int> m_cubeButtonHover;
     QVariantAnimation* m_turn = nullptr;

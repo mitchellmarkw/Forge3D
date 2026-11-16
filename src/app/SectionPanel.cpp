@@ -23,7 +23,15 @@ SectionPanel::SectionPanel(QWidget* parent) : QWidget(parent)
 {
     auto* layout = new QVBoxLayout(this);
     layout->setSpacing(2);
-    // The label rests on top of its list.
+    // Each label rests on top of its list.
+    layout->addWidget(new QLabel(tr("Cut:")));
+    m_what = new QComboBox;
+    m_what->addItem(tr("Everything on the plate"));
+    m_what->addItem(tr("Only the selected shape"));
+    m_what->setToolTip(tr("Cut the whole view open, or only the shape that's selected (the others stay whole). "
+                          "Click another shape to cut that one instead."));
+    layout->addWidget(m_what);
+    layout->addSpacing(8);
     layout->addWidget(new QLabel(tr("Cut across:")));
     m_axis = new QComboBox;
     m_axis->addItem(tr("Left to right (X)"));
@@ -64,6 +72,11 @@ SectionPanel::SectionPanel(QWidget* parent) : QWidget(parent)
         emit axisChanged();
         emit changed();
     });
+    connect(m_what, &QComboBox::currentIndexChanged, this, [this] {
+        m_placed = false;
+        emit axisChanged();
+        emit changed();
+    });
     connect(m_slider, &QSlider::valueChanged, this, &SectionPanel::fromSlider);
     connect(m_position, &QDoubleSpinBox::valueChanged, this, &SectionPanel::fromSpin);
     connect(m_otherSide, &QCheckBox::toggled, this, &SectionPanel::changed);
@@ -78,6 +91,27 @@ int SectionPanel::axis() const
 double SectionPanel::position() const
 {
     return m_position->value();
+}
+
+bool SectionPanel::selectedOnly() const
+{
+    return m_what->currentIndex() == 1;
+}
+
+void SectionPanel::setReach(double low, double high)
+{
+    if (!(high - low > 1e-6)) {
+        low -= 5.0;
+        high += 5.0;
+    }
+    const double margin = (high - low) * 0.02;
+    if (std::abs(low - margin - m_low) < 1e-9 && std::abs(high + margin - m_high) < 1e-9)
+        return;
+    m_low = low - margin;
+    m_high = high + margin;
+    const QSignalBlocker block(m_slider);
+    m_slider->setValue(
+        int(std::lround(std::clamp((m_position->value() - m_low) / (m_high - m_low), 0.0, 1.0) * kSteps)));
 }
 
 bool SectionPanel::otherSide() const
