@@ -104,6 +104,12 @@ Vec3 halfExtents(const PrimitiveSpec& spec)
                     x = std::max(x, std::abs(q.x));
                     y = std::max(y, std::abs(q.y));
                 }
+                if (p.taper < 0.0) {
+                    // Leaning out: wider at the far end.
+                    const double out = (p.midplane ? p.length / 2 : p.length) * std::tan(-p.taper * 3.14159265358979323846 / 180);
+                    x += out;
+                    y += out;
+                }
                 for (const auto& g : p.sketch.geos)
                     if (g.kind == sketch::GeoKind::Circle) {
                         const auto& c = p.sketch.points[std::size_t(g.a)];
@@ -385,13 +391,22 @@ void resizeOne(PrimitiveSpec& spec, int axis, double value, const ResizeOptions&
                 }
                 keepTorusHole(p, minV);
             } else if constexpr (std::is_same_v<T, PadSpec>) {
+                // A tapered one keeps its shape: the sides' slope follows the stretch.
+                const auto lean = [&p](double by) {
+                    const double pi = 3.14159265358979323846;
+                    p.taper = std::clamp(std::atan(std::tan(p.taper * pi / 180) * by) * 180 / pi, -60.0, 60.0);
+                };
                 if (axis == 2) {
+                    if (value > 0.0)
+                        lean(p.length / value);
                     p.length = value;
                 } else {
                     // Sketches resize evenly across (circles stay circles).
                     const double current = 2.0 * halfExtents(PrimitiveSpec{p})[std::size_t(axis)];
-                    if (current > 0.0)
+                    if (current > 0.0) {
                         sketch::scale(p.sketch, value / current, value / current);
+                        lean(value / current);
+                    }
                 }
             } else if constexpr (std::is_same_v<T, RevolveSpec>) {
                 const double current = 2.0 * halfExtents(PrimitiveSpec{p})[std::size_t(axis)];

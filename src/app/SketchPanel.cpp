@@ -61,6 +61,17 @@ SketchPanel::SketchPanel(QWidget* parent) : QWidget(parent)
     m_length->setSuffix(tr(" mm"));
     m_length->setMinimumWidth(110);
     makeLayout->addWidget(m_length);
+    m_taperLabel = new QLabel(tr("Taper:"));
+    makeLayout->addWidget(m_taperLabel);
+    m_taper = new QDoubleSpinBox;
+    m_taper->setRange(-60.0, 60.0);
+    m_taper->setDecimals(1);
+    m_taper->setSingleStep(1.0);
+    m_taper->setSuffix(QStringLiteral("\u00B0"));
+    m_taper->setSpecialValueText(QString());
+    m_taper->setToolTip(tr("Leans the sides in as they go away from the sketch (draft): 0\u00B0 is straight, "
+                           "a minus angle leans them out. A pocket gets narrower as it goes deeper."));
+    makeLayout->addWidget(m_taper);
     m_angleLabel = new QLabel(tr("Angle:"));
     makeLayout->addWidget(m_angleLabel);
     m_angle = new QDoubleSpinBox;
@@ -218,6 +229,7 @@ void SketchPanel::start(const QString& title, bool onFace, bool editing, const O
     }
     m_make->setCurrentIndex(m_make->findData(int(options.make)));
     m_length->setValue(options.length);
+    m_taper->setValue(options.taper);
     m_angle->setValue(options.angle);
     m_otherWay->setChecked(options.otherWay);
     m_bothWays->setChecked(options.bothWays);
@@ -256,6 +268,12 @@ SketchPanel::Make SketchPanel::make() const
 double SketchPanel::length() const
 {
     return m_length->value();
+}
+
+double SketchPanel::taper() const
+{
+    const Make kind = make();
+    return (kind == Make::Pad || kind == Make::Pocket) && !throughAll() ? m_taper->value() : 0.0;
 }
 
 double SketchPanel::angle() const
@@ -370,6 +388,7 @@ void SketchPanel::updateLabels()
     m_make->setEnabled(!m_pathStage && m_outline == 0);
     if (loft || sweep) {
         for (QWidget* w : {static_cast<QWidget*>(m_lengthLabel), static_cast<QWidget*>(m_length),
+                           static_cast<QWidget*>(m_taperLabel), static_cast<QWidget*>(m_taper),
                            static_cast<QWidget*>(m_angleLabel), static_cast<QWidget*>(m_angle),
                            static_cast<QWidget*>(m_axisHelp), static_cast<QWidget*>(m_otherWay),
                            static_cast<QWidget*>(m_bothWays), static_cast<QWidget*>(m_throughAll)})
@@ -381,6 +400,8 @@ void SketchPanel::updateLabels()
                              : tr("How far the outline is pushed out"));
     m_lengthLabel->setVisible(!spin);
     m_length->setVisible(!spin);
+    m_taperLabel->setVisible(!spin);
+    m_taper->setVisible(!spin);
     m_angleLabel->setVisible(spin);
     m_angle->setVisible(spin);
     m_axisHelp->setVisible(spin);
@@ -395,6 +416,8 @@ void SketchPanel::updateLabels()
     m_bothWays->setEnabled(!m_otherWay->isChecked() && !through);
     m_length->setEnabled(!(kind == Make::Pocket && m_throughAll->isChecked()));
     m_lengthLabel->setEnabled(m_length->isEnabled());
+    m_taper->setEnabled(m_length->isEnabled());
+    m_taperLabel->setEnabled(m_length->isEnabled());
 }
 
 }  // namespace forge::app

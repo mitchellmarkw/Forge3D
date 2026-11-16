@@ -269,6 +269,14 @@ PrimitiveSpec scaledSpec(const PrimitiveSpec& spec, const Vec3& f)
                 if (!sketch::scale(p.sketch, f[0], f[1]))
                     throw NotScalable("This sketch has curves, slopes or angles, so it can only be resized evenly "
                                       "across (its height can change freely)");
+                if (p.taper != 0.0) {
+                    // The sides keep their shape: the lean changes when it's stretched one way.
+                    if (std::abs(f[0] - f[1]) > 1e-12 * std::abs(f[0]))
+                        throw NotScalable("A tapered shape can only be resized evenly across (its height can "
+                                          "change freely)");
+                    const double pi = 3.14159265358979323846;
+                    p.taper = std::clamp(std::atan(std::tan(p.taper * pi / 180) * f[0] / f[2]) * 180 / pi, -60.0, 60.0);
+                }
                 p.length *= f[2];
             } else if constexpr (std::is_same_v<T, LoftSpec> || std::is_same_v<T, SweepSpec>) {
                 if (std::abs(f[0] - f[1]) > 1e-12 || std::abs(f[0] - f[2]) > 1e-12)

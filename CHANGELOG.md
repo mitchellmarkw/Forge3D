@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.38.0 Beta — Slice 29: Taper (2026-11-16)
+
+- **Taper** on pads and pockets (in the sketcher, under Length / Depth): an angle that
+  leans the sides in as they go away from the sketch, the "draft" that moulded parts
+  have. 0° is straight as before; a minus angle leans them out. Up to 60° either way.
+  - A pad is full size at the sketch and narrower at its far end; a pocket gets
+    narrower as it goes deeper. Round outlines become cones.
+  - A hole inside the outline opens out as the outside narrows (the walls thin from
+    both sides).
+  - With **Both ways** it narrows each way from the sketch. **Through all** pockets
+    stay straight.
+  - If the angle is too steep for the length (the sides would meet before the end),
+    a message says so.
+- Change it later by double-clicking the pad or pocket. Made taller or shorter by its
+  handles, a tapered shape keeps its shape (the angle follows); it resizes evenly
+  across.
+- (Chamfered edges were already there: Design → Edges → Chamfer or Bevel.)
+- 219 unit tests (2 new).
+
 ## 0.37.0 Beta — Slice 28: Sketch tools (2026-11-16)
 
 Four new tools on the sketcher's toolbar:

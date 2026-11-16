@@ -6,6 +6,8 @@
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepLib.hxx>
+#include <BRepOffsetAPI_DraftAngle.hxx>
+#include <BRepOffsetAPI_MakeOffset.hxx>
 #include <BRepOffsetAPI_MakePipeShell.hxx>
 #include <BRepOffsetAPI_ThruSections.hxx>
 #include <Geom2d_Line.hxx>
@@ -227,11 +229,89 @@ TopoDS_Shape faces(const Sketch& s)
     return out;
 }
 
+namespace {
+
+// One face of the sketch pushed `height` along Z (negative: down) from the sketch
+// plane, its sides leaning in by `taper` degrees as they go.
+TopoDS_Shape taperedPrism(const TopoDS_Shape& face, double height, double taper)
+{
+    // The outline at the far end is the sketch's moved in by this much: if part of it
+    // (the outline, or a hole) closes up before then, the taper is too steep.
+    const char* const tooSteep = "That taper is too steep for this shape: the sides would meet before the end";
+    {
+        const double inward = std::abs(height) * std::tan(taper * std::numbers::pi / 180.0);
+        int wires = 0, left = 0;
+        for (TopExp_Explorer it(face, TopAbs_WIRE); it.More(); it.Next())
+            ++wires;
+        BRepOffsetAPI_MakeOffset far(TopoDS::Face(face), GeomAbs_Intersection);
+        far.Perform(-inward);
+        if (far.IsDone() && !far.Shape().IsNull())
+            for (TopExp_Explorer it(far.Shape(), TopAbs_WIRE); it.More(); it.Next())
+                ++left;
+        if (left != wires)
+            throw GeometryError(tooSteep);
+    }
+    const TopoDS_Shape prism = BRepPrimAPI_MakePrism(face, gp_Vec(0, 0, height)).Shape();
+    const gp_Dir pull(0, 0, height > 0 ? 1 : -1);
+    const gp_Pln neutral(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1));
+    BRepOffsetAPI_DraftAngle draft(prism);
+    for (TopExp_Explorer it(prism, TopAbs_FACE); it.More(); it.Next()) {
+        const TopoDS_Face side = TopoDS::Face(it.Current());
+        const BRepAdaptor_Surface surface(side);
+        if (surface.GetType() == GeomAbs_Plane && std::abs(surface.Plane().Axis().Direction().Z()) > 0.5)
+            continue;  // the two ends
+        draft.Add(side, pull, taper * std::numbers::pi / 180.0, neutral);
+        if (!draft.AddDone())
+            throw GeometryError("The sides of this outline can't be tapered (try straight lines and whole arcs)");
+    }
+    draft.Build();
+    if (!draft.IsDone() || !BRepCheck_Analyzer(draft.Shape()).IsValid())
+        throw GeometryError(tooSteep);
+    return draft.Shape();
+}
+
+}  // namespace
+
 TopoDS_Shape padShape(const PadSpec& pad)
 {
     if (!(pad.length > 0.0))
         throw std::invalid_argument("The pad's length must be greater than zero");
+    if (!(std::abs(pad.taper) <= 60.0))
+        throw std::invalid_argument("The taper must be between -60 and 60 degrees");
     const TopoDS_Shape flat = faces(pad.sketch);
+    if (pad.taper != 0.0) {
+        try {
+            TopoDS_Shape result;
+            bool first = true;
+            const auto add = [&](const TopoDS_Shape& solid) {
+                if (first) {
+                    result = solid;
+                    first = false;
+                    return;
+                }
+                BRepAlgoAPI_Fuse fuse(result, solid);
+                if (!fuse.IsDone() || fuse.HasErrors())
+                    throw GeometryError("Outlines in the sketch overlap in a way that can't be joined");
+                result = fuse.Shape();
+            };
+            for (TopExp_Explorer it(flat, TopAbs_FACE); it.More(); it.Next()) {
+                if (pad.midplane) {
+                    add(taperedPrism(it.Current(), pad.length / 2, pad.taper));
+                    add(taperedPrism(it.Current(), -pad.length / 2, pad.taper));
+                } else {
+                    add(taperedPrism(it.Current(), pad.reversed ? -pad.length : pad.length, pad.taper));
+                }
+            }
+            if (first)
+                throw GeometryError("Draw a closed outline to make a shape.");
+            ShapeUpgrade_UnifySameDomain unify(result, true, true, false);
+            unify.Build();
+            return unify.Shape();
+        } catch (const Standard_Failure& e) {
+            throw GeometryError(std::string("The sketch could not be pushed up with that taper: ") +
+                                e.GetMessageString());
+        }
+    }
     double from = 0.0, to = pad.length;
     if (pad.reversed) {
         from = -pad.length;

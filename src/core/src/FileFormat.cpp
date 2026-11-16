@@ -323,6 +323,8 @@ json bodyToJson(const Body& b)
     if (const auto* pad = std::get_if<PadSpec>(&b.spec)) {
         j["reversed"] = pad->reversed;
         j["midplane"] = pad->midplane;
+        if (pad->taper != 0.0)
+            j["taper"] = pad->taper;
         j["sketch"] = sketchToJson(pad->sketch);
     }
     if (const auto* l = std::get_if<LoftSpec>(&b.spec)) {
@@ -757,6 +759,7 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
         pad.length = number(*params, "length", where);
         pad.reversed = j.value("reversed", false);
         pad.midplane = j.value("midplane", false);
+        pad.taper = std::clamp(j.value("taper", 0.0), -60.0, 60.0);
         const auto sk = j.find("sketch");
         if (sk == j.end() || !sk->is_object())
             damaged(where + ": missing sketch");
