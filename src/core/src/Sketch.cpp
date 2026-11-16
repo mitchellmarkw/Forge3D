@@ -24,6 +24,7 @@ std::array<char, 3> slots(const Constraint& c)
     case Rule::Parallel:
     case Rule::Perpendicular:
     case Rule::Equal:
+    case Rule::Gap:
     case Rule::Tangent: return {'g', 'g', '-'};
     case Rule::PointOn: return {'p', 'g', '-'};
     case Rule::Coincident: return {'p', 'p', '-'};
@@ -262,6 +263,17 @@ struct Residuals {
                 break;
             }
             case Rule::Radius: f.push_back(radius(s, *ga) - c.value); break;
+            case Rule::Gap: {
+                if (ga->kind == GeoKind::Line) {
+                    const auto [dx, dy] = dir(*gb);
+                    const auto [lx, ly] = P(gb->a);
+                    const auto [px, py] = P(ga->a);
+                    f.push_back((dx * (py - ly) - dy * (px - lx)) / std::max(std::hypot(dx, dy), 1e-12) - c.value);
+                } else {
+                    f.push_back(radius(s, *ga) - radius(s, *gb) - c.value);
+                }
+                break;
+            }
             case Rule::Angle: {
                 const auto [ax, ay] = dir(*ga);
                 double from = 0.0;
@@ -342,6 +354,10 @@ void checkRefs(const Sketch& s)
         case Rule::Tangent:
             if (kindOf(c.a) == GeoKind::Line && kindOf(c.b) == GeoKind::Line)
                 throw std::invalid_argument("Tangent needs a circle or arc");
+            break;
+        case Rule::Gap:
+            if ((kindOf(c.a) == GeoKind::Line) != (kindOf(c.b) == GeoKind::Line))
+                throw std::invalid_argument("A gap goes between two lines, or two circles or arcs");
             break;
         default:
             if (slots(c)[0] == 'g' && (c.rule == Rule::Horizontal || c.rule == Rule::Vertical ||
@@ -445,6 +461,7 @@ bool isDimension(Rule rule)
     case Rule::DistanceX:
     case Rule::DistanceY:
     case Rule::Radius:
+    case Rule::Gap:
     case Rule::Angle: return true;
     default: return false;
     }
@@ -769,6 +786,14 @@ double measure(const Sketch& s, const Constraint& c)
     case Rule::DistanceX: return P(c.b).x - P(c.a).x;
     case Rule::DistanceY: return P(c.b).y - P(c.a).y;
     case Rule::Radius: return radiusOf(s, s.geos[std::size_t(c.a)]);
+    case Rule::Gap: {
+        const Geo& ga = s.geos[std::size_t(c.a)];
+        const Geo& gb = s.geos[std::size_t(c.b)];
+        if (ga.kind != GeoKind::Line)
+            return radiusOf(s, ga) - radiusOf(s, gb);
+        const double dx = P(gb.b).x - P(gb.a).x, dy = P(gb.b).y - P(gb.a).y;
+        return (dx * (P(ga.a).y - P(gb.a).y) - dy * (P(ga.a).x - P(gb.a).x)) / std::max(std::hypot(dx, dy), 1e-12);
+    }
     case Rule::Angle: {
         const Geo& ga = s.geos[std::size_t(c.a)];
         const double a = std::atan2(P(ga.b).y - P(ga.a).y, P(ga.b).x - P(ga.a).x);
@@ -821,7 +846,7 @@ bool scale(Sketch& s, double sx, double sy)
                 return false;
         for (const Constraint& c : s.constraints)
             if (c.rule == Rule::Distance || c.rule == Rule::Angle || c.rule == Rule::Radius ||
-                c.rule == Rule::Tangent)
+                c.rule == Rule::Tangent || c.rule == Rule::Gap)
                 return false;
     }
     for (Point& p : s.points) {
@@ -833,6 +858,7 @@ bool scale(Sketch& s, double sx, double sy)
     for (Constraint& c : s.constraints) {
         switch (c.rule) {
         case Rule::Distance:
+        case Rule::Gap:
         case Rule::Radius: c.value *= sx; break;
         case Rule::DistanceX: c.value *= sx; break;
         case Rule::DistanceY: c.value *= sy; break;
@@ -896,6 +922,7 @@ std::string describe(const Sketch& s, const Constraint& c)
     case Rule::DistanceX: return "\xE2\x86\x94 " + num(std::abs(c.value)) + " mm";
     case Rule::DistanceY: return "\xE2\x86\x95 " + num(std::abs(c.value)) + " mm";
     case Rule::Radius: return "R" + num(c.value);
+    case Rule::Gap: return "Gap " + num(std::abs(c.value));
     case Rule::Angle: return num(c.value) + "\xC2\xB0";
     }
     return {};

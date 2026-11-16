@@ -751,9 +751,17 @@ and sharp across edges.
 - Offset: `chainOf` walks the joined lines and arcs (no branching); each joint moves
   to where the two offset curves meet (smooth joints: straight out); closed chains
   use the signed area to know which way is out. Copies: lines Parallel to the
-  originals, arcs on the same centre point, Tangent rules copied.
+  originals, arcs on the same centre point, Tangent rules copied, and a `Rule::Gap`
+  dimension (two lines: the copy's start a signed distance left of the original;
+  circles / arcs: the difference in radius) for each run of pieces joined by Tangent
+  rules (a run shares one gap). File format 24.
 - Mirror: each point gets an image held by a Symmetric rule (points on the axis are
-  shared); arcs swap start and end; circles get an Equal rule.
+  shared); arcs swap start and end; circles get an Equal rule. `endsOntoLine` first
+  moves loose ends within 3% of the picked curves' size onto the axis (PointOn), and
+  the app calls `straighten` (an axis within 10° of upright / level is turned to it,
+  its PointOn points with it, and gets a Vertical / Horizontal rule) when the rules
+  allow. Both place the points directly: left to the solver, a PointOn pull can send
+  the line's free end far away.
 - The app: `SketchView::change` wraps a tool (undo snapshot, solve, put back with the
   reason on failure). Trim is a tool mode (`Tool::Trim`, hover shows `trimPiece`);
   the others act on the picks and ask for a size.

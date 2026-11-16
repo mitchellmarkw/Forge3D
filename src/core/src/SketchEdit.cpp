@@ -656,6 +656,7 @@ std::vector<int> offset(Sketch& s, const std::vector<int>& geos, double distance
             work.radii.push_back(r);
             work.geos.push_back({GeoKind::Circle, g.a, -1, -1, int(work.radii.size()) - 1, g.construction});
             made.push_back(int(work.geos.size()) - 1);
+            work.constraints.push_back(makeRule(work, Rule::Gap, made.back(), geo));
             continue;
         }
         const Chain chain = chainOf(s, geo, seen);
@@ -720,20 +721,100 @@ std::vector<int> offset(Sketch& s, const std::vector<int>& geos, double distance
             if (og.kind == GeoKind::Line)
                 work.constraints.push_back(makeRule(work, Rule::Parallel, st.geo, copy));
         }
-        // Smooth joints stay smooth.
+        // Smooth joints stay smooth. Pieces joined smoothly keep their gap together, so
+        // each such run needs holding only once.
+        std::map<int, int> run;
+        for (const Step& st : chain.steps)
+            run[st.geo] = st.geo;
+        const auto runOf = [&run](int g) {
+            while (run[g] != g)
+                g = run[g];
+            return g;
+        };
         for (const Constraint& c : s.constraints)
             if (c.rule == Rule::Tangent && copyOf.count(c.a) && copyOf.count(c.b)) {
-                Constraint t = c;
-                t.a = copyOf[c.a];
-                t.b = copyOf[c.b];
-                work.constraints.push_back(makeRule(work, Rule::Tangent, t.a, t.b));
+                work.constraints.push_back(makeRule(work, Rule::Tangent, copyOf[c.a], copyOf[c.b]));
+                run[runOf(c.a)] = runOf(c.b);
             }
+        // The gap itself: a dimension between each run of the copy and its original.
+        std::set<int> held;
+        for (const Step& st : chain.steps)
+            if (held.insert(runOf(st.geo)).second)
+                work.constraints.push_back(makeRule(work, Rule::Gap, copyOf[st.geo], st.geo));
     }
     s = std::move(work);
     return made;
 }
 
 // ---- Mirror -----------------------------------------------------------------------------------
+
+void endsOntoLine(Sketch& s, const std::vector<int>& geos, int line)
+{
+    if (line < 0 || std::size_t(line) >= s.geos.size() || s.geos[std::size_t(line)].kind != GeoKind::Line)
+        return;
+    const Point la = at(s, s.geos[std::size_t(line)].a);
+    const Point ld = unit(at(s, s.geos[std::size_t(line)].b) - la);
+    std::map<int, int> uses;
+    for (const Geo& g : s.geos)
+        if (g.kind != GeoKind::Circle && !g.construction)
+            for (int p : endsOf(g))
+                ++uses[p];
+    std::set<int> held;
+    for (const Constraint& c : s.constraints)
+        if (c.rule == Rule::PointOn && c.b == line)
+            held.insert(c.a);
+    double x0 = 1e300, y0 = 1e300, x1 = -1e300, y1 = -1e300;
+    for (int gi : geos) {
+        if (gi < 0 || std::size_t(gi) >= s.geos.size())
+            continue;
+        for (int p : {s.geos[std::size_t(gi)].a, s.geos[std::size_t(gi)].b, s.geos[std::size_t(gi)].c})
+            if (p >= 0) {
+                x0 = std::min(x0, at(s, p).x), x1 = std::max(x1, at(s, p).x);
+                y0 = std::min(y0, at(s, p).y), y1 = std::max(y1, at(s, p).y);
+            }
+    }
+    const double near = 0.03 * std::hypot(x1 - x0, y1 - y0);
+    for (int gi : geos) {
+        if (gi < 0 || std::size_t(gi) >= s.geos.size() || gi == line)
+            continue;
+        const Geo& g = s.geos[std::size_t(gi)];
+        if (g.kind == GeoKind::Circle || g.construction)
+            continue;
+        for (int p : endsOf(g)) {
+            const double off = std::abs(cross(at(s, p) - la, ld));
+            const bool onEnd = p == s.geos[std::size_t(line)].a || p == s.geos[std::size_t(line)].b;
+            if (p > 0 && !onEnd && uses[p] == 1 && off <= near && held.insert(p).second) {
+                s.points[std::size_t(p)] = la + ld * dot(at(s, p) - la, ld);  // onto it now, then kept there
+                s.constraints.push_back(Constraint{Rule::PointOn, p, line, -1, 0.0, 0.0});
+            }
+        }
+    }
+}
+
+bool straighten(Sketch& s, const std::vector<int>& geos, int line)
+{
+    if (line < 0 || std::size_t(line) >= s.geos.size() || s.geos[std::size_t(line)].kind != GeoKind::Line)
+        return false;
+    const Geo g = s.geos[std::size_t(line)];
+    const Point d = at(s, g.b) - at(s, g.a);
+    const double dx = std::abs(d.x), dy = std::abs(d.y);
+    const double lean = std::atan2(std::min(dx, dy), std::max(dx, dy)) * 180 / pi;
+    if (!(lean > 1e-7 && lean <= 10.0))
+        return false;
+    endsOntoLine(s, geos, line);
+    // Turn it about its start (or its end, when the start can't move: the origin).
+    const int pivot = g.b == 0 ? g.b : g.a, other = pivot == g.a ? g.b : g.a;
+    const Point from = at(s, pivot);
+    const Point was = unit(at(s, other) - from);
+    const Point now = dx < dy ? Point{0.0, was.y < 0 ? -1.0 : 1.0} : Point{was.x < 0 ? -1.0 : 1.0, 0.0};
+    const auto turned = [&](Point p) { return from + now * dot(p - from, was) + perp(now) * cross(was, p - from); };
+    s.points[std::size_t(other)] = turned(at(s, other));
+    for (const Constraint& c : s.constraints)
+        if (c.rule == Rule::PointOn && c.b == line && c.a > 0)
+            s.points[std::size_t(c.a)] = turned(at(s, c.a));
+    s.constraints.push_back(makeRule(s, dx < dy ? Rule::Vertical : Rule::Horizontal, line));
+    return true;
+}
 
 std::vector<int> mirror(Sketch& s, const std::vector<int>& geos, const std::vector<int>& points, int axis)
 {
@@ -752,7 +833,11 @@ std::vector<int> mirror(Sketch& s, const std::vector<int>& geos, const std::vect
     if (what.empty() && points.empty())
         throw std::invalid_argument("Pick what to mirror, then Ctrl+click the line to mirror it about");
 
+    endsOntoLine(s, what, axis);
     std::map<int, int> image;
+    for (const Constraint& c : s.constraints)
+        if (c.rule == Rule::PointOn && c.b == axis)
+            image[c.a] = c.a;  // held on the line: shared with the copy
     const auto imageOf = [&](int p) {
         if (const auto it = image.find(p); it != image.end())
             return it->second;

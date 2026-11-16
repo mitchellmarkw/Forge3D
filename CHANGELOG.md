@@ -13,14 +13,17 @@ Four new tools on the sketcher's toolbar:
   dimension (double-click to change it). The old corner stays as a dashed helper
   corner, so sizes measured to it still hold.
 - **Offset** (Shift+O): pick any line or curve of an outline and give a distance: the
-  whole outline is copied that far out (a minus number: in). Lines stay parallel to
-  the original's and arcs share their centres.
+  whole outline is copied that far out (a minus number: in). The copy is held that
+  far from the original by **Gap** dimensions (double-click one to change it), so it
+  follows when the original is dragged or resized.
 - **Mirror** (M): pick things, Ctrl+click the line to mirror about last (or include one
   dashed helper line), and they're copied to the other side. The copy stays a mirror
   image when the original changes; points on the line are shared, so half a shape
-  drawn against the line closes up.
+  drawn against the line closes up. A mirror line that leans a little (up to 10°) is
+  made upright or level first, and ends drawn on it (or all but) are put on it.
 - Each tool is one Undo, and says why when it can't be done (a radius too big for the
   lines, an offset that would fold over itself).
+- Files saved with 0.37 need 0.37 or later (file format 24: the Gap dimension).
 - 217 unit tests (4 new: one for each tool).
 
 ## 0.36.0 Beta — Slice 27: Loft and sweep (2026-11-16)

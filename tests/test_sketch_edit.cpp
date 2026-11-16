@@ -221,8 +221,29 @@ TEST_CASE("Offset: a copy of an outline, further out or in", "[sketchedit]")
         offset(t, {0}, -2.0);
         CHECK(solve(t).ok);
         CHECK_THAT(area(t), WithinRel(200.0 - 16.0 * 6.0, 1e-6));
-        // Moving the original drags the copy round with it (sides parallel).
-        solve(t, {{3, Point{25, 10}}});
+        // The gap is held: four Gap dimensions (a sharp-cornered outline: one a side),
+        // and nothing more can move than before the offset.
+        int gaps = 0;
+        for (const Constraint& c : t.constraints)
+            gaps += c.rule == Rule::Gap;
+        CHECK(gaps == 4);
+        {
+            Sketch plain;
+            rectangle(plain, 0, 0, 20, 10);
+            CHECK(freedom(t) == freedom(plain));
+        }
+        // Drag the original's corner a long way: the copy keeps its distance.
+        solve(t, {{3, Point{40, 25}}});
+        CHECK(solve(t).ok);
+        const double w = t.points[3].x - t.points[1].x, h = t.points[3].y - t.points[1].y;
+        CHECK(w > 30);
+        CHECK_THAT(area(t), WithinRel(w * h - (w - 4) * (h - 4), 1e-6));
+        // Change one gap: that side moves.
+        for (Constraint& c : t.constraints)
+            if (c.rule == Rule::Gap) {
+                c.value = c.value < 0 ? -1.0 : 1.0;
+                break;
+            }
         CHECK(solve(t).ok);
         Sketch far;
         rectangle(far, 0, 0, 20, 10);
@@ -242,8 +263,15 @@ TEST_CASE("Offset: a copy of an outline, further out or in", "[sketchedit]")
         for (int arc : {2, 3})
             for (int l : {top, bottom})
                 s.constraints.push_back(makeRule(s, Rule::Tangent, l, arc));
+        const int free = freedom(s);
         offset(s, {top}, 1.0);
         CHECK(solve(s).ok);
+        // Joined smoothly all round: one Gap holds the lot.
+        int gaps = 0;
+        for (const Constraint& c : s.constraints)
+            gaps += c.rule == Rule::Gap;
+        CHECK(gaps == 1);
+        CHECK(freedom(s) == free);
         double x0, y0, x1, y1;
         box(s, x0, y0, x1, y1);
         CHECK_THAT(y1, WithinAbs(3.0, 1e-9));
@@ -256,6 +284,9 @@ TEST_CASE("Offset: a copy of an outline, further out or in", "[sketchedit]")
         REQUIRE(made.size() == 1);
         CHECK_THAT(radiusOf(c, c.geos[std::size_t(made[0])]), WithinAbs(3.0, 1e-12));
         CHECK(c.geos[std::size_t(made[0])].a == c.geos[std::size_t(round)].a);  // same centre
+        c.radii[0] = 10;  // the original grows: the copy stays 1 inside
+        CHECK(solve(c).ok);
+        CHECK_THAT(radiusOf(c, c.geos[std::size_t(made[0])]), WithinAbs(radiusOf(c, c.geos[std::size_t(round)]) - 1.0, 1e-6));
 
         // An L, open: copied to its left (going from its first point).
         Sketch l;
@@ -315,4 +346,39 @@ TEST_CASE("Mirror: a copy the other side of a line, held mirror-image", "[sketch
     CHECK_THAT(t.points[std::size_t(g.b)].x, WithinAbs(-5.0, 1e-9));  // starts at the top
     CHECK_THAT(t.points[std::size_t(g.c)].x, WithinAbs(-7.0, 1e-9));
     CHECK_THROWS_AS(mirror(t, {1}, {}, 1), std::invalid_argument);  // not a line
+
+    // Half a shape whose ends just miss the line: put on it, so the outline closes.
+    Sketch h;
+    const int ax = line(h, 0, addPoint(h, {0, 20}), true);
+    h.constraints.push_back(makeRule(h, Rule::Vertical, ax));
+    const int p0 = addPoint(h, {0.3, 2}), p1 = addPoint(h, {10, 2}), p2 = addPoint(h, {10, 12}), p3 = addPoint(h, {0.2, 12});
+    const int m0 = line(h, p0, p1), m1 = line(h, p1, p2), m2 = line(h, p2, p3);
+    mirror(h, {m0, m1, m2}, {}, ax);
+    CHECK(solve(h).ok);
+    CHECK(looseEnds(h).empty());
+    CHECK_THAT(h.points[std::size_t(p0)].x, WithinAbs(0.0, 1e-6));
+    CHECK_THAT(area(h), WithinRel(200.0, 1e-6));
+
+    // A mirror line leaning a little: made upright, the ends drawn on it going with it.
+    Sketch lean;
+    const int tip = addPoint(lean, {3, 25});
+    const int la = line(lean, 0, tip, true);
+    const int q0 = addPoint(lean, {0.6, 5}), q1 = addPoint(lean, {18, 5}), q2 = addPoint(lean, {18, 20}),
+              q3 = addPoint(lean, {2.4, 20});
+    const int n0 = line(lean, q0, q1), n1 = line(lean, q1, q2), n2 = line(lean, q2, q3);
+    lean.constraints.push_back(makeRule(lean, Rule::Horizontal, n0));
+    lean.constraints.push_back(makeRule(lean, Rule::Vertical, n1));
+    lean.constraints.push_back(makeRule(lean, Rule::Horizontal, n2));
+    CHECK(straighten(lean, {n0, n1, n2}, la));
+    CHECK(solve(lean).ok);
+    CHECK_THAT(lean.points[std::size_t(tip)].x, WithinAbs(0.0, 1e-6));
+    CHECK(lean.points[std::size_t(tip)].y > 24);  // still about as long, still going up
+    mirror(lean, {n0, n1, n2}, {}, la);
+    CHECK(solve(lean).ok);
+    CHECK(looseEnds(lean).empty());
+    CHECK_THAT(area(lean), WithinRel(36.0 * 15.0, 0.02));
+    CHECK_FALSE(straighten(lean, {}, la));  // already upright
+    Sketch slanted;
+    const int sl = line(slanted, 0, addPoint(slanted, {10, 10}), true);
+    CHECK_FALSE(straighten(slanted, {}, sl));  // really at an angle: left alone
 }

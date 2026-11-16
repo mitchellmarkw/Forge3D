@@ -656,14 +656,15 @@ void SketchView::editDimension(int index)
     Constraint& c = m_sketch.constraints[std::size_t(index)];
     if (!isDimension(c.rule))
         return;
-    const bool signedValue = c.rule == Rule::DistanceX || c.rule == Rule::DistanceY;
+    const bool gap = c.rule == Rule::Gap;
+    const bool signedValue = c.rule == Rule::DistanceX || c.rule == Rule::DistanceY || gap;
     const bool angle = c.rule == Rule::Angle;
     QString label = angle ? tr("Angle (degrees):")
                     : c.rule == Rule::Radius ? tr("Radius (mm):")
                                              : tr("Distance (mm):");
     bool accepted = false;
     const double shown = signedValue ? std::abs(c.value) : c.value;
-    const double value = QInputDialog::getDouble(this, tr("Dimension"), label, shown, angle ? -360.0 : signedValue ? 0.0 : 0.001,
+    const double value = QInputDialog::getDouble(this, tr("Dimension"), label, shown, angle ? -360.0 : signedValue && !gap ? 0.0 : 0.001,
                                                  angle ? 360.0 : 100000.0, 3, &accepted);
     if (!accepted)
         return;
@@ -775,7 +776,7 @@ void SketchView::offsetPicked()
         return;
     m_lastOffset = distance;
     change([&] { offset(m_sketch, geos, distance); },
-           tr("Offset. The copy's lines stay parallel to the original's; add a dimension to hold the gap."));
+           tr("Offset. The copy is held that far from the original: double-click a Gap to change it."));
 }
 
 void SketchView::mirrorPicked()
@@ -809,8 +810,35 @@ void SketchView::mirrorPicked()
                      true);
         return;
     }
-    change([&] { mirror(m_sketch, geos, points, axis); },
-           tr("Mirrored. The copy stays a mirror image of the original."));
+    bool straightened = false;
+    const bool done = change(
+        [&] {
+            // A mirror line that's nearly upright or level is meant to be: make it so
+            // first (if the sketch's rules allow), or the two halves wouldn't meet.
+            const Sketch asDrawn = m_sketch;
+            if (straighten(m_sketch, geos, axis)) {
+                bool ok = false;
+                try {
+                    ok = solve(m_sketch).ok;
+                } catch (const std::exception&) {
+                }
+                if (ok)
+                    straightened = true;
+                else
+                    m_sketch = asDrawn;
+            }
+            mirror(m_sketch, geos, points, axis);
+        },
+        QString());
+    if (done)
+        emit message(straightened ? tr("Mirrored. The mirror line leaned a little, so it was made %1 first "
+                                       "(Undo puts everything back).")
+                                        .arg(std::abs(m_sketch.points[std::size_t(m_sketch.geos[std::size_t(axis)].a)].x -
+                                                      m_sketch.points[std::size_t(m_sketch.geos[std::size_t(axis)].b)].x) < 1e-6
+                                                 ? tr("upright")
+                                                 : tr("level"))
+                                  : tr("Mirrored. The copy stays a mirror image of the original."),
+                     false);
 }
 
 void SketchView::deleteSelection()
@@ -886,6 +914,7 @@ QPointF SketchView::ruleAnchor(const Constraint& c, int index) const
     case Rule::Equal:
     case Rule::Tangent:
     case Rule::Radius:
+    case Rule::Gap:
     case Rule::Angle: at = geoMid(c.a); break;
     case Rule::PointOn:
     case Rule::Fixed: at = P(c.a); break;

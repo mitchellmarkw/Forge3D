@@ -34,12 +34,22 @@ void trim(Sketch& s, int geo, Point at);
 // Copies the outlines that `geos` are part of (whole chains of joined lines and arcs,
 // and circles) `distance` away: outward from a closed outline (negative: inward), to
 // the left of an open one (going from its first point). Lines stay parallel to the
-// originals and arcs / circles share their centres. Returns the new curves.
+// originals and arcs / circles share their centres, and Gap dimensions hold the
+// distance (one for each run of smoothly joined pieces). Returns the new curves.
 std::vector<int> offset(Sketch& s, const std::vector<int>& geos, double distance);
 
 // Copies `geos` and the loose `points` mirrored about line `axis`. Each copied point
 // is held mirror-image to its original (Symmetric rules); points on the axis are
-// shared. Returns the new curves.
+// shared, and loose ends all but on it are put on it. Returns the new curves.
 std::vector<int> mirror(Sketch& s, const std::vector<int>& geos, const std::vector<int>& points, int axis);
+
+// Loose ends of `geos` that are on `line`, or all but (within 3% of their size), are
+// put on it with a rule keeping them there. Mirror does this itself.
+void endsOntoLine(Sketch& s, const std::vector<int>& geos, int line);
+
+// A line leaning a little (up to 10 degrees) from upright or level is made so, with a
+// Vertical / Horizontal rule; the ends of `geos` on it go with it. Returns whether it
+// did anything. Solve afterwards (other rules may not allow it).
+bool straighten(Sketch& s, const std::vector<int>& geos, int line);
 
 }  // namespace forge::sketch
