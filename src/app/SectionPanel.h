@@ -20,19 +20,23 @@ public:
 
     int axis() const;          // 0 = X (left to right), 1 = Y (front to back), 2 = Z (bottom to top)
     double position() const;   // along that axis, plate mm
+    bool selectedOnly() const; // cut just the selected shape, not everything
     bool otherSide() const;    // hide the low side instead of the high side
     // How far the model reaches along the axis (the slider's travel). keepPosition:
     // leave the cut where it is if it's still within reach, else go to the middle.
     void setRange(double low, double high, bool keepPosition);
+    // The same, never moving the cut (the model changed while the view was cut).
+    void setReach(double low, double high);
 
 signals:
     void changed();
-    void axisChanged();
+    void axisChanged();  // or what's cut: the slider's travel needs working out again
 
 private:
     void fromSlider(int value);
     void fromSpin(double value);
 
+    QComboBox* m_what = nullptr;
     QComboBox* m_axis = nullptr;
     QSlider* m_slider = nullptr;
     QDoubleSpinBox* m_position = nullptr;

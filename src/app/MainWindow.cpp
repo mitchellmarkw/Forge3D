@@ -1442,7 +1442,11 @@ void MainWindow::createDocks()
     m_sectionDock->setWidget(m_sectionPanel);
     addDockWidget(Qt::LeftDockWidgetArea, m_sectionDock);
     m_sectionDock->hide();
-    connect(m_sectionDock, &QDockWidget::visibilityChanged, this, [this] { applySection(true); });
+    connect(m_sectionDock, &QDockWidget::visibilityChanged, this, [this](bool shown) {
+        if (shown)
+            resizeDocks({m_sectionDock}, {m_sectionPanel->sizeHint().height() + 30}, Qt::Vertical);  // all of it showing
+        applySection(true);
+    });
     connect(m_sectionPanel, &SectionPanel::axisChanged, this, [this] { applySection(true); });
     connect(m_sectionPanel, &SectionPanel::changed, this, [this] { applySection(false); });
     QAction* section = m_sectionDock->toggleViewAction();
@@ -1466,7 +1470,11 @@ void MainWindow::applySection(bool newRange)
     }
     const int axis = m_sectionPanel->axis();
     if (newRange) {
-        const Bounds box = m_viewport->sceneBounds();
+        // (Tell the view first which shapes are cut, so the reach is theirs.)
+        Viewport::Section which;
+        which.selectedOnly = m_sectionPanel->selectedOnly();
+        m_viewport->setSection(which);
+        const Bounds box = m_viewport->sceneBounds(m_sectionPanel->selectedOnly());
         // setRange comes back here (changed) to draw it.
         if (box.valid)
             m_sectionPanel->setRange(box.min[std::size_t(axis)], box.max[std::size_t(axis)], true);
@@ -1481,6 +1489,7 @@ void MainWindow::applySection(bool newRange)
     cut.normal = QVector3D(axis == 0 ? 1.0f : 0.0f, axis == 1 ? 1.0f : 0.0f, axis == 2 ? 1.0f : 0.0f) *
                  (hideHigh ? 1.0f : -1.0f);
     cut.offset = float(m_sectionPanel->position()) * (hideHigh ? 1.0f : -1.0f);
+    cut.selectedOnly = m_sectionPanel->selectedOnly();
     m_viewport->setSection(cut);
 }
 
@@ -4869,6 +4878,13 @@ void MainWindow::refreshScene()
         }
     }
     m_viewport->setItems(std::move(items));
+    if (m_sectionDock && m_sectionDock->isVisible()) {
+        // The model or the selection changed: the slider reaches across what's cut now.
+        const Bounds box = m_viewport->sceneBounds(m_sectionPanel->selectedOnly());
+        const auto axis = std::size_t(m_sectionPanel->axis());
+        if (box.valid)
+            m_sectionPanel->setReach(box.min[axis], box.max[axis]);
+    }
 
     const Body* selected = m_doc.find(selectedOne());
     // "Round" can't be ticked for an oval cylinder. Undo, redo or a typed radius can turn

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.40.1 Beta — Section view for one shape (2026-11-16)
+
+- Section View has a **Cut:** choice: **Everything on the plate** (as before) or
+  **Only the selected shape**. With the second, just the shape you select is cut open
+  and the others stay whole; click another shape to cut that one instead. With
+  nothing selected, the last one stays cut. The slider then travels across that
+  shape only.
+- The Section View panel opens tall enough to show all of itself.
+
 ## 0.40.0 Beta — Slice 31: Section view (2026-11-16)
 
 - **View → Section View**: cuts the view open so you can look inside a model: wall

@@ -170,20 +170,45 @@ void Viewport::setItems(std::vector<DisplayItem> items)
 {
     m_items = std::move(items);
     m_itemsDirty = true;
+    noteSectionShapes();
     update();
 }
 
 void Viewport::setSection(const std::optional<Section>& section)
 {
     m_section = section;
+    noteSectionShapes();
     update();
 }
 
-Bounds Viewport::sceneBounds() const
+void Viewport::noteSectionShapes()
 {
-    Bounds all;
+    // The selected shapes are the ones cut; with nothing selected, the last ones stay cut.
+    std::set<std::uint64_t> selected;
+    bool anyLeft = false;
     for (const DisplayItem& item : m_items) {
         if (!item.mesh || item.ghost || item.alpha < 1.0f)
+            continue;
+        if (item.selected)
+            selected.insert(item.id);
+        anyLeft = anyLeft || m_sectionIds.count(item.id) > 0;
+    }
+    if (!selected.empty())
+        m_sectionIds = std::move(selected);
+    else if (!anyLeft)
+        m_sectionIds.clear();
+}
+
+Bounds Viewport::sceneBounds(bool cutOnly) const
+{
+    Bounds all;
+    const bool some = cutOnly && std::any_of(m_items.begin(), m_items.end(), [this](const DisplayItem& item) {
+        return item.mesh && !item.ghost && item.alpha >= 1.0f && m_sectionIds.count(item.id) > 0;
+    });
+    for (const DisplayItem& item : m_items) {
+        if (!item.mesh || item.ghost || item.alpha < 1.0f)
+            continue;
+        if (some && !m_sectionIds.count(item.id))
             continue;
         const Bounds local = item.mesh->bounds();
         if (!local.valid)
@@ -599,6 +624,7 @@ void Viewport::paintGL()
     // Bodies: solid ones first, then see-through parts on top of them.
     m_meshShader->bind();
     m_meshShader->setUniformValue("uClipOn", m_section ? 1.0f : 0.0f);
+    const bool cutSome = m_section && m_section->selectedOnly;
     if (m_section) {
         m_meshShader->setUniformValue("uClip", QVector4D(m_section->normal, m_section->offset));
         m_meshShader->setUniformValue("uClipNormalView", view.mapVector(m_section->normal));
@@ -616,6 +642,8 @@ void Viewport::paintGL()
             m_meshShader->setUniformValue("uMvp", viewProj * item.model);
             m_meshShader->setUniformValue("uModelView", modelView);
             m_meshShader->setUniformValue("uModel", item.model);
+            if (cutSome)
+                m_meshShader->setUniformValue("uClipOn", m_sectionIds.count(item.id) ? 1.0f : 0.0f);
             m_meshShader->setUniformValue("uNormalMatrix", modelView.normalMatrix());
             m_meshShader->setUniformValue("uColor", item.color);
             m_meshShader->setUniformValue("uSelected", item.selected ? 1.0f : 0.0f);
