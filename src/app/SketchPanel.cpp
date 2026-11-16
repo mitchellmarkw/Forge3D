@@ -167,7 +167,7 @@ SketchPanel::SketchPanel(QWidget* parent) : QWidget(parent)
     makeLayout->addWidget(m_sweepGroup);
     layout->addWidget(makeGroup);
 
-    auto* help = new QLabel(tr("<b>Draw</b>: Line (L), Rectangle (R), Circle (C), Arc (A), Slot (S), Point (P). "
+    auto* help = new QLabel(tr("<b>Draw</b>: Line (L), Rectangle (R), Circle (C), Arc (A), Slot (S), Point (P), Text (W). "
                                "Esc stops drawing, then goes back to picking.<br>"
                                "<b>Pick</b>: click; Ctrl+click picks more. Drag points and lines to move them.<br>"
                                "<b>Rules</b> go on what's picked: Horizontal (H), Vertical (V), Parallel, "

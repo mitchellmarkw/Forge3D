@@ -5,10 +5,13 @@
 #include "forge/core/SketchEdit.h"
 
 #include <QPointF>
+#include <QPolygonF>
 #include <QRectF>
 #include <QWidget>
 
+#include <map>
 #include <optional>
+#include <string>
 #include <vector>
 
 namespace forge::app {
@@ -24,7 +27,7 @@ class SketchView : public QWidget {
     Q_OBJECT
 
 public:
-    enum class Tool { Select, Line, Rectangle, Circle, Arc, Slot, Point, Trim };
+    enum class Tool { Select, Line, Rectangle, Circle, Arc, Slot, Point, Trim, Text };
 
     explicit SketchView(QWidget* parent = nullptr);
 
@@ -75,7 +78,7 @@ protected:
 
 private:
     struct Pick {
-        enum Kind { Point, Geo, Rule } kind = Point;
+        enum Kind { Point, Geo, Rule, Text } kind = Point;
         int index = -1;
         bool operator==(const Pick&) const = default;
     };
@@ -105,6 +108,16 @@ private:
     void finishChain();
     void clickTool(const Snap& snap);
     void editDimension(int rule);
+    // Asks for words, font and size (true: OK). Then the outlines of some words as they
+    // lie at the origin, unturned (worked out once and kept), and their box.
+    bool askWords(sketch::Words& words, bool isNew);
+    struct Lettering {
+        std::vector<std::vector<sketch::Point>> lines;
+        QRectF box;
+        QString problem;  // why there's nothing to draw (the font, or no letters)
+    };
+    const Lettering& letteringOf(const sketch::Words& words) const;
+    QPolygonF wordsBox(const sketch::Words& words) const;  // on screen
 
     std::vector<int> picked(Pick::Kind kind) const;
     QString describeRule(const sketch::Constraint& c) const;
@@ -129,6 +142,7 @@ private:
     std::optional<Pick> m_hover;
     std::optional<sketch::TrimPiece> m_trimPiece;  // what a click with Trim would take away
     double m_lastRadius = 2.0, m_lastOffset = 2.0;
+    mutable std::map<std::string, Lettering> m_lettering;
     std::vector<QRectF> m_ruleRects;  // where each rule's label was drawn (for picking)
 
     // Dragging

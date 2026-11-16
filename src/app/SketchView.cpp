@@ -1,8 +1,19 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "SketchView.h"
 
+#include "forge/core/SketchShape.h"
+#include "forge/core/Text.h"
+
+#include <QCheckBox>
+#include <QComboBox>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QDoubleSpinBox>
 #include <QFontMetricsF>
 #include <QInputDialog>
+#include <QLabel>
+#include <QLineEdit>
+#include <QVBoxLayout>
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QPainter>
@@ -117,6 +128,9 @@ void SketchView::setTool(Tool tool)
     case Tool::Point:
         emit message(tr("Point: click to put a point (a hole goes at each point on its own)."), false);
         break;
+    case Tool::Text:
+        emit message(tr("Text: click where the words start (the left end of the line they stand on)."), false);
+        break;
     case Tool::Trim:
         emit message(tr("Trim: click a piece of a line or curve to take it away, back to where other lines "
                         "cross it (the piece shows red). Esc when done."),
@@ -165,6 +179,13 @@ void SketchView::fit()
             grow(c.x - r, c.y - r);
             grow(c.x + r, c.y + r);
         }
+    for (const Words& w : m_sketch.texts) {
+        const QRectF box = letteringOf(w).box;
+        const Point at = m_sketch.points[std::size_t(w.at)];
+        const double c = std::cos(w.angle * pi / 180), s = std::sin(w.angle * pi / 180);
+        for (const QPointF& q : {box.topLeft(), box.topRight(), box.bottomLeft(), box.bottomRight()})
+            grow(at.x + q.x() * c - q.y() * s, at.y + q.x() * s + q.y() * c);
+    }
     for (const auto& line : m_reference)
         for (const QPointF& p : line)
             grow(p.x(), p.y());
@@ -236,7 +257,108 @@ std::optional<SketchView::Pick> SketchView::pickAt(const QPointF& pixel) const
         return best;
     if (const int g = geoAt(pixel); g >= 0)
         return Pick{Pick::Geo, g};
+    for (std::size_t i = 0; i < m_sketch.texts.size(); ++i)
+        if (wordsBox(m_sketch.texts[i]).containsPoint(pixel, Qt::OddEvenFill))
+            return Pick{Pick::Text, int(i)};
     return std::nullopt;
+}
+
+const SketchView::Lettering& SketchView::letteringOf(const Words& w) const
+{
+    const std::string key = w.text + '\n' + w.font + '\n' + (w.bold ? 'b' : '-') + (w.italic ? 'i' : '-') + '\n' +
+                            std::to_string(w.height);
+    const auto found = m_lettering.find(key);
+    if (found != m_lettering.end())
+        return found->second;
+    if (m_lettering.size() > 64)
+        m_lettering.clear();
+    Lettering made;
+    try {
+        made.lines = wordsOutlines(w);
+        double x0 = 1e300, y0 = 1e300, x1 = -1e300, y1 = -1e300;
+        for (const auto& line : made.lines)
+            for (const Point& q : line) {
+                x0 = std::min(x0, q.x), x1 = std::max(x1, q.x);
+                y0 = std::min(y0, q.y), y1 = std::max(y1, q.y);
+            }
+        if (x0 <= x1)
+            made.box = QRectF(QPointF(x0, y0), QPointF(x1, y1));
+    } catch (const std::exception& e) {
+        made.problem = QString::fromUtf8(e.what());
+    }
+    if (made.box.isEmpty())
+        made.box = QRectF(0, 0, w.height * 2, w.height);  // something to click on
+    return m_lettering.emplace(key, std::move(made)).first->second;
+}
+
+QPolygonF SketchView::wordsBox(const Words& w) const
+{
+    const QRectF box = letteringOf(w).box;
+    const Point at = m_sketch.points[std::size_t(w.at)];
+    const double c = std::cos(w.angle * pi / 180), s = std::sin(w.angle * pi / 180);
+    QPolygonF out;
+    for (const QPointF& q : {box.topLeft(), box.topRight(), box.bottomRight(), box.bottomLeft()})
+        out << toScreen({at.x + q.x() * c - q.y() * s, at.y + q.x() * s + q.y() * c});
+    return out;
+}
+
+bool SketchView::askWords(Words& words, bool isNew)
+{
+    QDialog dialog(this);
+    dialog.setWindowTitle(isNew ? tr("Text") : tr("Change the text"));
+    auto* layout = new QVBoxLayout(&dialog);
+    layout->addWidget(new QLabel(tr("Words:")));
+    auto* text = new QLineEdit(QString::fromStdString(words.text));
+    text->setMinimumWidth(260);
+    layout->addWidget(text);
+    layout->addSpacing(4);
+    layout->addWidget(new QLabel(tr("Font:")));  // the label rests on top of its list
+    auto* font = new QComboBox;
+    for (const std::string& name : text::availableFonts())
+        font->addItem(QString::fromStdString(name));
+    font->setCurrentText(QString::fromStdString(text::resolvedFont(words.font)));
+    font->setMaxVisibleItems(18);
+    layout->setSpacing(2);
+    layout->addWidget(font);
+    layout->addSpacing(4);
+    auto* bold = new QCheckBox(tr("Bold"));
+    bold->setChecked(words.bold);
+    auto* italic = new QCheckBox(tr("Italic"));
+    italic->setChecked(words.italic);
+    layout->addWidget(bold);
+    layout->addWidget(italic);
+    layout->addSpacing(4);
+    layout->addWidget(new QLabel(tr("Letter height (a capital letter):")));
+    auto* height = new QDoubleSpinBox;
+    height->setRange(0.5, 2000.0);
+    height->setDecimals(2);
+    height->setSuffix(tr(" mm"));
+    height->setValue(words.height);
+    layout->addWidget(height);
+    layout->addWidget(new QLabel(tr("Turned (anticlockwise):")));
+    auto* angle = new QDoubleSpinBox;
+    angle->setRange(-360.0, 360.0);
+    angle->setDecimals(1);
+    angle->setSingleStep(15.0);
+    angle->setSuffix(QStringLiteral("\u00B0"));
+    angle->setValue(words.angle);
+    layout->addWidget(angle);
+    layout->addSpacing(8);
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+    layout->addWidget(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    text->selectAll();
+    text->setFocus();
+    if (dialog.exec() != QDialog::Accepted || text->text().trimmed().isEmpty())
+        return false;
+    words.text = text->text().toStdString();
+    words.font = font->currentText().toStdString();
+    words.bold = bold->isChecked();
+    words.italic = italic->isChecked();
+    words.height = height->value();
+    words.angle = angle->value();
+    return true;
 }
 
 int SketchView::geoAt(const QPointF& pixel) const
@@ -350,6 +472,24 @@ void SketchView::clickTool(const Snap& snapIn)
     Snap snap = snapIn;
     switch (m_tool) {
     case Tool::Select: return;
+    case Tool::Text: {
+        Words words;
+        words.text = tr("Text").toStdString();
+        if (!m_sketch.texts.empty()) {  // carry on in the same style
+            words = m_sketch.texts.back();
+            words.angle = 0.0;
+        }
+        if (!askWords(words, true))
+            return;
+        remember();
+        words.at = pointFor(snap);
+        m_sketch.texts.push_back(words);
+        solveNow();
+        if (const QString problem = letteringOf(words).problem; !problem.isEmpty())
+            emit message(problem, true);
+        setTool(Tool::Select);
+        return;
+    }
     case Tool::Trim: {
         const int geo = geoAt(m_cursorPixel);
         if (geo < 0)
@@ -864,6 +1004,19 @@ void SketchView::deleteSelection()
                 geos.push_back(int(g));
         }
     }
+    // Picked words go, and words whose point was picked; then their points, if nothing
+    // else uses them.
+    std::vector<int> words = picked(Pick::Text);
+    for (std::size_t i = 0; i < m_sketch.texts.size(); ++i)
+        for (int p : picked(Pick::Point))
+            if (p != 0 && m_sketch.texts[i].at == p)
+                words.push_back(int(i));
+    std::sort(words.begin(), words.end());
+    words.erase(std::unique(words.begin(), words.end()), words.end());
+    for (auto it = words.rbegin(); it != words.rend(); ++it) {
+        lonePicked.push_back(m_sketch.texts[std::size_t(*it)].at);
+        m_sketch.texts.erase(m_sketch.texts.begin() + *it);
+    }
     // Each removal renumbers only its own kind (and lone points belong to no curve).
     removeConstraints(m_sketch, rules);
     removePoints(m_sketch, lonePicked);
@@ -966,7 +1119,7 @@ void SketchView::paintEvent(QPaintEvent*)
         p.drawPolyline(poly);
     }
 
-    const bool held = m_solved.ok && m_solved.freedom == 0 && !m_sketch.geos.empty();
+    const bool held = m_solved.ok && m_solved.freedom == 0 && !isEmpty(m_sketch);
     const QColor normal = held ? QColor(30, 140, 60) : QColor(30, 70, 160);
     const QColor pickedColour(240, 130, 20), hoverColour(250, 175, 80);
     const auto colourFor = [&](Pick pick, const QColor& base) {
@@ -1002,6 +1155,27 @@ void SketchView::paintEvent(QPaintEvent*)
             drawArc(c, radiusOf(m_sketch, g), a0, sweep(a0, angleOf(e.x - c.x, e.y - c.y)));
             break;
         }
+        }
+    }
+
+    // Words: their letters' outlines.
+    for (std::size_t i = 0; i < m_sketch.texts.size(); ++i) {
+        const Words& w = m_sketch.texts[i];
+        const Lettering& letters = letteringOf(w);
+        const Point at = m_sketch.points[std::size_t(w.at)];
+        const double c = std::cos(w.angle * pi / 180), s = std::sin(w.angle * pi / 180);
+        const QColor colour = colourFor({Pick::Text, int(i)}, normal);
+        p.setBrush(Qt::NoBrush);
+        p.setPen(QPen(colour, 1.4));
+        for (const auto& line : letters.lines) {
+            QPolygonF poly;
+            for (const Point& q : line)
+                poly << toScreen({at.x + q.x * c - q.y * s, at.y + q.x * s + q.y * c});
+            p.drawPolyline(poly);
+        }
+        if (letters.lines.empty() || colour != normal) {
+            p.setPen(QPen(letters.lines.empty() ? QColor(210, 40, 40) : colour, 1, Qt::DashLine));
+            p.drawPolygon(wordsBox(w));
         }
     }
 
@@ -1169,7 +1343,11 @@ void SketchView::mousePressEvent(QMouseEvent* event)
     // Get ready to drag what was picked.
     m_dragPoints.clear();
     m_dragRadius = -1;
-    if (pick && pick->kind == Pick::Point && pick->index != 0) {
+    if (pick && pick->kind == Pick::Text) {
+        const int at = m_sketch.texts[std::size_t(pick->index)].at;
+        if (at != 0)
+            m_dragPoints.push_back({at, m_sketch.points[std::size_t(at)]});  // drag the words by their point
+    } else if (pick && pick->kind == Pick::Point && pick->index != 0) {
         m_dragPoints.push_back({pick->index, m_sketch.points[std::size_t(pick->index)]});
     } else if (pick && pick->kind == Pick::Geo) {
         const Geo& g = m_sketch.geos[std::size_t(pick->index)];
@@ -1258,6 +1436,16 @@ void SketchView::mouseDoubleClickEvent(QMouseEvent* event)
     const auto pick = pickAt(event->position());
     if (pick && pick->kind == Pick::Rule)
         editDimension(pick->index);
+    if (pick && pick->kind == Pick::Text) {
+        Words words = m_sketch.texts[std::size_t(pick->index)];
+        if (!askWords(words, false))
+            return;
+        remember();
+        m_sketch.texts[std::size_t(pick->index)] = words;
+        solveNow();
+        if (const QString problem = letteringOf(words).problem; !problem.isEmpty())
+            emit message(problem, true);
+    }
 }
 
 void SketchView::wheelEvent(QWheelEvent* event)

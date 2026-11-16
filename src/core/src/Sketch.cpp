@@ -327,6 +327,9 @@ void checkRefs(const Sketch& s)
         if (g.kind == GeoKind::Circle && (g.r < 0 || g.r >= nr))
             throw std::invalid_argument("The sketch is damaged (a circle's radius is missing)");
     }
+    for (const Words& w : s.texts)
+        if (w.at < 0 || w.at >= np)
+            throw std::invalid_argument("The sketch is damaged (some words' point is missing)");
     for (const Constraint& c : s.constraints) {
         const auto sl = slots(c);
         for (int k = 0; k < 3; ++k) {
@@ -628,6 +631,8 @@ int mergePoints(Sketch& s, int into, int from)
         if (g.kind == GeoKind::Arc)
             remap(g.c);
     }
+    for (Words& w : s.texts)
+        remap(w.at);
     std::vector<Constraint> kept;
     for (Constraint c : s.constraints) {
         const auto sl = slots(c);
@@ -684,9 +689,26 @@ std::vector<bool> pointsInUse(const Sketch& s)
         if (g.kind == GeoKind::Arc)
             used[std::size_t(g.c)] = true;
     }
+    for (const Words& w : s.texts)
+        used[std::size_t(w.at)] = true;
     return used;
 }
 }  // namespace
+
+void removeWords(Sketch& s, int index)
+{
+    if (index < 0 || std::size_t(index) >= s.texts.size())
+        return;
+    const int p = s.texts[std::size_t(index)].at;
+    s.texts.erase(s.texts.begin() + index);
+    if (p > 0 && !pointsInUse(s)[std::size_t(p)])
+        dropPoint(s, p);
+}
+
+bool isEmpty(const Sketch& s)
+{
+    return s.geos.empty() && s.texts.empty();
+}
 
 std::vector<int> loosePoints(const Sketch& s)
 {
@@ -710,6 +732,9 @@ void removePoints(Sketch& s, std::vector<int> points)
             if (p > 0 && std::binary_search(points.begin(), points.end(), p))
                 geos.push_back(int(g));
     }
+    for (std::size_t i = s.texts.size(); i-- > 0;)
+        if (s.texts[i].at > 0 && std::binary_search(points.begin(), points.end(), s.texts[i].at))
+            s.texts.erase(s.texts.begin() + std::ptrdiff_t(i));
     removeGeos(s, geos);
     // Then the loose ones asked for (highest first, so indices stay right).
     const std::vector<bool> used = pointsInUse(s);
@@ -840,6 +865,10 @@ Constraint makeRule(const Sketch& s, Rule rule, int a, int b, int c)
 bool scale(Sketch& s, double sx, double sy)
 {
     const bool even = std::abs(sx - sy) <= 1e-12 * std::max(std::abs(sx), std::abs(sy));
+    if (!even && !s.texts.empty())
+        return false;  // letters keep their proportions
+    for (Words& w : s.texts)
+        w.height *= std::abs(sx);
     if (!even) {
         for (const Geo& g : s.geos)
             if (g.kind != GeoKind::Line)

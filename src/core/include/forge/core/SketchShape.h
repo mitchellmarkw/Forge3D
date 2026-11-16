@@ -29,6 +29,13 @@ TopoDS_Shape sweepPath(const SweepSpec& sweep);
 // A sketch's lines and curves as polylines (sketch coordinates), to show as a reference.
 std::vector<std::vector<Point>> outlinesOf(const Sketch& s);
 
+// Some words' letters as flat faces in sketch coordinates (turned and put at their
+// point). Throws when there's nothing to draw or the font can't be loaded.
+TopoDS_Shape wordsFaces(const Sketch& s, const Words& words);
+// Their outlines as lines for drawing, as if at the origin and not turned (so they
+// can be kept and reused while the words are moved about).
+std::vector<std::vector<Point>> wordsOutlines(const Words& words);
+
 // The revolve's solid: the sketch's outlines spun around its axis line.
 TopoDS_Shape revolveShape(const RevolveSpec& revolve);
 // The cutters of a Hole step: one per loose point of its sketch, going down (-Z) from

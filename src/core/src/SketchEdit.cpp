@@ -245,6 +245,9 @@ bool inUse(const Sketch& s, int p)
     for (const Geo& g : s.geos)
         if (g.a == p || (g.kind != GeoKind::Circle && g.b == p) || (g.kind == GeoKind::Arc && g.c == p))
             return true;
+    for (const Words& w : s.texts)
+        if (w.at == p)
+            return true;
     return false;
 }
 
