@@ -5566,6 +5566,8 @@ void MainWindow::createSketchBar()
         {SketchView::Tool::Arc, tr("Arc"), Qt::Key_A, tr("An arc: its middle, then its start, then its end")},
         {SketchView::Tool::Slot, tr("Slot"), Qt::Key_S, tr("A slot: the middles of its round ends, then its width")},
         {SketchView::Tool::Point, tr("Point"), Qt::Key_P, tr("A point on its own (where a hole goes)")},
+        {SketchView::Tool::Trim, tr("Trim"), Qt::Key_X,
+         tr("Click pieces of lines and curves to take them away, back to where other lines cross them")},
     };
     for (const auto& t : toolList) {
         QAction* a = add(t.text, t.key, t.tip, [this, tool = t.tool] { m_sketchView->setTool(tool); });
@@ -5606,6 +5608,16 @@ void MainWindow::createSketchBar()
     add(tr("Helper"), Qt::Key_G,
         tr("Turn the picked lines into helper lines (dashed: used by rules, not part of the shape), or back"),
         [this] { m_sketchView->toggleConstruction(); });
+    add(tr("Round corner"), QKeySequence(Qt::SHIFT | Qt::Key_R),
+        tr("Round the picked corners (where two lines meet) with an arc"), [this] { m_sketchView->roundCorners(); });
+    add(tr("Offset"), QKeySequence(Qt::SHIFT | Qt::Key_O),
+        tr("Copy the picked outline a set distance out (or in): pick any line or curve of it"),
+        [this] { m_sketchView->offsetPicked(); });
+    add(tr("Mirror"), Qt::Key_M,
+        tr("Copy what's picked to the other side of a line: pick things, Ctrl+click the mirror line last "
+           "(or pick a helper line), then Mirror"),
+        [this] { m_sketchView->mirrorPicked(); });
+    m_sketchBar->addSeparator();
     add(tr("Delete"), QKeySequence::Delete, tr("Delete what's picked"), [this] { m_sketchView->deleteSelection(); });
     add(tr("Undo"), QKeySequence::Undo, tr("Undo the last change to the sketch"), [this] { m_sketchView->undo(); });
     add(tr("Redo"), QKeySequence::Redo, tr("Redo"), [this] { m_sketchView->redo(); });

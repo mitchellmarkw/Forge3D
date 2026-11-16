@@ -2,6 +2,7 @@
 #pragma once
 
 #include "forge/core/Sketch.h"
+#include "forge/core/SketchEdit.h"
 
 #include <QPointF>
 #include <QRectF>
@@ -23,7 +24,7 @@ class SketchView : public QWidget {
     Q_OBJECT
 
 public:
-    enum class Tool { Select, Line, Rectangle, Circle, Arc, Slot, Point };
+    enum class Tool { Select, Line, Rectangle, Circle, Arc, Slot, Point, Trim };
 
     explicit SketchView(QWidget* parent = nullptr);
 
@@ -45,6 +46,10 @@ public:
     // / radius / angle as suits the pick, 1 = across only, 2 = up only.
     void addDimension(int how);
     void toggleConstruction();
+    // Tools on what's picked; each asks for its size, and says why if it can't be done.
+    void roundCorners();   // the picked corner points (where two lines meet)
+    void offsetPicked();   // the outlines the picked curves are part of
+    void mirrorPicked();   // the picked curves, about the helper line picked (or the line picked last)
     void deleteSelection();
     // The lines and circles picked (e.g. the axis for Revolve), and picking one.
     std::vector<int> pickedGeos() const { return picked(Pick::Geo); }
@@ -85,6 +90,10 @@ private:
     sketch::Point toSketch(const QPointF& p) const;
     Snap snapAt(const QPointF& pixel) const;
     std::optional<Pick> pickAt(const QPointF& pixel) const;
+    int geoAt(const QPointF& pixel) const;  // the curve under the mouse, or -1
+    // Makes a change with one of the tools: undone as one step, and put back (with the
+    // reason shown) if it throws or the rules can't be met afterwards.
+    template <typename Change> bool change(Change&& change, const QString& done);
     double gridStep() const;
 
     // Changes: snapshot for undo first, then solve after.
@@ -118,6 +127,8 @@ private:
 
     std::vector<Pick> m_picks;
     std::optional<Pick> m_hover;
+    std::optional<sketch::TrimPiece> m_trimPiece;  // what a click with Trim would take away
+    double m_lastRadius = 2.0, m_lastOffset = 2.0;
     std::vector<QRectF> m_ruleRects;  // where each rule's label was drawn (for picking)
 
     // Dragging

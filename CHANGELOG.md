@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.37.0 Beta — Slice 28: Sketch tools (2026-11-16)
+
+Four new tools on the sketcher's toolbar:
+
+- **Trim** (X): click a piece of a line, arc or circle to take it away, back to where
+  other lines cross it. The piece under the mouse shows red first. A line crossed
+  twice splits in two (the halves stay in line); a circle becomes an arc; a line
+  nothing crosses goes altogether. The new ends stay on the line that cut them.
+- **Round corner** (Shift+R): pick corner points where two straight lines meet, give a
+  radius, and each corner becomes an arc touching both lines. The radius is a
+  dimension (double-click to change it). The old corner stays as a dashed helper
+  corner, so sizes measured to it still hold.
+- **Offset** (Shift+O): pick any line or curve of an outline and give a distance: the
+  whole outline is copied that far out (a minus number: in). Lines stay parallel to
+  the original's and arcs share their centres.
+- **Mirror** (M): pick things, Ctrl+click the line to mirror about last (or include one
+  dashed helper line), and they're copied to the other side. The copy stays a mirror
+  image when the original changes; points on the line are shared, so half a shape
+  drawn against the line closes up.
+- Each tool is one Undo, and says why when it can't be done (a radius too big for the
+  lines, an offset that would fold over itself).
+- 217 unit tests (4 new: one for each tool).
+
 ## 0.36.0 Beta — Slice 27: Loft and sweep (2026-11-16)
 
 - **Loft** (in the sketcher, **Make:**): blends one outline into others stacked above

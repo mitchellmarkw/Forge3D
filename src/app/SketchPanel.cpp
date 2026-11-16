@@ -163,6 +163,9 @@ SketchPanel::SketchPanel(QWidget* parent) : QWidget(parent)
                                "Perpendicular, Equal (E), Tangent (T), Coincident (O), Symmetric, Lock.<br>"
                                "<b>Dimension</b> (D): a line's length, two points' distance, a circle's radius or "
                                "two lines' angle. Double-click a dimension to change it.<br>"
+                               "<b>Change</b>: Trim (X) takes away the piece you click; Round corner (Shift+R) "
+                               "on picked corners; Offset (Shift+O) copies an outline further out or in; "
+                               "Mirror (M) copies to the other side of a line.<br>"
                                "Shapes go <span style='color:#1e8c3c'>green</span> when every size and place "
                                "is set. <span style='color:#d22'>Red</span> points are loose ends.<br>"
                                "Wheel zooms; right- or middle-drag pans; F fits."));
