@@ -51,7 +51,8 @@ Gate to Phase 2: a new user prints a customised part within 10 minutes.
 | 27 | Loft and sweep: blend between outlines; sweep an outline along a drawn path or a spiral | Done (0.36.0, released) |
 | 28 | Sketch tools: Trim, Round corner, Offset (held by Gap dimensions), Mirror | Done (0.37.0) |
 | 29 | Taper (draft) on pads and pockets | Done (0.38.0) |
-| 30 | Text in sketches: words whose letters are outlines | **Delivered for testing** |
+| 30 | Text in sketches: words whose letters are outlines | Done (0.39.0) |
+| 31 | Section view: cut the view open to look inside | **Delivered for testing** |
 
 Separate track: sculpt-engine prototype (one Draw brush on a 1M-triangle mesh at 60 fps).
 

@@ -792,3 +792,15 @@ and sharp across edges.
 - The app: `Tool::Text` asks with a small dialog; `Pick::Text` picks words by their
   box; outlines for drawing come from `wordsOutlines` (at the origin, unturned) and
   are kept per text / font / style / height in `m_lettering`.
+
+## Section view (slice 31)
+
+- View only: `Viewport::setSection({normal, offset})`. The mesh fragment shader
+  discards fragments with dot(normal, world position) > offset (`uModel` gives the
+  world position) and, while cutting, draws back-facing fragments (the inside of a
+  closed solid seen through the cut) in a flat darker shade lit as the cut plane: the
+  cut reads as a filled face without building any geometry. Nothing in the document or
+  picking changes.
+- `SectionPanel` in its own dock (hidden until View → Section View); the dock's
+  visibility is the on/off switch. `MainWindow::applySection` sets the slider's reach
+  from `Viewport::sceneBounds()` when it opens or the axis changes.

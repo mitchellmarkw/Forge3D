@@ -31,13 +31,16 @@ layout(location = 1) in vec3 aNormal;
 layout(location = 2) in float aShade;
 uniform mat4 uMvp;
 uniform mat4 uModelView;
+uniform mat4 uModel;
 uniform mat3 uNormalMatrix;
 out vec3 vNormal;
 out vec3 vViewPos;
+out vec3 vWorldPos;
 out float vShade;
 void main() {
     vNormal = uNormalMatrix * aNormal;
     vShade = aShade;
+    vWorldPos = (uModel * vec4(aPosition, 1.0)).xyz;
     vViewPos = (uModelView * vec4(aPosition, 1.0)).xyz;
     gl_Position = uMvp * vec4(aPosition, 1.0);
 }
@@ -46,15 +49,27 @@ void main() {
 const char* kMeshFragmentShader = R"(#version 330 core
 in vec3 vNormal;
 in vec3 vViewPos;
+in vec3 vWorldPos;
 in float vShade;  // sculpting's mask: 1 = masked, drawn dark
+uniform vec4 uClip;         // section view: plane normal (plate) and offset
+uniform float uClipOn;      // 0 or 1
+uniform vec3 uClipNormalView;  // the plane's normal as the camera sees it, towards the cut-away side
 uniform vec3 uColor;
 uniform float uSelected;  // 0 or 1
 uniform float uAlpha;     // 1 = solid, less = see-through (ghost)
 out vec4 fragColor;
 void main() {
+    if (uClipOn > 0.5 && dot(uClip.xyz, vWorldPos) > uClip.w) discard;
     vec3 n = normalize(vNormal);
     if (!gl_FrontFacing) n = -n;               // light the inside of open meshes too
     vec3 toEye = normalize(-vViewPos);
+    if (uClipOn > 0.5 && !gl_FrontFacing) {
+        // The inside of a solid seen through the cut: drawn as the flat cut face.
+        vec3 flatN = normalize(uClipNormalView);
+        float lit = 0.70 + 0.25 * max(dot(flatN, normalize(vec3(-0.5, 0.7, 0.6))), 0.0);
+        fragColor = vec4(mix(uColor, vec3(0.12, 0.13, 0.16), 0.35) * lit, uAlpha);
+        return;
+    }
     vec3 key = normalize(vec3(-0.5, 0.7, 0.6)); // light fixed to the camera, upper left
     float diffuse = max(dot(n, key), 0.0);
     float head = max(dot(n, toEye), 0.0);
@@ -156,6 +171,31 @@ void Viewport::setItems(std::vector<DisplayItem> items)
     m_items = std::move(items);
     m_itemsDirty = true;
     update();
+}
+
+void Viewport::setSection(const std::optional<Section>& section)
+{
+    m_section = section;
+    update();
+}
+
+Bounds Viewport::sceneBounds() const
+{
+    Bounds all;
+    for (const DisplayItem& item : m_items) {
+        if (!item.mesh || item.ghost || item.alpha < 1.0f)
+            continue;
+        const Bounds local = item.mesh->bounds();
+        if (!local.valid)
+            continue;
+        for (int corner = 0; corner < 8; ++corner) {
+            const QVector3D p = item.model.map(QVector3D((corner & 1) ? local.max[0] : local.min[0],
+                                                         (corner & 2) ? local.max[1] : local.min[1],
+                                                         (corner & 4) ? local.max[2] : local.min[2]));
+            all.expand(p.x(), p.y(), p.z());
+        }
+    }
+    return all;
 }
 
 void Viewport::fitView()
@@ -558,6 +598,11 @@ void Viewport::paintGL()
 
     // Bodies: solid ones first, then see-through parts on top of them.
     m_meshShader->bind();
+    m_meshShader->setUniformValue("uClipOn", m_section ? 1.0f : 0.0f);
+    if (m_section) {
+        m_meshShader->setUniformValue("uClip", QVector4D(m_section->normal, m_section->offset));
+        m_meshShader->setUniformValue("uClipNormalView", view.mapVector(m_section->normal));
+    }
     enum class Pass { Solid, Translucent, Ghost };
     const auto drawItems = [&](Pass pass) {
         for (const DisplayItem& item : m_items) {
@@ -570,6 +615,7 @@ void Viewport::paintGL()
             const QMatrix4x4 modelView = view * item.model;
             m_meshShader->setUniformValue("uMvp", viewProj * item.model);
             m_meshShader->setUniformValue("uModelView", modelView);
+            m_meshShader->setUniformValue("uModel", item.model);
             m_meshShader->setUniformValue("uNormalMatrix", modelView.normalMatrix());
             m_meshShader->setUniformValue("uColor", item.color);
             m_meshShader->setUniformValue("uSelected", item.selected ? 1.0f : 0.0f);
