@@ -11,6 +11,8 @@
 #include "PatternPanel.h"
 #include "ShellPanel.h"
 #include "MeasurePanel.h"
+#include "ThreadPanel.h"
+#include "forge/core/Thread.h"
 #include "forge/core/Picking.h"
 #include "SketchPanel.h"
 #include "SketchView.h"
@@ -490,6 +492,8 @@ void MainWindow::createActions()
             endHole();
         else if (m_shellMode.active)
             endShell();
+        else if (m_threadMode.active)
+            endThread();
         else if (m_followMode.active)
             endFollow();
         else if (m_patternMode.active)
@@ -710,6 +714,25 @@ void MainWindow::createActions()
         }
         startFollow(target, false);
     });
+    m_threadAction = new QAction(tr("Thread"), this);
+    m_threadAction->setToolTip(tr("Thread: cut a screw thread into a round face of the selected shape: a peg (a "
+                                  "bolt) or a hole (a nut), in standard metric sizes"));
+    connect(m_threadAction, &QAction::triggered, this, [this] {
+        const ObjectId id = selectedOne();
+        if (id == kInvalidId || m_selection.size() != 1 || !m_doc.isTopLevel(id)) {
+            statusBar()->showMessage(tr("Thread: select one shape on the plate first."), 6000);
+            return;
+        }
+        const ObjectId target = history::tip(m_doc, id);
+        if (m_doc.usesMeshEngine(target)) {
+            QMessageBox::information(this, tr("Forge3D"),
+                                     tr("Threads go on solid shapes made in Forge3D, not on imported meshes or "
+                                        "shapes made with them (sculpted, embossed or already threaded). Add the "
+                                        "thread before those steps."));
+            return;
+        }
+        startThread(target, false);
+    });
     m_patternAction = new QAction(tr("Pattern"), this);
     m_patternAction->setToolTip(tr("Pattern: linked copies in a row, a grid or round a circle, of the selected shape "
                                    "or of the hole / pocket / groove its last step made"));
@@ -903,6 +926,7 @@ void MainWindow::createToolBar()
         {m_sculptAction, "sculpt"},
         {m_simplifyAction, "simplify"},
         {m_measureAction, "measure"},
+        {m_threadAction, "thread"},
         {m_layFlat, "lay-on-face"},
         {m_sitOnPlate, "sit-on-plate"},
         {m_export, "export"},
@@ -1030,8 +1054,8 @@ void MainWindow::createToolBar()
         group(design, tr("Sketch"), {sketchButton});
     }
     group(design, tr("Features"),
-          {button(m_holeAction), button(m_shellAction), button(m_followAction), button(m_patternAction),
-           button(m_edgesAction)});
+          {button(m_holeAction), button(m_threadAction), button(m_shellAction), button(m_followAction),
+           button(m_patternAction), button(m_edgesAction)});
     group(design, tr("Change"), {button(m_split), button(m_emboss)});
     group(design, tr("Check"), {button(m_measureAction)});
     group(design, tr("Undo"), {shortButton(m_undo, tr("Undo")), shortButton(m_redo, tr("Redo"))});
@@ -1255,6 +1279,9 @@ void MainWindow::createDocks()
     m_sculptPanel = new SculptPanel;
     stackLayout->addWidget(m_sculptPanel);
     m_sculptPanel->hide();
+    m_threadPanel = new ThreadPanel;
+    stackLayout->addWidget(m_threadPanel);
+    m_threadPanel->hide();
     m_measurePanel = new MeasurePanel;
     stackLayout->addWidget(m_measurePanel);
     m_measurePanel->hide();
@@ -1302,6 +1329,13 @@ void MainWindow::createDocks()
         rebuildShellHighlights();
         m_shellTimer->start(0);
     });
+    m_threadTimer = new QTimer(this);
+    m_threadTimer->setSingleShot(true);
+    m_threadTimer->setInterval(250);
+    connect(m_threadTimer, &QTimer::timeout, this, &MainWindow::updateThreadPreview);
+    connect(m_threadPanel, &ThreadPanel::changed, this, [this] { m_threadTimer->start(); });
+    connect(m_threadPanel, &ThreadPanel::applyRequested, this, &MainWindow::applyThread);
+    connect(m_threadPanel, &ThreadPanel::cancelRequested, this, &MainWindow::endThread);
     connect(m_shellPanel, &ShellPanel::applyRequested, this, &MainWindow::applyShell);
     connect(m_shellPanel, &ShellPanel::cancelRequested, this, &MainWindow::endShell);
 
@@ -1523,6 +1557,10 @@ void MainWindow::onViewportClicked(const QVector3D& origin, const QVector3D& dir
         shellClick(origin, direction);
         return;
     }
+    if (m_threadMode.active) {
+        threadClick(origin, direction);
+        return;
+    }
     if (m_followMode.active) {
         followClick(origin, direction);
         return;
@@ -1622,7 +1660,7 @@ void MainWindow::onLeftPressed(const QVector3D& origin, const QVector3D& directi
         return;
     }
     if (m_embossMode.active || m_edgesMode.active || m_holeMode.active || m_shellMode.active || m_followMode.active ||
-        m_patternMode.active)
+        m_patternMode.active || m_threadMode.active)
         return;  // shapes stay put while the tool is open
 
     if (handle.valid() && multiSelection()) {
@@ -2922,7 +2960,7 @@ bool MainWindow::toolOpen() const
 {
     return m_splitMode.active || m_embossMode.active || m_edgesMode.active || m_sketchMode.picking ||
            m_sketchMode.active || m_holeMode.active || m_shellMode.active || m_followMode.active ||
-           m_patternMode.active || m_sculptMode.active || m_measureMode.active;
+           m_patternMode.active || m_sculptMode.active || m_measureMode.active || m_threadMode.active;
 }
 
 void MainWindow::startEmboss(ObjectId target, bool editing)
@@ -4639,6 +4677,8 @@ void MainWindow::refreshScene()
             endHole();
         if (m_shellMode.active && !m_doc.find(m_shellMode.target))
             endShell();
+        if (m_threadMode.active && !m_doc.find(m_threadMode.target))
+            endThread();
         if (m_followMode.active && !m_doc.find(m_followMode.target))
             endFollow();
         if (m_patternMode.active && !m_doc.find(m_patternMode.target))
@@ -4691,6 +4731,20 @@ void MainWindow::refreshScene()
                     line.id = kEdgesPickedItem;
                     line.mesh = m_followMode.pathLines;
                     line.color = QVector3D(0.95f, 0.5f, 0.05f);
+                    line.ghost = true;
+                    items.push_back(line);
+                }
+            }
+            if (m_threadMode.active && id == history::objectOf(m_doc, m_threadMode.target)) {
+                if (m_threadMode.preview) {
+                    item.mesh = m_threadMode.preview;
+                    item.model = previewFrame(m_threadMode.target, m_threadMode.editing);
+                }
+                if (m_threadMode.pickedLines && !m_threadMode.pickedLines->empty()) {
+                    DisplayItem line;
+                    line.id = kEdgesPickedItem;
+                    line.mesh = m_threadMode.pickedLines;
+                    line.color = QVector3D(0.9f, 0.15f, 0.1f);
                     line.ghost = true;
                     items.push_back(line);
                 }
@@ -4897,6 +4951,7 @@ void MainWindow::refreshScene()
                                !toolOpen());
     m_holeAction->setEnabled(m_selection.size() == 1 && allTopLevel && !rolled && !toolOpen());
     m_shellAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
+    m_threadAction->setEnabled(m_shellAction->isEnabled());
     m_followAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_patternAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_clear->setEnabled(!m_doc.empty());
@@ -5049,6 +5104,7 @@ void MainWindow::editStep(ObjectId id)
     switch (body->boolean->op) {
     case BooleanOp::Edges: startEdges(id, true); break;
     case BooleanOp::Shell: startShell(id, true); break;
+    case BooleanOp::Thread: startThread(id, true); break;
     case BooleanOp::Follow: startFollow(id, true); break;
     case BooleanOp::Pattern: startPattern(id, true); break;
     case BooleanOp::Emboss: startEmboss(id, true); break;
@@ -5153,6 +5209,7 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
                            (body->isBoolean() && (op == BooleanOp::Edges || op == BooleanOp::Shell ||
                                                   op == BooleanOp::Follow || op == BooleanOp::Pattern ||
                                                   op == BooleanOp::Emboss || op == BooleanOp::Sculpt ||
+                                                  op == BooleanOp::Thread ||
                                                   (op == BooleanOp::Split && m_doc.isTopLevel(id))));
         if (!opens) {
             // Nothing to open: show or hide what's inside, as a list does.
@@ -6511,6 +6568,198 @@ void MainWindow::endShell()
     m_shellTimer->stop();
     m_shellMode = ShellMode{};
     m_shellPanel->hide();
+    m_properties->show();
+    QTimer::singleShot(0, this, [this] { resizeDocks({m_propsDock}, {m_propsDockWidth}, Qt::Horizontal); });
+    statusBar()->clearMessage();
+    refreshScene();
+    refreshCommandState();
+}
+
+// ---- Thread -----------------------------------------------------------------------
+
+void MainWindow::startThread(ObjectId target, bool editing)
+{
+    const Body* body = m_doc.find(target);
+    if (!body || toolOpen())
+        return;
+    if (m_dragState.kind != Drag::Kind::None)
+        cancelDrag();
+    ThreadMode mode;
+    mode.active = true;
+    mode.editing = editing;
+    mode.target = target;
+    ThreadFinish finish;
+    try {
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        struct RestoreCursor {
+            ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
+        } restore;
+        mode.shape = editing ? pickableShape(m_doc, target) : inPlate(m_doc, target);
+        mode.found = edges::analyse(mode.shape);
+        mode.finder = std::make_shared<edges::FaceFinder>(mode.shape);
+        if (editing) {
+            if (!body->isBoolean() || body->boolean->op != BooleanOp::Thread)
+                return;
+            finish = threadInPlate(m_doc, target);
+            const std::vector<int> found = shell::match(mode.shape, {finish.face});
+            if (!found.empty() && found.front() >= 0) {
+                mode.face = found.front();
+                mode.ref = shell::refFor(mode.shape, mode.face, finish.face.point);
+            }
+        }
+    } catch (const std::exception& e) {
+        QMessageBox::information(this, tr("Forge3D"), QString::fromUtf8(e.what()));
+        return;
+    }
+    m_threadMode = std::move(mode);
+    const QString name = QString::fromStdString(body->name);
+    m_threadPanel->start(editing ? tr("Change the thread of '%1'").arg(name) : tr("Thread '%1'").arg(name), editing);
+    m_threadPanel->setValues(finish.size, finish.pitch, finish.fit, finish.leftHand);
+    m_propsDockWidth = m_propsDock->width();
+    m_properties->hide();
+    m_threadPanel->show();
+    statusBar()->showMessage(tr("Thread: click the round face of a peg or a hole, then Apply. Esc cancels."));
+    threadPicked(false);
+    updateThreadPreview();
+    refreshCommandState();
+}
+
+void MainWindow::threadClick(const QVector3D& origin, const QVector3D& direction)
+{
+    const QVector3D dir = direction.normalized();
+    const auto hit = m_threadMode.finder->under({origin.x(), origin.y(), origin.z()}, {dir.x(), dir.y(), dir.z()});
+    if (!hit)
+        return;
+    if (!thread::roundFace(m_threadMode.shape, hit->face)) {
+        m_threadPanel->setStatus(tr("That face isn't round. Click the round side of a peg, or the inside of a "
+                                    "hole."),
+                                 true);
+        return;
+    }
+    const bool changed = hit->face != m_threadMode.face;
+    m_threadMode.face = hit->face;
+    m_threadMode.ref = shell::refFor(m_threadMode.shape, hit->face, hit->point);
+    threadPicked(changed);
+    m_threadTimer->start(0);
+}
+
+void MainWindow::threadPicked(bool suggest)
+{
+    auto& mode = m_threadMode;
+    const float radius = std::max(0.02f, m_viewport->camera().distance() * 0.0022f);
+    std::vector<const std::vector<Vec3>*> lines;
+    if (mode.face >= 0 && std::size_t(mode.face) < mode.found.faceEdges.size())
+        for (int e : mode.found.faceEdges[std::size_t(mode.face)])
+            lines.push_back(&mode.found.edges[std::size_t(e)].polyline);
+    mode.pickedLines = lines.empty() ? nullptr : tubes(lines, radius);
+    const auto round = mode.face >= 0 ? thread::roundFace(mode.shape, mode.face) : std::nullopt;
+    if (!round) {
+        m_threadPanel->setPicked({});
+        return;
+    }
+    m_threadPanel->setPicked(
+        (round->hole ? tr("<b>A hole</b>, Ø %1 mm, %2 mm deep: an inside thread (a nut).")
+                     : tr("<b>A peg</b>, Ø %1 mm, %2 mm long: an outside thread (a bolt)."))
+            .arg(QString::number(2 * round->radius, 'f', 2), QString::number(round->to - round->from, 'f', 2)));
+    if (suggest) {
+        const thread::Size s = thread::suggest(*round);
+        m_threadPanel->setValues(s.diameter, s.pitch, m_threadPanel->fit(), m_threadPanel->leftHand());
+    }
+}
+
+std::optional<BooleanSpec> MainWindow::currentThreadSpec() const
+{
+    if (!m_threadMode.active || m_threadMode.face < 0)
+        return std::nullopt;
+    ThreadFinish f;
+    f.face = m_threadMode.ref;
+    f.size = m_threadPanel->size();
+    f.pitch = m_threadPanel->pitch();
+    f.fit = m_threadPanel->fit();
+    f.leftHand = m_threadPanel->leftHand();
+    if (m_threadMode.editing)
+        return withThread(m_doc, m_threadMode.target, f).boolean;
+    return threadSpec(m_doc, m_threadMode.target, f);
+}
+
+void MainWindow::updateThreadPreview()
+{
+    if (!m_threadMode.active)
+        return;
+    m_threadTimer->stop();
+    m_threadMode.preview.reset();
+    bool ok = false;
+    try {
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        struct RestoreCursor {
+            ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
+        } restore;
+        if (const auto spec = currentThreadSpec()) {
+            m_threadMode.preview = m_doc.previewMesh(*spec);
+            m_threadPanel->setStatus(tr("This is how it will look."), false);
+            ok = true;
+        } else {
+            m_threadPanel->setStatus({}, false);
+        }
+    } catch (const std::exception& e) {
+        m_threadPanel->setStatus(QString::fromUtf8(e.what()), true);
+    }
+    m_threadPanel->setApplyEnabled(ok);
+    refreshScene();
+}
+
+void MainWindow::applyThread()
+{
+    if (!m_threadMode.active)
+        return;
+    std::optional<BooleanSpec> spec;
+    try {
+        spec = currentThreadSpec();
+        if (!spec)
+            return;
+        m_doc.previewMesh(*spec);
+    } catch (const std::exception& e) {
+        QMessageBox::warning(this, tr("Forge3D"),
+                             tr("The thread could not be cut:\n%1").arg(QString::fromUtf8(e.what())));
+        return;
+    }
+    const ObjectId target = m_threadMode.target;
+    if (m_threadMode.editing) {
+        const Body* now = m_doc.find(target);
+        if (!now)
+            return endThread();
+        const Body before = *now;
+        Body after = before;
+        after.boolean = *spec;
+        endThread();
+        run(std::make_unique<EditBodyCommand>(before, after, "Change thread"));
+        setSelection(history::objectOf(m_doc, target));
+        return;
+    }
+    Body result;
+    result.id = m_doc.allocateId();
+    result.name = m_doc.uniqueName("Threaded");
+    result.boolean = *spec;
+    const ObjectId id = result.id;
+    endThread();
+    if (!m_doc.isTopLevel(target)) {
+        // Rolled back: the step goes in at the bar.
+        const ObjectId object = history::objectOf(m_doc, target);
+        if (run(std::make_unique<InsertStepCommand>(std::move(result), m_doc.parentOf(target))))
+            setSelection(object);
+        return;
+    }
+    if (run(std::make_unique<CombineCommand>(std::move(result))))
+        setSelection(id);
+}
+
+void MainWindow::endThread()
+{
+    if (!m_threadMode.active)
+        return;
+    m_threadTimer->stop();
+    m_threadMode = ThreadMode{};
+    m_threadPanel->hide();
     m_properties->show();
     QTimer::singleShot(0, this, [this] { resizeDocks({m_propsDock}, {m_propsDockWidth}, Qt::Horizontal); });
     statusBar()->clearMessage();

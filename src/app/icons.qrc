@@ -46,5 +46,6 @@
     <file alias="sculpt.svg">icons/sculpt.svg</file>
     <file alias="simplify.svg">icons/simplify.svg</file>
     <file alias="measure.svg">icons/measure.svg</file>
+    <file alias="thread.svg">icons/thread.svg</file>
   </qresource>
 </RCC>

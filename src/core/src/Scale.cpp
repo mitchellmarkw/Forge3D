@@ -166,6 +166,20 @@ void scaleInto(const Document& doc, ObjectId id, const Vec3& factors, const Vec3
         out.push_back(std::move(next));
         return;
     }
+    if (body->boolean->op == BooleanOp::Thread && body->boolean->thread) {
+        // The picked face moves with the shape; evenly scaled, the thread grows too.
+        Body next = *body;
+        ThreadFinish& t = *next.boolean->thread;
+        t.face.point = {factors[0] * (t.face.point[0] - anchor[0]) + anchor[0],
+                        factors[1] * (t.face.point[1] - anchor[1]) + anchor[1],
+                        factors[2] * (t.face.point[2] - anchor[2]) + anchor[2]};
+        if (even(factors)) {
+            t.size *= factors[0];
+            t.pitch *= factors[0];
+        }
+        out.push_back(std::move(next));
+        return;
+    }
     if (body->boolean->op == BooleanOp::Shell && body->boolean->shell) {
         // The open faces' picks move with the shape; evenly scaled, the walls grow too.
         Body next = *body;

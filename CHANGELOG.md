@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.35.0 Beta — Slice 26: Threads (2026-11-16)
+
+- **Thread** (Design tab): cuts a screw thread into a round face of a shape. Click the
+  outside of a **peg** for a bolt-like outside thread, or the inside of a **hole** for a
+  nut-like inside thread.
+- **Thread size**: standard metric sizes M2 to M30 (ISO coarse pitches), suggested
+  from the face you click (a hole: the size it was drilled for), or any diameter and
+  pitch under **Other size**.
+- **Fit** (0.2 mm to start) loosens it for printing: a peg's thread is made that much
+  smaller all round, a hole's that much bigger, so printed parts screw together.
+  **Left-hand** threads too.
+- A preview before **Apply**; it's a step in the history (double-click to change), the
+  thread follows when the peg or hole changes size, and it grows with the shape when
+  it's resized evenly. It runs the length of the round face and stops at its ends, so
+  it doesn't cut into what the peg stands on or the bottom of a hole.
+- Threads are made with the mesh engine (like Emboss), so add them after rounding and
+  other solid steps.
+- Files saved with 0.35 need 0.35 or later (file format 22).
+- 210 unit tests (2 new: sizes and round faces; an M6 peg and an M6 hole, left-hand
+  threads, saving, a longer peg, resizing).
+
 ## 0.34.0 Beta — Slice 25: Measure (2026-11-14)
 
 - **Measure** (on the Build, Design and Print tabs): click a **face**, an **edge** or a

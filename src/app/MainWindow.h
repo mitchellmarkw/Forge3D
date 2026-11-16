@@ -59,6 +59,7 @@ class FollowPanel;
 class HolePanel;
 class PatternPanel;
 class ShellPanel;
+class ThreadPanel;
 class SketchPanel;
 class SketchView;
 struct DisplayItem;
@@ -556,6 +557,32 @@ private:
         std::shared_ptr<const Mesh> pickedLines;
     };
     ShellMode m_shellMode;
+
+    // Thread (slice 26): a screw thread cut into the round face clicked.
+    QAction* m_threadAction = nullptr;
+    ThreadPanel* m_threadPanel = nullptr;
+    QTimer* m_threadTimer = nullptr;
+    struct ThreadMode {
+        bool active = false;
+        bool editing = false;
+        ObjectId target = kInvalidId;
+        TopoDS_Shape shape;  // what is picked on, in plate coordinates
+        edges::ShapeEdges found;
+        std::shared_ptr<edges::FaceFinder> finder;
+        int face = -1;  // the round face picked
+        FaceRef ref;
+        std::shared_ptr<const Mesh> preview;  // result coordinates
+        std::shared_ptr<const Mesh> pickedLines;
+    };
+    ThreadMode m_threadMode;
+    void startThread(ObjectId target, bool editing);
+    void threadClick(const QVector3D& origin, const QVector3D& direction);
+    // Shows the face picked; `suggest`: sets the standard size that fits it.
+    void threadPicked(bool suggest);
+    std::optional<BooleanSpec> currentThreadSpec() const;
+    void updateThreadPreview();
+    void applyThread();
+    void endThread();
 
     QAction* m_followAction = nullptr;
     FollowPanel* m_followPanel = nullptr;
