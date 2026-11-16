@@ -819,3 +819,11 @@ and sharp across edges.
   and Undo to each. `Viewport::setLeftDrag` makes the left button orbit, pan or zoom
   (an `ExclusiveOptional` action group: one or none); the Section dock follows
   `m_sectionAction`.
+
+## Fit warning (slice 33)
+
+- `Viewport::checkFit` (on `setItems` and plate changes): an item whose box corners
+  all sit inside the plate and under `m_plateZ` fits; otherwise its points are tested
+  (a turned shape's box overshoots). Ids that don't fit go in `m_offPlate`; the mesh
+  shader's `uWarn` tints them and `offPlateChanged(count)` feeds the status bar.
+  `plate/z` and `plate/warn` in Preferences.

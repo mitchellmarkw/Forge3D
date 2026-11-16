@@ -55,6 +55,7 @@ uniform vec4 uClip;         // section view: plane normal (plate) and offset
 uniform float uClipOn;      // 0 or 1
 uniform vec3 uClipNormalView;  // the plane's normal as the camera sees it, towards the cut-away side
 uniform vec3 uColor;
+uniform float uWarn;      // 1: the shape doesn't fit the build plate
 uniform float uSelected;  // 0 or 1
 uniform float uAlpha;     // 1 = solid, less = see-through (ghost)
 out vec4 fragColor;
@@ -74,7 +75,8 @@ void main() {
     float diffuse = max(dot(n, key), 0.0);
     float head = max(dot(n, toEye), 0.0);
     float spec = pow(max(dot(n, normalize(key + toEye)), 0.0), 48.0) * 0.20;
-    vec3 base = mix(uColor, vec3(0.16, 0.16, 0.20), clamp(vShade, 0.0, 1.0) * 0.8);
+    vec3 tinted = mix(uColor, vec3(0.93, 0.33, 0.16), uWarn * 0.75);
+    vec3 base = mix(tinted, vec3(0.16, 0.16, 0.20), clamp(vShade, 0.0, 1.0) * 0.8);
     vec3 color = base * (0.28 + 0.62 * diffuse + 0.15 * head) + vec3(spec);
     // Selection: lighten the body and add a bright cyan glow toward its silhouette.
     // Cyan is not in the body palette, so it reads as "selected" on any colour.
@@ -170,6 +172,7 @@ void Viewport::setItems(std::vector<DisplayItem> items)
     m_items = std::move(items);
     m_itemsDirty = true;
     noteSectionShapes();
+    checkFit();
     update();
 }
 
@@ -195,7 +198,62 @@ void Viewport::setPlateSize(float x, float y)
     m_plateX = std::clamp(x, 20.0f, 2000.0f);
     m_plateY = std::clamp(y, 20.0f, 2000.0f);
     m_plateDirty = true;
+    checkFit();
     update();
+}
+
+void Viewport::setPlateHeight(float z)
+{
+    m_plateZ = std::clamp(z, 10.0f, 5000.0f);
+    m_plateDirty = true;
+    checkFit();
+    update();
+}
+
+void Viewport::setFitWarning(bool on)
+{
+    m_fitWarning = on;
+    checkFit();
+    update();
+}
+
+void Viewport::checkFit()
+{
+    std::set<std::uint64_t> off;
+    if (m_fitWarning) {
+        const float halfX = m_plateX * 0.5f + 0.01f, halfY = m_plateY * 0.5f + 0.01f, top = m_plateZ + 0.01f;
+        const auto outside = [&](const QVector3D& p) {
+            return std::abs(p.x()) > halfX || std::abs(p.y()) > halfY || p.z() > top;
+        };
+        for (const DisplayItem& item : m_items) {
+            if (!item.mesh || item.ghost || item.alpha < 1.0f || item.mesh->empty())
+                continue;
+            const Bounds local = item.mesh->bounds();
+            if (!local.valid)
+                continue;
+            // Its box fits: so does the shape. Otherwise look at its points (a turned
+            // shape's box reaches further than the shape does).
+            bool boxOut = false;
+            for (int corner = 0; corner < 8 && !boxOut; ++corner)
+                boxOut = outside(item.model.map(QVector3D((corner & 1) ? local.max[0] : local.min[0],
+                                                          (corner & 2) ? local.max[1] : local.min[1],
+                                                          (corner & 4) ? local.max[2] : local.min[2])));
+            if (!boxOut)
+                continue;
+            bool out = false;
+            const auto& pos = item.mesh->positions;
+            for (std::size_t i = 0; i + 2 < pos.size() && !out; i += 3)
+                out = outside(item.model.map(QVector3D(pos[i], pos[i + 1], pos[i + 2])));
+            if (out)
+                off.insert(item.id);
+        }
+    }
+    if (off != m_offPlate) {
+        const bool countChanged = off.size() != m_offPlate.size();
+        m_offPlate = std::move(off);
+        if (countChanged)
+            emit offPlateChanged(int(m_offPlate.size()));
+    }
 }
 
 void Viewport::setSection(const std::optional<Section>& section)
@@ -502,6 +560,22 @@ void Viewport::buildPlateGeometry()
     addLine(halfX, -halfY, halfX, halfY, edge);
     addLine(halfX, halfY, -halfX, halfY, edge);
     addLine(-halfX, halfY, -halfX, -halfY, edge);
+    // The build height: a faint box standing on the plate.
+    {
+        const QVector3D faint(0.74f, 0.76f, 0.82f);
+        const auto add3 = [&vertices, &faint](float x0, float y0, float z0, float x1, float y1, float z1) {
+            vertices.insert(vertices.end(), {x0, y0, z0, faint.x(), faint.y(), faint.z()});
+            vertices.insert(vertices.end(), {x1, y1, z1, faint.x(), faint.y(), faint.z()});
+        };
+        const float z = m_plateZ;
+        add3(-halfX, -halfY, z, halfX, -halfY, z);
+        add3(halfX, -halfY, z, halfX, halfY, z);
+        add3(halfX, halfY, z, -halfX, halfY, z);
+        add3(-halfX, halfY, z, -halfX, -halfY, z);
+        for (float sx : {-1.0f, 1.0f})
+            for (float sy : {-1.0f, 1.0f})
+                add3(sx * halfX, sy * halfY, 0.0f, sx * halfX, sy * halfY, z);
+    }
     addLine(-halfX, 0.0f, 0.0f, 0.0f, major);
     addLine(0.0f, -halfY, 0.0f, 0.0f, major);
     addLine(0.0f, 0.0f, halfX, 0.0f, xAxis);  // +X in red
@@ -684,6 +758,7 @@ void Viewport::paintGL()
                 m_meshShader->setUniformValue("uClipOn", m_sectionIds.count(item.id) ? 1.0f : 0.0f);
             m_meshShader->setUniformValue("uNormalMatrix", modelView.normalMatrix());
             m_meshShader->setUniformValue("uColor", item.color);
+            m_meshShader->setUniformValue("uWarn", pass == Pass::Solid && m_offPlate.count(item.id) ? 1.0f : 0.0f);
             m_meshShader->setUniformValue("uSelected", item.selected ? 1.0f : 0.0f);
             m_meshShader->setUniformValue("uAlpha", pass == Pass::Ghost ? 0.45f : item.alpha);
             QOpenGLVertexArrayObject::Binder bind(found->second->vao.get());

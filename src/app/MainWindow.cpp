@@ -51,6 +51,7 @@
 #include <QCloseEvent>
 #include <QDesktopServices>
 #include <QDir>
+#include <QCheckBox>
 #include <QComboBox>
 #include <QDialog>
 #include <QDockWidget>
@@ -1584,6 +1585,17 @@ void MainWindow::createStatusBar()
 
     m_modelInfo = new QLabel(this);
     m_glInfo = new QLabel(this);
+    m_fitInfo = new QLabel(this);
+    m_fitInfo->setStyleSheet(QStringLiteral("color: #c0431a; font-weight: bold;"));
+    m_fitInfo->setToolTip(tr("Shapes drawn in orange-red reach past the edge of the build plate or above the "
+                             "printer's height (Edit > Build Plate Size sets them)"));
+    m_fitInfo->hide();
+    statusBar()->addPermanentWidget(m_fitInfo);
+    connect(m_viewport, &Viewport::offPlateChanged, this, [this](int count) {
+        m_fitInfo->setVisible(count > 0);
+        m_fitInfo->setText(count == 1 ? tr("1 shape doesn't fit the printer")
+                                      : tr("%1 shapes don't fit the printer").arg(count));
+    });
     statusBar()->addPermanentWidget(m_modelInfo);
     statusBar()->addPermanentWidget(m_glInfo);
 
@@ -4441,25 +4453,27 @@ void MainWindow::applyPlateSize()
     const Preferences settings;
     m_viewport->setPlateSize(settings.value(QStringLiteral("plate/x"), 220.0).toFloat(),
                              settings.value(QStringLiteral("plate/y"), 220.0).toFloat());
+    m_viewport->setPlateHeight(settings.value(QStringLiteral("plate/z"), 250.0).toFloat());
+    m_viewport->setFitWarning(settings.value(QStringLiteral("plate/warn"), true).toBool());
 }
 
 void MainWindow::choosePlateSize()
 {
     struct Preset {
         const char* name;
-        double x, y;
+        double x, y, z;
     };
     // Common printer beds (X across, Y front to back).
     static const Preset presets[] = {
-        {"180 x 180 mm (Prusa MINI, Bambu Lab A1 mini)", 180, 180},
-        {"220 x 220 mm (Creality Ender 3, many others)", 220, 220},
-        {"235 x 235 mm", 235, 235},
-        {"250 x 210 mm (Prusa MK3 / MK4)", 250, 210},
-        {"256 x 256 mm (Bambu Lab X1 / P1 / A1)", 256, 256},
-        {"270 x 270 mm", 270, 270},
-        {"300 x 300 mm", 300, 300},
-        {"350 x 350 mm", 350, 350},
-        {"360 x 360 mm (Prusa XL)", 360, 360},
+        {"180 x 180 mm (Prusa MINI, Bambu Lab A1 mini)", 180, 180, 180},
+        {"220 x 220 mm (Creality Ender 3, many others)", 220, 220, 250},
+        {"235 x 235 mm", 235, 235, 250},
+        {"250 x 210 mm (Prusa MK3 / MK4)", 250, 210, 210},
+        {"256 x 256 mm (Bambu Lab X1 / P1 / A1)", 256, 256, 256},
+        {"270 x 270 mm", 270, 270, 270},
+        {"300 x 300 mm", 300, 300, 300},
+        {"350 x 350 mm", 350, 350, 350},
+        {"360 x 360 mm (Prusa XL)", 360, 360, 360},
     };
     const QSizeF now = m_viewport->plateSize();
     QDialog dialog(this);
@@ -4488,9 +4502,20 @@ void MainWindow::choosePlateSize()
     layout->addWidget(new QLabel(tr("Front to back (Y):")));
     auto* y = spin(now.height());
     layout->addWidget(y);
+    layout->addWidget(new QLabel(tr("Height it can print (Z):")));
+    auto* z = spin(m_viewport->plateHeight());
+    z->setRange(10.0, 5000.0);
+    z->setToolTip(tr("Choosing a bed from the list sets a usual height for it; check your printer's and change "
+                     "it here if it differs"));
+    layout->addWidget(z);
+    layout->addSpacing(6);
+    auto* warn = new QCheckBox(tr("Show shapes that don't fit in orange-red"));
+    warn->setChecked(Preferences().value(QStringLiteral("plate/warn"), true).toBool());
+    layout->addWidget(warn);
     layout->addSpacing(8);
-    auto* note = new QLabel(tr("The grid is drawn this size, with a darker line round its edge, so you can see "
-                               "whether a design fits your printer. It's remembered for every model."));
+    auto* note = new QLabel(tr("The grid is drawn this size, with a darker line round its edge and a faint box "
+                               "up to the height, so you can see whether a design fits your printer. It's "
+                               "remembered for every model."));
     note->setWordWrap(true);
     note->setStyleSheet(QStringLiteral("color: palette(mid);"));
     layout->addWidget(note);
@@ -4514,6 +4539,7 @@ void MainWindow::choosePlateSize()
         const QSignalBlocker a(x), b(y);
         x->setValue(presets[index].x);
         y->setValue(presets[index].y);
+        z->setValue(presets[index].z);
     });
     const auto typed = [&] { list->setCurrentIndex(matching()); };
     connect(x, &QDoubleSpinBox::valueChanged, &dialog, typed);
@@ -4524,10 +4550,13 @@ void MainWindow::choosePlateSize()
     Preferences settings;
     settings.setValue(QStringLiteral("plate/x"), x->value());
     settings.setValue(QStringLiteral("plate/y"), y->value());
+    settings.setValue(QStringLiteral("plate/z"), z->value());
+    settings.setValue(QStringLiteral("plate/warn"), warn->isChecked());
     applyPlateSize();
     if (m_doc.bodyCount() == 0)
         m_viewport->resetView();
-    statusBar()->showMessage(tr("Build plate: %1 \u00D7 %2 mm").arg(x->value()).arg(y->value()), 4000);
+    statusBar()->showMessage(
+        tr("Build plate: %1 \u00D7 %2 mm, %3 mm high").arg(x->value()).arg(y->value()).arg(z->value()), 4000);
     qInfo() << "Build plate size" << x->value() << "x" << y->value();
 }
 
