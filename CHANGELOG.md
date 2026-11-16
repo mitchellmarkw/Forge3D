@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.43.0 Beta — Slice 34: Backup copies and recovery (2026-11-16)
+
+- While you work, Forge3D keeps a **backup copy** of a model with unsaved changes,
+  refreshed every 2 minutes (only when something changed, and never in the middle of
+  a drag). It's kept in Forge3D's own data folder, not beside your file, and your file
+  is never touched.
+- If Forge3D **didn't close properly** (a crash, a power cut, the computer restarting),
+  the next start offers: **Recover** (opens the backup with its changes not yet saved,
+  under the model's own name, so Save puts it back where it belongs), **Throw It
+  Away**, or **Ask Me Next Time**.
+- Saving, opening another model, starting a new one or closing normally removes the
+  backup: there's nothing to recover then.
+- Two Forge3D windows open at once each keep their own backup and don't offer each
+  other's.
+
 ## 0.42.0 Beta — Slice 33: Does it fit the printer? (2026-11-16)
 
 - **Build Plate Size** also has the **height** the printer can print (Z). Choosing a

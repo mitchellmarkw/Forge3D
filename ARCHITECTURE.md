@@ -827,3 +827,14 @@ and sharp across edges.
   (a turned shape's box overshoots). Ids that don't fit go in `m_offPlate`; the mesh
   shader's `uWarn` tints them and `offPlateChanged(count)` feeds the status bar.
   `plate/z` and `plate/warn` in Preferences.
+
+## Backup copies (slice 34)
+
+- Each session has `<AppLocalData>/recovery/<time>-<pid>.f3d`, with a `.json` beside
+  it (the model's own path, when it was written) and a `QLockFile` (`.lock`) held for
+  the session's life. `autosaveNow` (a 2-minute timer; `FORGE3D_AUTOSAVE_SECONDS`
+  shortens it for testing) writes only when the stack isn't clean and the document
+  changed since the last backup (`m_docSerial`), to a `.part` file swapped in.
+- `removeRecovery` on save, open, new and a normal close. At start `offerRecovery`
+  lists backups whose lock can be taken (their session is dead) and asks;
+  `recoverFrom` loads one and marks the stack modified (`CommandStack::setModified`).

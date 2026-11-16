@@ -55,7 +55,8 @@ Gate to Phase 2: a new user prints a customised part within 10 minutes.
 | 31 | Section view: cut the view open to look inside | Done (0.40.0) |
 | 31+ | Section view for only the selected shape | Done (0.40.1, released) |
 | 32 | Open Recent; build plate size; the ribbon reorganised, with a View tab (Orbit / Pan / Zoom on the left button) | Done (0.41.0) |
-| 33 | Printer height, and a warning colour for shapes that don't fit the plate | **Delivered for testing** |
+| 33 | Printer height, and a warning colour for shapes that don't fit the plate | Done (0.42.0) |
+| 34 | Backup copies while you work, offered back after a crash | **Delivered for testing** |
 
 Separate track: sculpt-engine prototype (one Draw brush on a 1M-triangle mesh at 60 fps).
 

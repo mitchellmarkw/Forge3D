@@ -25,6 +25,8 @@
 
 #include <map>
 #include <memory>
+
+#include <QLockFile>
 #include <set>
 #include <vector>
 #include <optional>
@@ -329,6 +331,17 @@ private:
     std::size_t m_barDragShown = 0;
     QLabel* m_modelInfo = nullptr;
     QLabel* m_fitInfo = nullptr;
+
+    // Backup copies while working, offered back after a crash.
+    void startAutosave();
+    void autosaveNow();
+    void removeRecovery();
+    void offerRecovery();
+    bool recoverFrom(const QString& backup);
+    QTimer* m_autosaveTimer = nullptr;
+    QString m_recoveryPath;                     // this session's backup (.f3d; a .json beside it says what of)
+    std::unique_ptr<QLockFile> m_recoveryLock;  // held while this session lives
+    quint64 m_docSerial = 0, m_autosavedSerial = 0;
     QLabel* m_glInfo = nullptr;
     QMenu* m_viewMenu = nullptr;
     QMenu* m_recentMenu = nullptr;
