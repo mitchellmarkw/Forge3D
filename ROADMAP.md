@@ -53,7 +53,7 @@ Gate to Phase 2: a new user prints a customised part within 10 minutes.
 | 29 | Taper (draft) on pads and pockets | Done (0.38.0) |
 | 30 | Text in sketches: words whose letters are outlines | Done (0.39.0) |
 | 31 | Section view: cut the view open to look inside | Done (0.40.0) |
-| 31+ | Section view for only the selected shape | **Delivered for testing** |
+| 31+ | Section view for only the selected shape | Done (0.40.1, released) |
 
 Separate track: sculpt-engine prototype (one Draw brush on a 1M-triangle mesh at 60 fps).
 
