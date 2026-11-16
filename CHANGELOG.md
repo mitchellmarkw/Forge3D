@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.42.0 Beta — Slice 33: Does it fit the printer? (2026-11-16)
+
+- **Build Plate Size** also has the **height** the printer can print (Z). Choosing a
+  bed from the list fills in a usual height for it; check your printer's and change it
+  if it differs. A faint box over the plate shows the space.
+- Shapes that **don't fit** (reaching past the plate's edge, or above the height) are
+  drawn **orange-red**, and the status bar says how many there are. Move, turn or
+  shrink a shape and it goes back to its own colour as soon as it fits.
+  - A shape turned at an angle is checked by its real outline, not its box.
+  - Shapes sunk below the plate aren't flagged (slicers cut those off).
+  - **Show shapes that don't fit in orange-red** in Build Plate Size turns it off.
+
 ## 0.41.0 Beta — Slice 32: Recent files, plate size, the ribbon (2026-11-16)
 
 - **File → Open Recent**: the last six models opened or saved, newest first (press

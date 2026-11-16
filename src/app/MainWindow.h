@@ -328,6 +328,7 @@ private:
     ObjectId m_barDrag = kInvalidId;                // the object whose rollback bar is being dragged
     std::size_t m_barDragShown = 0;
     QLabel* m_modelInfo = nullptr;
+    QLabel* m_fitInfo = nullptr;
     QLabel* m_glInfo = nullptr;
     QMenu* m_viewMenu = nullptr;
     QMenu* m_recentMenu = nullptr;
