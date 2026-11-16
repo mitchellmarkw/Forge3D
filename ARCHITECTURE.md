@@ -695,3 +695,18 @@ and sharp across edges.
   document change). Highlights are ghost items (orange hover, red picks, green nearest
   line, blue centre line); the panel shows rich text.
 
+## Threads (slice 26)
+
+- `BooleanOp::Thread`, one operand, `ThreadFinish{face (a FaceRef, as Shell's open
+  faces), size, pitch, fit, leftHand}` in step coordinates (`threadSpec`,
+  `threadInPlate`, `withThread`; `pickableShape` gives the operand, as for Shell).
+- `thread::roundFace` reads the cylindrical face: radius, axis, its extent along the
+  axis (UV bounds) and whether it's a hole (the oriented normal points at the axis).
+  `suggest` picks the nearest ISO coarse size (a hole by D − P, the tap drill).
+- `thread::cutFor` makes closed triangle meshes: a peg's crest at min(R, D/2 − fit)
+  (a tube clears the peg down to it if bigger), a hole's at max(R, D/2 − 0.5413 P +
+  fit) (a bar opens it up); the groove is a four-sided section (60° flanks, 0.6134 P
+  deep, P/8 flats) swept round a helix, 64 steps a turn, run a pitch past both ends and
+  trimmed (Manifold intersection) to the face's length. The step subtracts them from
+  the part with the mesh engine. File format 22.
+

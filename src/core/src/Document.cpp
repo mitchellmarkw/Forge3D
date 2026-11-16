@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "forge/core/Document.h"
 #include "forge/core/Remesh.h"
+#include "forge/core/Thread.h"
 #include "forge/core/Sculpt.h"
 
 #include "forge/core/Edges.h"
@@ -220,6 +221,11 @@ void Document::validateBoolean(const Body& body, const std::map<ObjectId, Object
             throw std::invalid_argument("Pattern works on exactly one shape");
         if (!body.boolean->pattern)
             throw std::invalid_argument("Pattern needs its settings");
+    } else if (op == BooleanOp::Thread) {
+        if (ops.size() != 1)
+            throw std::invalid_argument("A thread goes on exactly one shape");
+        if (!body.boolean->thread || !(body.boolean->thread->size > 0) || !(body.boolean->thread->pitch > 0))
+            throw std::invalid_argument("A thread needs a size and a pitch");
     } else if (op == BooleanOp::Simplify) {
         if (ops.size() != 1)
             throw std::invalid_argument("Simplify works on exactly one shape");
@@ -494,7 +500,8 @@ TopoDS_Shape Document::combine(const BooleanSpec& spec) const
     const std::vector<ObjectId>& operands = spec.operands;
     TopoDS_Shape result;
     try {
-        if (op == BooleanOp::Emboss || op == BooleanOp::Sculpt || op == BooleanOp::Simplify)
+        if (op == BooleanOp::Emboss || op == BooleanOp::Sculpt || op == BooleanOp::Simplify ||
+            op == BooleanOp::Thread)
             throw GeometryError(toString(op) + " is worked out by the mesh engine");
         if (op == BooleanOp::Pattern)
             return patternShape(spec);
@@ -613,6 +620,7 @@ TopoDS_Shape Document::combine(const BooleanSpec& spec) const
             case BooleanOp::Pattern:
             case BooleanOp::Sculpt:
             case BooleanOp::Simplify:
+            case BooleanOp::Thread:
                 break;  // handled above / by the mesh engine
             }
         }
@@ -706,7 +714,7 @@ TopoDS_Shape Document::previewCombine(const BooleanSpec& spec) const
     if ((spec.op == BooleanOp::Split || spec.op == BooleanOp::Mirror || spec.op == BooleanOp::Emboss ||
          spec.op == BooleanOp::Edges || spec.op == BooleanOp::Shell ||
          spec.op == BooleanOp::Follow || spec.op == BooleanOp::Pattern || spec.op == BooleanOp::Sculpt ||
-         spec.op == BooleanOp::Simplify) &&
+         spec.op == BooleanOp::Simplify || spec.op == BooleanOp::Thread) &&
         spec.operands.size() != 1)
         throw std::invalid_argument(toString(spec.op) + " works on exactly one shape");
     return combine(spec);
@@ -776,6 +784,7 @@ BooleanSpec Document::passThrough(const BooleanSpec& spec)
     pass.pattern.reset();
     pass.sculpt.reset();
     pass.simplify.reset();
+    pass.thread.reset();
     switch (spec.op) {
     case BooleanOp::Merge:
     case BooleanOp::Intersect:
@@ -934,7 +943,8 @@ Body Document::removeStep(ObjectId id)
 
 bool Document::specUsesMesh(const BooleanSpec& spec) const
 {
-    if (spec.op == BooleanOp::Emboss || spec.op == BooleanOp::Sculpt || spec.op == BooleanOp::Simplify)
+    if (spec.op == BooleanOp::Emboss || spec.op == BooleanOp::Sculpt || spec.op == BooleanOp::Simplify ||
+        spec.op == BooleanOp::Thread)
         return true;  // letters following a surface, and sculpting, only exist as triangles
     for (ObjectId part : spec.operands)
         if (usesMeshEngine(part))
@@ -1228,6 +1238,22 @@ MeshSolid Document::combineMeshes(const BooleanSpec& spec) const
         const ObjectId part = spec.operands.front();
         const Mesh done = sculpted(sculptStart(part, spec.sculpt->detail), *spec.sculpt);
         return meshkernel::transformed(meshkernel::fromTriangles(done.positions, done.indices), localTransform(part));
+    }
+    case BooleanOp::Thread: {
+        if (!spec.thread)
+            throw GeometryError("Thread has no settings");
+        if (usesMeshEngine(spec.operands.front()))
+            throw GeometryError("Threads go on solid shapes, not on imported meshes or shapes made with them.");
+        const auto round = threadedFace(*this, spec);
+        if (!round)
+            throw GeometryError("The round face for the thread can't be found any more (the shape changed too much). "
+                                "Double-click the thread to pick it again.");
+        const thread::Cut cut = thread::cutFor(*round, *spec.thread);
+        MeshSolid result = parts.front();
+        if (!cut.clear.empty())
+            result = meshkernel::subtracted(result, {meshkernel::fromTriangles(cut.clear.positions, cut.clear.indices)});
+        return meshkernel::subtracted(result,
+                                      {meshkernel::fromTriangles(cut.groove.positions, cut.groove.indices)});
     }
     case BooleanOp::Simplify: {
         if (!spec.simplify)

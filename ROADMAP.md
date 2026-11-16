@@ -46,7 +46,8 @@ Gate to Phase 2: a new user prints a customised part within 10 minutes.
 | 22 | Mask (paint, clear, invert), Crease and Snake hook brushes | Done (0.31.0) |
 | 23 | Remesh (even triangles, in sculpting) and Simplify (a step for any shape) | Done (0.32.0, released) |
 | 24 | Pattern brush: built-in patterns or a picture pressed in, repeating | Done (0.33.0) |
-| 25 | Measure: faces, edges, corners and points; distances, angles, diameters, centres | **Delivered for testing** |
+| 25 | Measure: faces, edges, corners and points; distances, angles, diameters, centres | Done (0.34.0) |
+| 26 | Threads: metric screw threads on pegs and in holes, with a fit for printing | **Delivered for testing** |
 
 Separate track: sculpt-engine prototype (one Draw brush on a 1M-triangle mesh at 60 fps).
 

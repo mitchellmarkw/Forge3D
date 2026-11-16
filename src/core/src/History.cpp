@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+#include "forge/core/Thread.h"
 #include "forge/core/History.h"
 #include "forge/core/Pattern.h"
 
@@ -201,6 +202,16 @@ std::string describe(const Document& doc, ObjectId id)
         case EdgeFinishKind::Bevel: return count + " bevelled " + num(f.size) + " mm at " + num(f.angle) + "\xC2\xB0";
         }
         return count;
+    }
+    case BooleanOp::Thread: {
+        if (!spec.thread)
+            return {};
+        const ThreadFinish& t = *spec.thread;
+        std::string name = "\xC3\x98" + num(t.size) + " \xC3\x97 " + num(t.pitch);
+        for (const auto& s : thread::metric())
+            if (std::abs(s.diameter - t.size) < 1e-9 && std::abs(s.pitch - t.pitch) < 1e-9)
+                name = s.name;
+        return name + " thread" + (t.leftHand ? ", left-hand" : "");
     }
     case BooleanOp::Simplify: {
         if (!spec.simplify)

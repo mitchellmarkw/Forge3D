@@ -280,7 +280,7 @@ PrimitiveSpec madeRound(const PrimitiveSpec& spec);
 
 // ---- Combine results ------------------------------------------------------------
 
-enum class BooleanOp { Merge, Subtract, Intersect, Split, Mirror, Group, Emboss, Edges, Shell, Follow, Pattern, Sculpt, Simplify };
+enum class BooleanOp { Merge, Subtract, Intersect, Split, Mirror, Group, Emboss, Edges, Shell, Follow, Pattern, Sculpt, Simplify, Thread };
 
 // What happens to the picked edges of a shape.
 enum class EdgeFinishKind {
@@ -425,6 +425,18 @@ struct ShellFinish {
     bool operator==(const ShellFinish&) const = default;
 };
 
+// A Thread step: a screw thread cut into a round face, a peg (outside thread) or a hole
+// (inside thread). Sizes in mm; `fit` loosens it for printing (the peg's thread made
+// that much smaller, the hole's that much bigger, all round).
+struct ThreadFinish {
+    FaceRef face;          // the round face, picked like Shell's open faces
+    double size = 6.0;     // the thread's nominal (outside) diameter, M6: 6
+    double pitch = 1.0;    // from one turn to the next
+    double fit = 0.2;
+    bool leftHand = false;
+    bool operator==(const ThreadFinish&) const = default;
+};
+
 // Follow: a groove cut along (or a ridge raised along) a path drawn on the surface.
 // The path is a sketch drawn at a spot on the surface (`origin`, facing `normal`, its X
 // along `xAxis`) and laid over the surface from there: on a flat face it stays as
@@ -508,6 +520,8 @@ struct BooleanSpec {
     std::optional<SculptFinish> sculpt{};
     // Simplify: how many of the triangles to keep.
     std::optional<SimplifyFinish> simplify{};
+    // Thread: where and what size.
+    std::optional<ThreadFinish> thread{};
     // Edges: what to do to which edges.
     std::optional<EdgeFinish> edges{};
     // Shell: how thick, and which faces are left open.

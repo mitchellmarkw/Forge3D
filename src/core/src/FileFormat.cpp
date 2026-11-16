@@ -194,6 +194,7 @@ const char* opName(BooleanOp op)
     case BooleanOp::Pattern: return "pattern";
     case BooleanOp::Sculpt: return "sculpt";
     case BooleanOp::Simplify: return "simplify";
+    case BooleanOp::Thread: return "thread";
     }
     return "merge";
 }
@@ -269,6 +270,13 @@ json bodyToJson(const Body& b)
                 }
                 j["sculpt"]["patterns"] = patterns;
             }
+        }
+        if (const auto& t = b.boolean->thread) {
+            json face{{"point", t->face.point}, {"normal", t->face.normal}};
+            if (t->face.located)
+                face["relative"] = t->face.relative;
+            j["thread"] = json{{"face", face},   {"size", t->size},         {"pitch", t->pitch},
+                               {"fit", t->fit}, {"leftHand", t->leftHand}};
         }
         if (const auto& sf = b.boolean->simplify)
             j["simplify"] = json{{"keep", sf->keep}};
@@ -420,6 +428,8 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
             spec.op = BooleanOp::Sculpt;
         else if (op == "simplify" && version >= 20)
             spec.op = BooleanOp::Simplify;
+        else if (op == "thread" && version >= 22)
+            spec.op = BooleanOp::Thread;
         else
             damaged(where + ": unknown combine operation '" + op + "'");
         const auto operands = j.find("operands");
@@ -541,6 +551,33 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
                 if (st.pattern >= int(sc.patterns.size()))
                     damaged(where + ": a sculpting stroke's pattern is missing");
             spec.sculpt = std::move(sc);
+        }
+        if (spec.op == BooleanOp::Thread) {
+            const auto tj = j.find("thread");
+            if (tj == j.end() || !tj->is_object())
+                damaged(where + ": missing the thread");
+            ThreadFinish t;
+            const auto fj = tj->find("face");
+            if (fj == tj->end() || !fj->is_object())
+                damaged(where + ": the thread's face is missing");
+            const auto readPoint = [&](const char* key, std::array<double, 3>& out) {
+                const auto v = fj->find(key);
+                if (v == fj->end() || !v->is_array() || v->size() != 3)
+                    damaged(where + ": the thread's face is damaged");
+                for (std::size_t i = 0; i < 3; ++i)
+                    out[i] = (*v)[i].get<double>();
+            };
+            readPoint("point", t.face.point);
+            readPoint("normal", t.face.normal);
+            if (fj->contains("relative")) {
+                readPoint("relative", t.face.relative);
+                t.face.located = true;
+            }
+            t.size = number(*tj, "size", where);
+            t.pitch = number(*tj, "pitch", where);
+            t.fit = tj->value("fit", 0.2);
+            t.leftHand = tj->value("leftHand", false);
+            spec.thread = t;
         }
         if (spec.op == BooleanOp::Simplify) {
             const auto sj = j.find("simplify");

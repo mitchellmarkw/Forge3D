@@ -49,7 +49,8 @@ namespace forge::file {
 //      sculpting (a stroke with the triangle size as its radius)
 //  21  the Pattern sculpt brush: a step's patterns (built-in by name, or a picture) and
 //      each stroke's pattern and repeat size
-inline constexpr int kFormatVersion = 21;
+//  22  thread steps (operation "thread": the round face picked, size, pitch, fit, hand)
+inline constexpr int kFormatVersion = 22;
 // The highest sculpt::Brush number a file may hold (Pattern).
 inline constexpr int kLastSculptBrush = 13;
 inline constexpr const char* kExtension = ".f3d";
