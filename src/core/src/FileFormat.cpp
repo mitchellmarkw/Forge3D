@@ -83,7 +83,15 @@ json sketchToJson(const sketch::Sketch& s)
     for (const auto& c : s.constraints)
         rules.push_back(json{{"rule", kRules[int(c.rule)]}, {"a", c.a}, {"b", c.b}, {"c", c.c},
                              {"value", c.value}, {"value2", c.value2}});
-    return json{{"points", points}, {"radii", s.radii}, {"geos", geos}, {"rules", rules}};
+    json out{{"points", points}, {"radii", s.radii}, {"geos", geos}, {"rules", rules}};
+    if (!s.texts.empty()) {
+        json texts = json::array();
+        for (const auto& w : s.texts)
+            texts.push_back(json{{"text", w.text}, {"font", w.font}, {"bold", w.bold}, {"italic", w.italic},
+                                 {"height", w.height}, {"angle", w.angle}, {"at", w.at}});
+        out["texts"] = texts;
+    }
+    return out;
 }
 
 sketch::Sketch sketchFromJson(const json& j, const std::string& where)
@@ -122,6 +130,20 @@ sketch::Sketch sketchFromJson(const json& j, const std::string& where)
             c.value2 = r.value("value2", 0.0);
             s.constraints.push_back(c);
         }
+        if (const auto texts = j.find("texts"); texts != j.end())
+            for (const auto& t : *texts) {
+                sketch::Words w;
+                w.text = t.at("text").get<std::string>();
+                w.font = t.value("font", std::string());
+                w.bold = t.value("bold", false);
+                w.italic = t.value("italic", false);
+                w.height = t.at("height").get<double>();
+                w.angle = t.value("angle", 0.0);
+                w.at = t.at("at").get<int>();
+                if (w.at < 0 || std::size_t(w.at) >= s.points.size() || !(w.height > 0.0))
+                    throw std::runtime_error("words out of place");
+                s.texts.push_back(w);
+            }
     } catch (const std::exception& e) {
         throw FileError("The file is damaged (" + where + ": sketch: " + e.what() + ").");
     }

@@ -777,3 +777,18 @@ and sharp across edges.
   (`BRepOffsetAPI_MakeOffset`) must keep as many wires as the face has.
 - Through-all pockets drop the taper (their tool is rebuilt from below the part).
   Scaling keeps the sides' slope (tan × across / along); uneven across isn't allowed.
+
+## Text in sketches (slice 30)
+
+- `Sketch::texts` (`Words`: text, font, bold, italic, capital height, angle, and `at`,
+  a sketch point for the left end of the baseline). The point is an ordinary solver
+  point; the letters themselves aren't in the solver. Point renumbering
+  (`mergePoints`), `pointsInUse` (so the point isn't a loose point / hole spot),
+  `removePoints`, `scale` (even only) and `checkRefs` know about them.
+- `wordsFaces` (SketchShape) builds the letters with `text::letterFaces` (em size =
+  height / capitalRatio), turned and moved to the point; `faces()` adds their wires to
+  the sketch's loops, so the usual even-odd nesting makes letters solid on their own
+  and holes inside an outline. Saved as the sketch's `"texts"` (file format 24).
+- The app: `Tool::Text` asks with a small dialog; `Pick::Text` picks words by their
+  box; outlines for drawing come from `wordsOutlines` (at the origin, unturned) and
+  are kept per text / font / style / height in `m_lettering`.

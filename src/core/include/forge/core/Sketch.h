@@ -61,12 +61,27 @@ struct Constraint {
     bool operator==(const Constraint&) const = default;
 };
 
+// Words in a sketch: their letters' outlines are part of the sketch's outlines (so
+// they can be padded, cut in as a pocket, or cut out of an outline round them). The
+// left end of the baseline sits on point `at`, which rules and dimensions can hold.
+struct Words {
+    std::string text;
+    std::string font;  // family name; empty = the default font
+    bool bold = false;
+    bool italic = false;
+    double height = 10.0;  // of a capital letter, mm
+    double angle = 0.0;    // degrees the baseline is turned, anticlockwise
+    int at = 0;
+    bool operator==(const Words&) const = default;
+};
+
 // Point 0 is the sketch's origin: always there, never moves.
 struct Sketch {
     std::vector<Point> points{Point{}};
     std::vector<double> radii;
     std::vector<Geo> geos;
     std::vector<Constraint> constraints;
+    std::vector<Words> texts;
     bool operator==(const Sketch&) const = default;
 };
 
@@ -106,6 +121,10 @@ void removePoints(Sketch& s, std::vector<int> points);
 std::vector<int> loosePoints(const Sketch& s);
 // Removes rules.
 void removeConstraints(Sketch& s, std::vector<int> rules);
+// Removes words (and their point, if nothing else uses it).
+void removeWords(Sketch& s, int index);
+// Whether there's nothing to make a shape from: no curves and no words.
+bool isEmpty(const Sketch& s);
 
 // Stretches the sketch (its points, radii and dimensions). Returns false (and changes
 // nothing) if it can't be stretched like that: circles, arcs, lengths along slopes

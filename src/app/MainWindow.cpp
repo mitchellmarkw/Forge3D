@@ -5568,6 +5568,8 @@ void MainWindow::createSketchBar()
         {SketchView::Tool::Point, tr("Point"), Qt::Key_P, tr("A point on its own (where a hole goes)")},
         {SketchView::Tool::Trim, tr("Trim"), Qt::Key_X,
          tr("Click pieces of lines and curves to take them away, back to where other lines cross them")},
+        {SketchView::Tool::Text, tr("Text"), Qt::Key_W,
+         tr("Words whose letters are outlines: click where they start. Double-click them later to change them")},
     };
     for (const auto& t : toolList) {
         QAction* a = add(t.text, t.key, t.tip, [this, tool = t.tool] { m_sketchView->setTool(tool); });
@@ -5938,7 +5940,7 @@ void MainWindow::openSketch(const sketch::Sketch& sketch, std::vector<std::vecto
     if (m_holeMode.positioning)
         m_sketchView->setTool(SketchView::Tool::Point);
     else if (m_followMode.sketching != 0)
-        m_sketchView->setTool(m_sketchView->sketch().geos.empty() ? SketchView::Tool::Line : SketchView::Tool::Select);
+        m_sketchView->setTool(sketch::isEmpty(m_sketchView->sketch()) ? SketchView::Tool::Line : SketchView::Tool::Select);
     else if (!editing)
         m_sketchView->setTool(SketchView::Tool::Line);
     m_sketchBar->show();
@@ -5973,7 +5975,7 @@ void MainWindow::updateSketchStatus()
                (solved.freedom == 0 ? tr("Every place is set.")
                                     : tr("Add dimensions (Across, Up) to set their places exactly."));
         held = solved.freedom == 0 && spots > 0;
-    } else if (s.geos.empty()) {
+    } else if (sketch::isEmpty(s)) {
         text = tr("Nothing drawn yet.");
     } else if (solved.freedom == 0) {
         text = tr("Fully set: every size and place is fixed.");

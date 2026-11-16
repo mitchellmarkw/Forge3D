@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.39.0 Beta — Slice 30: Text in sketches (2026-11-16)
+
+- **Text** tool in the sketcher (W): click where the words start, then type them and
+  choose the **font**, bold / italic, the **letter height** (of a capital, in mm) and
+  how far they're turned. The letters are drawn as outlines and are part of the
+  sketch:
+  - **Pad** a sketch of words: letters standing up. **Pocket** them on a face:
+    engraved, with crisp flat-bottomed letters (and Taper works on them).
+  - Words **inside an outline** are cut out of it, like a stencil or a nameplate with
+    see-through letters.
+- **Double-click** words to change them; drag them to move them; pick them and press
+  Delete to remove them. The small square at their start is an ordinary sketch point,
+  so dimensions (Across, Up) and rules can hold the words in place.
+- Any font installed on the computer. A file opened on a computer without the font
+  uses the default font instead.
+- (For words that follow a curved surface, Emboss is still the tool; sketch words are
+  flat.)
+- 221 unit tests (2 new).
+
 ## 0.38.0 Beta — Slice 29: Taper (2026-11-16)
 
 - **Taper** on pads and pockets (in the sketcher, under Length / Depth): an angle that

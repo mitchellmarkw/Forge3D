@@ -2,6 +2,7 @@
 #include "forge/core/SketchShape.h"
 
 #include "forge/core/Document.h"  // GeometryError
+#include "forge/core/Text.h"
 
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
@@ -165,6 +166,10 @@ TopoDS_Shape faces(const Sketch& s)
                 wires.push_back(w);
             }
         }
+        // Words: every letter's outlines (and the holes in them).
+        for (const Words& w : s.texts)
+            for (TopExp_Explorer it(wordsFaces(s, w), TopAbs_WIRE); it.More(); it.Next())
+                wires.push_back(TopoDS::Wire(it.Current()));
     } catch (const Standard_Failure& e) {
         throw GeometryError(std::string("The sketch could not be drawn: ") + e.GetMessageString());
     }
@@ -412,6 +417,41 @@ Bnd_Box boxOf(const TopoDS_Shape& shape)
 }
 
 }  // namespace
+
+namespace {
+TopoDS_Shape lettersOf(const Words& w)
+{
+    if (!(w.height > 0.0))
+        throw std::invalid_argument("The letters must be bigger than zero");
+    const double ratio = text::capitalRatio(w.font, w.bold, w.italic);
+    return text::letterFaces(w.text, w.font, w.bold, w.italic, w.height / (ratio > 0 ? ratio : 0.7));
+}
+}  // namespace
+
+TopoDS_Shape wordsFaces(const Sketch& s, const Words& w)
+{
+    const Point p = s.points.at(std::size_t(w.at));
+    gp_Trsf turn, move;
+    turn.SetRotation(gp_Ax1(gp::Origin(), gp::DZ()), w.angle * std::numbers::pi / 180.0);
+    move.SetTranslation(gp_Vec(p.x, p.y, 0));
+    return BRepBuilderAPI_Transform(lettersOf(w), move * turn, true).Shape();
+}
+
+std::vector<std::vector<Point>> wordsOutlines(const Words& w)
+{
+    std::vector<std::vector<Point>> out;
+    const TopoDS_Shape letters = lettersOf(w);
+    for (TopExp_Explorer it(letters, TopAbs_WIRE); it.More(); it.Next()) {
+        std::vector<Point> line;
+        for (const auto& q : polygon(TopoDS::Wire(it.Current())))
+            line.push_back({q[0], q[1]});
+        if (line.size() >= 2) {
+            line.push_back(line.front());
+            out.push_back(std::move(line));
+        }
+    }
+    return out;
+}
 
 std::vector<std::vector<Point>> outlinesOf(const Sketch& s)
 {
