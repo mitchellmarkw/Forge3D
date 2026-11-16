@@ -833,6 +833,7 @@ std::optional<std::pair<PrimitiveSpec, Transform>> Document::throughTool(ObjectI
     } else if (auto* pad = std::get_if<PadSpec>(&spec)) {
         pad->reversed = false;  // stretched from its base up, like the others
         pad->midplane = false;
+        pad->taper = 0.0;       // straight through
         height = &pad->length;
     }
     if (!height)

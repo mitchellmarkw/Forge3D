@@ -156,7 +156,9 @@ std::string describe(const Document& doc, ObjectId id)
                     return "\"" + p.text + "\"";
                 else if constexpr (std::is_same_v<T, PadSpec>)
                     return std::string("sketch, ") + num(p.length) + " mm" +
-                           (p.reversed ? " down" : p.midplane ? " both ways" : "");
+                           (p.reversed ? " down" : p.midplane ? " both ways" : "") +
+                           (p.taper != 0.0 ? ", " + num(std::abs(p.taper)) + "\xC2\xB0 taper" + (p.taper < 0 ? " out" : "")
+                                           : std::string());
                 else if constexpr (std::is_same_v<T, RevolveSpec>)
                     return std::string("sketch, spun ") + num(p.angle) + "\xC2\xB0";
                 else if constexpr (std::is_same_v<T, LoftSpec>)

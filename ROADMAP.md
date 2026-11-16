@@ -49,7 +49,8 @@ Gate to Phase 2: a new user prints a customised part within 10 minutes.
 | 25 | Measure: faces, edges, corners and points; distances, angles, diameters, centres | Done (0.34.0) |
 | 26 | Threads: metric screw threads on pegs and in holes, with a fit for printing | Done (0.35.0) |
 | 27 | Loft and sweep: blend between outlines; sweep an outline along a drawn path or a spiral | Done (0.36.0, released) |
-| 28 | Sketch tools: Trim, Round corner, Offset (held by Gap dimensions), Mirror | **Delivered for testing** |
+| 28 | Sketch tools: Trim, Round corner, Offset (held by Gap dimensions), Mirror | Done (0.37.0) |
+| 29 | Taper (draft) on pads and pockets | **Delivered for testing** |
 
 Separate track: sculpt-engine prototype (one Draw brush on a 1M-triangle mesh at 60 fps).
 

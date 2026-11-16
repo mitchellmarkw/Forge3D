@@ -175,6 +175,9 @@ struct PadSpec {
     double length = 10.0;
     bool reversed = false;
     bool midplane = false;
+    // Draft: degrees the sides lean in as they go away from the sketch (0: straight up;
+    // negative: they lean out). Holes in the outline widen as the outside narrows.
+    double taper = 0.0;
     bool operator==(const PadSpec&) const = default;
 };
 

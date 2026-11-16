@@ -5844,6 +5844,7 @@ void MainWindow::startSketchEdit(ObjectId id)
         options.length = pad->length;
         options.otherWay = cuts ? !pad->reversed : pad->reversed;
         options.bothWays = pad->midplane;
+        options.taper = pad->taper;
         options.throughAll = step && step->boolean->throughAll;
     } else if (const auto* loft = std::get_if<LoftSpec>(&tool->spec)) {
         if (loft->sections.empty())
@@ -6071,6 +6072,7 @@ void MainWindow::finishSketch()
         pad.length = m_sketchPanel->length();
         pad.reversed = cut ? !m_sketchPanel->otherWay() : m_sketchPanel->otherWay();
         pad.midplane = m_sketchPanel->bothWays();
+        pad.taper = m_sketchPanel->taper();
         spec = pad;
     }
     TopoDS_Shape solid;

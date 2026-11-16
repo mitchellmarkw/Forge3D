@@ -52,6 +52,8 @@ namespace forge::file {
 //  22  thread steps (operation "thread": the round face picked, size, pitch, fit, hand)
 //  23  lofts (outlines stacked at heights) and sweeps (an outline along a drawn path
 //      or a spiral)
+//  24  the sketch rule "gap" (an offset copy's distance from its original); a pad's
+//      "taper" (degrees its sides lean in)
 inline constexpr int kFormatVersion = 24;
 // The highest sculpt::Brush number a file may hold (Pattern).
 inline constexpr int kLastSculptBrush = 13;

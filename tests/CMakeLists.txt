@@ -34,6 +34,7 @@ add_executable(forge_tests
     test_thread.cpp
     test_loft.cpp
     test_sketch_edit.cpp
+    test_taper.cpp
 )
 target_link_libraries(forge_tests PRIVATE
     Forge3D::core

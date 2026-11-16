@@ -28,6 +28,7 @@ public:
         bool otherWay = false;
         bool bothWays = false;
         bool throughAll = false;
+        double taper = 0.0;      // Pad / Pocket: degrees the sides lean in
         bool ruled = false;      // Loft: straight sides
         bool spiral = false;     // Sweep: round a spiral (else along a drawn path)
         double pitch = 5.0;      // spiral
@@ -43,6 +44,7 @@ public:
     bool pocket() const { return make() == Make::Pocket || make() == Make::Groove; }
     bool revolve() const { return make() == Make::Revolve || make() == Make::Groove; }
     double length() const;
+    double taper() const;  // 0 with Through all
     double angle() const;
     bool otherWay() const;
     bool bothWays() const;
@@ -81,6 +83,8 @@ private:
     QLabel* m_makeLabel = nullptr;
     QComboBox* m_make = nullptr;
     QLabel* m_lengthLabel = nullptr;
+    QLabel* m_taperLabel = nullptr;
+    QDoubleSpinBox* m_taper = nullptr;
     QDoubleSpinBox* m_length = nullptr;
     QLabel* m_angleLabel = nullptr;
     QDoubleSpinBox* m_angle = nullptr;

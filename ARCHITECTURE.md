@@ -765,3 +765,15 @@ and sharp across edges.
 - The app: `SketchView::change` wraps a tool (undo snapshot, solve, put back with the
   reason on failure). Trim is a tool mode (`Tool::Trim`, hover shows `trimPiece`);
   the others act on the picks and ask for a size.
+
+## Taper (slice 29)
+
+- `PadSpec::taper` (degrees; 0 keeps the old straight path through `padShape`
+  untouched). Each sketch face is pushed from the sketch plane (`taperedPrism`) and its
+  side faces leaned with `BRepOffsetAPI_DraftAngle` (neutral plane: the sketch plane;
+  pull: the way it's pushed), so planes stay planes and cylinders become cones.
+  Midplane: two halves from the sketch plane, fused.
+- Too steep is caught first in 2D: the face offset inward by length × tan(taper)
+  (`BRepOffsetAPI_MakeOffset`) must keep as many wires as the face has.
+- Through-all pockets drop the taper (their tool is rebuilt from below the part).
+  Scaling keeps the sides' slope (tan × across / along); uneven across isn't allowed.
