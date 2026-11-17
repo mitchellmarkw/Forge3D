@@ -72,6 +72,9 @@ Gate to Phase 2: a new user prints a customised part within 10 minutes.
 
 Slices 39–41 close the gaps found in the [Phase 1 gate review](docs/PHASE1_GATE.md).
 
+Waiting for a place: reference images, a custom shape library, precise part alignment
+and Quick Socket. See [docs/TODO.md](docs/TODO.md).
+
 ## Phase 2: Sculpt · Phase 3: Hybrid · Phase 4: Pro
 
 See the spec doc. Slices will be listed here when Phase 1 nears its gate.
