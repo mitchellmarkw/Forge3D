@@ -256,6 +256,13 @@ TopoDS_Shape letterFaces(const std::string& text, const std::string& font, bool 
 {
     if (!(emSize > 0.0))
         throw std::invalid_argument("The letters must be bigger than zero");
+    int letters = 0;
+    for (unsigned char c : text)
+        if ((c & 0xC0) != 0x80 && c != ' ' && c != '\t' && c != '\n' && c != '\r')
+            ++letters;  // characters other than spaces (each UTF-8 character once)
+    if (letters > kMaxLetters)
+        throw std::invalid_argument("That's too many letters: up to " + std::to_string(kMaxLetters) +
+                                    " at a time (split long text over several pieces)");
     std::lock_guard lock(fontMutex());
     const std::string name = resolvedLocked(font);
     StdPrs_BRepFont brepFont;

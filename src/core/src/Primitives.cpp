@@ -58,6 +58,11 @@ void requirePositive(double value, const char* name)
 {
     if (!(value > 0.0))
         throw std::invalid_argument(std::string(name) + " must be greater than zero");
+    // Far past anything printable, and past what the geometry kernel can work with.
+    if (value < 1e-4)
+        throw std::invalid_argument(std::string(name) + " is too small (under 0.0001 mm)");
+    if (!(value <= 1e6))
+        throw std::invalid_argument(std::string(name) + " is too big (over a kilometre)");
 }
 }  // namespace
 

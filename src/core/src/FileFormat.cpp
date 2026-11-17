@@ -6,8 +6,10 @@
 #include <miniz.h>
 #include <nlohmann/json.hpp>
 
+#include <cmath>
 #include <cstring>
 #include <fstream>
+#include <functional>
 #include <iterator>
 #include <system_error>
 #include <type_traits>
@@ -149,6 +151,8 @@ sketch::Sketch sketchFromJson(const json& j, const std::string& where)
     }
     if (s.points.empty())
         s.points.push_back({});
+    if (const std::string wrong = sketch::damage(s); !wrong.empty())
+        throw FileError("The file is damaged (" + where + ": sketch: " + wrong + ").");
     return s;
 }
 
@@ -934,6 +938,20 @@ std::vector<Body> fromJson(const std::string& text, const std::function<std::str
 
     if (root.value("units", std::string("mm")) != "mm")
         damaged("unsupported units");
+
+    // No number in a Forge3D document is near 10 km (10,000,000 mm), or not a number at all:
+    // such a value is damage, and building shapes from it can take for ever.
+    std::function<void(const json&)> sensible = [&sensible](const json& j) {
+        if (j.is_number()) {
+            const double v = j.get<double>();
+            if (!std::isfinite(v) || std::abs(v) > 1e7)
+                damaged("a number is far too big");
+        } else if (j.is_structured()) {
+            for (const auto& v : j)
+                sensible(v);
+        }
+    };
+    sensible(root);
 
     const auto bodies = root.find("bodies");
     if (bodies == root.end() || !bodies->is_array())

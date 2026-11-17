@@ -22,6 +22,7 @@ WordsEditor::WordsEditor(QWidget* parent) : QWidget(parent)
 
     auto* textLabel = new QLabel(tr("Words:"));
     m_text = new QLineEdit;
+    m_text->setMaxLength(text::kMaxLetters + 40);  // (spaces aside, letterFaces says if it's too many)
     m_text->setPlaceholderText(tr("Type the words here"));
     m_text->setToolTip(tr("The letters to make. Press Enter (or click elsewhere) to apply"));
     textLabel->setBuddy(m_text);

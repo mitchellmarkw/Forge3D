@@ -507,6 +507,16 @@ TopoDS_Shape apply(const TopoDS_Shape& shape, const EdgeFinish& finish)
         throw std::invalid_argument("The bevel angle must be between 0.5° and 89.5°");
     if (finish.edges.empty())
         throw std::invalid_argument("Pick at least one edge");
+    {
+        Bnd_Box box;
+        BRepBndLib::Add(shape, box);
+        if (!box.IsVoid()) {
+            double x0, y0, z0, x1, y1, z1;
+            box.Get(x0, y0, z0, x1, y1, z1);
+            if (finish.size > std::max({x1 - x0, y1 - y0, z1 - z0}))
+                throw GeometryError("That size is bigger than the whole shape. Try a smaller size.");
+        }
+    }
     Maps maps;
     const ShapeEdges found = analyseWith(shape, maps);
     std::vector<std::pair<int, int>> picks;  // edge, face index for Bevel

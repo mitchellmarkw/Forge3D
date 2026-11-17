@@ -11,6 +11,7 @@
 #include "forge/core/SketchShape.h"
 
 #include <BRepGProp.hxx>
+#include <nlohmann/json.hpp>
 #include <GProp_GProps.hxx>
 
 #include <catch2/catch_test_macros.hpp>
@@ -25,6 +26,7 @@ using namespace forge;
 using namespace forge::sketch;
 using Catch::Matchers::WithinAbs;
 using Catch::Matchers::WithinRel;
+using nlohmann::json;
 namespace fs = std::filesystem;
 
 namespace {
@@ -466,4 +468,35 @@ TEST_CASE("Pad on a face, merged, keeps its place", "[sketch]")
         CHECK_THAT(padBox.center()[2], WithinAbs(14, 1e-3));
         CHECK_THAT(padBox.center()[1], WithinAbs(-12, 1e-3));
     }
+}
+
+TEST_CASE("A sketch from a damaged file is refused, not used", "[sketch][file]")
+{
+    Sketch s = roughRectangle();
+    rule(s, Rule::Horizontal, 0);
+    rule(s, Rule::Distance, 0, -1, -1, 30.0);
+    circle(s, {15, 10}, 4);
+    CHECK(damage(s).empty());
+    PadSpec pad;
+    pad.sketch = s;
+    Document doc;
+    Body b;
+    b.id = doc.allocateId();
+    b.name = "Pad";
+    b.spec = pad;
+    doc.replaceAll({b});
+    const json good = json::parse(file::toJson(doc, "test"));
+    CHECK(file::fromJson(good.dump()).size() == 1);
+
+    const auto refused = [&good](const std::string& at, const json& value) {
+        json bad = good;
+        bad[json::json_pointer("/bodies/0/sketch" + at)] = value;
+        CHECK_THROWS_AS(file::fromJson(bad.dump()), file::FileError);
+    };
+    refused("/geos/0/a", 1000000000);  // a point that isn't there (this crashed)
+    refused("/geos/0/b", -1);
+    refused("/geos/4/r", 7);           // the circle's radius isn't there
+    refused("/rules/0/a", 99);         // a line that isn't there
+    refused("/rules/0/a", 4);          // a circle has no direction to be level
+    refused("/rules/1/a", 4);          // ...or a length
 }

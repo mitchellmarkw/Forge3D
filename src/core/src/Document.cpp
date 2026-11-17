@@ -642,6 +642,18 @@ TopoDS_Shape Document::combine(const BooleanSpec& spec) const
     return result;
 }
 
+namespace {
+std::string occtMessage(const Standard_Failure& e)
+{
+#if OCC_VERSION_HEX >= 0x080000
+    const char* message = e.what();
+#else
+    const char* message = e.GetMessageString();
+#endif
+    return message && *message ? message : "an error in the geometry kernel";
+}
+}  // namespace
+
 TopoDS_Shape Document::shape(ObjectId id) const
 {
     const auto cached = m_shapeCache.find(id);
@@ -662,7 +674,11 @@ TopoDS_Shape Document::shape(ObjectId id) const
         built = primitives::makeMeshSolid(*data, {1.0, 1.0, 1.0});
     } else {
         if (!body->isBoolean()) {
-            built = primitives::buildShape(body->spec);
+            try {
+                built = primitives::buildShape(body->spec);
+            } catch (const Standard_Failure& e) {
+                throw GeometryError(std::string("The shape could not be made: ") + occtMessage(e));
+            }
         } else {
             try {
                 built = combine(effectiveSpec(*body));
@@ -692,8 +708,14 @@ std::shared_ptr<const Mesh> Document::mesh(ObjectId id) const
         built = std::make_shared<const Mesh>(displayMesh(std::get<MeshSpec>(body->spec)));  // no B-rep needed
     else if (body && body->isBoolean() && usesMeshEngine(id))
         built = std::make_shared<const Mesh>(meshkernel::displayMesh(meshSolid(id)));
-    else
-        built = std::make_shared<const Mesh>(tessellate(shape(id)));
+    else {
+        const TopoDS_Shape solid = shape(id);
+        try {
+            built = std::make_shared<const Mesh>(tessellate(solid));
+        } catch (const Standard_Failure& e) {
+            throw GeometryError(std::string("The shape could not be drawn: ") + occtMessage(e));
+        }
+    }
     m_meshCache[id] = built;
     return built;
 }
