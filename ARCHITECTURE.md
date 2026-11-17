@@ -849,3 +849,13 @@ and sharp across edges.
 - `Viewport::setLabels` draws lines with a boxed text at the middle (QPainter, after
   the GL scene). `m_measureLabels` (the live measurement) and `m_keptLabels` (Keep on
   Screen; cleared by the document listener on any change).
+
+## Sketch on the section's cut (slice 36)
+
+- `sketchOnPlane(which, atSection)`: the middle-plane sketch with the plane moved to
+  the section's position along its axis (`sketch::middlePlane` at that point;
+  `sectionOutlines` gives the reference). `otherWay` is preset when the plane's normal
+  points at the hidden side.
+- In `sketchFaceClick`, a ray that meets the section plane coming from the hidden side
+  at a point inside the shape (`BRepClass3d_SolidClassifier`) is a click on the cut
+  face and goes to `sketchOnSection`.

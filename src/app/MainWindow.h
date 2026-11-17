@@ -185,7 +185,9 @@ private:
     // (Pocket). On the plate, or on a flat face of the selected shape.
     void createSketchBar();
     void sketchClicked();                  // the Sketch button
-    void sketchOnPlane(int which);         // front / side / top plane through the middle
+    void sketchOnSection();                // the section view's cut
+    QAction* m_sketchOnSection = nullptr;
+    void sketchOnPlane(int which, bool atSection = false);         // front / side / top plane through the middle
     bool sketchTargetOk(ObjectId id);      // a shape that can be sketched on (else says why)
     void sketchFaceClick(const QVector3D& origin, const QVector3D& direction);
     void openSketch(const sketch::Sketch& sketch, std::vector<std::vector<QPointF>> reference, const QString& title,

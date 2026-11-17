@@ -11,6 +11,9 @@
 #include "PatternPanel.h"
 #include "ShellPanel.h"
 #include "MeasurePanel.h"
+
+#include <BRepClass3d_SolidClassifier.hxx>
+#include <gp_Pnt.hxx>
 #include "SectionPanel.h"
 #include "ThreadPanel.h"
 #include "forge/core/Thread.h"
@@ -713,6 +716,14 @@ void MainWindow::createActions()
                              "groove's outline at a round part's edge and spin it round the middle line."));
             connect(a, &QAction::triggered, this, [this, which] { sketchOnPlane(which); });
         }
+        m_sketchMenu->addSeparator();
+        m_sketchOnSection = m_sketchMenu->addAction(tr("The section view's cut"));
+        m_sketchOnSection->setToolTip(tr("Sketch on the flat cut that Section View shows (turn Section View on "
+                                         "first, View tab). The cut through the selected shape is shown to snap "
+                                         "to. With a shape selected you can also click Sketch and then the cut "
+                                         "face itself."));
+        m_sketchOnSection->setEnabled(false);
+        connect(m_sketchOnSection, &QAction::triggered, this, &MainWindow::sketchOnSection);
         m_sketchMenu->setToolTipsVisible(true);
     }
 
@@ -1574,6 +1585,7 @@ void MainWindow::createDocks()
     connect(m_sectionPanel, &SectionPanel::changed, this, [this] { applySection(false); });
     connect(m_sectionAction, &QAction::toggled, m_sectionDock, &QDockWidget::setVisible);
     connect(m_sectionDock, &QDockWidget::visibilityChanged, m_sectionAction, &QAction::setChecked);
+    connect(m_sectionDock, &QDockWidget::visibilityChanged, m_sketchOnSection, &QAction::setEnabled);
     m_viewMenu->addAction(m_sectionAction);
     m_viewMenu->addSeparator();
     // Let the user bring closed panels back.
@@ -6380,7 +6392,20 @@ bool MainWindow::sketchTargetOk(ObjectId id)
     return true;
 }
 
-void MainWindow::sketchOnPlane(int which)
+void MainWindow::sketchOnSection()
+{
+    if (!m_sectionDock || !m_sectionDock->isVisible()) {
+        statusBar()->showMessage(tr("Turn Section View on first (View tab), and slide the cut to where you want "
+                                    "to draw."),
+                                 8000);
+        return;
+    }
+    // Cut across X: the side plane; across Y: the front plane; across Z: the top plane.
+    static const int planeFor[] = {1, 0, 2};
+    sketchOnPlane(planeFor[m_sectionPanel->axis()], true);
+}
+
+void MainWindow::sketchOnPlane(int which, bool atSection)
 {
     if (toolOpen())
         return;
@@ -6388,13 +6413,31 @@ void MainWindow::sketchOnPlane(int which)
         cancelDrag();
     static const char* names[] = {"front", "side", "top"};
     const QString planeName = tr(names[which]);
+    // On the section's cut: the same plane, where the cut is. What's made goes into the
+    // part that shows (the hidden side is the other way).
+    static const int axisFor[] = {1, 0, 2};
+    const auto atCut = [&](Vec3 centre) {
+        if (atSection)
+            centre[std::size_t(axisFor[which])] = m_sectionPanel->position();
+        return centre;
+    };
+    SketchPanel::Options options;
+    if (atSection) {
+        const Transform plane = sketch::middlePlane(which, {0, 0, 0});
+        const auto& section = m_viewport->section();
+        const double along = section ? plane.m[0][2] * section->normal.x() + plane.m[1][2] * section->normal.y() +
+                                           plane.m[2][2] * section->normal.z()
+                                     : 0.0;
+        options.otherWay = along > 0.0;  // the plane faces the hidden side: go the other way
+    }
     if (m_selection.empty()) {
         // Through the plate's middle: the front and side planes stand up from it.
         m_sketchMode = SketchMode{};
         m_sketchMode.plane = which;
-        m_sketchMode.frame = sketch::middlePlane(which, {0, 0, 0});
-        SketchPanel::Options options;
-        openSketch(sketch::Sketch{}, {}, tr("Sketch on the %1 plane").arg(planeName), false, options);
+        m_sketchMode.frame = sketch::middlePlane(which, atCut({0, 0, 0}));
+        openSketch(sketch::Sketch{}, {},
+                   atSection ? tr("Sketch on the section view's cut") : tr("Sketch on the %1 plane").arg(planeName),
+                   false, options);
         return;
     }
     const ObjectId id = selectedOne();
@@ -6404,7 +6447,7 @@ void MainWindow::sketchOnPlane(int which)
     m_sketchMode = SketchMode{};
     m_sketchMode.target = id;
     m_sketchMode.plane = which;
-    m_sketchMode.frame = sketch::middlePlane(which, {c[0], c[1], c[2]});
+    m_sketchMode.frame = sketch::middlePlane(which, atCut({c[0], c[1], c[2]}));
     std::vector<std::vector<QPointF>> reference;
     try {
         for (const auto& line : sketch::sectionOutlines(inPlate(m_doc, id), m_sketchMode.frame)) {
@@ -6416,11 +6459,16 @@ void MainWindow::sketchOnPlane(int which)
     } catch (const std::exception& e) {
         qWarning() << "Cutting through the shape failed:" << e.what();
     }
-    SketchPanel::Options options;
+    if (atSection && reference.empty())
+        statusBar()->showMessage(tr("The cut doesn't pass through '%1' here, so there's no outline to snap to.")
+                                     .arg(QString::fromStdString(m_doc.find(id)->name)),
+                                 8000);
     options.length = 5.0;
     openSketch(sketch::Sketch{}, std::move(reference),
-               tr("Sketch on the %1 plane through the middle of '%2'")
-                   .arg(planeName, QString::fromStdString(m_doc.find(id)->name)),
+               atSection ? tr("Sketch on the section view's cut through '%1'")
+                               .arg(QString::fromStdString(m_doc.find(id)->name))
+                         : tr("Sketch on the %1 plane through the middle of '%2'")
+                               .arg(planeName, QString::fromStdString(m_doc.find(id)->name)),
                true, options);
 }
 
@@ -6439,6 +6487,24 @@ void MainWindow::sketchFaceClick(const QVector3D& origin, const QVector3D& direc
             ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
         } restore;
         const TopoDS_Shape shape = pickableShape(m_doc, target);
+        // With the view cut open, a click on the cut face itself means: sketch there.
+        // (The ray comes through the hidden side and meets the cut inside the shape.)
+        if (const auto& section = m_viewport->section();
+            section && (!section->selectedOnly || m_viewport->sectionShapes().count(target))) {
+            const float towards = QVector3D::dotProduct(direction, section->normal);
+            const float t = towards < -1e-6f
+                                ? (section->offset - QVector3D::dotProduct(origin, section->normal)) / towards
+                                : -1.0f;
+            if (t > 0.0f) {
+                const QVector3D p = origin + direction * t;
+                BRepClass3d_SolidClassifier inside(shape, gp_Pnt(p.x(), p.y(), p.z()), 1e-6);
+                if (inside.State() == TopAbs_IN) {
+                    m_sketchMode = SketchMode{};
+                    sketchOnSection();
+                    return;
+                }
+            }
+        }
         const auto hit = edges::faceUnder(shape, {origin.x(), origin.y(), origin.z()},
                                           {direction.x(), direction.y(), direction.z()});
         if (!hit) {
