@@ -6,6 +6,8 @@
 #include "forge/core/Text.h"
 
 #include <QApplication>
+
+#include "Theme.h"
 #include <QCommandLineOption>
 #include <QCommandLineParser>
 #include <QElapsedTimer>
@@ -37,6 +39,7 @@ int main(int argc, char* argv[])
     QApplication::setApplicationVersion(QString::fromLatin1(forge::build::kVersion));
 
     QApplication app(argc, argv);
+    forge::app::theme::apply(app, forge::app::theme::saved());
 
     forge::app::installLogging();
     forge::app::installCrashHandler(

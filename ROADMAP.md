@@ -58,7 +58,9 @@ Gate to Phase 2: a new user prints a customised part within 10 minutes.
 | 33 | Printer height, and a warning colour for shapes that don't fit the plate | Done (0.42.0) |
 | 34 | Backup copies while you work, offered back after a crash | Done (0.43.0) |
 | 35 | Backup settings; clicks respect the section view; measurements shown and kept in the view | Done (0.44.0, released) |
-| 36 | Sketch on the section view's cut | **Delivered for testing** |
+| 36 | Sketch on the section view's cut | Done (0.45.0) |
+| 37 | Dark theme (View → Theme: Follow Windows, Light, Dark) | **Delivered for testing** |
+| 38 | Split for printing: manual and smart splits to fit the printer, with tapered alignment pegs and matching holes | Next |
 
 Separate track: sculpt-engine prototype (one Draw brush on a 1M-triangle mesh at 60 fps).
 

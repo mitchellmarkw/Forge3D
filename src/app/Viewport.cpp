@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "Viewport.h"
 
+#include "Theme.h"
+
 #include "ViewCube.h"
 
 #include <QFontMetricsF>
@@ -110,7 +112,10 @@ void main() { fragColor = vec4(vColor, 1.0); }
 
 constexpr float kMinorStep = 10.0f;
 constexpr float kMajorStep = 50.0f;
-const QVector3D kBackground(0.93f, 0.94f, 0.96f);
+QVector3D rgb(const QColor& c)
+{
+    return {float(c.redF()), float(c.greenF()), float(c.blueF())};
+}
 
 std::unique_ptr<QOpenGLShaderProgram> buildProgram(const char* vs, const char* fs, const char* name)
 {
@@ -174,6 +179,12 @@ void Viewport::setItems(std::vector<DisplayItem> items)
     m_itemsDirty = true;
     noteSectionShapes();
     checkFit();
+    update();
+}
+
+void Viewport::themeChanged()
+{
+    m_plateDirty = true;
     update();
 }
 
@@ -544,9 +555,9 @@ void Viewport::buildPlateGeometry()
     };
 
     const float halfX = m_plateX * 0.5f, halfY = m_plateY * 0.5f;
-    const QVector3D minor(0.80f, 0.81f, 0.84f);
-    const QVector3D major(0.62f, 0.64f, 0.68f);
-    const QVector3D edge(0.42f, 0.44f, 0.50f);
+    const QVector3D minor = rgb(theme::look().gridMinor);
+    const QVector3D major = rgb(theme::look().gridMajor);
+    const QVector3D edge = rgb(theme::look().plateEdge);
     const QVector3D xAxis(0.85f, 0.25f, 0.25f);
     const QVector3D yAxis(0.25f, 0.65f, 0.30f);
 
@@ -569,7 +580,7 @@ void Viewport::buildPlateGeometry()
     addLine(-halfX, halfY, -halfX, -halfY, edge);
     // The build height: a faint box standing on the plate.
     {
-        const QVector3D faint(0.74f, 0.76f, 0.82f);
+        const QVector3D faint = rgb(theme::look().buildBox);
         const auto add3 = [&vertices, &faint](float x0, float y0, float z0, float x1, float y1, float z1) {
             vertices.insert(vertices.end(), {x0, y0, z0, faint.x(), faint.y(), faint.z()});
             vertices.insert(vertices.end(), {x1, y1, z1, faint.x(), faint.y(), faint.z()});
@@ -716,7 +727,10 @@ void Viewport::syncGpuMeshes()
 
 void Viewport::paintGL()
 {
-    glClearColor(kBackground.x(), kBackground.y(), kBackground.z(), 1.0f);
+    {
+        const QColor bg = theme::look().view;
+        glClearColor(float(bg.redF()), float(bg.greenF()), float(bg.blueF()), 1.0f);
+    }
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     if (!m_glReady)
         return;
@@ -809,9 +823,9 @@ void Viewport::paintGL()
             QRectF box(0, 0, metrics.horizontalAdvance(label.text) + 12, metrics.height() + 4);
             box.moveCenter(mid);
             painter.setPen(QPen(label.colour, 1.2));
-            painter.setBrush(QColor(255, 255, 255, 235));
+            painter.setBrush(theme::look().labelFill);
             painter.drawRoundedRect(box, 4, 4);
-            painter.setPen(QColor(25, 30, 40));
+            painter.setPen(theme::look().labelText);
             painter.drawText(box, Qt::AlignCenter, label.text);
         }
     }

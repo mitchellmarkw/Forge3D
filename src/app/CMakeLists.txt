@@ -30,6 +30,8 @@ add_executable(Forge3D WIN32
     ShellPanel.cpp
     MeasurePanel.h
     SectionPanel.h
+    Theme.h
+    Theme.cpp
     SectionPanel.cpp
     MeasurePanel.cpp
     ThreadPanel.h

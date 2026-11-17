@@ -15,6 +15,7 @@
 #include <BRepClass3d_SolidClassifier.hxx>
 #include <gp_Pnt.hxx>
 #include "SectionPanel.h"
+#include "Theme.h"
 #include "ThreadPanel.h"
 #include "forge/core/Thread.h"
 #include "forge/core/Picking.h"
@@ -302,8 +303,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
                                     "Or <b>Import</b> an STL, 3MF or OBJ file, or drop one here."));
         m_emptyHint->setAlignment(Qt::AlignCenter);
         m_emptyHint->setTextFormat(Qt::RichText);
-        m_emptyHint->setStyleSheet(QStringLiteral("QLabel { background: rgba(255, 255, 255, 215); color: #333; "
-                                                  "border: 1px solid #c8ccd2; border-radius: 6px; padding: 10px; }"));
+        styleEmptyHint();
         m_emptyHint->setAttribute(Qt::WA_TransparentForMouseEvents);
         overlay->addSpacing(40);
         overlay->addWidget(m_emptyHint, 0, Qt::AlignHCenter | Qt::AlignTop);
@@ -590,7 +590,7 @@ void MainWindow::createActions()
         QAction* a = m_addMenu->addAction(QString::fromStdString(typeName(spec)));
         a->setToolTip(tips[kind]);
         a->setObjectName(QStringLiteral("Add") + QString::fromStdString(typeName(spec)));
-        a->setIcon(ribbonIcon(QStringLiteral("shape-") + QString::fromStdString(typeName(spec)).toLower()));
+        setIconNamed(a, QStringLiteral("shape-") + QString::fromStdString(typeName(spec)).toLower());
         connect(a, &QAction::triggered, this, [this, spec] { addBody(spec); });
         if (kind == 1)
             m_addMenu->addSeparator();  // the familiar two first
@@ -967,6 +967,22 @@ void MainWindow::createMenus()
     view->addSeparator();
     view->addAction(m_plateSizeAction);
     applyPlateSize();
+    {
+        QMenu* themes = view->addMenu(tr("&Theme"));
+        auto* group = new QActionGroup(themes);
+        const std::pair<theme::Choice, QString> choices[] = {
+            {theme::Choice::System, tr("Follow &Windows")},
+            {theme::Choice::Light, tr("&Light")},
+            {theme::Choice::Dark, tr("&Dark")},
+        };
+        for (const auto& [choice, name] : choices) {
+            QAction* a = themes->addAction(name);
+            a->setCheckable(true);
+            a->setChecked(theme::saved() == choice);
+            group->addAction(a);
+            connect(a, &QAction::triggered, this, [this, choice = choice] { chooseTheme(int(choice)); });
+        }
+    }
     view->addSeparator();
     m_viewMenu = view;  // the panels' show/hide entries are added in createDocks()
 
@@ -1043,7 +1059,7 @@ void MainWindow::createToolBar()
         {m_plateSizeAction, "plate"},
     };
     for (const auto& [action, name] : pictures)
-        action->setIcon(ribbonIcon(QString::fromLatin1(name)));
+        setIconNamed(action, QString::fromLatin1(name));
 
     QToolBar* bar = addToolBar(tr("Ribbon"));
     bar->setObjectName(QStringLiteral("Ribbon"));
@@ -4713,6 +4729,48 @@ bool MainWindow::recoverFrom(const QString& backup)
     statusBar()->showMessage(tr("Recovered. Save it (Ctrl+S) to keep it."), 10000);
     qInfo().noquote() << "Recovered from" << backup << "-" << m_doc.bodyCount() << "bodies";
     return true;
+}
+
+// ---- Light / dark -----------------------------------------------------------------
+
+void MainWindow::setIconNamed(QAction* action, const QString& name)
+{
+    action->setIcon(ribbonIcon(name));
+    m_namedIcons.emplace_back(action, name);
+}
+
+void MainWindow::styleEmptyHint()
+{
+    if (!m_emptyHint)
+        return;
+    m_emptyHint->setStyleSheet(
+        theme::dark() ? QStringLiteral("QLabel { background: rgba(45, 49, 56, 225); color: #e1e4eb; "
+                                       "border: 1px solid #5a606c; border-radius: 6px; padding: 10px; }")
+                      : QStringLiteral("QLabel { background: rgba(255, 255, 255, 215); color: #333; "
+                                       "border: 1px solid #c8ccd2; border-radius: 6px; padding: 10px; }"));
+}
+
+void MainWindow::chooseTheme(int choice)
+{
+    const auto c = theme::Choice(choice);
+    theme::save(c);
+    theme::apply(*qApp, c);
+    // Everything drawn from the old colours, again.
+    for (const auto& [action, name] : m_namedIcons)
+        action->setIcon(ribbonIcon(name));
+    styleEmptyHint();
+    m_viewport->themeChanged();
+    refreshObjectList();
+    if (m_sketchView)
+        m_sketchView->update();
+    for (QWidget* w : QApplication::allWidgets()) {
+        // Widgets with a style sheet keep the palette they were polished with: polish
+        // them again (setting the same sheet does it).
+        if (!w->styleSheet().isEmpty())
+            w->setStyleSheet(w->styleSheet());
+        w->update();
+    }
+    qInfo() << "Theme:" << (theme::dark() ? "dark" : "light");
 }
 
 void MainWindow::noteRecentFile(const QString& path)

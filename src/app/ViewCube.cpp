@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "ViewCube.h"
 
+#include "Theme.h"
+
 #include <QCoreApplication>
 #include <QFont>
 #include <QPainter>
@@ -100,7 +102,8 @@ void ViewCube::paint(QPainter& painter, const QMatrix4x4& view, const QRectF& ar
     painter.save();
     painter.setRenderHint(QPainter::Antialiasing);
     painter.setRenderHint(QPainter::TextAntialiasing);
-    const QColor faceColour(0xe9, 0xee, 0xf5), edgeColour(0x5a, 0x63, 0x6e), hoverColour(0x2b, 0x78, 0xd0);
+    const QColor faceColour = theme::look().cubeFace, edgeColour = theme::look().cubeEdge,
+                 hoverColour(0x2b, 0x78, 0xd0);
     const auto all = pieces(view, area);
     int index = 0;
     for (const Face& f : kFaces) {
@@ -138,7 +141,7 @@ void ViewCube::paint(QPainter& painter, const QMatrix4x4& view, const QRectF& ar
         const QFontMetricsF metrics(font);
         const double s = 1.5 / std::max(metrics.horizontalAdvance(name), metrics.height() * 2.0);
         painter.scale(s, s);
-        painter.setPen(QColor(0x2b, 0x2f, 0x33));
+        painter.setPen(theme::look().cubeText);
         painter.drawText(QRectF(-1.0 / s, -1.0 / s, 2.0 / s, 2.0 / s), Qt::AlignCenter, name);
         painter.restore();
     }

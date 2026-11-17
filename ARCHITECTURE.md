@@ -859,3 +859,14 @@ and sharp across edges.
 - In `sketchFaceClick`, a ray that meets the section plane coming from the hidden side
   at a point inside the shape (`BRepClass3d_SolidClassifier`) is a click on the cut
   face and goes to `sketchOnSection`.
+
+## Theme (slice 37)
+
+- `Theme.h/.cpp`: `theme::apply(app, choice)` sets Fusion with a dark palette for
+  Dark (Follow Windows reads `AppsUseLightTheme` in the registry), and the starting
+  style and palette for Light (Fusion's light palette if the computer started us dark).
+  `theme::look()` gives the colours Forge3D paints itself: the 3D view's background and
+  grid, the sketcher's paper, lines and labels, the view cube, the tour note.
+- `MainWindow::chooseTheme` switches live: icons are drawn again from their SVGs
+  (`setIconNamed` keeps the action → name list), style-sheeted widgets are polished
+  again, and the viewport rebuilds its plate lines. `ui/theme` in Preferences.
