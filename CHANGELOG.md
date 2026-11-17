@@ -15,6 +15,8 @@
   picks, so you can measure something else and see several at once. Kept ones stay
   after Done. **Remove Kept** takes them away; they're also taken away when the model
   changes, since the numbers might no longer be true.
+- The Quick Start guide's pictures show the new ribbon, and it mentions Orbit / Pan / Zoom
+  on the View tab.
 - 222 unit tests (1 new: picking with a section).
 
 ## 0.43.0 Beta — Slice 34: Backup copies and recovery (2026-11-16)

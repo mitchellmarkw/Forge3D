@@ -14,6 +14,8 @@ VIEW = [
     ("Slide the view", "drag with the middle button (or Shift + right button)"),
     ("Zoom", "the mouse wheel"),
     ("Fit everything in view", "F (Home puts the view back to the start)"),
+    ("No middle button, or a touchpad", "on the **View** tab, **Orbit**, **Pan** or **Zoom** puts that on the left "
+                                        "button until you click it again"),
 ]
 STEPS = [
     ("Add a box and size it",
@@ -29,7 +31,7 @@ STEPS = [
      "Subtract keeps the first shape you pick and cuts the others out of it.",
      "guide-3-select.png"),
     ("Cut the hole",
-     "Click **Subtract**. The cylinder cuts its hole and disappears. Nothing is lost: double-click a "
+     "**Design → Subtract**. The cylinder cuts its hole and disappears. Nothing is lost: double-click a "
      "step in **Objects** any time to change it, and the tag follows.",
      "guide-4-hole.png"),
     ("Put your name on it",
@@ -37,9 +39,9 @@ STEPS = [
      "click the top of the tag where the words should go, then click **Emboss**.",
      "guide-5-emboss.png"),
     ("Print it",
-     "**Print → Export** saves an STL or 3MF file your slicer opens. **Send to Slicer** opens it in "
+     "**Print/Save → Export** saves an STL or 3MF file your slicer opens. **Send to Slicer** opens it in "
      "your slicer straight away (the first time, it asks which slicer you use). If a shape needs a "
-     "different face down, **Lay on Face** and click that face.",
+     "different face down, **Design → Lay on Face** and click that face.",
      "guide-6-print.png"),
     ("Keep your work",
      "**File → Save** keeps a `.f3d` file with every step, so you can open it later and change the "

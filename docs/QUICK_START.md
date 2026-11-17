@@ -8,6 +8,7 @@ In about ten minutes you'll make a key tag with a hole for the ring and your nam
 - **Slide the view:** drag with the middle button (or Shift + right button)
 - **Zoom:** the mouse wheel
 - **Fit everything in view:** F (Home puts the view back to the start)
+- **No middle button, or a touchpad:** on the **View** tab, **Orbit**, **Pan** or **Zoom** puts that on the left button until you click it again
 
 ## 1. Add a box and size it
 
@@ -29,7 +30,7 @@ Click **Box 1** in **Objects** on the left, then hold **Ctrl** and click **Cylin
 
 ## 4. Cut the hole
 
-Click **Subtract**. The cylinder cuts its hole and disappears. Nothing is lost: double-click a step in **Objects** any time to change it, and the tag follows.
+**Design → Subtract**. The cylinder cuts its hole and disappears. Nothing is lost: double-click a step in **Objects** any time to change it, and the tag follows.
 
 ![Cut the hole](quick-start/guide-4-hole.png)
 
@@ -41,7 +42,7 @@ Click **Subtract**. The cylinder cuts its hole and disappears. Nothing is lost: 
 
 ## 6. Print it
 
-**Print → Export** saves an STL or 3MF file your slicer opens. **Send to Slicer** opens it in your slicer straight away (the first time, it asks which slicer you use). If a shape needs a different face down, **Lay on Face** and click that face.
+**Print/Save → Export** saves an STL or 3MF file your slicer opens. **Send to Slicer** opens it in your slicer straight away (the first time, it asks which slicer you use). If a shape needs a different face down, **Design → Lay on Face** and click that face.
 
 ![Print it](quick-start/guide-6-print.png)
 
