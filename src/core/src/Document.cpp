@@ -1021,6 +1021,21 @@ bool Document::specUsesMesh(const BooleanSpec& spec) const
     return false;
 }
 
+std::optional<MeshSolid> Document::cachedSolid(ObjectId id) const
+{
+    if (const auto cached = m_solidCache.find(id); cached != m_solidCache.end())
+        return cached->second;
+    return std::nullopt;
+}
+
+void Document::seedSolid(ObjectId id, MeshSolid solid) const
+{
+    if (!find(id))
+        throw std::out_of_range("No body with id " + std::to_string(id));
+    m_solidCache[id] = std::move(solid);
+    m_meshCache.erase(id);
+}
+
 MeshSolid Document::meshSolid(ObjectId id) const
 {
     if (const auto cached = m_solidCache.find(id); cached != m_solidCache.end())

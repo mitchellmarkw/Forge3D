@@ -165,3 +165,104 @@ TEST_CASE("Extrude Down: the underside stretched down to the plate", "[meshsteps
 }
 
 
+
+#include "forge/core/MeshSteps.h"
+#include <algorithm>
+#include <array>
+#include <map>
+TEST_CASE("Smooth: an even result, with no lumps", "[meshsteps]")
+{
+    Document doc;
+    CommandStack stack(doc);
+    const ObjectId box = add(stack, doc, BoxSpec{20, 20, 20});
+    Mesh surface;
+    meshkernel::triangles(doc.meshSolid(box), surface.positions, surface.indices);
+    const Mesh round = meshsteps::smoothed(surface, 10);
+    // Strongly smoothed, a cube becomes a rounded, pebble-like shape. Lumps show up as
+    // sharp bends between neighbouring triangles.
+    const std::size_t n = round.positions.size() / 3;
+    std::vector<double> r(n);
+    for (std::size_t v = 0; v < n; ++v) {
+        const double x = round.positions[v * 3], y = round.positions[v * 3 + 1], z = round.positions[v * 3 + 2] - 10.0;
+        r[v] = std::sqrt(x * x + y * y + z * z);
+    }
+    const auto normal = [&round](std::size_t t) {
+        const float* a = &round.positions[round.indices[t * 3] * 3];
+        const float* b = &round.positions[round.indices[t * 3 + 1] * 3];
+        const float* c = &round.positions[round.indices[t * 3 + 2] * 3];
+        const double e1[3] = {b[0] - a[0], b[1] - a[1], b[2] - a[2]}, e2[3] = {c[0] - a[0], c[1] - a[1], c[2] - a[2]};
+        std::array<double, 3> nn{e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2],
+                                 e1[0] * e2[1] - e1[1] * e2[0]};
+        const double l = std::sqrt(nn[0] * nn[0] + nn[1] * nn[1] + nn[2] * nn[2]);
+        for (double& x : nn)
+            x /= std::max(l, 1e-300);
+        return nn;
+    };
+    std::map<std::pair<std::uint32_t, std::uint32_t>, std::size_t> edgeOf;
+    double sharpest = 0.0;
+    for (std::size_t t = 0; t < round.indices.size() / 3; ++t)
+        for (int k = 0; k < 3; ++k) {
+            std::uint32_t a = round.indices[t * 3 + k], b = round.indices[t * 3 + (k + 1) % 3];
+            const auto e = std::minmax(a, b);
+            const auto [it, added] = edgeOf.try_emplace({e.first, e.second}, t);
+            if (added)
+                continue;
+            const auto n1 = normal(it->second), n2 = normal(t);
+            const double d = std::clamp(n1[0] * n2[0] + n1[1] * n2[1] + n1[2] * n2[2], -1.0, 1.0);
+            sharpest = std::max(sharpest, std::acos(d) * 180.0 / M_PI);
+        }
+    CHECK(sharpest < 20.0);  // degrees between neighbouring triangles
+    const auto [lo, hi] = std::minmax_element(r.begin(), r.end());
+    CHECK(*hi - *lo < 3.5);  // rounded right off: corners (17.3) and faces (10) much closer
+}
+
+#include <filesystem>
+#include <random>
+TEST_CASE("Slow results are saved with the file and used when it's opened", "[meshsteps][file]")
+{
+    namespace fs = std::filesystem;
+    const fs::path path = fs::temp_directory_path() / ("forge3d-results-" + std::to_string(std::random_device{}()) + ".f3d");
+    Document doc;
+    CommandStack stack(doc);
+    const ObjectId sphere = add(stack, doc, SphereSpec{}, 5.0);
+    BooleanSpec e;
+    e.op = BooleanOp::ExtrudeDown;
+    e.operands = {sphere};
+    const ObjectId down = step(stack, doc, e);
+    BooleanSpec s;
+    s.op = BooleanOp::Smooth;
+    s.operands = {down};
+    s.smooth = SmoothFinish{4};
+    const ObjectId smooth = step(stack, doc, s);
+    const double volume = volumeOf(doc, smooth);
+    file::save(doc, path, "test");
+
+    SECTION("used as saved")
+    {
+        Document again;
+        again.replaceAll(file::load(path));
+        CHECK(file::useSavedResults(again, path) == 1);
+        REQUIRE(again.cachedSolid(smooth).has_value());
+        CHECK_THAT(meshkernel::volume(*again.cachedSolid(smooth)), WithinRel(volume, 1e-5));
+        CHECK_FALSE(again.cachedSolid(down).has_value());  // the steps inside: worked out if needed
+        // Renamed, recoloured or moved: still the same shape.
+        CommandStack s2(again);
+        s2.execute(std::make_unique<RenameBodyCommand>(smooth, "Pebble"));
+        Placement moved = again.find(smooth)->placement;
+        moved.x += 30;
+        s2.execute(std::make_unique<SetPlacementCommand>(smooth, moved));
+        CHECK(file::resultKey(again, smooth) == file::resultKey(doc, smooth));
+    }
+    SECTION("not used once something it's made from is different")
+    {
+        Document again;
+        auto bodies = file::load(path);
+        for (Body& b : bodies)
+            if (b.id == smooth)
+                b.boolean->smooth->strength = 5;
+        again.replaceAll(bodies);
+        CHECK(file::useSavedResults(again, path) == 0);
+        CHECK_FALSE(again.cachedSolid(smooth).has_value());
+    }
+    fs::remove(path);
+}

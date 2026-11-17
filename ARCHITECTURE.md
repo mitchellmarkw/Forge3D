@@ -942,7 +942,9 @@ and sharp across edges.
 - `meshsteps::smoothed` (MeshSteps.cpp): under 150k triangles, remesh to an edge of
   min(diag/60, mean edge) first; then uniform-Laplacian steps (λ 0.5), about
   (reach / edge)² of them (reach = strength × diag / 60; at most 300), open-edge points
-  pinned; then scaled about the centroid back to the starting volume.
+  pinned, in chunks of 12, remeshed again between chunks (points drift and bunch up,
+  which made lumps); then scaled about the centroid back to the starting volume.
+  Points are welded by position first.
 - `meshsteps::columnsBelow`: triangles facing down (against up) and above the plane are
   grouped into connected patches. Each patch becomes one closed solid (`solidBelow`):
   the patch turned over on top (lifted a hair), its projection a hair under the plane,
@@ -957,4 +959,13 @@ and sharp across edges.
   OpenGL ES) and an unlit `uWire` path in the shader. `paintGL` now re-enables depth
   testing (and resets the depth mask, blending and culling) every frame, because the
   QPainter overlays leave it off.
+- Saved results: `file::save` writes `results/<id>.bin` (magic `F3DRESU1`, a key, then
+  `meshToBytes`) for each top-level mesh-engine shape whose solid is already cached and
+  that has no known problem in its tree. `file::resultKey` is FNV-1a over
+  `kResultsVersion` and the JSON of the shape and everything it's made from (name and
+  colour left out, and the top's placement). `file::useSavedResults` (called after
+  `replaceAll` on open and recover) checks each key and `seedSolid`s the matches. Bump
+  `kResultsVersion` when any mesh-engine step's result changes. `addStepRows` uses
+  `knownProblem` rather than `problemWith` for an object whose result is cached, so
+  listing steps doesn't build them.
 

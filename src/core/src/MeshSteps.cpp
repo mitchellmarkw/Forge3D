@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <map>
 #include <unordered_map>
 #include <stdexcept>
 #include <utility>
@@ -153,31 +154,45 @@ std::vector<Mesh> packed(std::vector<Mesh> solids, double margin)
     return out;
 }
 
+// The same triangles with corners at the same place made one point (a mesh from the
+// mesh engine can repeat a point where its faces meet), and triangles that collapsed
+// to a line or a point left out.
+Mesh welded(const Mesh& m)
+{
+    Mesh out;
+    std::map<std::array<float, 3>, std::uint32_t> at;
+    std::vector<std::uint32_t> remap(m.positions.size() / 3);
+    for (std::size_t v = 0; v < remap.size(); ++v) {
+        const std::array<float, 3> p{m.positions[v * 3], m.positions[v * 3 + 1], m.positions[v * 3 + 2]};
+        auto [it, added] = at.try_emplace(p, std::uint32_t(out.positions.size() / 3));
+        if (added)
+            out.positions.insert(out.positions.end(), p.begin(), p.end());
+        remap[v] = it->second;
+    }
+    for (std::size_t t = 0; t + 2 < m.indices.size(); t += 3) {
+        const std::uint32_t a = remap[m.indices[t]], b = remap[m.indices[t + 1]], c = remap[m.indices[t + 2]];
+        if (a != b && b != c && a != c)
+            out.indices.insert(out.indices.end(), {a, b, c});
+    }
+    return out;
+}
+
 }  // namespace
 
-Mesh smoothed(const Mesh& closed, int strength)
-{
-    if (strength < 1 || strength > 10)
-        throw std::invalid_argument("Smooth needs a strength from 1 to 10");
-    if (closed.indices.empty())
-        return closed;
-    // Small even triangles first: a box's 12 triangles have nothing to smooth with.
-    Mesh m;
-    if (closed.triangleCount() < 150'000) {
-        const double edge = std::min(diagonalOf(closed) / 60.0, std::max(meanEdge(closed), 1e-6));
-        m = remesh::remeshed(closed, std::max(edge, diagonalOf(closed) / 400.0), 3, 1'500'000);
-    } else {
-        m = closed;
-    }
-    const std::size_t n = m.positions.size() / 3;
+namespace {
 
-    // Neighbours (each edge once per side), and open-edge points, which stay put.
+// `rounds` times, every point moved half way to the average of its neighbours. Points on
+// open edges stay put. Returns false if there were any (the surface isn't closed).
+bool relax(Mesh& m, int rounds)
+{
+    const std::size_t n = m.positions.size() / 3;
     std::vector<std::pair<std::uint32_t, std::uint32_t>> edges;
     edges.reserve(m.indices.size());
     for (std::size_t t = 0; t + 2 < m.indices.size(); t += 3)
         for (int k = 0; k < 3; ++k)
             edges.emplace_back(m.indices[t + k], m.indices[t + (k + 1) % 3]);
     std::vector<char> pinned(n, 0);
+    bool closedSurface = true;
     {
         std::vector<std::pair<std::uint32_t, std::uint32_t>> sorted = edges;
         for (auto& e : sorted)
@@ -188,8 +203,10 @@ Mesh smoothed(const Mesh& closed, int strength)
             std::size_t j = i;
             while (j < sorted.size() && sorted[j] == sorted[i])
                 ++j;
-            if (j - i != 2)
+            if (j - i != 2) {
                 pinned[sorted[i].first] = pinned[sorted[i].second] = 1;
+                closedSurface = false;
+            }
             i = j;
         }
     }
@@ -205,9 +222,8 @@ Mesh smoothed(const Mesh& closed, int strength)
         for (const auto& e : edges)
             list[fill[e.first]++] = e.second;
     }
-
     std::vector<double> p(m.positions.begin(), m.positions.end()), moved(p.size());
-    const auto step = [&](double factor) {
+    for (int r = 0; r < rounds; ++r) {
         for (std::size_t v = 0; v < n; ++v) {
             const std::uint32_t from = start[v], to = start[v + 1];
             if (pinned[v] || from == to) {
@@ -220,46 +236,75 @@ Mesh smoothed(const Mesh& closed, int strength)
                 for (int c = 0; c < 3; ++c)
                     avg[c] += p[std::size_t(list[k]) * 3 + c];
             for (int c = 0; c < 3; ++c)
-                moved[v * 3 + c] = p[v * 3 + c] + factor * (avg[c] / double(to - from) - p[v * 3 + c]);
+                moved[v * 3 + c] = 0.5 * p[v * 3 + c] + 0.5 * avg[c] / double(to - from);
         }
         std::swap(p, moved);
-    };
-    // Rounding reaches about `reach` in from edges and corners; spreading one triangle's
-    // width per step, that takes about (reach / edge)^2 steps.
+    }
+    m.positions.assign(p.begin(), p.end());
+    return closedSurface;
+}
+
+double volumeOf(const Mesh& m)
+{
+    double v = 0.0;
+    for (std::size_t t = 0; t + 2 < m.indices.size(); t += 3) {
+        const float* a = &m.positions[std::size_t(m.indices[t]) * 3];
+        const float* b = &m.positions[std::size_t(m.indices[t + 1]) * 3];
+        const float* c = &m.positions[std::size_t(m.indices[t + 2]) * 3];
+        v += double(a[0]) * (double(b[1]) * c[2] - double(b[2]) * c[1]) -
+             double(a[1]) * (double(b[0]) * c[2] - double(b[2]) * c[0]) +
+             double(a[2]) * (double(b[0]) * c[1] - double(b[1]) * c[0]);
+    }
+    return v / 6.0;
+}
+
+}  // namespace
+
+Mesh smoothed(const Mesh& closed, int strength)
+{
+    if (strength < 1 || strength > 10)
+        throw std::invalid_argument("Smooth needs a strength from 1 to 10");
+    if (closed.indices.empty())
+        return closed;
+    Mesh m = welded(closed);
     const double diag = diagonalOf(m);
+    const double before = volumeOf(m);
+    // Small even triangles first (a box's 12 triangles have nothing to smooth with), and
+    // evened out again every few rounds: points drift along the surface as it's smoothed,
+    // bunching up in places, and bunched points make lumps.
+    const bool remesh = m.triangleCount() < 150'000;
+    const double edge = std::max(std::min(diag / 60.0, std::max(meanEdge(m), 1e-6)), diag / 400.0);
+    if (remesh)
+        m = remesh::remeshed(m, edge, 3, 1'500'000);
+    // Rounding reaches about `reach` in from edges and corners; spreading one triangle's
+    // width per round, that takes about (reach / edge)^2 rounds.
     const double reach = double(strength) * diag / 60.0;
-    const double edge = std::max(meanEdge(m), 1e-9);
-    const int rounds = int(std::clamp(std::lround((reach / edge) * (reach / edge)), long(strength), 300L));
-    const auto volume = [&m](const std::vector<double>& q) {
-        double v = 0.0;
-        for (std::size_t t = 0; t + 2 < m.indices.size(); t += 3) {
-            const double* a = &q[std::size_t(m.indices[t]) * 3];
-            const double* b = &q[std::size_t(m.indices[t + 1]) * 3];
-            const double* c = &q[std::size_t(m.indices[t + 2]) * 3];
-            v += a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0]) +
-                 a[2] * (b[0] * c[1] - b[1] * c[0]);
-        }
-        return v / 6.0;
-    };
-    const double before = volume(p);
-    for (int r = 0; r < rounds; ++r)
-        step(0.5);
+    const double meanNow = std::max(meanEdge(m), 1e-9);
+    int rounds = int(std::clamp(std::lround((reach / meanNow) * (reach / meanNow)), long(strength), 300L));
+    bool closedSurface = true;
+    while (rounds > 0) {
+        const int now = std::min(rounds, 12);
+        closedSurface = relax(m, now) && closedSurface;
+        rounds -= now;
+        if (rounds > 0 && remesh)
+            m = remesh::remeshed(m, edge, 2, 1'500'000);
+    }
     // Smoothing shrinks a shape: grow it back about its middle to the volume it had.
-    const bool closedSurface = std::none_of(pinned.begin(), pinned.end(), [](char c) { return c != 0; });
-    const double after = volume(p);
+    const double after = volumeOf(m);
     if (closedSurface && before > 0.0 && after > 0.0) {
+        const std::size_t n = m.positions.size() / 3;
         double centre[3] = {0, 0, 0};
         for (std::size_t v = 0; v < n; ++v)
             for (int c = 0; c < 3; ++c)
-                centre[c] += p[v * 3 + c] / double(n);
+                centre[c] += m.positions[v * 3 + c] / double(n);
         const double k = std::cbrt(before / after);
         for (std::size_t v = 0; v < n; ++v)
             for (int c = 0; c < 3; ++c)
-                p[v * 3 + c] = centre[c] + (p[v * 3 + c] - centre[c]) * k;
+                m.positions[v * 3 + c] = float(centre[c] + (m.positions[v * 3 + c] - centre[c]) * k);
     }
     Mesh out;
-    out.indices = m.indices;
-    out.positions.assign(p.begin(), p.end());
+    out.positions = std::move(m.positions);
+    out.indices = std::move(m.indices);
     return out;
 }
 

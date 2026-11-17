@@ -25,7 +25,7 @@ unzip and run `Forge3D.exe`.
 | # | Do this | You should see | Result |
 | --- | --- | --- | --- |
 | 6 | Select the box; Sculpt tab → **Whole Shape** → **Smooth** | After a moment its edges and corners are rounded. Objects shows a "Smoothed" step, strength 3 | |
-| 7 | In Properties set **Strength** to 10 | Much rounder, nearly a pebble; about the same size. Undo: back to 3 | |
+| 7 | In Properties set **Strength** to 10 | Much rounder, nearly a pebble; about the same size; **even all over** (no lumps or bumps along the old edges). Undo: back to 3 | |
 | 8 | Click **Remove the smoothing** in Properties | The sharp box again | |
 | 9 | Smooth an imported or sculpted mesh (yours, the bigger the better) | Smoothed; note how long it takes | |
 
@@ -39,3 +39,6 @@ unzip and run `Forge3D.exe`.
 | 13 | Move a shape so part of it is below the plate, then Extrude Down | A message says to move it up first | |
 | 14 | Extrude Down one of your figures (arms out) | Everything below the arms and body is filled to the plate. Note how long it takes | |
 | 15 | Save, close and reopen the file with a Smooth and an Extrude Down step | Both as they were | |
+| 16 | Do 15 with your complex smoothed and extruded figure | It opens in a few seconds, not minutes. (The first save after this update has to work it out once more; after that it's quick) | |
+| 17 | Open that figure in Objects to see its steps | The steps are listed straight away | |
+| 18 | Change the figure's Smooth strength, save, close and reopen | The new strength is used (not the old saved result) | |

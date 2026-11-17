@@ -2,10 +2,12 @@
 #include "forge/core/FileFormat.h"
 
 #include "forge/core/Document.h"
+#include "forge/core/MeshKernel.h"
 
 #include <miniz.h>
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -994,6 +996,101 @@ std::vector<Body> fromJson(const std::string& text, const std::function<std::str
     return result;
 }
 
+// ---- Saved results ------------------------------------------------------------------
+
+namespace {
+
+// Bump when a step's result is worked out differently, so old saved results aren't used.
+constexpr int kResultsVersion = 1;
+constexpr char kResultMagic[8] = {'F', '3', 'D', 'R', 'E', 'S', 'U', '1'};
+
+void collect(const Document& doc, ObjectId id, std::vector<ObjectId>& out)
+{
+    const Body* b = doc.find(id);
+    if (!b || std::find(out.begin(), out.end(), id) != out.end())
+        return;
+    out.push_back(id);
+    if (b->boolean)
+        for (ObjectId part : b->boolean->operands)
+            collect(doc, part, out);
+}
+
+// Top-level shapes whose result is the mesh engine's, worth keeping in the file.
+bool keepsResult(const Document& doc, const Body& b)
+{
+    return b.isBoolean() && doc.isTopLevel(b.id) && doc.usesMeshEngine(b.id);
+}
+
+}  // namespace
+
+std::string resultKey(const Document& doc, ObjectId id)
+{
+    std::vector<ObjectId> all;
+    collect(doc, id, all);
+    std::sort(all.begin(), all.end());
+    std::string text = "v" + std::to_string(kResultsVersion) + "/" + std::to_string(id);
+    for (ObjectId part : all) {
+        json j = bodyToJson(*doc.find(part));
+        j.erase("name");  // renaming doesn't change the shape
+        j.erase("colour");
+        if (part == id)
+            j.erase("placement");  // nor does moving the whole thing
+        text += "|" + j.dump();
+    }
+    std::uint64_t h = 1469598103934665603ULL;  // FNV-1a
+    for (unsigned char c : text) {
+        h ^= c;
+        h *= 1099511628211ULL;
+    }
+    char hex[17];
+    std::snprintf(hex, sizeof hex, "%016llx", static_cast<unsigned long long>(h));
+    return std::string(hex) + "-" + std::to_string(text.size());
+}
+
+std::size_t useSavedResults(const Document& doc, const std::filesystem::path& path)
+{
+    std::string bytes;
+    try {
+        bytes = readWholeFile(path);
+    } catch (const std::exception&) {
+        return 0;
+    }
+    mz_zip_archive zip{};
+    if (!mz_zip_reader_init_mem(&zip, bytes.data(), bytes.size(), 0))
+        return 0;
+    std::size_t used = 0;
+    for (const Body& b : doc.bodies()) {
+        if (!keepsResult(doc, b) || doc.cachedSolid(b.id))
+            continue;
+        const std::string name = "results/" + std::to_string(b.id) + ".bin";
+        size_t size = 0;
+        void* data = mz_zip_reader_extract_file_to_heap(&zip, name.c_str(), &size, 0);
+        if (!data)
+            continue;
+        const std::string entry(static_cast<const char*>(data), size);
+        mz_free(data);
+        try {
+            if (entry.size() < sizeof kResultMagic + 4 || entry.compare(0, sizeof kResultMagic, kResultMagic,
+                                                                        sizeof kResultMagic) != 0)
+                continue;
+            std::uint32_t keyLength = 0;
+            std::memcpy(&keyLength, entry.data() + sizeof kResultMagic, 4);
+            const std::size_t at = sizeof kResultMagic + 4;
+            if (keyLength > 200 || entry.size() < at + keyLength)
+                continue;
+            if (entry.compare(at, keyLength, resultKey(doc, b.id)) != 0)
+                continue;  // made from something else: work it out again
+            const auto mesh = meshFromBytes(entry.substr(at + keyLength));
+            doc.seedSolid(b.id, meshkernel::fromMeshData(*mesh, {1.0, 1.0, 1.0}));
+            ++used;
+        } catch (const std::exception&) {
+            // Damaged: it's worked out again when it's needed.
+        }
+    }
+    mz_zip_reader_end(&zip);
+    return used;
+}
+
 // ---- Zip container --------------------------------------------------------------
 
 void save(const Document& doc, const std::filesystem::path& path, const std::string& createdBy)
@@ -1017,6 +1114,38 @@ void save(const Document& doc, const std::filesystem::path& path, const std::str
             ok = mz_zip_writer_add_mem(&zip, name.c_str(), bytes.data(), bytes.size(),
                                        static_cast<mz_uint>(MZ_DEFAULT_COMPRESSION));
         }
+    }
+    // The finished results of the slow steps, so opening the file is quick.
+    for (const Body& b : doc.bodies()) {
+        if (!ok)
+            break;
+        if (!keepsResult(doc, b))
+            continue;
+        const auto solid = doc.cachedSolid(b.id);
+        if (!solid)
+            continue;  // not worked out yet: nothing to save time on
+        {
+            // A step that couldn't be built should say so again when the file is opened.
+            std::vector<ObjectId> all;
+            collect(doc, b.id, all);
+            if (std::any_of(all.begin(), all.end(), [&doc](ObjectId id) { return doc.knownProblem(id); }))
+                continue;
+        }
+        MeshData mesh;
+        meshkernel::triangles(*solid, mesh.positions, mesh.indices);
+        Bounds box;
+        for (std::size_t i = 0; i + 2 < mesh.positions.size(); i += 3)
+            box.expand(mesh.positions[i], mesh.positions[i + 1], mesh.positions[i + 2]);
+        mesh.size = box.size();
+        const std::string key = resultKey(doc, b.id);
+        std::string entry(kResultMagic, sizeof kResultMagic);
+        const auto keyLength = std::uint32_t(key.size());
+        entry.append(reinterpret_cast<const char*>(&keyLength), 4);
+        entry += key;
+        entry += meshToBytes(mesh);
+        const std::string name = "results/" + std::to_string(b.id) + ".bin";
+        ok = mz_zip_writer_add_mem(&zip, name.c_str(), entry.data(), entry.size(),
+                                   static_cast<mz_uint>(MZ_BEST_SPEED));
     }
     ok = ok && mz_zip_writer_finalize_heap_archive(&zip, &buffer, &size);
     if (!ok) {

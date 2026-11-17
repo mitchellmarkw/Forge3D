@@ -4829,6 +4829,9 @@ bool MainWindow::openFile(const QString& path)
     try {
         std::vector<Body> bodies = file::load(toPath(path));
         m_doc.replaceAll(std::move(bodies));
+        // The slow steps' results saved with the file: no need to work them out again.
+        if (const std::size_t used = file::useSavedResults(m_doc, toPath(path)))
+            qInfo().noquote() << "Saved results used:" << used;
     } catch (const std::exception& e) {
         qWarning().noquote() << "Open failed:" << path << "-" << e.what();
         QMessageBox::critical(this, tr("Could not open %1").arg(QFileInfo(path).fileName()),
@@ -5078,6 +5081,7 @@ bool MainWindow::recoverFrom(const QString& backup)
     try {
         std::vector<Body> bodies = file::load(toPath(backup));
         m_doc.replaceAll(std::move(bodies));
+        file::useSavedResults(m_doc, toPath(backup));
     } catch (const std::exception& e) {
         qWarning().noquote() << "Recovery failed:" << backup << "-" << e.what();
         QMessageBox::critical(this, tr("Could not recover the backup"), QString::fromUtf8(e.what()));
@@ -6092,6 +6096,14 @@ void MainWindow::addStepRows(QTreeWidgetItem* objectRow, ObjectId top)
 {
     const std::vector<ObjectId> line = history::steps(m_doc, top);
     const std::size_t shown = history::barAt(m_doc, top);
+    // A finished result (perhaps from the file) means every step in it was built, or
+    // was clean when it was saved: don't build the steps just to list them.
+    const bool built = m_doc.usesMeshEngine(top) && m_doc.cachedSolid(top).has_value();
+    const auto problemOf = [this, built](ObjectId id) -> std::optional<std::string> {
+        if (!built)
+            return m_doc.problemWith(id);
+        return m_doc.knownProblem(id) ? m_doc.problemWith(id) : std::nullopt;
+    };
     const auto addBar = [&] {
         auto* bar = new QTreeWidgetItem(objectRow);
         bar->setText(0, tr("━━━ rollback bar ━━━"));
@@ -6116,7 +6128,7 @@ void MainWindow::addStepRows(QTreeWidgetItem* objectRow, ObjectId top)
         item->setData(0, kOwnerRole, QVariant::fromValue<ObjectId>(top));
         item->setData(0, kStepIndexRole, int(i));
         item->setToolTip(0, tr("%1. Double-click to change it.").arg(QString::fromStdString(typeName(body))));
-        if (const auto problem = body.suppressed || i >= shown ? std::nullopt : m_doc.problemWith(id)) {
+        if (const auto problem = body.suppressed || i >= shown ? std::nullopt : problemOf(id)) {
             item->setText(0, QStringLiteral("\u26A0 ") + item->text(0));
             item->setText(1, tr("didn't work: left out"));
             const QString why = QString::fromStdString(*problem);
@@ -6129,7 +6141,7 @@ void MainWindow::addStepRows(QTreeWidgetItem* objectRow, ObjectId top)
             objectRowItem->setForeground(1, QColor(0xc0, 0x39, 0x2b));
         }
         const bool dim = body.suppressed || i >= shown;
-        const auto problem = dim ? std::nullopt : m_doc.problemWith(id);
+        const auto problem = dim ? std::nullopt : problemOf(id);
         for (int c = 0; c < 2; ++c) {
             item->setForeground(c, palette().brush(dim ? QPalette::Disabled : QPalette::Active,
                                                    c == 0 ? QPalette::Text : QPalette::PlaceholderText));
