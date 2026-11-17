@@ -58,11 +58,19 @@ Gate to Phase 2: a new user prints a customised part within 10 minutes.
 | 33 | Printer height, and a warning colour for shapes that don't fit the plate | Done (0.42.0) |
 | 34 | Backup copies while you work, offered back after a crash | Done (0.43.0) |
 | 35 | Backup settings; clicks respect the section view; measurements shown and kept in the view | Done (0.44.0, released) |
-| 36 | Sketch on the section view's cut | Done (0.45.0) |
-| 37 | Dark theme (View → Theme: Follow Windows, Light, Dark) | Done (0.46.0) |
-| 38 | Split for printing: manual and smart splits to fit the printer, with tapered alignment pegs and matching holes | **Delivered for testing** |
+| 36 | Sketch on the section view's cut | Done (0.45.0, released in 0.47.1) |
+| 37 | Dark theme (View → Theme: Follow Windows, Light, Dark) | Done (0.46.0, released in 0.47.1) |
+| 38 | Split for printing: manual and smart splits to fit the printer, with tapered alignment pegs and matching holes | Done (0.47.0, released in 0.47.1) |
 
-Separate track: sculpt-engine prototype (one Draw brush on a 1M-triangle mesh at 60 fps).
+| — | Code audit: damaged files, extreme sizes, safety net | Done (0.47.1, released) |
+| 39 | Colours: a colour for each shape, kept in the file and exported in 3MF | Next |
+| 40 | Smooth (whole shape) and Extrude Down | Planned |
+| 41 | Open PLY and GLB/glTF; wireframe view | Planned |
+| 42 | Angled smart cuts; drag a cut before it's made | Planned |
+| 43 | Lay out split pieces on the plate (or several plates) | Planned |
+| 44 | Sculpt-engine prototype: Draw brush on a 1M-triangle mesh at 60 fps | Planned |
+
+Slices 39–41 close the gaps found in the [Phase 1 gate review](docs/PHASE1_GATE.md).
 
 ## Phase 2: Sculpt · Phase 3: Hybrid · Phase 4: Pro
 
