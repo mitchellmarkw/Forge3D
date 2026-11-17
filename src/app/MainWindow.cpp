@@ -62,6 +62,7 @@
 #include <QLockFile>
 #include <QDoubleSpinBox>
 #include <QSignalBlocker>
+#include <QSpinBox>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QDragEnterEvent>
@@ -338,6 +339,12 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
 
     m_doc.addListener([this](const Document::Change& change) {
         ++m_docSerial;
+        if (!m_keptLabels.empty()) {
+            // The shapes changed: the kept numbers may no longer be true.
+            m_keptLabels.clear();
+            showLabels();
+            statusBar()->showMessage(tr("The kept measurements were taken off the view: the model changed."), 8000);
+        }
         if (change.kind == Document::ChangeKind::Removed)  // e.g. undo of an Add
             std::erase(m_selection, change.id);
         if (m_measureMode.active) {
@@ -919,6 +926,12 @@ void MainWindow::createMenus()
 
     edit->addSeparator();
     edit->addAction(m_plateSizeAction);
+    {
+        QAction* backups = edit->addAction(tr("&Backup Copies..."));
+        backups->setToolTip(tr("How often a backup copy of unsaved work is made, or none at all"));
+        backups->setStatusTip(backups->toolTip());
+        connect(backups, &QAction::triggered, this, &MainWindow::chooseBackups);
+    }
 
     QMenu* add = menuBar()->addMenu(tr("&Add"));
     add->addActions(m_addMenu->actions());
@@ -1387,6 +1400,22 @@ void MainWindow::createDocks()
         showMeasurements();
     });
     connect(m_measurePanel, &MeasurePanel::doneRequested, this, &MainWindow::endMeasure);
+    connect(m_measurePanel, &MeasurePanel::keepRequested, this, [this] {
+        if (m_measureLabels.empty()) {
+            statusBar()->showMessage(tr("Pick two things first: then their distance can be kept on screen."), 6000);
+            return;
+        }
+        m_keptLabels.insert(m_keptLabels.end(), m_measureLabels.begin(), m_measureLabels.end());
+        // Ready for the next one.
+        m_measureMode.picks.clear();
+        m_measureMode.hover.reset();
+        showMeasurements();
+        statusBar()->showMessage(tr("Kept. Measure something else, or Done."), 6000);
+    });
+    connect(m_measurePanel, &MeasurePanel::removeKeptRequested, this, [this] {
+        m_keptLabels.clear();
+        showLabels();
+    });
     connect(m_sculptPanel, &SculptPanel::detailChanged, this, &MainWindow::remeshSculpt);
     connect(m_sculptPanel, &SculptPanel::addDetailChanged, this, [this] {
         if (m_sculptMode.sculptor)
@@ -1728,7 +1757,7 @@ void MainWindow::onViewportClicked(const QVector3D& origin, const QVector3D& dir
     ray.origin = {origin.x(), origin.y(), origin.z()};
     ray.direction = {direction.x(), direction.y(), direction.z()};
     try {
-        const auto hit = pick(m_doc, ray);
+        const auto hit = pickShown(ray);
         if (modifiers.testFlag(Qt::ControlModifier)) {
             if (hit)
                 toggleSelection(hit->id);  // Ctrl+click adds or removes
@@ -1914,7 +1943,7 @@ void MainWindow::onLeftPressed(const QVector3D& origin, const QVector3D& directi
     Ray ray;
     ray.origin = {origin.x(), origin.y(), origin.z()};
     ray.direction = {direction.x(), direction.y(), direction.z()};
-    const auto hit = pick(m_doc, ray);
+    const auto hit = pickShown(ray);
     if (!hit)
         return;  // empty space: the click (on release) clears the selection
     if (multiSelection() && isSelected(hit->id)) {
@@ -3349,7 +3378,7 @@ void MainWindow::layFlatClick(const QVector3D& origin, const QVector3D& directio
     ray.origin = {origin.x(), origin.y(), origin.z()};
     ray.direction = {direction.x(), direction.y(), direction.z()};
     try {
-        const auto hit = pick(m_doc, ray);
+        const auto hit = pickShown(ray);
         if (!hit) {
             statusBar()->showMessage(tr("Lay on Face: click a face of a shape (Esc cancels)."));
             return;
@@ -3953,6 +3982,8 @@ void MainWindow::endMeasure()
     if (!m_measureMode.active)
         return;
     m_measureMode = MeasureMode{};
+    m_measureLabels.clear();
+    showLabels();
     m_measurePanel->hide();
     m_properties->show();
     QTimer::singleShot(0, this, [this] { resizeDocks({m_propsDock}, {m_propsDockWidth}, Qt::Horizontal); });
@@ -3969,7 +4000,7 @@ std::optional<MainWindow::MeasureMode::Thing> MainWindow::measureThingAt(const Q
     Ray ray;
     ray.origin = {origin.x(), origin.y(), origin.z()};
     ray.direction = {dir.x(), dir.y(), dir.z()};
-    const auto hit = pick(m_doc, ray);
+    const auto hit = pickShown(ray);
     if (!hit)
         return std::nullopt;
     MeasureMode::Thing thing;
@@ -4122,6 +4153,7 @@ void MainWindow::showMeasurements()
         return;
     mode.lineMesh.reset();
     mode.centreMesh.reset();
+    m_measureLabels.clear();
     std::vector<std::shared_ptr<const Mesh>> picked;
     for (const auto& p : mode.picks)
         picked.push_back(p.mesh);
@@ -4159,20 +4191,51 @@ void MainWindow::showMeasurements()
             if (b.centreToFace)
                 html += tr("<br><b>Centre to the face: %1 mm</b> (blue)").arg(mm(*b.centreToFace));
             const float radius = std::max(0.01f, m_viewport->camera().distance() * 0.0015f);
+            const auto vec = [](const Vec3& v) { return QVector3D(float(v[0]), float(v[1]), float(v[2])); };
             if (b.distance > 1e-6) {
                 const std::vector<Vec3> line{b.from, b.to};
                 mode.lineMesh = tubes({&line}, radius);
+                m_measureLabels.push_back({vec(b.from), vec(b.to), tr("%1 mm").arg(mm(b.distance)), QColor(30, 140, 60)});
             }
             if ((b.centres && *b.centres > 1e-6) || (b.centreToFace && *b.centreToFace > 1e-6)) {
                 const std::vector<Vec3> line{b.centreFrom, b.centreTo};
                 mode.centreMesh = tubes({&line}, radius);
+                m_measureLabels.push_back({vec(b.centreFrom), vec(b.centreTo),
+                                           tr("%1 mm").arg(mm(b.centres ? *b.centres : *b.centreToFace)),
+                                           QColor(40, 110, 200)});
             }
         }
     } catch (const std::exception& e) {
         html = tr("Could not measure that: %1").arg(QString::fromUtf8(e.what()).toHtmlEscaped());
     }
     m_measurePanel->setResult(html);
+    showLabels();
     refreshScene();
+}
+
+void MainWindow::showLabels()
+{
+    std::vector<Viewport::Label> all = m_keptLabels;
+    if (m_measureMode.active)
+        all.insert(all.end(), m_measureLabels.begin(), m_measureLabels.end());
+    m_viewport->setLabels(std::move(all));
+}
+
+std::optional<PickHit> MainWindow::pickShown(const Ray& ray) const
+{
+    const auto& section = m_viewport->section();
+    if (!section)
+        return pick(m_doc, ray);
+    PickClip clip;
+    clip.normal = {section->normal.x(), section->normal.y(), section->normal.z()};
+    clip.offset = section->offset;
+    if (section->selectedOnly) {
+        for (std::uint64_t id : m_viewport->sectionShapes())
+            clip.only.push_back(ObjectId(id));
+        if (clip.only.empty())
+            return pick(m_doc, ray);  // nothing is cut
+    }
+    return pick(m_doc, ray, &clip);
 }
 
 void MainWindow::simplifySelected()
@@ -4429,12 +4492,75 @@ void MainWindow::startAutosave()
     m_recoveryLock = std::make_unique<QLockFile>(besideBackup(m_recoveryPath, ".lock"));
     m_recoveryLock->setStaleLockTime(0);
     m_recoveryLock->tryLock(0);
-    bool ok = false;
-    const int seconds = qEnvironmentVariableIntValue("FORGE3D_AUTOSAVE_SECONDS", &ok);
     m_autosaveTimer = new QTimer(this);
-    m_autosaveTimer->setInterval(ok && seconds > 0 ? seconds * 1000 : 2 * 60 * 1000);
     connect(m_autosaveTimer, &QTimer::timeout, this, &MainWindow::autosaveNow);
-    m_autosaveTimer->start();
+    const auto apply = [this] {
+        const Preferences settings;
+        bool ok = false;
+        const int seconds = qEnvironmentVariableIntValue("FORGE3D_AUTOSAVE_SECONDS", &ok);  // for testing
+        const int minutes = std::clamp(settings.value(QStringLiteral("backup/minutes"), 2).toInt(), 2, 60);
+        m_autosaveTimer->setInterval(ok && seconds > 0 ? seconds * 1000 : minutes * 60 * 1000);
+        if (settings.value(QStringLiteral("backup/on"), true).toBool()) {
+            m_autosaveTimer->start();
+        } else {
+            m_autosaveTimer->stop();
+            removeRecovery();        // none wanted: none left lying about
+            m_autosavedSerial = 0;   // (and a first one straight away if they're turned back on)
+        }
+    };
+    apply();
+    m_applyBackupSettings = apply;
+}
+
+void MainWindow::chooseBackups()
+{
+    Preferences settings;
+    QDialog dialog(this);
+    dialog.setWindowTitle(tr("Backup Copies"));
+    auto* layout = new QVBoxLayout(&dialog);
+    auto* on = new QCheckBox(tr("Keep a backup copy of unsaved work"));
+    on->setChecked(settings.value(QStringLiteral("backup/on"), true).toBool());
+    layout->addWidget(on);
+    layout->addSpacing(4);
+    auto* label = new QLabel(tr("Make one every:"));
+    layout->addWidget(label);
+    auto* minutes = new QSpinBox;
+    minutes->setRange(2, 60);
+    minutes->setSuffix(tr(" minutes"));
+    minutes->setValue(std::clamp(settings.value(QStringLiteral("backup/minutes"), 2).toInt(), 2, 60));
+    minutes->setToolTip(tr("From 2 to 60 minutes"));
+    layout->addWidget(minutes);
+    layout->addSpacing(8);
+    auto* note = new QLabel(tr("If Forge3D doesn't close properly (a crash, a power cut), the next start offers "
+                               "the last backup back. With this off, unsaved work is lost if that happens. "
+                               "Backups are only made when something has changed, and your own files are never "
+                               "touched."));
+    note->setWordWrap(true);
+    note->setStyleSheet(QStringLiteral("color: palette(mid);"));
+    note->setMinimumWidth(340);
+    layout->addWidget(note);
+    layout->addSpacing(8);
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+    layout->addWidget(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    const auto enable = [&] {
+        minutes->setEnabled(on->isChecked());
+        label->setEnabled(on->isChecked());
+    };
+    enable();
+    connect(on, &QCheckBox::toggled, &dialog, enable);
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+    settings.setValue(QStringLiteral("backup/on"), on->isChecked());
+    settings.setValue(QStringLiteral("backup/minutes"), minutes->value());
+    settings.sync();
+    if (m_applyBackupSettings)
+        m_applyBackupSettings();
+    statusBar()->showMessage(on->isChecked() ? tr("Backup copies: every %1 minutes").arg(minutes->value())
+                                             : tr("Backup copies are off"),
+                             5000);
+    qInfo() << "Backup copies" << (on->isChecked() ? "on, minutes:" : "off") << minutes->value();
 }
 
 void MainWindow::autosaveNow()

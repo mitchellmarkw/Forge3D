@@ -5,6 +5,7 @@
 
 #include <array>
 #include <optional>
+#include <vector>
 
 namespace forge {
 
@@ -22,8 +23,16 @@ struct PickHit {
     std::array<double, 3> point{0.0, 0.0, 0.0};
 };
 
+// Part of the scene left out of picking (a section view's hidden side): hits where
+// dot(normal, point) > offset don't count, on every body or just on `only`.
+struct PickClip {
+    std::array<double, 3> normal{0.0, 0.0, 1.0};
+    double offset = 0.0;
+    std::vector<ObjectId> only;  // empty: every body
+};
+
 // The body whose surface the ray hits first, if any. Tests every triangle of
 // every body (fine for hundreds of bodies; a BVH comes with sculpting).
-std::optional<PickHit> pick(const Document& doc, const Ray& ray);
+std::optional<PickHit> pick(const Document& doc, const Ray& ray, const PickClip* clip = nullptr);
 
 }  // namespace forge

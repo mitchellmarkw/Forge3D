@@ -838,3 +838,14 @@ and sharp across edges.
 - `removeRecovery` on save, open, new and a normal close. At start `offerRecovery`
   lists backups whose lock can be taken (their session is dead) and asks;
   `recoverFrom` loads one and marks the stack modified (`CommandStack::setModified`).
+
+## Slice 35
+
+- Backups: `backup/on`, `backup/minutes` (2..60) in Preferences; `chooseBackups`
+  re-applies them to the timer.
+- `pick(doc, ray, const PickClip*)` skips hits on a section's hidden side (all bodies,
+  or `only`); `MainWindow::pickShown` builds the clip from `Viewport::section()` and
+  is what selecting, dragging, Lay on Face and Measure's body pick use.
+- `Viewport::setLabels` draws lines with a boxed text at the middle (QPainter, after
+  the GL scene). `m_measureLabels` (the live measurement) and `m_keptLabels` (Keep on
+  Screen; cleared by the document listener on any change).

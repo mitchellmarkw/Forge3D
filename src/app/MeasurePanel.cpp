@@ -46,7 +46,19 @@ MeasurePanel::MeasurePanel(QWidget* parent) : QWidget(parent)
     buttons->addStretch(1);
     buttons->addWidget(done);
     layout->addLayout(buttons);
+    layout->addSpacing(8);
+    auto* keeping = new QHBoxLayout;
+    auto* keep = new QPushButton(tr("Keep on Screen"));
+    keep->setToolTip(tr("Leave this measurement showing in the view (its line and its number), so you can "
+                        "measure something else as well. Kept ones stay after Done, until the model changes."));
+    auto* removeKept = new QPushButton(tr("Remove Kept"));
+    removeKept->setToolTip(tr("Take the kept measurements off the view"));
+    keeping->addWidget(keep);
+    keeping->addWidget(removeKept);
+    layout->addLayout(keeping);
     layout->addStretch(1);
+    connect(keep, &QPushButton::clicked, this, &MeasurePanel::keepRequested);
+    connect(removeKept, &QPushButton::clicked, this, &MeasurePanel::removeKeptRequested);
     connect(clear, &QPushButton::clicked, this, &MeasurePanel::clearRequested);
     connect(done, &QPushButton::clicked, this, &MeasurePanel::doneRequested);
 }

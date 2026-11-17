@@ -12,7 +12,9 @@
 #include <QOpenGLVertexArrayObject>
 #include <QOpenGLWidget>
 #include <QPointF>
+#include <QColor>
 #include <QSizeF>
+#include <QString>
 #include <QVector3D>
 #include <QVector4D>
 
@@ -116,6 +118,16 @@ public:
         bool selectedOnly = false;
     };
     void setSection(const std::optional<Section>& section);
+    const std::optional<Section>& section() const { return m_section; }
+    const std::set<std::uint64_t>& sectionShapes() const { return m_sectionIds; }  // for selectedOnly
+
+    // Measurements drawn over the view: a line between two points with words at its middle.
+    struct Label {
+        QVector3D from, to;
+        QString text;
+        QColor colour{30, 140, 60};
+    };
+    void setLabels(std::vector<Label> labels);
     // The box round what's shown (ghosts and see-through helpers aside), plate mm.
     // cutOnly: just the shapes a selected-only section cuts (all, if there are none).
     Bounds sceneBounds(bool cutOnly = false) const;
@@ -186,6 +198,7 @@ private:
     // The view cube
     bool m_viewCube = true;
     std::optional<Section> m_section;
+    std::vector<Label> m_labels;
     std::set<std::uint64_t> m_sectionIds;  // the shapes a selected-only section cuts
     void noteSectionShapes();
     std::optional<int> m_cubeHover;

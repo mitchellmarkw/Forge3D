@@ -21,6 +21,8 @@ public:
 
 signals:
     void clearRequested();
+    void keepRequested();        // leave this measurement showing in the view
+    void removeKeptRequested();  // take the kept ones away
     void doneRequested();
 
 private:
