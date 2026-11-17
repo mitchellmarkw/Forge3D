@@ -1326,7 +1326,8 @@ void MainWindow::createDocks()
     connect(m_splitPanel, &SplitPanel::smartRequested, this, [this] {
         const ObjectId target = m_splitMode.target;
         endSplit();
-        splitToFit(target);
+        // Its questions open once this click is done with (the panel was just put away).
+        QTimer::singleShot(0, this, [this, target] { splitToFit(target); });
     });
     m_embossTimer = new QTimer(this);
     m_embossTimer->setSingleShot(true);
@@ -2874,19 +2875,43 @@ void MainWindow::applySplit()
         QMessageBox::warning(this, tr("Forge3D"), tr("Split did not work:\n%1").arg(QString::fromUtf8(e.what())));
         return;
     }
-    if (m_splitPanel->keep() == SplitKeep::Both && keys.keys)
-        statusBar()->showMessage(keyed > 0 ? tr("Split, with %1 alignment %2.")
-                                                 .arg(keyed)
-                                                 .arg(keys.loosePins ? (keyed == 1 ? tr("pin") : tr("pins"))
-                                                                     : (keyed == 1 ? tr("peg") : tr("pegs")))
-                                           : tr("Split. The cut has no room for alignment pegs (too small or "
-                                                "thin)."),
-                                 10000);
-    qInfo().noquote() << "Command:" << QString::fromStdString(m_stack.undoLabel());
+    const bool wantedKeys = m_splitPanel->keep() == SplitKeep::Both && keys.keys;
+    qInfo().noquote() << "Command:" << QString::fromStdString(m_stack.undoLabel()) << "-" << keyed << "keys";
     endSplit();
-    // Select the arrow-side half on its own, so the move and rotate handles show
-    // straight away (as after Merge); click the other half to work on it.
     setSelection(made.front());
+    if (!wantedKeys)
+        return;
+    if (keyed > 0) {
+        statusBar()->showMessage(tr("Split, with %1 alignment %2.")
+                                     .arg(keyed)
+                                     .arg(keys.loosePins ? (keyed == 1 ? tr("pin") : tr("pins"))
+                                                         : (keyed == 1 ? tr("peg") : tr("pegs"))),
+                                 10000);
+        return;
+    }
+    // Asked for pegs and got none: say so plainly, and why. (Once this click is done
+    // with: the panel it came from has just been put away.)
+    QTimer::singleShot(0, this, [this, keys] {
+        const double smallest = std::max(2.0, keys.diameter * 0.5);
+        const double across = smallest + 2 * (keys.clearance + 1.2);
+        const double behind = (keys.loosePins ? keys.length / 2 : keys.length) + 0.5 + 1.2;
+        QMessageBox box(this);
+        box.setIcon(QMessageBox::Warning);
+        box.setWindowTitle(tr("No room for alignment pegs"));
+        box.setText(tr("The shape was split, but without alignment pegs: the cut is too small or thin for them."));
+        box.setInformativeText(
+            tr("Even the smallest peg (%1 mm) needs about %2 mm of solid across the cut, and %3 mm of solid behind "
+               "it for its hole. Try a smaller diameter or a shorter peg in Split, cut somewhere thicker, or line "
+               "the pieces up by eye.")
+                .arg(smallest, 0, 'g', 3)
+                .arg(across, 0, 'g', 3)
+                .arg(behind, 0, 'g', 3));
+        QPushButton* undo = box.addButton(tr("Undo the Split"), QMessageBox::DestructiveRole);
+        box.addButton(tr("Keep It"), QMessageBox::AcceptRole);
+        box.exec();
+        if (box.clickedButton() == undo)
+            m_stack.undo();
+    });
 }
 
 KeyOptions MainWindow::savedKeyOptions() const

@@ -14,8 +14,8 @@
   - Pegs go well inside the cut, clear of its edges and of any holes through it, with
     room behind them for the hole: two per piece of the cut (so it can't turn), three
     on a big one. A cut through two legs gets pegs in each leg. Where the cut has no
-    room for a peg, smaller ones are tried; if none fits, the cut isn't keyed and a
-    message says so.
+    room for a peg, smaller ones are tried; if none fits, a warning says the cut has no
+    room for pegs, how much it would need, and offers **Undo the Split**.
 - **Split to Fit** (Print/Save tab, Edit menu, and a **Smart Split** button in Split):
   cuts a shape too big for your printer (Build Plate Size) into pieces that each fit,
   as few as will do. Each cut is level or upright and goes where it cuts through

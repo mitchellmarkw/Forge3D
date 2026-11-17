@@ -20,7 +20,7 @@ check, download the `Forge3D-windows-x64-…` artifact, unzip and run `Forge3D.e
 | 5 | Measure a hole's opening against a peg's foot | The hole is a little wider (0.4 mm across) | |
 | 6 | **Undo** | One box again | |
 | 7 | Split again with **Loose pins**, Pin length 10 | Holes in both pieces, and two pins standing beside the box | |
-| 8 | Add a thin plate (Box 60 × 3 × 20) and split it **Across X** with pegs on | It splits, with a message that the cut has no room for pegs | |
+| 8 | Add a thin plate (Box 60 × 3 × 20) and split it **Across X** with pegs on | A warning: "No room for alignment pegs", saying how much solid a peg needs, with **Keep It** and **Undo the Split**. Undo the Split: one plate again. Split again and Keep It: two pieces, no pegs | |
 | 9 | Split a shape with a hole through it (or a hollow one) across the hole | The pegs avoid the hole | |
 | 10 | Close and reopen Split | Your peg settings are remembered | |
 
