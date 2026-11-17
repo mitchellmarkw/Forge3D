@@ -113,6 +113,20 @@ private:
     std::optional<std::string> m_old;
 };
 
+// Colours several bodies in one step (none: back to the automatic colour).
+class SetColourCommand final : public Command {
+public:
+    SetColourCommand(std::vector<ObjectId> ids, std::optional<std::uint32_t> colour);
+    std::string label() const override { return "Colour"; }
+    void redo(Document& doc) override;
+    void undo(Document& doc) override;
+
+private:
+    std::vector<ObjectId> m_ids;
+    std::optional<std::uint32_t> m_new;
+    std::vector<std::optional<std::uint32_t>> m_old;
+};
+
 // Sets a body's size and placement in one step, with both states given up front.
 // Used by gizmo drags: the drag previews changes live, then records one of these.
 class EditBodyCommand final : public Command {

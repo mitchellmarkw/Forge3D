@@ -571,6 +571,16 @@ struct BooleanSpec {
 
 // A solid object in the document: either a primitive (spec) or a combine result
 // (boolean). For a result, spec is unused.
+// Shapes without a colour of their own show in these, in turn (by id).
+inline constexpr std::array<std::uint32_t, 6> kDefaultColours{
+    0x478CD9,  // blue
+    0xED8C33,  // orange
+    0x59B366,  // green
+    0x9E73CC,  // purple
+    0x33ADB3,  // teal
+    0xE06B85,  // rose
+};
+
 struct Body {
     ObjectId id = kInvalidId;
     std::string name;
@@ -582,6 +592,9 @@ struct Body {
     // (one-part steps, Subtract), or its parts side by side (Merge, Intersect, Group).
     bool suppressed = false;
     bool rolledBack = false;
+    // A colour chosen for this shape, 0xRRGGBB. None: a combined shape takes its first
+    // part's colour; anything else one from the default palette (see Document::colourOf).
+    std::optional<std::uint32_t> colour;
 
     bool isBoolean() const { return boolean.has_value(); }
     bool isOff() const { return boolean.has_value() && (suppressed || rolledBack); }

@@ -7,6 +7,7 @@
 #include <nlohmann/json.hpp>
 
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <fstream>
 #include <functional>
@@ -228,6 +229,11 @@ const char* opName(BooleanOp op)
 json bodyToJson(const Body& b)
 {
     json j{{"id", b.id}, {"name", b.name}, {"placement", placementToJson(b.placement)}};
+    if (b.colour) {
+        char hex[8];
+        std::snprintf(hex, sizeof hex, "#%06X", unsigned(*b.colour & 0xFFFFFFu));
+        j["colour"] = hex;
+    }
     if (b.isBoolean()) {
         j["type"] = "combine";
         j["operation"] = opName(b.boolean->op);
@@ -427,6 +433,14 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
 
     const auto name = j.find("name");
     b.name = (name != j.end() && name->is_string()) ? name->get<std::string>() : std::string();
+
+    if (const auto colour = j.find("colour"); colour != j.end()) {
+        const std::string hex = colour->is_string() ? colour->get<std::string>() : std::string();
+        if (hex.size() != 7 || hex[0] != '#' ||
+            hex.find_first_not_of("0123456789abcdefABCDEF", 1) != std::string::npos)
+            damaged(where + ": colour is not like #RRGGBB");
+        b.colour = std::uint32_t(std::stoul(hex.substr(1), nullptr, 16));
+    }
 
     const auto placement = j.find("placement");
     if (placement == j.end() || !placement->is_object())

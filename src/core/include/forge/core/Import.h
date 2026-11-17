@@ -9,6 +9,7 @@
 #include <functional>
 #include <memory>
 #include <stdexcept>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -22,6 +23,7 @@ struct RawMesh {
     std::string name;
     std::vector<float> positions;       // 3 per point
     std::vector<std::uint32_t> indices;  // 3 per triangle
+    std::optional<std::uint32_t> colour;  // 0xRRGGBB, if the file gave the object one (3MF)
 };
 
 class ImportError : public std::runtime_error {

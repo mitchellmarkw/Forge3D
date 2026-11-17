@@ -131,6 +131,36 @@ void RenameBodyCommand::undo(Document& doc)
     doc.rename(m_id, *m_old);
 }
 
+// ---- SetColourCommand ----------------------------------------------------------
+
+SetColourCommand::SetColourCommand(std::vector<ObjectId> ids, std::optional<std::uint32_t> colour)
+    : m_ids(std::move(ids)), m_new(colour)
+{
+    if (m_ids.empty())
+        throw std::invalid_argument("Select a shape to colour first");
+}
+
+void SetColourCommand::redo(Document& doc)
+{
+    std::vector<std::optional<std::uint32_t>> old;
+    for (ObjectId id : m_ids) {
+        const Body* body = doc.find(id);
+        if (!body)
+            throw std::out_of_range("Cannot colour: no body with id " + std::to_string(id));
+        old.push_back(body->colour);
+    }
+    for (ObjectId id : m_ids)
+        doc.setColour(id, m_new);
+    if (m_old.empty())
+        m_old = std::move(old);
+}
+
+void SetColourCommand::undo(Document& doc)
+{
+    for (std::size_t i = 0; i < m_ids.size(); ++i)
+        doc.setColour(m_ids[i], m_old[i]);
+}
+
 // ---- EditBodyCommand ------------------------------------------------------------
 
 EditBodyCommand::EditBodyCommand(Body before, Body after, std::string label)

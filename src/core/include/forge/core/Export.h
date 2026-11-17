@@ -21,6 +21,7 @@ struct ExportMesh {
     std::vector<float> positions;       // 3 per point
     std::vector<std::uint32_t> indices;  // 3 per triangle, anticlockwise seen from outside
     std::size_t openEdges = 0;          // edges not shared by exactly two triangles (0 = watertight)
+    std::uint32_t colour = 0x478CD9;    // 0xRRGGBB, as shown (written to 3MF files)
 
     std::size_t triangleCount() const { return indices.size() / 3; }
     double volume() const;  // mm^3; negative if inside out

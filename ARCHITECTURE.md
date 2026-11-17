@@ -916,3 +916,20 @@ and sharp across edges.
   (`FORGE3D_FUZZ_PER_FILE` per file) and opens and builds every body.
   `FORGE3D_FUZZ_TRACE` names a file that holds the case in hand, for finding hangs.
 
+## Colours (slice 39)
+
+- `Body::colour` (optional 0xRRGGBB); `Document::colourOf` walks first operands until
+  a body has one, else `kDefaultColours[(id - 1) % 6]` (the old display palette, now in
+  core). `Document::setColour` notifies Modified without invalidating the shape cache.
+- `SetColourCommand(ids, colour)`: one undo step for several objects. The app colours
+  `history::objectOf` of each selected id (`selectedObjects`).
+- File: `"colour": "#RRGGBB"` on a body, only when set (a string, so the reader's
+  1e7 number limit doesn't apply). No format-version change: older readers ignore it.
+- 3MF export: `ExportMesh::colour`; one `<basematerials>` (id after the objects) with a
+  `<base displaycolor="#RRGGBBFF">` per distinct colour; objects carry `pid` / `pindex`.
+  Import reads `basematerials` and an object's `pid` / `pindex` (or its first
+  triangle's `pid` / `p1`, or a coloured component's) into `RawMesh::colour`.
+- UI: `m_colourMenu` (Build → Look), also a submenu in the Objects context menu; a
+  `QWidgetAction` grid of `kSwatches` buttons, More Colours… (`QColorDialog`) and
+  Automatic. Each choice is applied on a zero-length timer, after the menu has closed.
+

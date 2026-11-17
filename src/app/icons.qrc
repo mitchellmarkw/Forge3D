@@ -1,6 +1,7 @@
 <RCC>
   <qresource prefix="/icons">
     <file alias="add-shape.svg">icons/add-shape.svg</file>
+    <file alias="colour.svg">icons/colour.svg</file>
     <file alias="orbit.svg">icons/orbit.svg</file>
     <file alias="pan.svg">icons/pan.svg</file>
     <file alias="zoom.svg">icons/zoom.svg</file>

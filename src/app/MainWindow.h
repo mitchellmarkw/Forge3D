@@ -280,6 +280,11 @@ private:
     void addObjectRow(QTreeWidgetItem* parent, ObjectId id);
     void addStepRows(QTreeWidgetItem* objectRow, ObjectId top);
     void showTreeMenu(const QPoint& pos);
+    // The objects the selection belongs to (each once), for Colour.
+    std::vector<ObjectId> selectedObjects() const;
+    void colourSelected(std::optional<std::uint32_t> colour);
+    void chooseOtherColour();
+    void fillColourMenu(QMenu* menu);
     void editStep(ObjectId id);
     void rollTo(ObjectId top, std::size_t shown);
     void setStepOff(ObjectId id, bool off);
@@ -398,6 +403,7 @@ private:
     QAction* m_paste = nullptr;
     QAction* m_group = nullptr;
     QMenu* m_mirrorMenu = nullptr;
+    QMenu* m_colourMenu = nullptr;  // Colour: swatches, Automatic, More Colours
     std::vector<BodyTree> m_clipboard;  // what Copy / Cut captured
     double m_clipboardLeft = 0.0;       // left edge of what was copied, on the plate
     int m_pasteCount = 0;               // pastes since Copy / Cut (0 right after Cut)
