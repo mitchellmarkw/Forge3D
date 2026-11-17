@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "forge/core/PrintSplit.h"
 #include "forge/core/Split.h"
 
 #include <QWidget>
 
 class QButtonGroup;
+class QCheckBox;
 class QDoubleSpinBox;
 class QGroupBox;
 class QLabel;
@@ -34,6 +36,12 @@ public:
     double tiltY() const;
     double offset() const;
     SplitKeep keep() const;
+    // Pegs (or pins) for the cut; keys = false when the cut isn't keyed (or only one
+    // half is kept).
+    KeyOptions keyOptions() const;
+    void setKeyOptions(const KeyOptions& options);
+    // The settings as set (keys: the tick box, whatever is kept), for remembering.
+    KeyOptions keySettings() const;
     // Moves the plane (as if typed); emits planeChanged.
     void setOffset(double offset);
 
@@ -41,6 +49,8 @@ signals:
     void planeChanged();
     void applyRequested();
     void cancelRequested();
+    void smartRequested();  // split to fit the printer instead
+    void keysChanged();
 
 private:
     void setTilts(double tiltX, double tiltY);
@@ -57,6 +67,17 @@ private:
     QRadioButton* m_keepFront = nullptr;
     QRadioButton* m_keepBack = nullptr;
     QPushButton* m_apply = nullptr;
+    QPushButton* m_smart = nullptr;
+    QGroupBox* m_keysGroup = nullptr;
+    QCheckBox* m_keys = nullptr;
+    QRadioButton* m_pegs = nullptr;
+    QRadioButton* m_pins = nullptr;
+    QDoubleSpinBox* m_diameter = nullptr;
+    QDoubleSpinBox* m_length = nullptr;
+    QDoubleSpinBox* m_taper = nullptr;
+    QDoubleSpinBox* m_clearance = nullptr;
+    QLabel* m_lengthLabel = nullptr;
+    void updateKeys();
     double m_min = -10.0;
     double m_max = 10.0;
 };

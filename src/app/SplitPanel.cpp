@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "SplitPanel.h"
 
+#include <QCheckBox>
 #include <QDoubleSpinBox>
 #include <QFormLayout>
 #include <QGroupBox>
@@ -47,6 +48,11 @@ SplitPanel::SplitPanel(QWidget* parent) : QWidget(parent)
                                "The arrow points to the first side. Orbit the view to check it."));
     hint->setWordWrap(true);
     layout->addWidget(hint);
+    m_smart = new QPushButton(tr("Smart Split: Fit the Printer"));
+    m_smart->setToolTip(tr("Let Forge3D choose the cuts: as few as will make every piece fit your printer "
+                           "(Build Plate Size), each where it cuts through least, keyed with the pegs set "
+                           "below"));
+    layout->addWidget(m_smart);
 
     // Direction
     auto* dirGroup = new QGroupBox(tr("Direction"));
@@ -99,6 +105,48 @@ SplitPanel::SplitPanel(QWidget* parent) : QWidget(parent)
     keepLayout->addWidget(m_keepBack);
     layout->addWidget(m_keepGroup);
 
+    // Alignment pegs
+    m_keysGroup = new QGroupBox(tr("Alignment pegs"));
+    auto* keysLayout = new QVBoxLayout(m_keysGroup);
+    m_keys = new QCheckBox(tr("Key the cut, so the pieces line up"));
+    m_keys->setToolTip(tr("Pegs on one piece fit tapered holes in the other, so the pieces only go together "
+                          "one way when you glue them"));
+    keysLayout->addWidget(m_keys);
+    m_pegs = new QRadioButton(tr("Pegs on one piece"));
+    m_pegs->setToolTip(tr("Pegs stand out of one piece (with a level cut, the lower one) into holes in the "
+                          "other"));
+    m_pins = new QRadioButton(tr("Loose pins (holes in both)"));
+    m_pins->setToolTip(tr("Both pieces get holes, and pins are added beside the model to print on their "
+                          "own: each piece keeps a flat cut face to print on"));
+    keysLayout->addWidget(m_pegs);
+    keysLayout->addWidget(m_pins);
+    auto* sizes = new QFormLayout;
+    const auto spin = [](double lo, double hi, double step, int decimals, const QString& suffix, const QString& tip) {
+        auto* s = new QDoubleSpinBox;
+        s->setRange(lo, hi);
+        s->setSingleStep(step);
+        s->setDecimals(decimals);
+        s->setSuffix(suffix);
+        s->setToolTip(tip);
+        s->setKeyboardTracking(false);
+        return s;
+    };
+    m_diameter = spin(2.0, 30.0, 0.5, 1, tr(" mm"), tr("How thick a peg is where it leaves the piece (smaller "
+                                                         "where a cut has no room for it)"));
+    m_length = spin(2.0, 40.0, 0.5, 1, tr(" mm"), tr("How far a peg stands out (a pin: its whole length)"));
+    m_taper = spin(0.0, 10.0, 0.5, 1, QStringLiteral("\u00B0"),
+                   tr("How much a peg narrows towards its tip, so it starts in its hole easily"));
+    m_clearance = spin(0.0, 1.0, 0.05, 2, tr(" mm"),
+                       tr("Extra room in the holes: 0.2 mm suits most printers; more if they're too tight"));
+    sizes->addRow(tr("Diameter:"), m_diameter);
+    m_lengthLabel = new QLabel(tr("Length:"));
+    sizes->addRow(m_lengthLabel, m_length);
+    sizes->addRow(tr("Taper:"), m_taper);
+    sizes->addRow(tr("Clearance:"), m_clearance);
+    keysLayout->addLayout(sizes);
+    layout->addWidget(m_keysGroup);
+    setKeyOptions(KeyOptions{});
+
     auto* buttons = new QHBoxLayout;
     m_apply = new QPushButton(tr("Split"));
     m_apply->setDefault(true);
@@ -118,6 +166,63 @@ SplitPanel::SplitPanel(QWidget* parent) : QWidget(parent)
     connect(m_slider, &QSlider::valueChanged, this, &SplitPanel::offsetFromSlider);
     connect(m_apply, &QPushButton::clicked, this, &SplitPanel::applyRequested);
     connect(cancel, &QPushButton::clicked, this, &SplitPanel::cancelRequested);
+    connect(m_smart, &QPushButton::clicked, this, &SplitPanel::smartRequested);
+    for (QRadioButton* b : {m_keepBoth, m_keepFront, m_keepBack, m_pegs, m_pins})
+        connect(b, &QRadioButton::toggled, this, [this] {
+            updateKeys();
+            emit keysChanged();
+        });
+    connect(m_keys, &QCheckBox::toggled, this, [this] {
+        updateKeys();
+        emit keysChanged();
+    });
+    for (QDoubleSpinBox* s : {m_diameter, m_length, m_taper, m_clearance})
+        connect(s, &QDoubleSpinBox::valueChanged, this, &SplitPanel::keysChanged);
+}
+
+void SplitPanel::updateKeys()
+{
+    const bool both = !m_keepGroup->isHidden() && m_keepBoth->isChecked();
+    m_keysGroup->setVisible(!m_keepGroup->isHidden());
+    m_keysGroup->setEnabled(both);
+    const bool on = m_keys->isChecked();
+    for (QWidget* w : {static_cast<QWidget*>(m_pegs), static_cast<QWidget*>(m_pins),
+                       static_cast<QWidget*>(m_diameter), static_cast<QWidget*>(m_length),
+                       static_cast<QWidget*>(m_taper), static_cast<QWidget*>(m_clearance)})
+        w->setEnabled(on);
+    m_lengthLabel->setText(m_pins->isChecked() ? tr("Pin length:") : tr("Peg length:"));
+}
+
+KeyOptions SplitPanel::keyOptions() const
+{
+    KeyOptions o;
+    o.keys = m_keys->isChecked() && !m_keepGroup->isHidden() && m_keepBoth->isChecked();
+    o.loosePins = m_pins->isChecked();
+    o.diameter = m_diameter->value();
+    o.length = m_length->value();
+    o.taper = m_taper->value();
+    o.clearance = m_clearance->value();
+    return o;
+}
+
+KeyOptions SplitPanel::keySettings() const
+{
+    KeyOptions o = keyOptions();
+    o.keys = m_keys->isChecked();
+    return o;
+}
+
+void SplitPanel::setKeyOptions(const KeyOptions& o)
+{
+    const QSignalBlocker b1(m_keys), b2(m_pegs), b3(m_pins), b4(m_diameter), b5(m_length), b6(m_taper),
+        b7(m_clearance);
+    m_keys->setChecked(o.keys);
+    (o.loosePins ? m_pins : m_pegs)->setChecked(true);
+    m_diameter->setValue(o.diameter);
+    m_length->setValue(o.length);
+    m_taper->setValue(o.taper);
+    m_clearance->setValue(o.clearance);
+    updateKeys();
 }
 
 void SplitPanel::start(const QString& title, bool editing, double tiltX, double tiltY, double offset)
@@ -125,6 +230,7 @@ void SplitPanel::start(const QString& title, bool editing, double tiltX, double 
     const QSignalBlocker b1(m_tiltX), b2(m_tiltY), b3(m_offset), b4(m_slider);
     m_title->setText(title);
     m_keepGroup->setVisible(!editing);
+    m_smart->setVisible(!editing);
     m_apply->setText(editing ? tr("Apply") : tr("Split"));
     m_apply->setToolTip(editing ? tr("Move the cut to here") : tr("Cut the shape here"));
     m_keepBoth->setChecked(true);
@@ -132,6 +238,7 @@ void SplitPanel::start(const QString& title, bool editing, double tiltX, double 
     m_tiltY->setValue(tiltY);
     m_offset->setRange(-1e5, 1e5);
     m_offset->setValue(offset);
+    updateKeys();
 }
 
 void SplitPanel::setOffsetRange(double minOffset, double maxOffset)

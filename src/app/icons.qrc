@@ -8,6 +8,7 @@
     <file alias="reset-view.svg">icons/reset-view.svg</file>
     <file alias="section.svg">icons/section.svg</file>
     <file alias="plate.svg">icons/plate.svg</file>
+    <file alias="split-fit.svg">icons/split-fit.svg</file>
     <file alias="align.svg">icons/align.svg</file>
     <file alias="clear-plate.svg">icons/clear-plate.svg</file>
     <file alias="delete.svg">icons/delete.svg</file>

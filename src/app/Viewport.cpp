@@ -78,7 +78,9 @@ void main() {
     float diffuse = max(dot(n, key), 0.0);
     float head = max(dot(n, toEye), 0.0);
     float spec = pow(max(dot(n, normalize(key + toEye)), 0.0), 48.0) * 0.20;
-    vec3 tinted = mix(uColor, vec3(0.93, 0.33, 0.16), uWarn * 0.75);
+    // 1: too big for the printer (orange-red); 0.5: only off the plate (amber).
+    vec3 warnColour = uWarn > 0.75 ? vec3(0.93, 0.33, 0.16) : vec3(0.96, 0.72, 0.18);
+    vec3 tinted = mix(uColor, warnColour, uWarn > 0.0 ? 0.75 : 0.0);
     vec3 base = mix(tinted, vec3(0.16, 0.16, 0.20), clamp(vShade, 0.0, 1.0) * 0.8);
     vec3 color = base * (0.28 + 0.62 * diffuse + 0.15 * head) + vec3(spec);
     // Selection: lighten the body and add a bright cyan glow toward its silhouette.
@@ -237,7 +239,7 @@ void Viewport::setFitWarning(bool on)
 
 void Viewport::checkFit()
 {
-    std::set<std::uint64_t> off;
+    std::map<std::uint64_t, int> off;  // 2: too big for the printer; 1: off the plate
     if (m_fitWarning) {
         const float halfX = m_plateX * 0.5f + 0.01f, halfY = m_plateY * 0.5f + 0.01f, top = m_plateZ + 0.01f;
         const auto outside = [&](const QVector3D& p) {
@@ -259,18 +261,31 @@ void Viewport::checkFit()
             if (!boxOut)
                 continue;
             bool out = false;
+            QVector3D lo(1e30f, 1e30f, 1e30f), hi(-1e30f, -1e30f, -1e30f);
             const auto& pos = item.mesh->positions;
-            for (std::size_t i = 0; i + 2 < pos.size() && !out; i += 3)
-                out = outside(item.model.map(QVector3D(pos[i], pos[i + 1], pos[i + 2])));
-            if (out)
-                off.insert(item.id);
+            for (std::size_t i = 0; i + 2 < pos.size(); i += 3) {
+                const QVector3D p = item.model.map(QVector3D(pos[i], pos[i + 1], pos[i + 2]));
+                out = out || outside(p);
+                lo = QVector3D(std::min(lo.x(), p.x()), std::min(lo.y(), p.y()), std::min(lo.z(), p.z()));
+                hi = QVector3D(std::max(hi.x(), p.x()), std::max(hi.y(), p.y()), std::max(hi.z(), p.z()));
+            }
+            if (!out)
+                continue;
+            // Too big for the printer, or just not on the plate (it would fit if moved,
+            // turned round on the plate if need be).
+            const QVector3D s = hi - lo;
+            const float x = m_plateX + 0.02f, y = m_plateY + 0.02f;
+            const bool wouldFit = ((s.x() <= x && s.y() <= y) || (s.y() <= x && s.x() <= y)) &&
+                                  s.z() - std::max(0.0f, -lo.z()) <= m_plateZ + 0.01f;
+            off[item.id] = wouldFit ? 1 : 2;
         }
     }
     if (off != m_offPlate) {
-        const bool countChanged = off.size() != m_offPlate.size();
         m_offPlate = std::move(off);
-        if (countChanged)
-            emit offPlateChanged(int(m_offPlate.size()));
+        int big = 0, away = 0;
+        for (const auto& [id, kind] : m_offPlate)
+            (kind == 2 ? big : away)++;
+        emit offPlateChanged(big, away);
     }
 }
 
@@ -779,7 +794,12 @@ void Viewport::paintGL()
                 m_meshShader->setUniformValue("uClipOn", m_sectionIds.count(item.id) ? 1.0f : 0.0f);
             m_meshShader->setUniformValue("uNormalMatrix", modelView.normalMatrix());
             m_meshShader->setUniformValue("uColor", item.color);
-            m_meshShader->setUniformValue("uWarn", pass == Pass::Solid && m_offPlate.count(item.id) ? 1.0f : 0.0f);
+            {
+                const auto warn = m_offPlate.find(item.id);
+                m_meshShader->setUniformValue("uWarn", pass != Pass::Solid || warn == m_offPlate.end() ? 0.0f
+                                                       : warn->second == 2                    ? 1.0f
+                                                                                              : 0.5f);
+            }
             m_meshShader->setUniformValue("uSelected", item.selected ? 1.0f : 0.0f);
             m_meshShader->setUniformValue("uAlpha", pass == Pass::Ghost ? 0.45f : item.alpha);
             QOpenGLVertexArrayObject::Binder bind(found->second->vao.get());

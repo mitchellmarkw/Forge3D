@@ -40,6 +40,7 @@ add_library(forge_core STATIC
     src/Mesh.cpp
     src/Picking.cpp
     src/Primitives.cpp
+    src/PrintSplit.cpp
     src/Scale.cpp
     src/Split.cpp
     src/Tessellator.cpp

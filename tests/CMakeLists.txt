@@ -36,6 +36,7 @@ add_executable(forge_tests
     test_sketch_edit.cpp
     test_taper.cpp
     test_sketch_text.cpp
+    test_print_split.cpp
 )
 target_link_libraries(forge_tests PRIVATE
     Forge3D::core
