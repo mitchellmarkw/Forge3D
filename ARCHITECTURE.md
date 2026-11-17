@@ -892,3 +892,27 @@ and sharp across edges.
   spacing. `planSmartSplit` counts pieces from the box for the confirmation.
 - Viewport fit warning: `m_offPlate` holds 2 (too big) or 1 (off the plate, would fit
   if moved; X/Y may swap); `uWarn` 1.0 / 0.5.
+
+## Robustness (0.47.1 audit)
+
+- `SafeApplication` (main.cpp) overrides `QApplication::notify`: a `std::exception`,
+  OCCT `Standard_Failure` (not a `std::exception` in OCCT 7) or anything else thrown
+  from an event handler is logged and reported in one deferred message box instead of
+  ending the process.
+- `Document::shape` / `mesh` turn `Standard_Failure` into `GeometryError`, so callers
+  only need `catch (const std::exception&)`.
+- Input bounds live in core, where both the UI and files go through them:
+  `primitives::requirePositive` (1e-4 … 1e6 mm), `text::kMaxLetters` (120),
+  `edges::apply` (size ≤ the shape's largest box side), `thread::cutFor` (≤ 2000
+  turns), 3MF corner count (counted with memoised component expansion before
+  building, 90 M corners), `repairMesh` (finite, |v| ≤ 1e7).
+- Files: `fromJson` refuses any number that is non-finite or over 1e7 in size;
+  `sketch::damage()` checks every curve's and rule's indices (and that direction rules
+  are on curves with two points) after a sketch is read.
+- `MainWindow::refreshScene` catches per body: an unbuildable shape is skipped (and
+  named in the status bar) rather than ending the loop.
+- `tests/fuzz_files.cpp` (hidden tag `[.fuzz]`): reads saved documents from
+  `FORGE3D_FUZZ_CORPUS`, checks each still opens, then replaces leaves with odd values
+  (`FORGE3D_FUZZ_PER_FILE` per file) and opens and builds every body.
+  `FORGE3D_FUZZ_TRACE` names a file that holds the case in hand, for finding hangs.
+

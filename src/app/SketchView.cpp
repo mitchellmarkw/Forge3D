@@ -311,6 +311,7 @@ bool SketchView::askWords(Words& words, bool isNew)
     auto* layout = new QVBoxLayout(&dialog);
     layout->addWidget(new QLabel(tr("Words:")));
     auto* text = new QLineEdit(QString::fromStdString(words.text));
+    text->setMaxLength(text::kMaxLetters + 40);
     text->setMinimumWidth(260);
     layout->addWidget(text);
     layout->addSpacing(4);

@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.47.1 Beta — Code audit: damaged files and edge cases (2026-11-17)
+
+No new features: a sweep for crashes, hangs and wrong behaviour at the edges.
+
+- **Damaged project files can't crash Forge3D.** A sketch in a file that refers to a
+  point, curve or radius that isn't there (or a rule on the wrong kind of curve) now
+  stops the file opening with "The file is damaged…", where before it could crash.
+  Numbers no Forge3D file would hold (over 10 km, or not a number) are refused the
+  same way, where before they could make Forge3D work for ever.
+- **Damaged STL / OBJ / 3MF files** give a plain message instead of a technical one
+  (words where numbers should be, impossible point numbers, points that are not a
+  number or absurdly far away), and a 3MF whose parts hold copies of copies past
+  30 million triangles is refused instead of filling the memory.
+- **Sizes that can't work are refused at once** instead of leaving Forge3D busy:
+  shape sizes under 0.0001 mm or over 1 km; an edge rounding or chamfer bigger than
+  the whole shape; a thread with more than 2000 turns (too fine a pitch for its
+  length); more than 120 letters in one piece of text (the text boxes stop typing a
+  little past that).
+- **One shape that can't be built no longer hides the others**: it is left out of the
+  view, the status bar names it, and every other shape still shows.
+- **A last safety net**: an unexpected error in any step now shows "Something went
+  wrong… Forge3D is still running" (with advice to save under a new name) instead of
+  closing the app.
+- **Backups**: deleting everything and leaving it now removes the backup copy, so an
+  old version isn't offered back after a crash.
+- Tests: a random Undo / Redo test (every state must match exactly), a damaged-file
+  test for sketches and imports, and an optional file fuzzer (`[.fuzz]`) that changes
+  every kind of value in saved documents. 228 unit tests.
+
 ## 0.47.0 Beta — Slice 38: Split for printing (2026-11-16)
 
 - **Alignment pegs on Split** (Design → Split, keeping both halves): the cut is keyed so

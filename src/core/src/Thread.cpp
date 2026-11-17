@@ -227,6 +227,8 @@ Cut cutFor(const Round& round, const ThreadFinish& f)
         throw std::invalid_argument("A thread needs a size and a pitch above zero");
     if (!(round.to > round.from))
         throw std::invalid_argument("The round face has no length to thread");
+    if ((round.to - round.from) / f.pitch > 2000.0)
+        throw std::invalid_argument("That pitch is too fine for this length (over 2000 turns): choose a bigger pitch");
     const double P = f.pitch;
     const double depth = 0.6134 * P;    // ISO: the outside thread's depth
     const double crestHalf = 0.4375 * P;  // the groove's half-width where it meets the crest

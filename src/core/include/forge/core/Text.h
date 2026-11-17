@@ -27,7 +27,9 @@ std::string resolvedFont(const std::string& name);
 // The words as flat faces in the XY plane, read from +Z: the left end of the first
 // line's baseline at the origin, lines going down (-Y). emSize: the font size in mm.
 // vertical: each letter on its own line, centred under the one before (a space leaves a gap).
-// Throws std::invalid_argument for text with nothing to draw (empty or spaces only).
+// Throws std::invalid_argument for text with nothing to draw (empty or spaces only),
+// or more than kMaxLetters letters (a long paragraph would take minutes to build).
+constexpr int kMaxLetters = 120;
 TopoDS_Shape letterFaces(const std::string& text, const std::string& font, bool bold, bool italic, double emSize,
                          bool vertical = false);
 // The words with a line break between every letter (UTF-8 aware), as stacked text is laid out.

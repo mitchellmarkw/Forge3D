@@ -43,6 +43,8 @@ std::string readWholeFile(const std::filesystem::path& path)
     return s.str();
 }
 
+constexpr std::size_t kMaxImportCorners = 90'000'000;  // 30 million triangles
+
 // ---- STL ------------------------------------------------------------------------------
 
 std::vector<RawMesh> readStlBinary(const std::string& bytes, const std::string& name)
@@ -254,7 +256,12 @@ std::vector<RawMesh> readObj(const std::string& text, const std::string& name)
             std::vector<std::uint32_t> poly;
             std::string token;
             while (ls >> token) {
-                const long long i = std::stoll(token.substr(0, token.find('/')));
+                long long i = 0;
+                try {
+                    i = std::stoll(token.substr(0, token.find('/')));
+                } catch (const std::logic_error&) {  // not a number, or far too big
+                    throw ImportError("This OBJ file is damaged (line " + std::to_string(lineNo) + ").");
+                }
                 const long long n = static_cast<long long>(points.size());
                 const long long index = i > 0 ? i - 1 : n + i;  // negative counts back from the last point
                 if (index < 0 || index >= n)
@@ -316,7 +323,20 @@ std::vector<RawMesh> read3mf(const std::string& bytes, const std::string& name)
         const auto it = t.attrs.find(key);
         if (it == t.attrs.end())
             throw ImportError(std::string("This 3MF file is damaged (missing ") + key + ").");
-        return std::stod(it->second);
+        try {
+            std::size_t used = 0;
+            const double v = std::stod(it->second, &used);
+            if (std::isfinite(v))
+                return v;
+        } catch (const std::logic_error&) {  // not a number, or far too big
+        }
+        throw ImportError(std::string("This 3MF file is damaged (") + key + " isn't a number).");
+    };
+    const auto corner = [&number](const XmlTag& t, const char* key) {
+        const double v = number(t, key);
+        if (v < 0 || v > 4e9 || v != std::floor(v))
+            throw ImportError("This 3MF file refers to a point that doesn't exist.");
+        return std::uint32_t(v);
     };
     scanXml(model, [&](const XmlTag& t) {
         if (t.closing) {
@@ -339,8 +359,7 @@ std::vector<RawMesh> read3mf(const std::string& bytes, const std::string& name)
                                       {float(number(t, "x")), float(number(t, "y")), float(number(t, "z"))});
         } else if (current && t.name == "triangle") {
             current->indices.insert(current->indices.end(),
-                                    {std::uint32_t(number(t, "v1")), std::uint32_t(number(t, "v2")),
-                                     std::uint32_t(number(t, "v3"))});
+                                    {corner(t, "v1"), corner(t, "v2"), corner(t, "v3")});
         } else if (current && t.name == "component") {
             if (t.attrs.count("objectid"))
                 current->components.emplace_back(t.attrs.at("objectid"),
@@ -374,11 +393,30 @@ std::vector<RawMesh> read3mf(const std::string& bytes, const std::string& name)
             for (const auto& [child, cm] : o.components)
                 addObject(child, combine(cm, m), into, depth + 1);
         };
+    // Count first: parts that hold copies of copies can multiply past what fits in memory.
+    std::map<std::pair<std::string, int>, double> counted;
+    std::function<double(const std::string&, int)> cornersIn = [&](const std::string& id, int depth) -> double {
+        const auto it = objects.find(id);
+        if (it == objects.end() || depth > 16)
+            return 0.0;
+        const auto known = counted.find({id, depth});
+        if (known != counted.end())
+            return known->second;
+        double n = double(it->second.indices.size());
+        for (const auto& [child, cm] : it->second.components)
+            n += cornersIn(child, depth + 1);
+        return counted[{id, depth}] = n;
+    };
     if (items.empty())  // no build list: take every object with triangles
         for (const auto& [id, o] : objects)
             if (!o.indices.empty())
                 items.emplace_back(id, kIdentity);
     int n = 0;
+    double corners = 0;
+    for (const auto& [id, m] : items)
+        corners += cornersIn(id, 0);
+    if (corners > double(kMaxImportCorners))
+        throw ImportError("This 3MF file repeats its parts too many times to open (over 30 million triangles).");
     for (const auto& [id, m] : items) {
         RawMesh mesh;
         const auto it = objects.find(id);
@@ -492,6 +530,9 @@ std::shared_ptr<const MeshData> repairMesh(const RawMesh& raw, RepairReport& rep
     report.trianglesIn = raw.indices.size() / 3;
     if (raw.indices.empty())
         throw ImportError("'" + raw.name + "' has no triangles.");
+    for (float v : raw.positions)
+        if (!std::isfinite(v) || std::abs(v) > 1e7f)  // 10 km: a damaged number, not a model
+            throw ImportError("'" + raw.name + "' is damaged: a point is not a sensible number.");
     const std::size_t rawPoints = raw.positions.size() / 3;
     for (std::uint32_t i : raw.indices)
         if (i >= rawPoints)

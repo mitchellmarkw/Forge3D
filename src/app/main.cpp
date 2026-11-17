@@ -11,6 +11,7 @@
 #include <QCommandLineOption>
 #include <QCommandLineParser>
 #include <QElapsedTimer>
+#include <QMessageBox>
 #include <QStandardPaths>
 #include <QTimer>
 #include <QSurfaceFormat>
@@ -18,7 +19,57 @@
 
 #include <thread>
 
+#include <Standard_Failure.hxx>
 #include <Standard_Version.hxx>
+
+namespace {
+
+// The last line of defence: an error that slips out of a click or a key press is
+// reported and the work kept, instead of the program closing. (Each tool catches
+// its own errors; this is for the ones nobody expected.)
+class SafeApplication : public QApplication {
+public:
+    using QApplication::QApplication;
+
+    bool notify(QObject* receiver, QEvent* event) override
+    {
+        try {
+            return QApplication::notify(receiver, event);
+        } catch (const std::exception& e) {
+            report(QString::fromUtf8(e.what()));
+        } catch (const Standard_Failure& e) {
+#if OCC_VERSION_HEX >= 0x080000
+            report(QString::fromUtf8(e.what()));
+#else
+            report(QString::fromUtf8(e.GetMessageString() ? e.GetMessageString() : "geometry kernel error"));
+#endif
+        } catch (...) {
+            report(QStringLiteral("unknown error"));
+        }
+        return false;
+    }
+
+private:
+    void report(const QString& what)
+    {
+        qCritical().noquote() << "Unexpected error (caught):" << what;
+        if (m_telling)
+            return;  // one message at a time
+        m_telling = true;
+        QTimer::singleShot(0, this, [this, what] {
+            QMessageBox::warning(activeWindow(), QStringLiteral("Forge3D"),
+                                 QApplication::translate("main", "Something went wrong: %1\n\nThat step didn't "
+                                                                 "finish, but Forge3D is still running. Save your "
+                                                                 "work (under a new name, to be safe).")
+                                     .arg(what));
+            m_telling = false;
+        });
+    }
+
+    bool m_telling = false;
+};
+
+}  // namespace
 
 int main(int argc, char* argv[])
 {
@@ -38,7 +89,7 @@ int main(int argc, char* argv[])
     QApplication::setApplicationName(QString::fromLatin1(forge::build::kAppName));
     QApplication::setApplicationVersion(QString::fromLatin1(forge::build::kVersion));
 
-    QApplication app(argc, argv);
+    SafeApplication app(argc, argv);
     forge::app::theme::apply(app, forge::app::theme::saved());
 
     forge::app::installLogging();

@@ -17,6 +17,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <memory>
 #include <random>
 #include <sstream>
@@ -364,4 +365,66 @@ TEST_CASE("Tiny STL files can be scaled up on import", "[import]")
     // Keeping it as it is (1) leaves it tiny.
     const auto kept = importFile(stack, doc, path, [](double) { return 1.0; });
     CHECK_THAT(doc.worldBounds(kept.bodies.front()).size()[0], WithinAbs(0.02, 1e-4));
+}
+
+namespace {
+std::string zipModel(const std::string& m)
+{
+    mz_zip_archive zip{};
+    mz_zip_writer_init_heap(&zip, 0, 0);
+    mz_zip_writer_add_mem(&zip, "3D/3dmodel.model", m.data(), m.size(), static_cast<mz_uint>(MZ_DEFAULT_COMPRESSION));
+    void* buf = nullptr;
+    size_t size = 0;
+    mz_zip_writer_finalize_heap_archive(&zip, &buf, &size);
+    std::string bytes(static_cast<const char*>(buf), size);
+    mz_zip_writer_end(&zip);
+    return bytes;
+}
+
+// One triangle in object 1, then `levels` objects each holding `copies` of the one below.
+std::string doubling3mf(int levels, const std::string& v1 = "0", const std::string& x = "1", int copies = 2)
+{
+    std::ostringstream s;
+    s << R"(<model><resources><object id="1"><mesh><vertices><vertex x="0" y="0" z="0"/><vertex x=")" << x
+      << R"(" y="0" z="0"/><vertex x="0" y="1" z="0"/></vertices><triangles><triangle v1=")" << v1
+      << R"(" v2="1" v3="2"/></triangles></mesh></object>)";
+    for (int i = 2; i <= levels + 1; ++i)
+    {
+        s << "<object id=\"" << i << "\"><components>";
+        for (int c = 0; c < copies; ++c)
+            s << "<component objectid=\"" << i - 1 << "\"/>";
+        s << "</components></object>";
+    }
+    s << "</resources><build><item objectid=\"" << levels + 1 << "\"/></build></model>";
+    return zipModel(s.str());
+}
+}  // namespace
+
+TEST_CASE("Damaged files are refused with a plain message", "[import]")
+{
+    // Words where numbers should be, and numbers far too big for a long long.
+    CHECK_THROWS_AS(readObj("v 0 0 0\nv 1 0 0\nv 0 1 0\nf a b c\n", "x"), ImportError);
+    CHECK_THROWS_AS(readObj("v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 99999999999999999999999\n", "x"), ImportError);
+    CHECK_THROWS_AS(read3mf(doubling3mf(0, "zero"), "x"), ImportError);
+    CHECK_THROWS_AS(read3mf(doubling3mf(0, "-1"), "x"), ImportError);
+    CHECK_THROWS_AS(read3mf(doubling3mf(0, "1e30"), "x"), ImportError);
+    CHECK_THROWS_AS(read3mf(doubling3mf(0, "0.5"), "x"), ImportError);
+    CHECK_THROWS_AS(read3mf(doubling3mf(0, "0", "1e999"), "x"), ImportError);
+
+    CHECK_THROWS_AS(read3mf(doubling3mf(0, "0", "nan"), "x"), ImportError);
+
+    // A point that is not a number, or absurdly far away, is refused when the shape is made.
+    RepairReport r;
+    Vec3 off;
+    RawMesh nan;
+    nan.name = "nan";
+    nan.positions = {0, 0, 0, std::numeric_limits<float>::quiet_NaN(), 0, 0, 0, 1, 0};
+    nan.indices = {0, 1, 2};
+    CHECK_THROWS_AS(repairMesh(nan, r, off), ImportError);
+    RawMesh far = readObj("v 0 0 0\nv 1e30 0 0\nv 0 1 0\nf 1 2 3\n", "far")[0];
+    CHECK_THROWS_AS(repairMesh(far, r, off), ImportError);
+
+    // Parts that hold copies of copies: 2^10 is fine; 1000^4 would never finish.
+    CHECK(read3mf(doubling3mf(10), "x")[0].indices.size() == 3 * 1024);
+    CHECK_THROWS_AS(read3mf(doubling3mf(4, "0", "1", 1000), "x"), ImportError);
 }

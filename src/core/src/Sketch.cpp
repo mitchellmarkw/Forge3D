@@ -470,6 +470,62 @@ bool isDimension(Rule rule)
     }
 }
 
+std::string damage(const Sketch& s)
+{
+    const auto point = [&s](int i) { return i >= 0 && std::size_t(i) < s.points.size(); };
+    const auto geo = [&s](int i) { return i >= 0 && std::size_t(i) < s.geos.size(); };
+    // A line (or an arc: centre to start); not a circle, which has no second point.
+    const auto line = [&](int i) { return geo(i) && s.geos[std::size_t(i)].kind != GeoKind::Circle; };
+    if (s.points.empty())
+        return "no points";
+    for (const Point& p : s.points)
+        if (!std::isfinite(p.x) || !std::isfinite(p.y))
+            return "a point is not a number";
+    for (double r : s.radii)
+        if (!std::isfinite(r))
+            return "a radius is not a number";
+    for (std::size_t i = 0; i < s.geos.size(); ++i) {
+        const Geo& g = s.geos[i];
+        const bool ok = g.kind == GeoKind::Line   ? point(g.a) && point(g.b) && g.a != g.b
+                        : g.kind == GeoKind::Arc  ? point(g.a) && point(g.b) && point(g.c)
+                                                  : point(g.a) && g.r >= 0 && std::size_t(g.r) < s.radii.size();
+        if (!ok)
+            return "curve " + std::to_string(i) + " refers to something that isn't there";
+    }
+    for (std::size_t i = 0; i < s.constraints.size(); ++i) {
+        const Constraint& c = s.constraints[i];
+        const auto kinds = slots(c);
+        bool ok = true;
+        for (int k = 0; k < 3; ++k) {
+            const int v = slotValue(c, k);
+            if (kinds[std::size_t(k)] == 'p')
+                ok = ok && point(v);
+            else if (kinds[std::size_t(k)] == 'g')
+                ok = ok && geo(v);
+        }
+        if (ok) {
+            // Rules that measure a direction need a curve with two points.
+            switch (c.rule) {
+            case Rule::Horizontal:
+            case Rule::Vertical:
+            case Rule::Distance: ok = c.b >= 0 || line(c.a); break;
+            case Rule::Parallel:
+            case Rule::Perpendicular: ok = line(c.a) && line(c.b); break;
+            case Rule::Angle: ok = line(c.a) && (c.b < 0 || line(c.b)); break;
+            case Rule::Symmetric: ok = line(c.c); break;
+            case Rule::Gap: ok = s.geos[std::size_t(c.a)].kind != GeoKind::Line || line(c.b); break;
+            default: break;
+            }
+        }
+        if (!ok || !std::isfinite(c.value) || !std::isfinite(c.value2))
+            return "rule " + std::to_string(i) + " refers to something that isn't there";
+    }
+    for (const Words& w : s.texts)
+        if (!point(w.at))
+            return "words out of place";
+    return {};
+}
+
 double radiusOf(const Sketch& s, const Geo& g)
 {
     if (g.kind == GeoKind::Circle)

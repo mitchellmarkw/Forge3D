@@ -37,6 +37,8 @@ add_executable(forge_tests
     test_taper.cpp
     test_sketch_text.cpp
     test_print_split.cpp
+    fuzz_files.cpp
+    test_undo_random.cpp
 )
 target_link_libraries(forge_tests PRIVATE
     Forge3D::core

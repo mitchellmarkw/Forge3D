@@ -107,6 +107,10 @@ double radiusOf(const Sketch& sketch, const Geo& g);
 
 // ---- Editing helpers ----
 
+// What is wrong with a sketch read from a file (a curve or rule that refers to a point,
+// curve or radius that isn't there, or to the wrong kind of curve); empty if nothing.
+std::string damage(const Sketch& s);
+
 // Adds a point and returns its index.
 int addPoint(Sketch& s, Point p);
 // Joins point `from` into point `into`: everything using `from` uses `into`, and `from`

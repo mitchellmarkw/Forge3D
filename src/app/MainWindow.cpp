@@ -4784,8 +4784,12 @@ void MainWindow::autosaveNow()
 {
     // Only what isn't saved, only when it changed since the last backup, and not in
     // the middle of a drag.
-    if (m_recoveryPath.isEmpty() || m_stack.isClean() || m_docSerial == m_autosavedSerial || m_doc.bodyCount() == 0)
+    if (m_recoveryPath.isEmpty() || m_stack.isClean() || m_docSerial == m_autosavedSerial)
         return;
+    if (m_doc.bodyCount() == 0) {
+        removeRecovery();  // everything deleted: nothing worth offering back
+        return;
+    }
     if (QGuiApplication::mouseButtons() != Qt::NoButton) {
         QTimer::singleShot(5000, this, &MainWindow::autosaveNow);
         return;
@@ -5586,10 +5590,19 @@ void MainWindow::refreshScene()
             endFollow();
         if (m_patternMode.active && !m_doc.find(m_patternMode.target))
             endPattern();
+        QString unbuilt;  // the first shape that couldn't be built: the others still show
         for (ObjectId id : m_doc.topLevelIds()) {
             DisplayItem item;
             item.id = id;
-            item.mesh = m_doc.mesh(id);  // rebuilt only if the shape changed
+            try {
+                item.mesh = m_doc.mesh(id);  // rebuilt only if the shape changed
+            } catch (const std::exception& e) {
+                qCritical() << "Could not build" << id << "for display:" << e.what();
+                if (unbuilt.isEmpty())
+                    unbuilt = tr("'%1' could not be built: %2")
+                                  .arg(QString::fromStdString(m_doc.find(id)->name), QString::fromUtf8(e.what()));
+                continue;
+            }
             item.model = toQMatrix(m_doc.worldTransform(id));
             if (m_edgesMode.active && id == history::objectOf(m_doc, m_edgesMode.target)) {
                 if (m_edgesMode.preview) {
@@ -5692,13 +5705,20 @@ void MainWindow::refreshScene()
                 continue;
             DisplayItem item;
             item.id = id;
-            item.mesh = m_doc.mesh(id);
+            try {
+                item.mesh = m_doc.mesh(id);
+            } catch (const std::exception& e) {
+                qCritical() << "Could not build part" << id << "for display:" << e.what();
+                continue;
+            }
             item.model = toQMatrix(m_doc.worldTransform(id));
             item.color = colourOf(id);
             item.selected = true;
             item.ghost = true;
             items.push_back(std::move(item));
         }
+        if (!unbuilt.isEmpty())
+            statusBar()->showMessage(unbuilt, 8000);
     } catch (const std::exception& e) {
         qCritical() << "Could not build geometry for display:" << e.what();
         statusBar()->showMessage(tr("A shape could not be built: %1").arg(QString::fromUtf8(e.what())), 8000);
