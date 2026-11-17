@@ -63,7 +63,14 @@ Gate to Phase 2: a new user prints a customised part within 10 minutes.
 | 38 | Split for printing: manual and smart splits to fit the printer, with tapered alignment pegs and matching holes | Done (0.47.0, released in 0.47.1) |
 
 | — | Code audit: damaged files, extreme sizes, safety net | Done (0.47.1, released) |
-Separate track: sculpt-engine prototype (one Draw brush on a 1M-triangle mesh at 60 fps).
+| 39 | Colours: a colour for each shape, kept in the file and exported in 3MF | Next |
+| 40 | Smooth (whole shape) and Extrude Down | Planned |
+| 41 | Open PLY and GLB/glTF; wireframe view | Planned |
+| 42 | Angled smart cuts; drag a cut before it's made | Planned |
+| 43 | Lay out split pieces on the plate (or several plates) | Planned |
+| 44 | Sculpt-engine prototype: Draw brush on a 1M-triangle mesh at 60 fps | Planned |
+
+Slices 39–41 close the gaps found in the [Phase 1 gate review](docs/PHASE1_GATE.md).
 
 ## Phase 2: Sculpt · Phase 3: Hybrid · Phase 4: Pro
 
