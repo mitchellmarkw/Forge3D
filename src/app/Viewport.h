@@ -104,7 +104,8 @@ public:
     void setPlateHeight(float z);
     float plateHeight() const { return m_plateZ; }
     // Shapes reaching past the plate's edge or above the build height are drawn in a
-    // warning colour (on by default). offPlateChanged says how many there are.
+    // warning colour (on by default): orange-red when too big for the printer, amber
+    // when they'd fit if moved onto the plate. offPlateChanged says how many of each.
     void setFitWarning(bool on);
 
     // Section view: everything on the side of the plane that `normal` points to is left
@@ -150,7 +151,7 @@ signals:
     void leftReleased(bool wasDrag);
     // The mouse moved with no button held (for tools that highlight what's under it).
     void hovered(const QVector3D& origin, const QVector3D& direction, const QPointF& pixel);
-    void offPlateChanged(int count);
+    void offPlateChanged(int tooBig, int offPlate);
     void glInfoReady(const QString& summary);
     void firstFrameRendered();
 
@@ -225,7 +226,7 @@ private:
     bool m_plateDirty = false;
     float m_plateZ = 250.0f;
     bool m_fitWarning = true;
-    std::set<std::uint64_t> m_offPlate;
+    std::map<std::uint64_t, int> m_offPlate;
     void checkFit();
     LeftDrag m_leftNav = LeftDrag::Tool;
     Qt::CursorShape restingCursor() const;

@@ -15,6 +15,7 @@
 #include <BRepClass3d_SolidClassifier.hxx>
 #include <gp_Pnt.hxx>
 #include "SectionPanel.h"
+#include "forge/core/PrintSplit.h"
 #include "Theme.h"
 #include "ThreadPanel.h"
 #include "forge/core/Thread.h"
@@ -610,6 +611,17 @@ void MainWindow::createActions()
     m_separate->setToolTip(tr("Separate: break a combined shape back into its parts, where they are"));
     connect(m_separate, &QAction::triggered, this, &MainWindow::separateSelected);
 
+    m_splitToFit = new QAction(tr("Split to Fit"), this);
+    m_splitToFit->setToolTip(tr("Split to Fit: cut the selected shape into pieces that fit your printer (Build "
+                                "Plate Size), keyed with alignment pegs so they line up when glued"));
+    connect(m_splitToFit, &QAction::triggered, this, [this] {
+        const ObjectId id = selectedOne();
+        if (id == kInvalidId || m_selection.size() != 1 || !m_doc.isTopLevel(id)) {
+            statusBar()->showMessage(tr("Split to Fit: select one shape on the plate first."), 6000);
+            return;
+        }
+        splitToFit(id);
+    });
     m_split = new QAction(tr("Split"), this);
     m_split->setToolTip(tr("Split: cut the selected shape in two with a plane, keeping one or both halves"));
     connect(m_split, &QAction::triggered, this, [this] {
@@ -923,6 +935,7 @@ void MainWindow::createMenus()
     edit->addAction(m_intersect);
     edit->addAction(m_separate);
     edit->addAction(m_split);
+    edit->addAction(m_splitToFit);
     edit->addAction(m_emboss);
     edit->addAction(m_edgesAction);
     edit->addAction(m_sketchAction);
@@ -1041,6 +1054,7 @@ void MainWindow::createToolBar()
         {m_followAction, "follow"},
         {m_edgesAction, "edges"},
         {m_split, "split"},
+        {m_splitToFit, "split-fit"},
         {m_emboss, "emboss"},
         {m_sculptAction, "sculpt"},
         {m_simplifyAction, "simplify"},
@@ -1212,6 +1226,7 @@ void MainWindow::createToolBar()
     common(viewPage);
 
     Page print = page(tr("Print/Save"), tr("Save it, or get it to the printer"));
+    group(print, tr("Prepare"), {button(m_splitToFit)});
     group(print, tr("Out"), {button(m_save), button(m_export), button(m_sendToSlicer)});
     common(print);
 
@@ -1306,6 +1321,13 @@ void MainWindow::createDocks()
     connect(m_splitPanel, &SplitPanel::planeChanged, this, &MainWindow::updateSplitPlane);
     connect(m_splitPanel, &SplitPanel::applyRequested, this, &MainWindow::applySplit);
     connect(m_splitPanel, &SplitPanel::cancelRequested, this, &MainWindow::endSplit);
+    connect(m_splitPanel, &SplitPanel::keysChanged, this,
+            [this] { saveKeyOptions(m_splitPanel->keySettings()); });
+    connect(m_splitPanel, &SplitPanel::smartRequested, this, [this] {
+        const ObjectId target = m_splitMode.target;
+        endSplit();
+        splitToFit(target);
+    });
     m_embossTimer = new QTimer(this);
     m_embossTimer->setSingleShot(true);
     connect(m_embossTimer, &QTimer::timeout, this, &MainWindow::updateEmbossPreview);
@@ -1652,14 +1674,21 @@ void MainWindow::createStatusBar()
     m_glInfo = new QLabel(this);
     m_fitInfo = new QLabel(this);
     m_fitInfo->setStyleSheet(QStringLiteral("color: #c0431a; font-weight: bold;"));
-    m_fitInfo->setToolTip(tr("Shapes drawn in orange-red reach past the edge of the build plate or above the "
-                             "printer's height (Edit > Build Plate Size sets them)"));
+    m_fitInfo->setToolTip(tr("Orange-red: too big for the printer (Split to Fit cuts it into pieces that fit). "
+                             "Amber: it would fit, but isn't on the plate: move it on to print it. "
+                             "Edit > Build Plate Size sets the printer's size."));
     m_fitInfo->hide();
     statusBar()->addPermanentWidget(m_fitInfo);
-    connect(m_viewport, &Viewport::offPlateChanged, this, [this](int count) {
-        m_fitInfo->setVisible(count > 0);
-        m_fitInfo->setText(count == 1 ? tr("1 shape doesn't fit the printer")
-                                      : tr("%1 shapes don't fit the printer").arg(count));
+    connect(m_viewport, &Viewport::offPlateChanged, this, [this](int big, int away) {
+        QStringList parts;
+        if (big > 0)
+            parts << (big == 1 ? tr("1 shape too big for the printer") : tr("%1 shapes too big for the printer").arg(big));
+        if (away > 0)
+            parts << (away == 1 ? tr("1 shape off the plate") : tr("%1 shapes off the plate").arg(away));
+        m_fitInfo->setVisible(!parts.isEmpty());
+        m_fitInfo->setText(parts.join(QStringLiteral(" \u00B7 ")));
+        m_fitInfo->setStyleSheet(big > 0 ? QStringLiteral("color: #c0431a; font-weight: bold;")
+                                         : QStringLiteral("color: #b07a00; font-weight: bold;"));
     });
     statusBar()->addPermanentWidget(m_modelInfo);
     statusBar()->addPermanentWidget(m_glInfo);
@@ -2668,6 +2697,7 @@ void MainWindow::startSplit(ObjectId target, bool editing)
     }
     m_splitMode = mode;
     const QString name = QString::fromStdString(body->name);
+    m_splitPanel->setKeyOptions(savedKeyOptions());
     m_splitPanel->start(editing ? tr("Move the cut of '%1'").arg(name) : tr("Split '%1'").arg(name), editing,
                         tiltX, tiltY, offset);
     m_propsDockWidth = m_propsDock->width();
@@ -2826,17 +2856,151 @@ void MainWindow::applySplit()
         return;
     }
     std::vector<ObjectId> made;
+    const KeyOptions keys = m_splitPanel->keyOptions();
+    int keyed = 0;
     try {
-        made = splitBody(m_stack, m_doc, m_splitMode.target, plane, m_splitPanel->keep());
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        struct RestoreCursor {
+            ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
+        } restore;
+        if (m_splitPanel->keep() == SplitKeep::Both && keys.keys) {
+            const KeyedSplit result = splitWithKeys(m_stack, m_doc, m_splitMode.target, plane, keys);
+            made = result.pieces;
+            keyed = result.keys;
+        } else {
+            made = splitBody(m_stack, m_doc, m_splitMode.target, plane, m_splitPanel->keep());
+        }
     } catch (const std::exception& e) {
         QMessageBox::warning(this, tr("Forge3D"), tr("Split did not work:\n%1").arg(QString::fromUtf8(e.what())));
         return;
     }
+    if (m_splitPanel->keep() == SplitKeep::Both && keys.keys)
+        statusBar()->showMessage(keyed > 0 ? tr("Split, with %1 alignment %2.")
+                                                 .arg(keyed)
+                                                 .arg(keys.loosePins ? (keyed == 1 ? tr("pin") : tr("pins"))
+                                                                     : (keyed == 1 ? tr("peg") : tr("pegs")))
+                                           : tr("Split. The cut has no room for alignment pegs (too small or "
+                                                "thin)."),
+                                 10000);
     qInfo().noquote() << "Command:" << QString::fromStdString(m_stack.undoLabel());
     endSplit();
     // Select the arrow-side half on its own, so the move and rotate handles show
     // straight away (as after Merge); click the other half to work on it.
     setSelection(made.front());
+}
+
+KeyOptions MainWindow::savedKeyOptions() const
+{
+    const Preferences s;
+    KeyOptions o;
+    o.keys = s.value(QStringLiteral("split/keys"), true).toBool();
+    o.loosePins = s.value(QStringLiteral("split/pins"), false).toBool();
+    o.diameter = s.value(QStringLiteral("split/diameter"), 5.0).toDouble();
+    o.length = s.value(QStringLiteral("split/length"), 6.0).toDouble();
+    o.taper = s.value(QStringLiteral("split/taper"), 2.0).toDouble();
+    o.clearance = s.value(QStringLiteral("split/clearance"), 0.2).toDouble();
+    return o;
+}
+
+void MainWindow::saveKeyOptions(const KeyOptions& o)
+{
+    Preferences s;
+    s.setValue(QStringLiteral("split/keys"), o.keys);
+    s.setValue(QStringLiteral("split/pins"), o.loosePins);
+    s.setValue(QStringLiteral("split/diameter"), o.diameter);
+    s.setValue(QStringLiteral("split/length"), o.length);
+    s.setValue(QStringLiteral("split/taper"), o.taper);
+    s.setValue(QStringLiteral("split/clearance"), o.clearance);
+}
+
+std::array<double, 3> MainWindow::printerVolume() const
+{
+    return {m_viewport->plateSize().width(), m_viewport->plateSize().height(), m_viewport->plateHeight()};
+}
+
+void MainWindow::splitToFit(ObjectId target)
+{
+    const Body* body = m_doc.find(target);
+    if (!body)
+        return;
+    if (m_dragState.kind != Drag::Kind::None)
+        cancelDrag();
+    const QString name = QString::fromStdString(body->name);
+    const auto volume = printerVolume();
+    const KeyOptions keys = savedKeyOptions();
+    const auto size = m_doc.worldBounds(target).size();
+    const QString printer = tr("%1 \u00D7 %2 \u00D7 %3 mm").arg(volume[0]).arg(volume[1]).arg(volume[2]);
+    SmartPlan plan;
+    try {
+        plan = planSmartSplit(m_doc, target, volume, keys);
+    } catch (const std::exception& e) {
+        QMessageBox::warning(this, tr("Split to Fit"), QString::fromUtf8(e.what()));
+        return;
+    }
+    if (plan.pieces <= 1) {
+        QMessageBox::information(this, tr("Split to Fit"),
+                                 tr("'%1' already fits your printer (%2): there's nothing to split.\n\n"
+                                    "(Edit > Build Plate Size sets the printer's size.)")
+                                     .arg(name, printer));
+        return;
+    }
+    QStringList cuts;
+    const QString across[] = {tr("across X"), tr("across Y"), tr("level")};
+    for (int a = 0; a < 3; ++a)
+        if (plan.cutsAcross[std::size_t(a)] > 0)
+            cuts << (plan.cutsAcross[std::size_t(a)] == 1 ? tr("1 cut %1").arg(across[a])
+                                                          : tr("%1 cuts %2").arg(plan.cutsAcross[std::size_t(a)]).arg(across[a]));
+    const QString keyed =
+        !keys.keys ? tr("The cuts won't be keyed (alignment pegs are off in Split).")
+        : keys.loosePins
+            ? tr("Each cut gets holes in both pieces and %1 mm loose pins (added beside the model).").arg(keys.diameter)
+            : tr("Each cut gets %1 mm alignment pegs, tapered %2\u00B0, standing %3 mm out of one piece into "
+                 "holes in the other.")
+                  .arg(keys.diameter)
+                  .arg(keys.taper)
+                  .arg(keys.length);
+    QMessageBox box(this);
+    box.setIcon(QMessageBox::Question);
+    box.setWindowTitle(tr("Split to Fit"));
+    box.setText(tr("'%1' is %2 \u00D7 %3 \u00D7 %4 mm, too big for your printer (%5).")
+                    .arg(name)
+                    .arg(std::round(size[0] * 10) / 10)
+                    .arg(std::round(size[1] * 10) / 10)
+                    .arg(std::round(size[2] * 10) / 10)
+                    .arg(printer));
+    box.setInformativeText(tr("Split it into %1 pieces (%2)? Each cut goes where it cuts through least.")
+                               .arg(plan.pieces)
+                               .arg(cuts.join(QStringLiteral(", "))) +
+                           QStringLiteral("\n\n") + keyed +
+                           tr("\n\nThe peg size and kind are set in Design > Split. One Undo puts it back."));
+    QPushButton* go = box.addButton(tr("Split"), QMessageBox::AcceptRole);
+    box.addButton(QMessageBox::Cancel);
+    box.setDefaultButton(go);
+    box.exec();
+    if (box.clickedButton() != go)
+        return;
+    KeyedSplit made;
+    try {
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        struct RestoreCursor {
+            ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
+        } restore;
+        made = smartSplit(m_stack, m_doc, target, volume, keys);
+    } catch (const std::exception& e) {
+        QMessageBox::warning(this, tr("Split to Fit"), tr("Split to Fit did not work:\n%1").arg(QString::fromUtf8(e.what())));
+        return;
+    }
+    qInfo().noquote() << "Command:" << QString::fromStdString(m_stack.undoLabel()) << "-" << made.pieces.size()
+                      << "pieces," << made.keys << "keys";
+    std::vector<ObjectId> all = made.pieces;
+    all.insert(all.end(), made.pins.begin(), made.pins.end());
+    setSelection(all);
+    statusBar()->showMessage(tr("Split into %1 pieces that each fit the printer (%2 alignment %3). Move one onto "
+                                "the plate to print it.")
+                                 .arg(made.pieces.size())
+                                 .arg(made.keys)
+                                 .arg(made.keys == 1 ? tr("key") : tr("keys")),
+                             20000);
 }
 
 void MainWindow::startEdges(ObjectId target, bool editing)

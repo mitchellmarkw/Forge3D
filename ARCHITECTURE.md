@@ -870,3 +870,25 @@ and sharp across edges.
 - `MainWindow::chooseTheme` switches live: icons are drawn again from their SVGs
   (`setIconNamed` keeps the action → name list), style-sheeted widgets are polished
   again, and the viewport rebuilds its plate lines. `ui/theme` in Preferences.
+
+## Split for printing (slice 38)
+
+- `PrintSplit.h` (core). `sectionLoops` slices the body's display mesh with the plane
+  (crossing points computed from a canonical edge order, joined end to end), so it
+  works for solids and meshes alike; `sectionArea` uses even-odd nesting.
+- `keySpots`: a grid over the cut, kept where it's inside (even-odd) and at least
+  r + clearance + 1.2 mm from every edge; grouped by the smallest loop holding it
+  (one group per piece of the cut); in each, the roomiest spot, then the furthest
+  from those chosen (2, or 3 over 4000 mm²), each checked by a ray through the mesh
+  for room for its hole. Diameters ×0.75 and ×0.5 are tried before giving up.
+- `splitWithKeys`: `splitBody` (Both), then `ConeSpec` bodies placed along the
+  normal: pegs (frustums, embedded 0.3 mm) merged into the back piece, holes (radius
+  + clearance, 0.5 mm deeper, same taper) subtracted from the front one; loose pins
+  are two cones merged, standing beside the model. All in one macro.
+- `smartSplit`: while a piece doesn't fit the volume (X/Y may swap; room along the cut
+  axis is reduced by the peg length), cut it across its most-overflowing axis at the
+  sampled position (14 samples in the window that leaves a fitting first piece and a
+  cuttable rest) with the smallest section area, lightly weighted towards even
+  spacing. `planSmartSplit` counts pieces from the box for the confirmation.
+- Viewport fit warning: `m_offPlate` holds 2 (too big) or 1 (off the plate, would fit
+  if moved; X/Y may swap); `uWarn` 1.0 / 0.5.

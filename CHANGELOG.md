@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.47.0 Beta — Slice 38: Split for printing (2026-11-16)
+
+- **Alignment pegs on Split** (Design → Split, keeping both halves): the cut is keyed so
+  the pieces only go together one way when you glue them. On by default.
+  - **Pegs on one piece**: tapered pegs stand out of one piece (with a level cut, the
+    lower one, so both pieces still print the usual way up) into matching tapered
+    holes in the other. The taper makes a peg easy to start in its hole.
+  - **Loose pins**: holes in both pieces, and pins (tapered both ends) added beside
+    the model to print separately, so every piece keeps a flat cut face to print on.
+  - **Diameter** (5 mm), **length** (6 mm), **taper** (2°) and **clearance** (0.2 mm,
+    added to the hole) can be changed, and are remembered.
+  - Pegs go well inside the cut, clear of its edges and of any holes through it, with
+    room behind them for the hole: two per piece of the cut (so it can't turn), three
+    on a big one. A cut through two legs gets pegs in each leg. Where the cut has no
+    room for a peg, smaller ones are tried; if none fits, the cut isn't keyed and a
+    message says so.
+- **Split to Fit** (Print/Save tab, Edit menu, and a **Smart Split** button in Split):
+  cuts a shape too big for your printer (Build Plate Size) into pieces that each fit,
+  as few as will do. Each cut is level or upright and goes where it cuts through
+  least (through a thin neck rather than a thick end), and every cut is keyed. It
+  says how many pieces first; one Undo puts it back.
+- The fit warning now tells **too big** (orange-red: Split to Fit will help) from **off
+  the plate** (amber: it would fit if moved onto the plate). The split pieces stay
+  together, amber, so you can see how they fit; move one onto the plate to print it.
+- 225 unit tests (3 new: keyed cuts, pins and small cuts, the smart split).
+
 ## 0.46.0 Beta — Slice 37: Dark theme (2026-11-16)
 
 - **View → Theme**: **Follow Windows** (the first time: matches Windows' own light or

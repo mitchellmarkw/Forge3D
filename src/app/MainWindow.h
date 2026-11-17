@@ -3,6 +3,7 @@
 
 #include "forge/core/Align.h"
 #include "forge/core/Arrange.h"
+#include "forge/core/PrintSplit.h"
 #include "forge/core/CommandStack.h"
 #include "forge/core/Document.h"
 #include "forge/core/Edges.h"
@@ -143,6 +144,11 @@ private:
     void startSplit(ObjectId target, bool editing);
     void endSplit();
     void applySplit();
+    void splitToFit(ObjectId target);  // the smart split, after saying what it will do
+    QAction* m_splitToFit = nullptr;
+    KeyOptions savedKeyOptions() const;
+    void saveKeyOptions(const KeyOptions& options);
+    std::array<double, 3> printerVolume() const;
     void updateSplitPlane();  // after the panel changed: redraw, update side names and range
     SplitPlane currentSplitPlane() const;
     void addSplitItems(std::vector<DisplayItem>& items) const;
