@@ -422,6 +422,8 @@ std::string toString(BooleanOp op)
     case BooleanOp::Sculpt: return "Sculpt";
     case BooleanOp::Simplify: return "Simplify";
     case BooleanOp::Thread: return "Thread";
+    case BooleanOp::Smooth: return "Smooth";
+    case BooleanOp::ExtrudeDown: return "Extrude Down";
     }
     return "Combine";
 }

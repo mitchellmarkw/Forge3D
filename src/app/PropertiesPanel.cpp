@@ -12,6 +12,7 @@
 #include <QLineEdit>
 #include <QPushButton>
 #include <QSignalBlocker>
+#include <QSpinBox>
 #include <QStackedWidget>
 #include <QVBoxLayout>
 
@@ -142,6 +143,16 @@ PropertiesPanel::PropertiesPanel(QWidget* parent) : QWidget(parent)
     m_keepRow = m_keep;
     m_keepLabel = new QLabel(tr("Keep:"));
     general->addRow(m_keepLabel, m_keep);
+    m_strength = new QSpinBox;
+    m_strength->setRange(1, 10);
+    m_strength->setKeyboardTracking(false);  // smoothing takes a moment: once, when done typing
+    m_strength->setToolTip(tr("How strongly to smooth: 1 takes the edge off, 10 rounds the shape right off"));
+    connect(m_strength, &QSpinBox::valueChanged, this, [this](int strength) {
+        if (m_body)
+            emit smoothStrengthRequested(m_body->id, strength);
+    });
+    m_strengthLabel = new QLabel(tr("Strength:"));
+    general->addRow(m_strengthLabel, m_strength);
     layout->addLayout(general);
 
     // A Text shape's words
@@ -288,6 +299,13 @@ void PropertiesPanel::setBody(const Body* body, const QString& context, bool isP
     const bool simplify = body->isBoolean() && body->boolean->op == BooleanOp::Simplify && body->boolean->simplify;
     m_keepRow->setVisible(simplify && !isPart);
     m_keepLabel->setVisible(simplify && !isPart);
+    const bool smooth = body->isBoolean() && body->boolean->op == BooleanOp::Smooth && body->boolean->smooth;
+    m_strength->setVisible(smooth && !isPart);
+    m_strengthLabel->setVisible(smooth && !isPart);
+    if (smooth) {
+        const QSignalBlocker block(m_strength);
+        m_strength->setValue(body->boolean->smooth->strength);
+    }
     if (simplify) {
         const QSignalBlocker block(m_keep);
         m_keep->setValue(body->boolean->simplify->keep * 100.0);
@@ -324,6 +342,14 @@ void PropertiesPanel::setBody(const Body* body, const QString& context, bool isP
                 button->setText(tr("Remove the words"));
                 button->setToolTip(tr("Give back the shape without the embossed words, where it is"));
             }
+            break;
+        case BooleanOp::Smooth:
+            button->setText(tr("Remove the smoothing"));
+            button->setToolTip(tr("Give back the shape as it was before it was smoothed, where it is"));
+            break;
+        case BooleanOp::ExtrudeDown:
+            button->setText(tr("Remove the extrusion"));
+            button->setToolTip(tr("Give back the shape without what was added below it, where it is"));
             break;
         case BooleanOp::Simplify:
             button->setText(tr("Remove the simplifying"));

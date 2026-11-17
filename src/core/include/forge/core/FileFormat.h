@@ -55,7 +55,7 @@ namespace forge::file {
 //  24  the sketch rule "gap" (an offset copy's distance from its original); a pad's
 //      "taper" (degrees its sides lean in); a sketch's "texts" (words whose letters
 //      are outlines)
-inline constexpr int kFormatVersion = 24;
+inline constexpr int kFormatVersion = 25;
 // The highest sculpt::Brush number a file may hold (Pattern).
 inline constexpr int kLastSculptBrush = 13;
 inline constexpr const char* kExtension = ".f3d";

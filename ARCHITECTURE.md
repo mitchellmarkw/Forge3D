@@ -933,3 +933,28 @@ and sharp across edges.
   `QWidgetAction` grid of `kSwatches` buttons, More Colours… (`QColorDialog`) and
   Automatic. Each choice is applied on a zero-length timer, after the menu has closed.
 
+## Smooth, Extrude Down, looks (slice 40)
+
+- `BooleanOp::Smooth` (`SmoothFinish::strength` 1..10) and `BooleanOp::ExtrudeDown`
+  (`planePoint` / `planeNormal`: the plate and "up", in the step's coordinates, set when
+  the step is made) are mesh-engine steps. File format 25 adds `"smooth"` /
+  `"extrudeDown"`.
+- `meshsteps::smoothed` (MeshSteps.cpp): under 150k triangles, remesh to an edge of
+  min(diag/60, mean edge) first; then uniform-Laplacian steps (λ 0.5), about
+  (reach / edge)² of them (reach = strength × diag / 60; at most 300), open-edge points
+  pinned; then scaled about the centroid back to the starting volume.
+- `meshsteps::columnsBelow`: triangles facing down (against up) and above the plane are
+  grouped into connected patches. Each patch becomes one closed solid (`solidBelow`):
+  the patch turned over on top (lifted a hair), its projection a hair under the plane,
+  and walls round its rim. Corners are merged through shared patch edges (union-find),
+  so patches touching at a single point don't pinch. Patches over 40k triangles are
+  simplified first, with the top lifted by 2× their mean edge. Solids with well-separated
+  boxes are packed into one mesh (`packed`), so a curved underside's many small patches
+  merge in a few batches. The step is `merged({part, solids…})`.
+- `Viewport::Look` (Solid / SeeThrough / Wireframe): see-through draws normal shapes in
+  the translucent pass at alpha 0.42, back faces then front faces (face culling);
+  wireframe uses `glPolygonMode(GL_LINE)` from `QOpenGLFunctions_3_3_Core` (not on
+  OpenGL ES) and an unlit `uWire` path in the shader. `paintGL` now re-enables depth
+  testing (and resets the depth mask, blending and culling) every frame, because the
+  QPainter overlays leave it off.
+

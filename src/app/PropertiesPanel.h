@@ -10,6 +10,7 @@
 
 class QCheckBox;
 class QDoubleSpinBox;
+class QSpinBox;
 class QFormLayout;
 class QGroupBox;
 class QLabel;
@@ -56,6 +57,8 @@ signals:
     void throughAllRequested(ObjectId id, bool on);
     // Simplify: the share of triangles to keep (0.01..1).
     void simplifyKeepRequested(ObjectId id, double keep);
+    // Smooth: how strongly (1..10).
+    void smoothStrengthRequested(ObjectId id, int strength);
 
 private:
     QDoubleSpinBox* makeLength(const QString& tip);
@@ -84,6 +87,8 @@ private:
     QWidget* m_keepRow = nullptr;
     QWidget* m_keepLabel = nullptr;
     QDoubleSpinBox* m_keep = nullptr;
+    QLabel* m_strengthLabel = nullptr;
+    QSpinBox* m_strength = nullptr;
     QWidget* m_textGroup = nullptr;  // the words of a Text shape
     WordsEditor* m_words = nullptr;
     QDoubleSpinBox* m_letterHeight = nullptr;

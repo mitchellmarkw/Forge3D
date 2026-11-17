@@ -221,6 +221,8 @@ const char* opName(BooleanOp op)
     case BooleanOp::Pattern: return "pattern";
     case BooleanOp::Sculpt: return "sculpt";
     case BooleanOp::Simplify: return "simplify";
+    case BooleanOp::Smooth: return "smooth";
+    case BooleanOp::ExtrudeDown: return "extrudeDown";
     case BooleanOp::Thread: return "thread";
     }
     return "merge";
@@ -240,6 +242,7 @@ json bodyToJson(const Body& b)
         j["operands"] = b.boolean->operands;
         j["pivot"] = b.boolean->pivot;
         if (b.boolean->op == BooleanOp::Split || b.boolean->op == BooleanOp::Mirror ||
+            b.boolean->op == BooleanOp::ExtrudeDown ||
             b.boolean->op == BooleanOp::Emboss) {
             j["planePoint"] = b.boolean->planePoint;
             j["planeNormal"] = b.boolean->planeNormal;
@@ -312,6 +315,8 @@ json bodyToJson(const Body& b)
         }
         if (const auto& sf = b.boolean->simplify)
             j["simplify"] = json{{"keep", sf->keep}};
+        if (const auto& sm = b.boolean->smooth)
+            j["smooth"] = json{{"strength", sm->strength}};
         if (const auto& p = b.boolean->pattern) {
             static const char* kinds[] = {"row", "grid", "circle"};
             j["pattern"] = json{{"kind", kinds[int(p->kind)]}, {"feature", p->feature},  {"dir1", p->dir1},
@@ -490,6 +495,10 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
             spec.op = BooleanOp::Simplify;
         else if (op == "thread" && version >= 22)
             spec.op = BooleanOp::Thread;
+        else if (op == "smooth" && version >= 25)
+            spec.op = BooleanOp::Smooth;
+        else if (op == "extrudeDown" && version >= 25)
+            spec.op = BooleanOp::ExtrudeDown;
         else
             damaged(where + ": unknown combine operation '" + op + "'");
         const auto operands = j.find("operands");
@@ -508,7 +517,8 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
                 damaged(where + ": bad pivot");
             spec.pivot[i] = (*pivot)[i].get<double>();
         }
-        if (spec.op == BooleanOp::Split || spec.op == BooleanOp::Mirror || spec.op == BooleanOp::Emboss) {
+        if (spec.op == BooleanOp::Split || spec.op == BooleanOp::Mirror || spec.op == BooleanOp::Emboss ||
+            spec.op == BooleanOp::ExtrudeDown) {
             const auto readVec = [&](const char* key, std::array<double, 3>& out) {
                 const auto v = j.find(key);
                 if (v == j.end() || !v->is_array() || v->size() != 3)
@@ -638,6 +648,12 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
             t.fit = tj->value("fit", 0.2);
             t.leftHand = tj->value("leftHand", false);
             spec.thread = t;
+        }
+        if (spec.op == BooleanOp::Smooth) {
+            const auto sj = j.find("smooth");
+            if (sj == j.end() || !sj->is_object())
+                damaged(where + ": missing how strongly to smooth");
+            spec.smooth = SmoothFinish{std::clamp(sj->value("strength", 3), 1, 10)};
         }
         if (spec.op == BooleanOp::Simplify) {
             const auto sj = j.find("simplify");

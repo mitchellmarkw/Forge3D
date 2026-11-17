@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "Viewport.h"
 
+#include <QOpenGLFunctions_3_3_Core>
+#include <QOpenGLVersionFunctionsFactory>
+
 #include "Theme.h"
 
 #include "ViewCube.h"
@@ -61,9 +64,16 @@ uniform vec3 uColor;
 uniform float uWarn;      // 1: the shape doesn't fit the build plate
 uniform float uSelected;  // 0 or 1
 uniform float uAlpha;     // 1 = solid, less = see-through (ghost)
+uniform float uWire;      // 1: drawing triangle edges (no lighting)
 out vec4 fragColor;
 void main() {
     if (uClipOn > 0.5 && dot(uClip.xyz, vWorldPos) > uClip.w) discard;
+    if (uWire > 0.5) {
+        vec3 warnLine = uWarn > 0.75 ? vec3(0.93, 0.33, 0.16) : vec3(0.96, 0.72, 0.18);
+        vec3 line = mix(uColor * 0.85, warnLine, uWarn > 0.0 ? 0.75 : 0.0);
+        fragColor = vec4(mix(line, vec3(0.25, 0.85, 1.0), uSelected * 0.8), 1.0);
+        return;
+    }
     vec3 n = normalize(vNormal);
     if (!gl_FrontFacing) n = -n;               // light the inside of open meshes too
     vec3 toEye = normalize(-vViewPos);
@@ -552,6 +562,9 @@ void Viewport::initializeGL()
 
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_MULTISAMPLE);
+    // Wireframe needs glPolygonMode, which OpenGL ES lacks (Qt's common functions leave it out).
+    m_gl33 = context()->isOpenGLES() ? nullptr
+                                     : QOpenGLVersionFunctionsFactory::get<QOpenGLFunctions_3_3_Core>(context());
 
     buildPlateGeometry();
     m_itemsDirty = true;
@@ -740,12 +753,27 @@ void Viewport::syncGpuMeshes()
     }
 }
 
+void Viewport::setLook(Look look)
+{
+    if (m_look == look)
+        return;
+    m_look = look;
+    update();
+}
+
 void Viewport::paintGL()
 {
     {
         const QColor bg = theme::look().view;
         glClearColor(float(bg.redF()), float(bg.greenF()), float(bg.blueF()), 1.0f);
     }
+    // QPainter (labels, the view cube) leaves its own state behind at the end of each
+    // frame, depth testing off among it: set what the 3D drawing needs every time.
+    glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_LESS);
+    glDepthMask(GL_TRUE);
+    glDisable(GL_BLEND);
+    glDisable(GL_CULL_FACE);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     if (!m_glReady)
         return;
@@ -772,6 +800,7 @@ void Viewport::paintGL()
     // Bodies: solid ones first, then see-through parts on top of them.
     m_meshShader->bind();
     m_meshShader->setUniformValue("uClipOn", m_section ? 1.0f : 0.0f);
+    m_meshShader->setUniformValue("uWire", 0.0f);
     const bool cutSome = m_section && m_section->selectedOnly;
     if (m_section) {
         m_meshShader->setUniformValue("uClip", QVector4D(m_section->normal, m_section->offset));
@@ -780,7 +809,10 @@ void Viewport::paintGL()
     enum class Pass { Solid, Translucent, Ghost };
     const auto drawItems = [&](Pass pass) {
         for (const DisplayItem& item : m_items) {
-            const Pass mine = item.ghost ? Pass::Ghost : item.alpha < 1.0f ? Pass::Translucent : Pass::Solid;
+            const bool seeThrough = m_look == Look::SeeThrough && !item.ghost && item.alpha >= 1.0f;
+            const Pass mine = item.ghost                               ? Pass::Ghost
+                              : item.alpha < 1.0f || seeThrough ? Pass::Translucent
+                                                                       : Pass::Solid;
             if (mine != pass)
                 continue;
             const auto found = m_gpu.find(item.id);
@@ -796,14 +828,32 @@ void Viewport::paintGL()
             m_meshShader->setUniformValue("uColor", item.color);
             {
                 const auto warn = m_offPlate.find(item.id);
-                m_meshShader->setUniformValue("uWarn", pass != Pass::Solid || warn == m_offPlate.end() ? 0.0f
+                m_meshShader->setUniformValue("uWarn", pass == Pass::Ghost || item.alpha < 1.0f || warn == m_offPlate.end() ? 0.0f
                                                        : warn->second == 2                    ? 1.0f
                                                                                               : 0.5f);
             }
             m_meshShader->setUniformValue("uSelected", item.selected ? 1.0f : 0.0f);
-            m_meshShader->setUniformValue("uAlpha", pass == Pass::Ghost ? 0.45f : item.alpha);
+            m_meshShader->setUniformValue("uAlpha", pass == Pass::Ghost ? 0.45f : seeThrough ? 0.42f : item.alpha);
             QOpenGLVertexArrayObject::Binder bind(found->second->vao.get());
-            glDrawElements(GL_TRIANGLES, found->second->indexCount, GL_UNSIGNED_INT, nullptr);
+            const bool wire = m_look == Look::Wireframe && pass == Pass::Solid && m_gl33;
+            if (wire) {
+                m_meshShader->setUniformValue("uWire", 1.0f);
+                m_gl33->glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+                glDrawElements(GL_TRIANGLES, found->second->indexCount, GL_UNSIGNED_INT, nullptr);
+                m_gl33->glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+                m_meshShader->setUniformValue("uWire", 0.0f);
+            } else if (seeThrough) {
+                // The far side first, then the near side over it, so the shape reads as a shape.
+                glEnable(GL_CULL_FACE);
+                glCullFace(GL_BACK);
+                glFrontFace(GL_CW);
+                glDrawElements(GL_TRIANGLES, found->second->indexCount, GL_UNSIGNED_INT, nullptr);
+                glFrontFace(GL_CCW);
+                glDrawElements(GL_TRIANGLES, found->second->indexCount, GL_UNSIGNED_INT, nullptr);
+                glDisable(GL_CULL_FACE);
+            } else {
+                glDrawElements(GL_TRIANGLES, found->second->indexCount, GL_UNSIGNED_INT, nullptr);
+            }
         }
     };
     drawItems(Pass::Solid);

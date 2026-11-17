@@ -28,6 +28,8 @@
 
 class QVariantAnimation;
 
+class QOpenGLFunctions_3_3_Core;
+
 namespace forge::app {
 
 // One thing to draw: a mesh in its own coordinates, plus where it sits.
@@ -130,6 +132,12 @@ public:
     };
     void setLabels(std::vector<Label> labels);
     void themeChanged();  // light / dark: redraw in the new colours
+    // How shapes are drawn: solid, see-through (half clear, so what's inside and behind
+    // shows), or as their triangles' edges. Parts shown inside combined shapes, the
+    // Split plane and other helpers are drawn as before.
+    enum class Look { Solid, SeeThrough, Wireframe };
+    void setLook(Look look);
+    Look look() const { return m_look; }
     // The box round what's shown (ghosts and see-through helpers aside), plate mm.
     // cutOnly: just the shapes a selected-only section cuts (all, if there are none).
     Bounds sceneBounds(bool cutOnly = false) const;
@@ -199,6 +207,8 @@ private:
 
     // The view cube
     bool m_viewCube = true;
+    Look m_look = Look::Solid;
+    QOpenGLFunctions_3_3_Core* m_gl33 = nullptr;  // for glPolygonMode (Wireframe); none on OpenGL ES
     std::optional<Section> m_section;
     std::vector<Label> m_labels;
     std::set<std::uint64_t> m_sectionIds;  // the shapes a selected-only section cuts
