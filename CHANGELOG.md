@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.45.0 Beta — Slice 36: Sketch on the section's cut (2026-11-16)
+
+- With **Section View** on, you can sketch on the flat cut it shows:
+  - Select a shape, click **Sketch**, then click the **cut face** itself; or
+  - **Sketch ▾ → The section view's cut** (with a shape selected, or with nothing
+    selected for a sketch at that plane on the plate).
+- The sketch opens on the cut's plane, exactly where the slider is, with the cut
+  through the shape drawn in grey dashes to snap to: its walls, holes and hollows.
+- What you make goes **into the part that shows** (The other way is set for you), so a
+  **Pocket** cuts into the half you can see, from the inside: a hidden chamber, a
+  channel, a slot from the middle. **Both ways** cuts or pads to both sides of the
+  cut, and **Revolve** / **Groove** work as on the middle planes.
+- The result is an ordinary step: double-click it to change the sketch. It stays where
+  it was made if the section slider moves afterwards.
+
 ## 0.44.0 Beta — Slice 35: Backup settings, section clicks, measurement labels (2026-11-16)
 
 - **Edit → Backup Copies…**: how often a backup copy of unsaved work is made, from
