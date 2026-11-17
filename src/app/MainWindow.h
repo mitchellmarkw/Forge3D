@@ -187,6 +187,11 @@ private:
     void sketchClicked();                  // the Sketch button
     void sketchOnSection();                // the section view's cut
     QAction* m_sketchOnSection = nullptr;
+    // Light / dark.
+    void setIconNamed(QAction* action, const QString& name);
+    void chooseTheme(int choice);  // theme::Choice
+    void styleEmptyHint();
+    std::vector<std::pair<QAction*, QString>> m_namedIcons;
     void sketchOnPlane(int which, bool atSection = false);         // front / side / top plane through the middle
     bool sketchTargetOk(ObjectId id);      // a shape that can be sketched on (else says why)
     void sketchFaceClick(const QVector3D& origin, const QVector3D& direction);

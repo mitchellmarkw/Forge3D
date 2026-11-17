@@ -128,6 +128,7 @@ public:
         QColor colour{30, 140, 60};
     };
     void setLabels(std::vector<Label> labels);
+    void themeChanged();  // light / dark: redraw in the new colours
     // The box round what's shown (ghosts and see-through helpers aside), plate mm.
     // cutOnly: just the shapes a selected-only section cuts (all, if there are none).
     Bounds sceneBounds(bool cutOnly = false) const;

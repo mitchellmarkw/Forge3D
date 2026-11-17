@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "SketchView.h"
 
+#include "Theme.h"
+
 #include "forge/core/SketchShape.h"
 #include "forge/core/Text.h"
 
@@ -1085,12 +1087,13 @@ void SketchView::paintEvent(QPaintEvent*)
 {
     QPainter p(this);
     p.setRenderHint(QPainter::Antialiasing, true);
-    p.fillRect(rect(), QColor(250, 251, 253));
+    const theme::Look& look = theme::look();
+    p.fillRect(rect(), look.sketchPaper);
 
     // Grid
     const double step = gridStep();
     const Point lo = toSketch({0, double(height())}), hi = toSketch({double(width()), 0});
-    const QPen minor(QColor(232, 236, 242), 1), major(QColor(210, 216, 226), 1);
+    const QPen minor(look.sketchMinor, 1), major(look.sketchMajor, 1);
     for (double x = std::floor(lo.x / step) * step; x <= hi.x; x += step) {
         const bool big = std::abs(std::remainder(x, step * 5)) < step * 0.01;
         p.setPen(big ? major : minor);
@@ -1111,7 +1114,7 @@ void SketchView::paintEvent(QPaintEvent*)
     p.drawLine(QPointF(o.x(), 0), QPointF(o.x(), height()));
 
     // The face sketched on
-    p.setPen(QPen(QColor(150, 150, 160), 1.5, Qt::DashLine));
+    p.setPen(QPen(look.sketchReference, 1.5, Qt::DashLine));
     for (const auto& line : m_reference) {
         QPolygonF poly;
         for (const QPointF& q : line)
@@ -1120,7 +1123,7 @@ void SketchView::paintEvent(QPaintEvent*)
     }
 
     const bool held = m_solved.ok && m_solved.freedom == 0 && !isEmpty(m_sketch);
-    const QColor normal = held ? QColor(30, 140, 60) : QColor(30, 70, 160);
+    const QColor normal = held ? look.sketchHeld : look.sketchLine;
     const QColor pickedColour(240, 130, 20), hoverColour(250, 175, 80);
     const auto colourFor = [&](Pick pick, const QColor& base) {
         if (std::find(m_picks.begin(), m_picks.end(), pick) != m_picks.end())
@@ -1140,7 +1143,7 @@ void SketchView::paintEvent(QPaintEvent*)
     };
     for (std::size_t i = 0; i < m_sketch.geos.size(); ++i) {
         const Geo& g = m_sketch.geos[i];
-        QPen pen(colourFor({Pick::Geo, int(i)}, g.construction ? QColor(90, 140, 220) : normal),
+        QPen pen(colourFor({Pick::Geo, int(i)}, g.construction ? look.sketchHelper : normal),
                  g.construction ? 1.2 : 2.0, g.construction ? Qt::DashLine : Qt::SolidLine);
         p.setPen(pen);
         const Point c = m_sketch.points[std::size_t(g.a)];
@@ -1228,9 +1231,9 @@ void SketchView::paintEvent(QPaintEvent*)
         const bool failing = std::find(m_solved.failing.begin(), m_solved.failing.end(), int(i)) != m_solved.failing.end();
         const QColor edge = colourFor({Pick::Rule, int(i)}, failing ? QColor(210, 40, 40) : QColor(150, 150, 165));
         p.setPen(QPen(edge, 1));
-        p.setBrush(isDimension(c.rule) ? QColor(255, 255, 255, 235) : QColor(240, 243, 250, 235));
+        p.setBrush(isDimension(c.rule) ? look.labelFill : look.labelRuleFill);
         p.drawRoundedRect(box, 3, 3);
-        p.setPen(failing ? QColor(200, 30, 30) : QColor(40, 40, 60));
+        p.setPen(failing ? QColor(230, 60, 60) : look.labelText);
         p.drawText(box, Qt::AlignCenter, text);
     }
 
@@ -1292,7 +1295,7 @@ void SketchView::paintEvent(QPaintEvent*)
         p.drawEllipse(q, 5, 5);
     }
     // Coordinates in the corner
-    p.setPen(QColor(110, 110, 125));
+    p.setPen(look.sketchText);
     p.drawText(QRectF(8, height() - 22, 300, 18), Qt::AlignLeft | Qt::AlignVCenter,
                tr("x %1   y %2 mm   (grid %3 mm)")
                    .arg(m_cursor.at.x, 0, 'f', 2)

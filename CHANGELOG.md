@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.46.0 Beta — Slice 37: Dark theme (2026-11-16)
+
+- **View → Theme**: **Follow Windows** (the first time: matches Windows' own light or
+  dark app mode), **Light** or **Dark**. It switches straight away, no restart, and is
+  remembered.
+- In Dark, everything goes dark together: the menus, ribbon and panels, the 3D view and
+  its grid, the sketcher, the view cube, measurement labels and the tour's notes. The
+  ribbon's icons turn light.
+- (Shapes keep their own colours either way.)
+
 ## 0.45.0 Beta — Slice 36: Sketch on the section's cut (2026-11-16)
 
 - With **Section View** on, you can sketch on the flat cut it shows:

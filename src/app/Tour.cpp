@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "Tour.h"
 
+#include "Theme.h"
+
 #include <QEvent>
 #include <QFrame>
 #include <QGraphicsDropShadowEffect>
@@ -29,9 +31,9 @@ Tour::Tour(QWidget* window, std::vector<Step> steps) : QWidget(window), m_window
 
     m_note = new QFrame(window);
     m_note->setObjectName(QStringLiteral("TourNote"));
-    m_note->setStyleSheet(QStringLiteral(
-        "#TourNote { background: white; border: 2px solid #2b78d0; border-radius: 8px; }"
-        "#TourNote QLabel { background: transparent; color: #2b2f33; }"));
+    m_note->setStyleSheet(QStringLiteral("#TourNote { background: %1; border: 2px solid #2b78d0; border-radius: 8px; }"
+                                         "#TourNote QLabel { background: transparent; color: %2; }")
+                              .arg(theme::look().noteFill.name(), theme::look().noteText.name()));
     m_note->setFixedWidth(kNoteWidth);
     auto* shadow = new QGraphicsDropShadowEffect(m_note);
     shadow->setBlurRadius(18);
