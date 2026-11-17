@@ -456,6 +456,32 @@ void Document::rename(ObjectId id, const std::string& name)
     notify(ChangeKind::Modified, id);
 }
 
+void Document::setColour(ObjectId id, std::optional<std::uint32_t> colour)
+{
+    if (colour)
+        *colour &= 0xFFFFFFu;
+    Body& body = require(id);
+    if (body.colour == colour)
+        return;
+    body.colour = colour;
+    notify(ChangeKind::Modified, id);
+}
+
+std::uint32_t Document::colourOf(ObjectId id) const
+{
+    for (int depth = 0; depth < 1000; ++depth) {
+        const Body* body = find(id);
+        if (!body)
+            break;
+        if (body->colour)
+            return *body->colour;
+        if (!body->isBoolean() || body->boolean->operands.empty())
+            break;
+        id = body->boolean->operands.front();
+    }
+    return kDefaultColours[std::size_t(std::max<ObjectId>(id - 1, 0)) % kDefaultColours.size()];
+}
+
 void Document::invalidate(ObjectId id, bool includeSelf)
 {
     if (includeSelf) {

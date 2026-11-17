@@ -200,7 +200,17 @@ struct MfObject {
     std::vector<float> positions;
     std::vector<std::uint32_t> indices;
     std::vector<std::pair<std::string, Affine>> components;  // object id, transform
+    std::string pid, pindex;  // its material (a colour), if it names one
 };
+
+// "#RRGGBB" or "#RRGGBBAA" -> 0xRRGGBB.
+std::optional<std::uint32_t> parseColour(const std::string& text)
+{
+    if ((text.size() != 7 && text.size() != 9) || text[0] != '#' ||
+        text.find_first_not_of("0123456789abcdefABCDEF", 1) != std::string::npos)
+        return std::nullopt;
+    return std::uint32_t(std::stoul(text.substr(1, 6), nullptr, 16));
+}
 
 }  // namespace
 
@@ -319,6 +329,8 @@ std::vector<RawMesh> read3mf(const std::string& bytes, const std::string& name)
     std::vector<std::pair<std::string, Affine>> items;
     MfObject* current = nullptr;
     std::string currentId;
+    std::map<std::string, std::vector<std::optional<std::uint32_t>>> materials;  // basematerials id -> colours
+    std::string currentMaterials;
     const auto number = [](const XmlTag& t, const char* key) {
         const auto it = t.attrs.find(key);
         if (it == t.attrs.end())
@@ -342,6 +354,20 @@ std::vector<RawMesh> read3mf(const std::string& bytes, const std::string& name)
         if (t.closing) {
             if (t.name == "object")
                 current = nullptr;
+            if (t.name == "basematerials")
+                currentMaterials.clear();
+            return;
+        }
+        if (t.name == "basematerials") {
+            currentMaterials = t.attrs.count("id") ? t.attrs.at("id") : std::string();
+            materials[currentMaterials];
+            if (t.selfClosing)
+                currentMaterials.clear();
+            return;
+        }
+        if (t.name == "base" && !currentMaterials.empty()) {
+            materials[currentMaterials].push_back(
+                t.attrs.count("displaycolor") ? parseColour(t.attrs.at("displaycolor")) : std::nullopt);
             return;
         }
         if (t.name == "model" && t.attrs.count("unit")) {
@@ -352,12 +378,18 @@ std::vector<RawMesh> read3mf(const std::string& bytes, const std::string& name)
             currentId = t.attrs.count("id") ? t.attrs.at("id") : std::string();
             current = &objects[currentId];
             current->name = t.attrs.count("name") ? unescape(t.attrs.at("name")) : std::string();
+            current->pid = t.attrs.count("pid") ? t.attrs.at("pid") : std::string();
+            current->pindex = t.attrs.count("pindex") ? t.attrs.at("pindex") : std::string("0");
             if (t.selfClosing)
                 current = nullptr;
         } else if (current && t.name == "vertex") {
             current->positions.insert(current->positions.end(),
                                       {float(number(t, "x")), float(number(t, "y")), float(number(t, "z"))});
         } else if (current && t.name == "triangle") {
+            if (current->pid.empty() && current->indices.empty() && t.attrs.count("pid")) {
+                current->pid = t.attrs.at("pid");  // no colour for the object: the first triangle's
+                current->pindex = t.attrs.count("p1") ? t.attrs.at("p1") : std::string("0");
+            }
             current->indices.insert(current->indices.end(),
                                     {corner(t, "v1"), corner(t, "v2"), corner(t, "v3")});
         } else if (current && t.name == "component") {
@@ -411,6 +443,25 @@ std::vector<RawMesh> read3mf(const std::string& bytes, const std::string& name)
         for (const auto& [id, o] : objects)
             if (!o.indices.empty())
                 items.emplace_back(id, kIdentity);
+    // An object's colour: its own material's, else its first coloured part's.
+    std::function<std::optional<std::uint32_t>(const std::string&, int)> colourOf =
+        [&](const std::string& id, int depth) -> std::optional<std::uint32_t> {
+        const auto it = objects.find(id);
+        if (it == objects.end() || depth > 16)
+            return std::nullopt;
+        const MfObject& o = it->second;
+        if (const auto group = materials.find(o.pid); !o.pid.empty() && group != materials.end()) {
+            const bool digits = !o.pindex.empty() && o.pindex.size() < 9 &&
+                                o.pindex.find_first_not_of("0123456789") == std::string::npos;
+            const std::size_t k = digits ? std::size_t(std::stoul(o.pindex)) : 0;
+            if (digits && k < group->second.size() && group->second[k])
+                return group->second[k];
+        }
+        for (const auto& [child, cm] : o.components)
+            if (const auto c = colourOf(child, depth + 1))
+                return c;
+        return std::nullopt;
+    };
     int n = 0;
     double corners = 0;
     for (const auto& [id, m] : items)
@@ -425,6 +476,7 @@ std::vector<RawMesh> read3mf(const std::string& bytes, const std::string& name)
                     : items.size() == 1                            ? name
                                                                    : name + " " + std::to_string(n);
         addObject(id, m, mesh, 0);
+        mesh.colour = colourOf(id, 0);
         if (!mesh.indices.empty())
             out.push_back(std::move(mesh));
     }
@@ -818,6 +870,7 @@ ImportResult importFile(CommandStack& stack, Document& doc, const std::filesyste
         spec.depth = data->size[1];
         spec.height = data->size[2];
         b.spec = spec;
+        b.colour = raw.colour;
         b.placement.x = offset[0];
         b.placement.y = offset[1];
         b.placement.z = offset[2];

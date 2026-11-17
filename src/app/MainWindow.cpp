@@ -57,7 +57,10 @@
 #include <QDesktopServices>
 #include <QDir>
 #include <QCheckBox>
+#include <QColorDialog>
 #include <QComboBox>
+#include <QGridLayout>
+#include <QWidgetAction>
 #include <QDialog>
 #include <QDockWidget>
 #include <QElapsedTimer>
@@ -129,14 +132,27 @@ namespace forge::app {
 namespace {
 
 // Distinct, print-friendly colours; each body keeps its colour (picked by id).
-const std::array<QVector3D, 6> kPalette{
-    QVector3D(0.28f, 0.55f, 0.85f),  // blue
-    QVector3D(0.93f, 0.55f, 0.20f),  // orange
-    QVector3D(0.35f, 0.70f, 0.40f),  // green
-    QVector3D(0.62f, 0.45f, 0.80f),  // purple
-    QVector3D(0.20f, 0.68f, 0.70f),  // teal
-    QVector3D(0.88f, 0.42f, 0.52f),  // rose
+// Colours offered by Colour: the usual filament colours.
+struct Swatch {
+    std::uint32_t rgb;
+    const char* name;
 };
+constexpr std::array<Swatch, 14> kSwatches{{
+    {0xF2F2F2, QT_TRANSLATE_NOOP("MainWindow", "White")},
+    {0xB5B8BC, QT_TRANSLATE_NOOP("MainWindow", "Light grey")},
+    {0x55585D, QT_TRANSLATE_NOOP("MainWindow", "Dark grey")},
+    {0x222326, QT_TRANSLATE_NOOP("MainWindow", "Black")},
+    {0xD7322D, QT_TRANSLATE_NOOP("MainWindow", "Red")},
+    {0xED8C33, QT_TRANSLATE_NOOP("MainWindow", "Orange")},
+    {0xF2C230, QT_TRANSLATE_NOOP("MainWindow", "Yellow")},
+    {0x3FA458, QT_TRANSLATE_NOOP("MainWindow", "Green")},
+    {0x33ADB3, QT_TRANSLATE_NOOP("MainWindow", "Teal")},
+    {0x2B78D0, QT_TRANSLATE_NOOP("MainWindow", "Blue")},
+    {0x8A56C2, QT_TRANSLATE_NOOP("MainWindow", "Purple")},
+    {0xE8779E, QT_TRANSLATE_NOOP("MainWindow", "Pink")},
+    {0x8A5A3C, QT_TRANSLATE_NOOP("MainWindow", "Brown")},
+    {0xC9A43A, QT_TRANSLATE_NOOP("MainWindow", "Gold")},
+}};
 
 // Snapping steps (hold Alt while dragging to turn snapping off).
 constexpr double kMoveStep = 1.0;   // mm
@@ -483,6 +499,13 @@ void MainWindow::createActions()
     addMirror(tr("Left / right (X)"), tr("Flip across X: what was on the left ends up on the right"), 0);
     addMirror(tr("Front / back (Y)"), tr("Flip across Y: what was at the front ends up at the back"), 1);
     addMirror(tr("Upside down (Z)"), tr("Flip across Z: the top ends up at the bottom, still on the plate"), 2);
+
+    m_colourMenu = new QMenu(tr("Colour"), this);
+    m_colourMenu->menuAction()->setToolTip(
+        tr("Colour: choose a colour for the selected shapes. It's saved with your model and written to 3MF "
+           "files, for printers with more than one colour"));
+    setIconNamed(m_colourMenu->menuAction(), QStringLiteral("colour"));
+    fillColourMenu(m_colourMenu);
 
     m_layFlat = new QAction(tr("Lay on Face"), this);
     m_layFlat->setCheckable(true);
@@ -1184,6 +1207,7 @@ void MainWindow::createToolBar()
     group(build, tr("Handles"),
           {button(m_modeMove), button(m_modeRotate), button(m_modeResize), button(m_snapAction),
            button(m_uniformAction)});
+    group(build, tr("Look"), {menuButton(m_colourMenu)});
     group(build, tr("Remove"), {button(m_delete), button(m_clear)});
     common(build);
 
@@ -5571,8 +5595,9 @@ void MainWindow::refreshScene()
 
     std::vector<DisplayItem> items;
     std::size_t triangles = 0;
-    const auto colourOf = [](ObjectId id) {
-        return kPalette.at(static_cast<std::size_t>((id - 1) % kPalette.size()));
+    const auto colourOf = [this](ObjectId id) {
+        const std::uint32_t c = m_doc.colourOf(id);
+        return QVector3D(float((c >> 16) & 0xFF) / 255.0f, float((c >> 8) & 0xFF) / 255.0f, float(c & 0xFF) / 255.0f);
     };
     try {
         // Everything on the plate...
@@ -5864,6 +5889,7 @@ void MainWindow::refreshScene()
     for (QAction* a : {m_duplicate, m_copy, m_cut})
         a->setEnabled(anySelected && allTopLevel && !toolOpen());
     m_mirrorMenu->menuAction()->setEnabled(anySelected && allTopLevel && !toolOpen() && !rolled);
+    m_colourMenu->menuAction()->setEnabled(anySelected && !toolOpen());
     m_group->setEnabled(m_selection.size() >= 2 && allTopLevel && !rolled);
     m_paste->setEnabled(!m_clipboard.empty() && !toolOpen());
     m_export->setEnabled(!m_doc.empty());
@@ -6047,6 +6073,74 @@ void MainWindow::editStep(ObjectId id)
     }
 }
 
+std::vector<ObjectId> MainWindow::selectedObjects() const
+{
+    std::vector<ObjectId> out;
+    for (ObjectId id : m_selection) {
+        const ObjectId top = history::objectOf(m_doc, id);
+        if (m_doc.find(top) && std::find(out.begin(), out.end(), top) == out.end())
+            out.push_back(top);
+    }
+    return out;
+}
+
+void MainWindow::fillColourMenu(QMenu* menu)
+{
+    menu->setToolTipsVisible(true);
+    // The swatches, in a grid at the top.
+    auto* grid = new QWidget(menu);
+    auto* layout = new QGridLayout(grid);
+    layout->setContentsMargins(8, 8, 8, 4);
+    layout->setSpacing(4);
+    for (std::size_t i = 0; i < kSwatches.size(); ++i) {
+        const Swatch swatch = kSwatches[i];
+        auto* b = new QToolButton(grid);
+        b->setFixedSize(26, 26);
+        b->setAutoRaise(false);
+        b->setToolTip(tr(swatch.name));
+        b->setAccessibleName(tr(swatch.name));
+        b->setStyleSheet(QStringLiteral("QToolButton { background: #%1; border: 1px solid palette(mid); "
+                                        "border-radius: 4px; } QToolButton:hover { border: 2px solid palette(highlight); }")
+                             .arg(swatch.rgb, 6, 16, QLatin1Char('0')));
+        connect(b, &QToolButton::clicked, this, [this, menu, rgb = swatch.rgb] {
+            menu->close();
+            // After the click is over: the menu (and the menu that opened it) closes first.
+            QTimer::singleShot(0, this, [this, rgb] { colourSelected(rgb); });
+        });
+        layout->addWidget(b, int(i / 7), int(i % 7));
+    }
+    auto* swatches = new QWidgetAction(menu);
+    swatches->setDefaultWidget(grid);
+    menu->addAction(swatches);
+    menu->addSeparator();
+    QAction* other = menu->addAction(tr("More Colours..."));
+    other->setToolTip(tr("Pick any colour"));
+    connect(other, &QAction::triggered, this, [this] { QTimer::singleShot(0, this, &MainWindow::chooseOtherColour); });
+    QAction* automatic = menu->addAction(tr("Automatic"));
+    automatic->setToolTip(tr("Back to the colour Forge3D gave it (a combined shape takes its first part's colour)"));
+    connect(automatic, &QAction::triggered, this,
+            [this] { QTimer::singleShot(0, this, [this] { colourSelected(std::nullopt); }); });
+}
+
+void MainWindow::colourSelected(std::optional<std::uint32_t> colour)
+{
+    const std::vector<ObjectId> ids = selectedObjects();
+    if (ids.empty() || toolOpen())
+        return;
+    run(std::make_unique<SetColourCommand>(ids, colour));
+}
+
+void MainWindow::chooseOtherColour()
+{
+    const std::vector<ObjectId> ids = selectedObjects();
+    if (ids.empty() || toolOpen())
+        return;
+    const std::uint32_t now = m_doc.colourOf(ids.front());
+    const QColor picked = QColorDialog::getColor(QColor::fromRgb(QRgb(now)), this, tr("Colour"));
+    if (picked.isValid())
+        colourSelected(std::uint32_t(picked.rgb() & 0xFFFFFFu));
+}
+
 void MainWindow::showTreeMenu(const QPoint& pos)
 {
     QTreeWidgetItem* item = m_objects->itemAt(pos);
@@ -6068,6 +6162,12 @@ void MainWindow::showTreeMenu(const QPoint& pos)
     const bool isStep = kind == kStepRow;
     const ObjectId top = isStep ? item->data(0, kOwnerRole).value<ObjectId>() : id;
     menu.addAction(tr("Change..."), this, [this, id] { editStep(id); });
+    if (!isStep) {
+        QMenu* colour = menu.addMenu(ribbonIcon(QStringLiteral("colour")), tr("Colour"));
+        fillColourMenu(colour);
+        if (!isSelected(id))
+            setSelection(id);  // the colour goes on the shape clicked
+    }
     if (body->isBoolean()) {
         menu.addAction(body->suppressed ? tr("Switch this step on") : tr("Switch this step off"), this,
                        [this, id, off = !body->suppressed] { setStepOff(id, off); });

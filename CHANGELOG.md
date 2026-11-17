@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.48.0 Beta — Slice 39: Colours (2026-11-17)
+
+- **Colour** (Build tab, and right-click a shape in Objects): pick one of 14 filament
+  colours (white, greys, black, red, orange, yellow, green, teal, blue, purple, pink,
+  brown, gold), **More Colours…** for any colour, or **Automatic** to go back to the
+  colour Forge3D gave it. It colours every selected object (a part picked inside a
+  combined shape colours the whole object). One Undo puts the old colours back.
+- Colours are **saved with your model**, and **written to 3MF** files (one standard 3MF
+  material per colour, each object pointing at its own), for slicers and printers that
+  print in more than one colour. 3MF files with colours keep them when imported.
+- A combined shape, and every step on a shape (edges, holes, split, emboss…), now
+  shows the colour of its first part instead of a new colour each time, until you
+  give it one of its own.
+- Older versions of Forge3D open these files too; they just don't show the colours.
+- 230 unit tests (2 new: colours chosen, inherited, undone and saved; colours through
+  3MF and back).
+
 ## 0.47.1 Beta — Code audit: damaged files and edge cases (2026-11-17)
 
 No new features: a sweep for crashes, hangs and wrong behaviour at the edges.

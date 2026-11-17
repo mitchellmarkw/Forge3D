@@ -90,6 +90,11 @@ public:
     // (its pivot, and a Split's plane). Throws if the operation or parts differ.
     void setBoolean(ObjectId id, const BooleanSpec& spec);
     void rename(ObjectId id, const std::string& name);
+    // Sets (or clears) the colour chosen for a body. The shape is not rebuilt.
+    void setColour(ObjectId id, std::optional<std::uint32_t> colour);
+    // The colour a body shows in, 0xRRGGBB: its own, else (a combined shape) its first
+    // part's, else one of the default colours, picked by its id.
+    std::uint32_t colourOf(ObjectId id) const;
     // Switches a combine step off or on (see Body::suppressed / rolledBack).
     void setStepState(ObjectId id, bool suppressed, bool rolledBack);
     // Puts a new step between `above` and its first part: `step` takes that part as its

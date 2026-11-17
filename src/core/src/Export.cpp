@@ -156,9 +156,26 @@ std::string threeMfModel(const std::vector<ExportMesh>& meshes)
     out << R"(<?xml version="1.0" encoding="UTF-8"?>)" << "\n"
         << R"(<model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">)"
         << "\n <metadata name=\"Application\">Forge3D</metadata>\n <resources>\n";
+    // Each colour once, as a base material the objects refer to (id after the objects').
+    std::vector<std::uint32_t> colours;
+    for (const ExportMesh& m : meshes)
+        if (std::find(colours.begin(), colours.end(), m.colour & 0xFFFFFFu) == colours.end())
+            colours.push_back(m.colour & 0xFFFFFFu);
+    const std::size_t materials = meshes.size() + 1;
+    if (!meshes.empty()) {
+        out << "  <basematerials id=\"" << materials << "\">\n";
+        for (std::uint32_t c : colours) {
+            char hex[8];
+            std::snprintf(hex, sizeof hex, "#%06X", unsigned(c));
+            out << "   <base name=\"" << hex << "\" displaycolor=\"" << hex << "FF\"/>\n";
+        }
+        out << "  </basematerials>\n";
+    }
     for (std::size_t i = 0; i < meshes.size(); ++i) {
         const ExportMesh& m = meshes[i];
-        out << "  <object id=\"" << i + 1 << "\" type=\"model\" name=\"" << xmlEscape(m.name) << "\">\n"
+        const auto pindex = std::find(colours.begin(), colours.end(), m.colour & 0xFFFFFFu) - colours.begin();
+        out << "  <object id=\"" << i + 1 << "\" type=\"model\" name=\"" << xmlEscape(m.name) << "\" pid=\""
+            << materials << "\" pindex=\"" << pindex << "\">\n"
             << "   <mesh>\n    <vertices>\n";
         for (std::size_t p = 0; p + 2 < m.positions.size(); p += 3)
             out << "     <vertex x=\"" << number(m.positions[p]) << "\" y=\"" << number(m.positions[p + 1])
@@ -272,6 +289,7 @@ std::vector<ExportMesh> exportMeshes(const Document& doc, const std::vector<Obje
         const Transform toPlate = doc.worldTransform(id);
         ExportMesh m;
         m.name = body->name;
+        m.colour = doc.colourOf(id);
         // Imported meshes and mesh-engine results already share their corners: just move
         // them onto the plate. Everything else is tessellated and welded.
         std::vector<float> shared;
