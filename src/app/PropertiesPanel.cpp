@@ -27,6 +27,20 @@ namespace forge::app {
 
 namespace {
 
+// Shows or hides a row of a form. Qt 6.4's QFormLayout::setRowVisible writes past the end
+// of its own memory when the form is next measured (QTBUG-109237), which crashed the app
+// some time later; there the row's widgets are hidden instead.
+void showRow(QFormLayout* form, QWidget* field, bool on)
+{
+#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
+    form->setRowVisible(field, on);
+#else
+    field->setVisible(on);
+    if (QWidget* label = form->labelForField(field))
+        label->setVisible(on);
+#endif
+}
+
 constexpr double kMinLength = 0.01;    // mm
 constexpr double kMaxLength = 10000.0;  // 10 m
 constexpr double kMaxOffset = 10000.0;
@@ -99,7 +113,12 @@ PropertiesPanel::PropertiesPanel(QWidget* parent) : QWidget(parent)
     m_context = new QLabel;
     m_context->setWordWrap(true);
     m_context->setStyleSheet(QStringLiteral("color: palette(mid);"));
-    general->addRow(m_context);
+    // Below the form, not in it: in Qt 6.4 a form holding a wrapping label and hidden
+    // rows writes past the end of its own memory when it's measured, which crashed the app
+    // some time later (after sculpting, as the panel changed).
+    layout->addLayout(general);
+    layout->addWidget(m_context);
+    general = new QFormLayout;
     auto* separate = new QPushButton(tr("Separate into parts"));
     separate->setToolTip(tr("Break this combined shape back into its parts, each left where it is"));
     connect(separate, &QPushButton::clicked, this, &PropertiesPanel::separateRequested);
@@ -376,7 +395,7 @@ void PropertiesPanel::setBody(const Body* body, const QString& context, bool isP
         const auto& fields = specFields(body->spec);
         for (std::size_t i = 0; i < m_sizeFields.size(); ++i) {
             const bool used = i < fields.size();
-            m_sizeForm->setRowVisible(m_sizeFields[i], used);
+            showRow(m_sizeForm, m_sizeFields[i], used);
             if (!used)
                 continue;
             m_sizeLabels[i]->setText(tr(fields[i].label) + QLatin1Char(':'));
@@ -385,7 +404,7 @@ void PropertiesPanel::setBody(const Body* body, const QString& context, bool isP
             m_sizeFields[i]->setValue(specValue(body->spec, i));
         }
         const bool roundable = hasRoundGroups(body->spec);
-        m_sizeForm->setRowVisible(m_round, roundable);
+        showRow(m_sizeForm, m_round, roundable);
         if (roundable) {
             const bool sphere = std::holds_alternative<SphereSpec>(body->spec);
             m_round->setText(sphere ? tr("Round (X, Y and Z radii equal)") : tr("Round (X radius = Y radius)"));

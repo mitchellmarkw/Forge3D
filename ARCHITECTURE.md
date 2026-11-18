@@ -1030,3 +1030,33 @@ and sharp across edges.
   judges each shape against the plate nearest its middle. Export groups shapes by plate
   and can write one file per plate, shifted back by `plateCentreX`.
 
+
+## Sculpt engine (slice 44)
+
+- `sculpt::spatialOrder(Mesh&)`: points sorted by a 63-bit Morton (Z-order) key of
+  their position in the mesh's box, triangles by their lowest point. The `Sculptor`
+  constructor and `setMesh` call it, so a brush's points are close together in memory
+  and in the GPU buffers. Saved results (`kResultsVersion` 2) are from meshes in this
+  order.
+- Change tracking: `noteChanged(points)` / `noteTriangle(t)` mark blocks of 256
+  (`kBlockShift` 8). `takeChanges()` returns them as merged runs `[first, last)`, or
+  `everything` after a rebuild (new sculptor, `setMesh`, remesh, mask clear/invert).
+  `normalsAround`, the mask brush and `splitAround` report what they change.
+- The grid that finds the surface: `gridUpdate` no longer refiles moved triangles; it
+  puts them on `m_stale` (`m_isStale` keeps each once). `hit` and `triangleAt` test the
+  stale triangles directly as well as the grid. `settle(most)` refiles the oldest
+  `most` (only those whose cells changed): all on button release, a quarter of them on
+  each dab once more than 100,000 are waiting.
+- `parallelFor(n, work)` splits loops of 4,096 or more over up to 8 threads: the Draw
+  and Inflate brush loops and `normalsOf`.
+- App: `MainWindow::sculptShown` passes `takeChanges()` to `Viewport::meshChanged(id,
+  MeshChanges)`, which queues runs per mesh (`m_changes`). `syncGpuMeshes` writes each
+  merged point run into the position, normal and mask buffers and each triangle run
+  into the index buffer (`glBufferSubData`). `upload(..., headroom)` allocates 1.25 ×
+  the mesh plus 4,096 points / 8,192 triangles (`GpuMesh::pointRoom`/`triangleRoom`),
+  so added detail is a write too; outgrowing the room uploads everything again, with
+  more room.
+- Qt 6.4 (Linux distributions) has a heap overflow in `QFormLayout` height-for-width
+  with hidden rows (QTBUG-109237). The Properties panel keeps its wrapping "Made
+  from" label outside the form, and `showRow` hides rows by their widgets before Qt
+  6.5.

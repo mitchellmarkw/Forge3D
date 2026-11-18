@@ -81,11 +81,19 @@ public:
     // The handle being dragged, drawn highlighted (none = not dragging).
     void setActiveHandle(const view::GizmoHandle& handle);
 
-    // Sculpting: points [first, last) of item `id`'s mesh moved in place (same mesh, same
-    // triangles); only they are sent to the graphics card again.
+    // Sculpting: parts of item `id`'s mesh changed in place (same mesh object): runs of
+    // points [first, last) (positions, normals, mask) and of triangles, which may run
+    // past what the card has (new ones). Only they are sent, at the next frame, unless
+    // `everything`, or the mesh has outgrown the room kept for it on the card.
+    struct MeshChanges {
+        std::vector<std::pair<std::uint32_t, std::uint32_t>> points;
+        std::vector<std::pair<std::uint32_t, std::uint32_t>> triangles;
+        bool everything = false;
+    };
+    void meshChanged(std::uint64_t id, const MeshChanges& changes);
+    // Sculpting: points [first, last) of item `id`'s mesh moved in place.
     void meshPointsChanged(std::uint64_t id, std::uint32_t first, std::uint32_t last);
-    // Sculpting: item `id`'s mesh gained points and triangles (same mesh object): sent
-    // to the graphics card again in full.
+    // Sculpting: item `id`'s mesh changed throughout: sent again in full.
     void meshGrew(std::uint64_t id);
     // A ring showing the brush on the surface (none: hidden).
     struct BrushRing {
@@ -192,6 +200,9 @@ private:
         QOpenGLBuffer shade{QOpenGLBuffer::VertexBuffer};  // one float per point: the mask
         QOpenGLBuffer indices{QOpenGLBuffer::IndexBuffer};
         int indexCount = 0;
+        // Room on the card, in points and triangles (more than the mesh has, for a mesh
+        // being sculpted, so detail can be added without sending it all again).
+        std::size_t pointRoom = 0, triangleRoom = 0;
         void destroy();
     };
 
@@ -200,7 +211,8 @@ private:
     std::optional<view::Gizmo> makeGizmo() const;
     void updateHover(const QPointF& pixel);
     void syncGpuMeshes();
-    void upload(GpuMesh& gpu, const std::shared_ptr<const forge::Mesh>& mesh);
+    // `headroom`: keep room for the mesh to grow (sculpting).
+    void upload(GpuMesh& gpu, const std::shared_ptr<const forge::Mesh>& mesh, bool headroom = false);
     void releaseGL();
     void drawBrushRing(const QMatrix4x4& viewProj);
     QRectF viewCubeArea() const;
@@ -225,7 +237,7 @@ private:
     QVariantAnimation* m_turn = nullptr;
 
     // Sculpting
-    std::map<std::uint64_t, std::pair<std::uint32_t, std::uint32_t>> m_movedPoints;
+    std::map<std::uint64_t, MeshChanges> m_changes;  // sculpting, waiting for the next frame
     std::set<std::uint64_t> m_grown;
     std::optional<BrushRing> m_brushRing;
     QOpenGLVertexArrayObject m_ringVao;

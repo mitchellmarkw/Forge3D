@@ -1001,7 +1001,7 @@ std::vector<Body> fromJson(const std::string& text, const std::function<std::str
 namespace {
 
 // Bump when a step's result is worked out differently, so old saved results aren't used.
-constexpr int kResultsVersion = 1;
+constexpr int kResultsVersion = 2;  // 2: sculpting numbers points in space order (0.53)
 constexpr char kResultMagic[8] = {'F', '3', 'D', 'R', 'E', 'S', 'U', '1'};
 
 void collect(const Document& doc, ObjectId id, std::vector<ObjectId>& out)
