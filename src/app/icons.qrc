@@ -45,6 +45,8 @@
     <file alias="shape-cylinder.svg">icons/shape-cylinder.svg</file>
     <file alias="shape-pyramid.svg">icons/shape-pyramid.svg</file>
     <file alias="shape-sphere.svg">icons/shape-sphere.svg</file>
+    <file alias="shape-custom.svg">icons/shape-custom.svg</file>
+    <file alias="save-custom.svg">icons/save-custom.svg</file>
     <file alias="shape-text.svg">icons/shape-text.svg</file>
     <file alias="shape-torus.svg">icons/shape-torus.svg</file>
     <file alias="shape-tube.svg">icons/shape-tube.svg</file>

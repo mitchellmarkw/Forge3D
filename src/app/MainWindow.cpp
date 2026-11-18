@@ -16,6 +16,7 @@
 #include <gp_Pnt.hxx>
 #include "SectionPanel.h"
 #include "forge/core/Layout.h"
+#include "forge/core/ShapeLibrary.h"
 #include "forge/core/PrintSplit.h"
 #include "Theme.h"
 #include "ThreadPanel.h"
@@ -24,6 +25,7 @@
 #include "SketchPanel.h"
 #include "SketchView.h"
 #include "SculptPanel.h"
+#include "CustomShapesDialog.h"
 #include "FitPanel.h"
 #include "SplitPanel.h"
 #include "Tour.h"
@@ -625,6 +627,20 @@ void MainWindow::createActions()
         if (kind == 1)
             m_addMenu->addSeparator();  // the familiar two first
     }
+    m_addMenu->addSeparator();
+    m_customMenu = m_addMenu->addMenu(tr("Custom"));
+    m_customMenu->setToolTipsVisible(true);
+    m_customMenu->menuAction()->setToolTip(
+        tr("Shapes you've saved with Save Custom Shape, each at the size it was saved"));
+    m_customMenu->menuAction()->setObjectName(QStringLiteral("AddCustom"));
+    setIconNamed(m_customMenu->menuAction(), QStringLiteral("shape-custom"));
+    connect(m_customMenu, &QMenu::aboutToShow, this, &MainWindow::fillCustomMenu);
+    fillCustomMenu();  // so it's never an empty menu
+    m_saveCustomShape = new QAction(tr("Save Custom Shape..."), this);
+    m_saveCustomShape->setToolTip(tr("Save Custom Shape: keep the selected shapes in your library, to add again "
+                                     "at exactly this size from Add Shape → Custom"));
+    m_saveCustomShape->setStatusTip(m_saveCustomShape->toolTip());
+    connect(m_saveCustomShape, &QAction::triggered, this, &MainWindow::saveCustomShape);
 
     m_merge = new QAction(tr("Merge"), this);
     m_merge->setToolTip(tr("Merge: join the selected shapes into one (select two or more; Ctrl+click adds)"));
@@ -989,6 +1005,7 @@ void MainWindow::createMenus()
     file->addSeparator();
     file->addAction(m_save);
     file->addAction(m_saveAs);
+    file->addAction(m_saveCustomShape);
     file->addSeparator();
     file->addAction(m_import);
     file->addAction(m_export);
@@ -1120,6 +1137,7 @@ void MainWindow::createToolBar()
         {m_undo, "undo"},
         {m_redo, "redo"},
         {m_addMenu->menuAction(), "add-shape"},
+        {m_saveCustomShape, "save-custom"},
         {m_modeMove, "move"},
         {m_modeRotate, "rotate"},
         {m_modeResize, "resize"},
@@ -1320,6 +1338,7 @@ void MainWindow::createToolBar()
     Page print = page(tr("Print/Save"), tr("Save it, or get it to the printer"));
     group(print, tr("Prepare"), {button(m_splitToFit), menuButton(m_layOutMenu)});
     group(print, tr("Out"), {button(m_save), button(m_export), button(m_sendToSlicer)});
+    group(print, tr("Library"), {button(m_saveCustomShape)});
     common(print);
 
     // Keep the tab you were on.
@@ -2691,6 +2710,128 @@ void MainWindow::paste()
     }
 }
 
+// ---- Custom shapes ------------------------------------------------------------------
+
+QString MainWindow::customShapesFolder() const
+{
+    const QString chosen = Preferences().value(QStringLiteral("library/folder")).toString();
+    if (!chosen.isEmpty())
+        return chosen;
+    // In Documents, where it's easy to find, back up or sync.
+    return QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation) +
+           QStringLiteral("/Forge3D/Custom Shapes");
+}
+
+void MainWindow::fillCustomMenu()
+{
+    m_customMenu->clear();
+    const auto entries = library::list(toPath(customShapesFolder()));
+    for (const auto& entry : entries) {
+        const QString name = QString::fromStdString(entry.name);
+#ifdef _WIN32
+        const QString file = QString::fromStdWString(entry.file.wstring());
+#else
+        const QString file = QString::fromStdString(entry.file.string());
+#endif
+        QAction* a = m_customMenu->addAction(name);
+        a->setToolTip(tr("Add '%1' at the size it was saved").arg(name));
+        connect(a, &QAction::triggered, this, [this, file] { addCustomShape(file); });
+    }
+    if (entries.empty()) {
+        QAction* none = m_customMenu->addAction(tr("None saved yet"));
+        none->setEnabled(false);
+        none->setToolTip(tr("Select a shape, then Print/Save → Save Custom Shape"));
+    }
+    m_customMenu->addSeparator();
+    QAction* manage = m_customMenu->addAction(tr("Manage Custom Shapes..."));
+    manage->setToolTip(tr("Rename or delete custom shapes, or choose the folder they're kept in"));
+    connect(manage, &QAction::triggered, this, &MainWindow::manageCustomShapes);
+}
+
+void MainWindow::saveCustomShape()
+{
+    if (m_selection.empty() || !std::all_of(m_selection.begin(), m_selection.end(),
+                                             [this](ObjectId id) { return m_doc.isTopLevel(id); })) {
+        statusBar()->showMessage(tr("Save Custom Shape: select the shapes to save first."), 6000);
+        return;
+    }
+    const QString suggested = m_selection.size() == 1 ? QString::fromStdString(m_doc.find(m_selection.front())->name)
+                                                      : QString();
+    const QString folder = customShapesFolder();
+    QString name;
+    for (;;) {
+        bool ok = false;
+        name = QInputDialog::getText(this, tr("Save Custom Shape"),
+                                     m_selection.size() == 1
+                                         ? tr("Name for this custom shape (it's added at this size from Add "
+                                              "Shape → Custom):")
+                                         : tr("Name for these %1 shapes, saved together (they're added as they "
+                                              "sit now, from Add Shape → Custom):").arg(m_selection.size()),
+                                     QLineEdit::Normal, suggested, &ok)
+                   .trimmed();
+        if (!ok || name.isEmpty())
+            return;
+        std::string fileName;
+        try {
+            fileName = library::fileNameFor(name.toStdString());
+        } catch (const std::exception& e) {
+            QMessageBox::warning(this, tr("Save Custom Shape"), QString::fromUtf8(e.what()));
+            continue;
+        }
+        if (!QFileInfo::exists(folder + QLatin1Char('/') + QString::fromStdString(fileName)))
+            break;
+        const auto answer = QMessageBox::question(
+            this, tr("Save Custom Shape"),
+            tr("There's already a custom shape called '%1'. Replace it?\n\nShapes already added from it aren't "
+               "changed.").arg(name),
+            QMessageBox::Yes | QMessageBox::No | QMessageBox::Cancel, QMessageBox::No);
+        if (answer == QMessageBox::Yes)
+            break;
+        if (answer == QMessageBox::Cancel)
+            return;
+    }
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    try {
+        const std::string createdBy = std::string(build::kAppName) + " " + build::kVersion;
+        library::save(m_doc, m_selection, toPath(folder), name.toStdString(), createdBy);
+        QApplication::restoreOverrideCursor();
+        qInfo().noquote() << "Saved custom shape" << name << "in" << folder;
+        statusBar()->showMessage(tr("Saved '%1'. Add it from Add Shape → Custom.").arg(name), 6000);
+    } catch (const std::exception& e) {
+        QApplication::restoreOverrideCursor();
+        QMessageBox::warning(this, tr("Save Custom Shape"),
+                             tr("The custom shape couldn't be saved:\n%1").arg(QString::fromUtf8(e.what())));
+    }
+}
+
+void MainWindow::addCustomShape(const QString& file)
+{
+    if (toolOpen()) {
+        statusBar()->showMessage(tr("Finish what you're doing first (Done or Cancel), then add the shape."), 6000);
+        return;
+    }
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    try {
+        const auto made = library::add(m_stack, m_doc, toPath(file));
+        QApplication::restoreOverrideCursor();
+        qInfo().noquote() << "Command:" << QString::fromStdString(m_stack.undoLabel());
+        setSelection(made);
+    } catch (const std::exception& e) {
+        QApplication::restoreOverrideCursor();
+        QMessageBox::warning(this, tr("Forge3D"),
+                             tr("The custom shape couldn't be added:\n%1").arg(QString::fromUtf8(e.what())));
+    }
+}
+
+void MainWindow::manageCustomShapes()
+{
+    CustomShapesDialog dialog(customShapesFolder(), this);
+    connect(&dialog, &CustomShapesDialog::folderChanged, this,
+            [](const QString& folder) { Preferences().setValue(QStringLiteral("library/folder"), folder); });
+    connect(&dialog, &CustomShapesDialog::addRequested, this, [this](const QString& file) { addCustomShape(file); });
+    dialog.exec();
+}
+
 void MainWindow::mirrorSelected(int axis)
 {
     if (m_selection.empty())
@@ -3109,7 +3250,6 @@ void MainWindow::splitToFit(ObjectId target)
     const QString name = QString::fromStdString(body->name);
     const auto volume = printerVolume();
     const KeyOptions keys = savedKeyOptions();
-    const auto size = m_doc.worldBounds(target).size();
     const QString printer = tr("%1 \u00D7 %2 \u00D7 %3 mm").arg(volume[0]).arg(volume[1]).arg(volume[2]);
     SmartPlan plan;
     try {
@@ -6444,7 +6584,7 @@ void MainWindow::refreshScene()
         a->setEnabled(m_selection.size() >= 2 && allTopLevel && !rolled);
     m_separate->setEnabled(selected && selected->isBoolean() && m_doc.isTopLevel(selected->id));
     m_alignMenu->menuAction()->setEnabled(m_selection.size() >= 2 && allTopLevel);
-    for (QAction* a : {m_duplicate, m_copy, m_cut})
+    for (QAction* a : {m_duplicate, m_copy, m_cut, m_saveCustomShape})
         a->setEnabled(anySelected && allTopLevel && !toolOpen());
     m_mirrorMenu->menuAction()->setEnabled(anySelected && allTopLevel && !toolOpen() && !rolled);
     m_colourMenu->menuAction()->setEnabled(anySelected && !toolOpen());

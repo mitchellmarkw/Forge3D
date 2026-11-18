@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.54.0 Beta — Slice 45: Custom shape library (2026-11-18)
+
+- **Save Custom Shape** (Print/Save tab → Library, and the File menu): keeps the
+  selected shapes in your library under a name you give. Saving under a name that's
+  already there asks before replacing it.
+- **Add Shape → Custom** (and Add → Custom) lists them. One comes in **at exactly the
+  size it was saved**, beside what's on the plate, so a 3 mm ball and its 3.2 mm socket
+  always come in at 3 and 3.2. One Undo takes it away again.
+  - Each keeps its whole history (Subtract, Smooth, Sculpt...) and colour, so it can
+    still be changed after it's added.
+  - Several shapes saved together come in as they sat, keeping their own names; a
+    single shape takes the name it has in the library.
+  - Slow results (sculpting, Smooth, big imported meshes) are saved with the shape, so
+    it comes in without being worked out again.
+- **Manage Custom Shapes...** (at the bottom of the Custom menu): add, rename or delete
+  (to the Recycle Bin) your shapes, open their folder, or keep them in another folder,
+  such as one that's backed up or synced between computers. They're kept in
+  Documents\Forge3D\Custom Shapes to start with, one .f3d file per shape, so they can
+  also be copied in and out by hand.
+- 248 unit tests (5 new: file names; a shape back at its saved size, beside the others,
+  renamed and undone; history and how shapes sit together kept; saved results come
+  with the shape; rename).
+
 ## 0.53.0 Beta — Slice 44: Faster sculpting on big meshes (2026-11-18)
 
 - **Sculpting keeps up on meshes of a million triangles and more.** Each dab of the
