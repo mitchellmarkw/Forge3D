@@ -17,8 +17,10 @@
 #include "SectionPanel.h"
 #include "forge/core/Layout.h"
 #include "forge/core/ShapeLibrary.h"
+#include "forge/core/Socket.h"
 #include "forge/core/PrintSplit.h"
 #include "Theme.h"
+#include "SocketPanel.h"
 #include "ThreadPanel.h"
 #include "forge/core/Thread.h"
 #include "forge/core/Picking.h"
@@ -553,6 +555,8 @@ void MainWindow::createActions()
             endShell();
         else if (m_threadMode.active)
             endThread();
+        else if (m_socketMode.active)
+            endSocket();
         else if (m_followMode.active)
             endFollow();
         else if (m_patternMode.active)
@@ -847,6 +851,17 @@ void MainWindow::createActions()
             return;
         }
         startThread(target, false);
+    });
+    m_socketAction = new QAction(tr("Quick Socket"), this);
+    m_socketAction->setToolTip(tr("Quick Socket: cut a socket for a ball joint or a peg into the selected shape, "
+                                  "at the spot you click, sized to fit once printed"));
+    connect(m_socketAction, &QAction::triggered, this, [this] {
+        const ObjectId id = selectedOne();
+        if (id == kInvalidId || m_selection.size() != 1 || !m_doc.isTopLevel(id)) {
+            statusBar()->showMessage(tr("Quick Socket: select one shape on the plate first."), 6000);
+            return;
+        }
+        startSocket(history::tip(m_doc, id), false);
     });
     m_patternAction = new QAction(tr("Pattern"), this);
     m_patternAction->setToolTip(tr("Pattern: linked copies in a row, a grid or round a circle, of the selected shape "
@@ -1168,6 +1183,7 @@ void MainWindow::createToolBar()
         {m_extrudeDownAction, "extrude-down"},
         {m_measureAction, "measure"},
         {m_threadAction, "thread"},
+        {m_socketAction, "socket"},
         {m_layFlat, "lay-on-face"},
         {m_sitOnPlate, "sit-on-plate"},
         {m_export, "export"},
@@ -1315,7 +1331,8 @@ void MainWindow::createToolBar()
         group(design, tr("Sketch"), {sketchButton});
     }
     group(design, tr("Features"),
-          {button(m_holeAction), button(m_threadAction), button(m_shellAction), button(m_followAction),
+          {button(m_holeAction), button(m_threadAction), button(m_socketAction), button(m_shellAction),
+           button(m_followAction),
            button(m_patternAction), button(m_edgesAction)});
     group(design, tr("Change"), {button(m_split), button(m_emboss)});
     group(design, tr("Place"), {button(m_layFlat), button(m_sitOnPlate), button(m_extrudeDownAction)});
@@ -1579,6 +1596,9 @@ void MainWindow::createDocks()
     m_threadPanel = new ThreadPanel;
     stackLayout->addWidget(m_threadPanel);
     m_threadPanel->hide();
+    m_socketPanel = new SocketPanel;
+    stackLayout->addWidget(m_socketPanel);
+    m_socketPanel->hide();
     m_measurePanel = new MeasurePanel;
     stackLayout->addWidget(m_measurePanel);
     m_measurePanel->hide();
@@ -1649,6 +1669,14 @@ void MainWindow::createDocks()
     connect(m_threadPanel, &ThreadPanel::changed, this, [this] { m_threadTimer->start(); });
     connect(m_threadPanel, &ThreadPanel::applyRequested, this, &MainWindow::applyThread);
     connect(m_threadPanel, &ThreadPanel::cancelRequested, this, &MainWindow::endThread);
+    m_socketTimer = new QTimer(this);
+    m_socketTimer->setSingleShot(true);
+    m_socketTimer->setInterval(250);
+    connect(m_socketTimer, &QTimer::timeout, this, &MainWindow::updateSocketPreview);
+    connect(m_socketPanel, &SocketPanel::changed, this, [this] { m_socketTimer->start(); });
+    connect(m_socketPanel, &SocketPanel::applyRequested, this, &MainWindow::applySocket);
+    connect(m_socketPanel, &SocketPanel::cancelRequested, this, &MainWindow::endSocket);
+    connect(m_socketPanel, &SocketPanel::addMatchingRequested, this, &MainWindow::addMatchingPart);
     connect(m_shellPanel, &ShellPanel::applyRequested, this, &MainWindow::applyShell);
     connect(m_shellPanel, &ShellPanel::cancelRequested, this, &MainWindow::endShell);
 
@@ -1954,6 +1982,10 @@ void MainWindow::onViewportClicked(const QVector3D& origin, const QVector3D& dir
         threadClick(origin, direction);
         return;
     }
+    if (m_socketMode.active) {
+        socketClick(origin, direction);
+        return;
+    }
     if (m_followMode.active) {
         followClick(origin, direction);
         return;
@@ -2059,7 +2091,7 @@ void MainWindow::onLeftPressed(const QVector3D& origin, const QVector3D& directi
         return;
     }
     if (m_embossMode.active || m_edgesMode.active || m_holeMode.active || m_shellMode.active || m_followMode.active ||
-        m_patternMode.active || m_threadMode.active)
+        m_patternMode.active || m_threadMode.active || m_socketMode.active)
         return;  // shapes stay put while the tool is open
 
     if (handle.valid() && multiSelection()) {
@@ -3903,7 +3935,8 @@ bool MainWindow::toolOpen() const
 {
     return m_splitMode.active || m_fitMode.active || m_embossMode.active || m_edgesMode.active || m_sketchMode.picking ||
            m_sketchMode.active || m_holeMode.active || m_shellMode.active || m_followMode.active ||
-           m_patternMode.active || m_sculptMode.active || m_measureMode.active || m_threadMode.active;
+           m_patternMode.active || m_sculptMode.active || m_measureMode.active || m_threadMode.active ||
+           m_socketMode.active;
 }
 
 void MainWindow::startEmboss(ObjectId target, bool editing)
@@ -6294,6 +6327,8 @@ void MainWindow::refreshScene()
             endShell();
         if (m_threadMode.active && !m_doc.find(m_threadMode.target))
             endThread();
+        if (m_socketMode.active && !m_doc.find(m_socketMode.target))
+            endSocket();
         if (m_followMode.active && !m_doc.find(m_followMode.target))
             endFollow();
         if (m_patternMode.active && !m_doc.find(m_patternMode.target))
@@ -6357,6 +6392,21 @@ void MainWindow::refreshScene()
                     line.color = QVector3D(0.95f, 0.5f, 0.05f);
                     line.ghost = true;
                     items.push_back(line);
+                }
+            }
+            if (m_socketMode.active && id == history::objectOf(m_doc, m_socketMode.target)) {
+                if (m_socketMode.preview) {
+                    item.mesh = m_socketMode.preview;
+                    item.model = previewFrame(m_socketMode.target, m_socketMode.editing);
+                }
+                if (m_socketMode.cut) {
+                    DisplayItem cut;
+                    cut.id = kEdgesPickedItem;
+                    cut.mesh = m_socketMode.cut;
+                    cut.color = QVector3D(0.9f, 0.15f, 0.1f);
+                    cut.ghost = true;
+                    cut.helper = true;
+                    items.push_back(cut);
                 }
             }
             if (m_threadMode.active && id == history::objectOf(m_doc, m_threadMode.target)) {
@@ -6609,6 +6659,7 @@ void MainWindow::refreshScene()
     m_holeAction->setEnabled(m_selection.size() == 1 && allTopLevel && !rolled && !toolOpen());
     m_shellAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_threadAction->setEnabled(m_shellAction->isEnabled());
+    m_socketAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_followAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_patternAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_clear->setEnabled(!m_doc.empty());
@@ -6770,6 +6821,7 @@ void MainWindow::editStep(ObjectId id)
     case BooleanOp::Edges: startEdges(id, true); break;
     case BooleanOp::Shell: startShell(id, true); break;
     case BooleanOp::Thread: startThread(id, true); break;
+    case BooleanOp::Socket: startSocket(id, true); break;
     case BooleanOp::Follow: startFollow(id, true); break;
     case BooleanOp::Pattern: startPattern(id, true); break;
     case BooleanOp::Emboss: startEmboss(id, true); break;
@@ -6948,7 +7000,7 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
                            (body->isBoolean() && (op == BooleanOp::Edges || op == BooleanOp::Shell ||
                                                   op == BooleanOp::Follow || op == BooleanOp::Pattern ||
                                                   op == BooleanOp::Emboss || op == BooleanOp::Sculpt ||
-                                                  op == BooleanOp::Thread ||
+                                                  op == BooleanOp::Thread || op == BooleanOp::Socket ||
                                                   (op == BooleanOp::Split && m_doc.isTopLevel(id))));
         if (!opens) {
             // Nothing to open: show or hide what's inside, as a list does.
@@ -8710,6 +8762,297 @@ void MainWindow::endThread()
     m_threadTimer->stop();
     m_threadMode = ThreadMode{};
     m_threadPanel->hide();
+    m_properties->show();
+    QTimer::singleShot(0, this, [this] { resizeDocks({m_propsDock}, {m_propsDockWidth}, Qt::Horizontal); });
+    statusBar()->clearMessage();
+    refreshScene();
+    refreshCommandState();
+}
+
+// ---- Quick Socket -----------------------------------------------------------------
+
+namespace {
+
+// The settings used last (kept between runs), so a figure's joints come out alike.
+SocketFinish rememberedSocket()
+{
+    const Preferences p;
+    SocketFinish f;
+    f.kind = p.value(QStringLiteral("socket/kind")).toString() == QStringLiteral("peg") ? SocketKind::Peg
+                                                                                        : SocketKind::Ball;
+    f.size = p.value(QStringLiteral("socket/size"), f.size).toDouble();
+    f.depth = p.value(QStringLiteral("socket/depth"), f.depth).toDouble();
+    f.resin = p.value(QStringLiteral("socket/printer"), QStringLiteral("resin")).toString() != QStringLiteral("fdm");
+    f.fit = p.value(QStringLiteral("socket/fit"), f.resin ? 0.1 : 0.2).toDouble();
+    f.snap = p.value(QStringLiteral("socket/snap"), true).toBool();
+    f.grip = p.value(QStringLiteral("socket/grip"), f.grip).toDouble();
+    f.shape = PegShape(std::clamp(p.value(QStringLiteral("socket/shape"), 0).toInt(), 0, 3));
+    f.reliefCuts = p.value(QStringLiteral("socket/reliefCuts"), 0).toInt();
+    f.reliefWidth = p.value(QStringLiteral("socket/reliefWidth"), f.reliefWidth).toDouble();
+    try {
+        socket::check(f);
+    } catch (const std::exception&) {
+        return SocketFinish{};
+    }
+    return f;
+}
+
+void rememberSocket(const SocketFinish& f)
+{
+    Preferences p;
+    p.setValue(QStringLiteral("socket/kind"), f.kind == SocketKind::Peg ? QStringLiteral("peg") : QStringLiteral("ball"));
+    p.setValue(QStringLiteral("socket/size"), f.size);
+    p.setValue(QStringLiteral("socket/depth"), f.depth);
+    p.setValue(QStringLiteral("socket/printer"), f.resin ? QStringLiteral("resin") : QStringLiteral("fdm"));
+    p.setValue(QStringLiteral("socket/fit"), f.fit);
+    p.setValue(QStringLiteral("socket/snap"), f.snap);
+    p.setValue(QStringLiteral("socket/grip"), f.grip);
+    p.setValue(QStringLiteral("socket/shape"), int(f.shape));
+    p.setValue(QStringLiteral("socket/reliefCuts"), f.reliefCuts);
+    p.setValue(QStringLiteral("socket/reliefWidth"), f.reliefWidth);
+}
+
+// The cut on its own, to show on a shape too big to preview quickly.
+std::shared_ptr<const Mesh> cutShown(const SocketFinish& f, const emboss::SurfacePoint& spot)
+{
+    auto out = std::make_shared<Mesh>();
+    for (const Mesh& piece : socket::cutters(f, spot.point, spot.normal)) {
+        const auto first = std::uint32_t(out->positions.size() / 3);
+        out->positions.insert(out->positions.end(), piece.positions.begin(), piece.positions.end());
+        for (std::uint32_t i : piece.indices)
+            out->indices.push_back(first + i);
+    }
+    // Facings for the shading: each point, the sum of its triangles'.
+    out->normals.assign(out->positions.size(), 0.0f);
+    for (std::size_t t = 0; t + 2 < out->indices.size(); t += 3) {
+        const float* a = &out->positions[3 * out->indices[t]];
+        const float* b = &out->positions[3 * out->indices[t + 1]];
+        const float* c = &out->positions[3 * out->indices[t + 2]];
+        const float u[3] = {b[0] - a[0], b[1] - a[1], b[2] - a[2]}, v[3] = {c[0] - a[0], c[1] - a[1], c[2] - a[2]};
+        const float n[3] = {u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]};
+        for (int k = 0; k < 3; ++k)
+            for (int j = 0; j < 3; ++j)
+                out->normals[3 * out->indices[t + std::size_t(k)] + std::size_t(j)] += n[j];
+    }
+    for (std::size_t i = 0; i + 2 < out->normals.size(); i += 3) {
+        const float l = std::sqrt(out->normals[i] * out->normals[i] + out->normals[i + 1] * out->normals[i + 1] +
+                                  out->normals[i + 2] * out->normals[i + 2]);
+        if (l > 0)
+            for (int j = 0; j < 3; ++j)
+                out->normals[i + std::size_t(j)] /= l;
+    }
+    return out;
+}
+
+// Shapes with more triangles than this show just the cut while the socket is set up
+// (working the whole result out again on every change would be slow).
+constexpr std::size_t kSocketPreviewTriangles = 300'000;
+
+}  // namespace
+
+void MainWindow::startSocket(ObjectId target, bool editing)
+{
+    const Body* body = m_doc.find(target);
+    if (!body || toolOpen())
+        return;
+    if (m_dragState.kind != Drag::Kind::None)
+        cancelDrag();
+    SocketMode mode;
+    mode.active = true;
+    mode.editing = editing;
+    mode.target = target;
+    SocketFinish finish = rememberedSocket();
+    if (editing) {
+        if (!body->isBoolean() || body->boolean->op != BooleanOp::Socket || !body->boolean->socket)
+            return;
+        finish = *body->boolean->socket;
+        try {
+            mode.spot = socketSpot(m_doc, target);
+        } catch (const std::exception& e) {
+            QMessageBox::information(this, tr("Forge3D"), QString::fromUtf8(e.what()));
+            return;
+        }
+    }
+    m_socketMode = std::move(mode);
+    const QString name = QString::fromStdString(body->name);
+    m_socketPanel->start(editing ? tr("Change the socket in '%1'").arg(name) : tr("Socket in '%1'").arg(name),
+                         editing);
+    m_socketPanel->setFinish(finish);
+    m_propsDockWidth = m_propsDock->width();
+    m_properties->hide();
+    m_socketPanel->show();
+    statusBar()->showMessage(editing ? tr("Quick Socket: change the settings, or click elsewhere on the shape to "
+                                          "move it, then Apply. Esc cancels.")
+                                     : tr("Quick Socket: click the spot on the shape where the socket goes. Esc "
+                                          "cancels."));
+    updateSocketPreview();
+    refreshCommandState();
+}
+
+void MainWindow::socketClick(const QVector3D& origin, const QVector3D& direction)
+{
+    const QVector3D d = direction.normalized();
+    std::optional<emboss::SurfacePoint> spot;
+    try {
+        // The facing averaged over about the socket's size, so a bumpy surface gives a
+        // steady direction.
+        const double radius = std::max(0.25, m_socketPanel->finish().size / 2.0);
+        spot = surfaceUnder(m_doc, m_socketMode.target, {origin.x(), origin.y(), origin.z()}, {d.x(), d.y(), d.z()},
+                            radius);
+    } catch (const std::exception& e) {
+        m_socketPanel->setStatus(QString::fromUtf8(e.what()), true);
+        return;
+    }
+    if (!spot) {
+        statusBar()->showMessage(tr("Quick Socket: click on the shape itself."), 4000);
+        return;
+    }
+    m_socketMode.spot = spot;
+    m_socketPanel->setPlaced(true);
+    m_socketTimer->start(0);
+}
+
+std::optional<BooleanSpec> MainWindow::currentSocketSpec() const
+{
+    if (!m_socketMode.active || !m_socketMode.spot)
+        return std::nullopt;
+    const SocketFinish f = m_socketPanel->finish();
+    if (m_socketMode.editing)
+        return withSocket(m_doc, m_socketMode.target, *m_socketMode.spot, f).boolean;
+    return socketSpec(m_doc, m_socketMode.target, *m_socketMode.spot, f);
+}
+
+void MainWindow::updateSocketPreview()
+{
+    if (!m_socketMode.active)
+        return;
+    m_socketTimer->stop();
+    m_socketMode.preview.reset();
+    m_socketMode.cut.reset();
+    bool ok = false;
+    try {
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        struct RestoreCursor {
+            ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
+        } restore;
+        socket::check(m_socketPanel->finish());
+        if (const auto spec = currentSocketSpec()) {
+            const ObjectId part = spec->operands.front();
+            const auto shown = m_doc.mesh(part);
+            if (shown && shown->triangleCount() > kSocketPreviewTriangles) {
+                m_socketMode.cut = cutShown(m_socketPanel->finish(), *m_socketMode.spot);
+                m_socketPanel->setStatus(tr("The red shape is what will be cut away (the shape is too big to show "
+                                            "the finished socket quickly). Apply cuts it."),
+                                         false);
+            } else {
+                m_socketMode.preview = m_doc.previewMesh(*spec);
+                m_socketPanel->setStatus(tr("This is how it will look."), false);
+            }
+            ok = true;
+        } else {
+            m_socketPanel->setStatus({}, false);
+        }
+    } catch (const std::exception& e) {
+        m_socketPanel->setStatus(QString::fromUtf8(e.what()), true);
+    }
+    m_socketPanel->setApplyEnabled(ok);
+    refreshScene();
+}
+
+void MainWindow::applySocket()
+{
+    if (!m_socketMode.active)
+        return;
+    std::optional<BooleanSpec> spec;
+    try {
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        struct RestoreCursor {
+            ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
+        } restore;
+        spec = currentSocketSpec();
+        if (!spec)
+            return;
+        m_doc.previewMesh(*spec);
+    } catch (const std::exception& e) {
+        QMessageBox::warning(this, tr("Forge3D"),
+                             tr("The socket could not be cut:\n%1").arg(QString::fromUtf8(e.what())));
+        return;
+    }
+    rememberSocket(*spec->socket);
+    const ObjectId target = m_socketMode.target;
+    if (m_socketMode.editing) {
+        const Body* now = m_doc.find(target);
+        if (!now)
+            return endSocket();
+        const Body before = *now;
+        Body after = before;
+        after.boolean = *spec;
+        endSocket();
+        run(std::make_unique<EditBodyCommand>(before, after, "Change socket"));
+        setSelection(history::objectOf(m_doc, target));
+        return;
+    }
+    Body result;
+    result.id = m_doc.allocateId();
+    result.name = m_doc.uniqueName("Socketed");
+    result.boolean = *spec;
+    const ObjectId id = result.id;
+    endSocket();
+    if (!m_doc.isTopLevel(target)) {
+        // Rolled back: the step goes in at the bar.
+        const ObjectId object = history::objectOf(m_doc, target);
+        if (run(std::make_unique<InsertStepCommand>(std::move(result), m_doc.parentOf(target))))
+            setSelection(object);
+        return;
+    }
+    if (run(std::make_unique<CombineCommand>(std::move(result))))
+        setSelection(id);
+}
+
+void MainWindow::addMatchingPart()
+{
+    const SocketFinish f = m_socketPanel->finish();
+    Body body;
+    try {
+        body.spec = socket::matchingPart(f);
+    } catch (const std::exception& e) {
+        m_socketPanel->setStatus(QString::fromUtf8(e.what()), true);
+        return;
+    }
+    body.id = m_doc.allocateId();
+    // "Ball Ø3", or "Ball Ø3 2" if there's one already.
+    const std::string base = socket::matchingName(f);
+    std::string name = base;
+    const auto taken = [this](const std::string& n) {
+        return std::any_of(m_doc.bodies().begin(), m_doc.bodies().end(), [&](const Body& b) { return b.name == n; });
+    };
+    for (int n = 2; taken(name); ++n)
+        name = base + " " + std::to_string(n);
+    body.name = name;
+    body.placement = suggestPlacement(m_doc, f.kind == SocketKind::Ball ? f.size : f.size * 1.5);
+    try {
+        m_stack.beginMacro("Add " + name);  // "Add Ball Ø3" rather than "Add Sphere"
+        m_stack.execute(std::make_unique<AddBodyCommand>(std::move(body)));
+        m_stack.endMacro();
+    } catch (const std::exception& e) {
+        m_stack.abortMacro();
+        m_socketPanel->setStatus(QString::fromUtf8(e.what()), true);
+        return;
+    }
+    qInfo().noquote() << "Command:" << QString::fromStdString(m_stack.undoLabel());
+    refreshScene();
+    refreshCommandState();
+    statusBar()->showMessage(tr("Added '%1' beside the shapes, at its true size.").arg(QString::fromStdString(name)),
+                             6000);
+}
+
+void MainWindow::endSocket()
+{
+    if (!m_socketMode.active)
+        return;
+    m_socketTimer->stop();
+    m_socketMode = SocketMode{};
+    m_socketPanel->hide();
     m_properties->show();
     QTimer::singleShot(0, this, [this] { resizeDocks({m_propsDock}, {m_propsDockWidth}, Qt::Horizontal); });
     statusBar()->clearMessage();

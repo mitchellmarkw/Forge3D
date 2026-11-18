@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+#include "forge/core/Socket.h"
 #include "forge/core/Thread.h"
 #include "forge/core/History.h"
 #include "forge/core/Pattern.h"
@@ -227,6 +228,7 @@ std::string describe(const Document& doc, ObjectId id)
         return "strength " + std::to_string(spec.smooth->strength);
     }
     case BooleanOp::ExtrudeDown: return "down to the plate";
+    case BooleanOp::Socket: return spec.socket ? socket::describe(*spec.socket) : std::string();
     case BooleanOp::Simplify: {
         if (!spec.simplify)
             return {};

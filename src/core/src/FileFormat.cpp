@@ -226,6 +226,7 @@ const char* opName(BooleanOp op)
     case BooleanOp::Smooth: return "smooth";
     case BooleanOp::ExtrudeDown: return "extrudeDown";
     case BooleanOp::Thread: return "thread";
+    case BooleanOp::Socket: return "socket";
     }
     return "merge";
 }
@@ -244,7 +245,7 @@ json bodyToJson(const Body& b)
         j["operands"] = b.boolean->operands;
         j["pivot"] = b.boolean->pivot;
         if (b.boolean->op == BooleanOp::Split || b.boolean->op == BooleanOp::Mirror ||
-            b.boolean->op == BooleanOp::ExtrudeDown ||
+            b.boolean->op == BooleanOp::ExtrudeDown || b.boolean->op == BooleanOp::Socket ||
             b.boolean->op == BooleanOp::Emboss) {
             j["planePoint"] = b.boolean->planePoint;
             j["planeNormal"] = b.boolean->planeNormal;
@@ -314,6 +315,21 @@ json bodyToJson(const Body& b)
                 face["relative"] = t->face.relative;
             j["thread"] = json{{"face", face},   {"size", t->size},         {"pitch", t->pitch},
                                {"fit", t->fit}, {"leftHand", t->leftHand}};
+        }
+        if (const auto& so = b.boolean->socket) {
+            static const char* shapes[] = {"round", "square", "hexagon", "octagon"};
+            j["socket"] = json{{"kind", so->kind == SocketKind::Ball ? "ball" : "peg"},
+                               {"size", so->size},
+                               {"depth", so->depth},
+                               {"fit", so->fit},
+                               {"printer", so->resin ? "resin" : "fdm"},
+                               {"snap", so->snap},
+                               {"grip", so->grip},
+                               {"shape", shapes[int(so->shape)]},
+                               {"turn", so->turn},
+                               {"reliefCuts", so->reliefCuts},
+                               {"reliefWidth", so->reliefWidth},
+                               {"reliefDepth", so->reliefDepth}};
         }
         if (const auto& sf = b.boolean->simplify)
             j["simplify"] = json{{"keep", sf->keep}};
@@ -501,6 +517,8 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
             spec.op = BooleanOp::Smooth;
         else if (op == "extrudeDown" && version >= 25)
             spec.op = BooleanOp::ExtrudeDown;
+        else if (op == "socket" && version >= 26)
+            spec.op = BooleanOp::Socket;
         else
             damaged(where + ": unknown combine operation '" + op + "'");
         const auto operands = j.find("operands");
@@ -520,7 +538,7 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
             spec.pivot[i] = (*pivot)[i].get<double>();
         }
         if (spec.op == BooleanOp::Split || spec.op == BooleanOp::Mirror || spec.op == BooleanOp::Emboss ||
-            spec.op == BooleanOp::ExtrudeDown) {
+            spec.op == BooleanOp::ExtrudeDown || spec.op == BooleanOp::Socket) {
             const auto readVec = [&](const char* key, std::array<double, 3>& out) {
                 const auto v = j.find(key);
                 if (v == j.end() || !v->is_array() || v->size() != 3)
@@ -650,6 +668,29 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
             t.fit = tj->value("fit", 0.2);
             t.leftHand = tj->value("leftHand", false);
             spec.thread = t;
+        }
+        if (spec.op == BooleanOp::Socket) {
+            const auto sj = j.find("socket");
+            if (sj == j.end() || !sj->is_object())
+                damaged(where + ": missing the socket's settings");
+            SocketFinish so;
+            so.kind = sj->value("kind", std::string("ball")) == "peg" ? SocketKind::Peg : SocketKind::Ball;
+            so.size = number(*sj, "size", where);
+            so.depth = sj->value("depth", so.depth);
+            so.fit = sj->value("fit", so.fit);
+            so.resin = sj->value("printer", std::string("resin")) != "fdm";
+            so.snap = sj->value("snap", true);
+            so.grip = sj->value("grip", so.grip);
+            const std::string shape = sj->value("shape", std::string("round"));
+            so.shape = shape == "square"    ? PegShape::Square
+                       : shape == "hexagon" ? PegShape::Hexagon
+                       : shape == "octagon" ? PegShape::Octagon
+                                            : PegShape::Round;
+            so.turn = sj->value("turn", 0.0);
+            so.reliefCuts = sj->value("reliefCuts", 0);
+            so.reliefWidth = sj->value("reliefWidth", so.reliefWidth);
+            so.reliefDepth = sj->value("reliefDepth", 0.0);
+            spec.socket = so;
         }
         if (spec.op == BooleanOp::Smooth) {
             const auto sj = j.find("smooth");

@@ -34,17 +34,3 @@ Today's Align lines shapes up by their boxes and centres. This is for joining pa
   bottom.
 
 Notes: build on Measure's picking (faces, edges, centres, axes).
-
-## Quick Socket
-
-Ball joints and peg sockets that fit after printing, without trial and error.
-
-- **Ball socket**: give the ball's size (3 mm), and Forge3D cuts a socket that takes it
-  once printed, including the clearance and how far the opening closes round the ball.
-- **Peg socket**: round, or another shape such as a hexagon (so it can't turn).
-- **Strain relief**, optional: for example, expansion cuts in a ball socket so it can
-  open as the ball snaps in.
-
-Notes: works like Hole and Thread (pick a face, give the sizes, it becomes a step that
-can be changed later). It also needs a matching ball or peg to add, and a fit setting
-as Thread has. It would pair well with the custom shape library and precise alignment.

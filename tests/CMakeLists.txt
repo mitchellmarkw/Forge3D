@@ -42,6 +42,7 @@ add_executable(forge_tests
     test_import_ply_gltf.cpp
     test_layout.cpp
     test_custom_shapes.cpp
+    test_socket.cpp
     bench_sculpt.cpp
     fuzz_files.cpp
     test_undo_random.cpp

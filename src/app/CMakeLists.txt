@@ -39,6 +39,8 @@ add_executable(Forge3D WIN32
     MeasurePanel.cpp
     ThreadPanel.h
     ThreadPanel.cpp
+    SocketPanel.h
+    SocketPanel.cpp
     SketchPanel.h
     SketchPanel.cpp
     SketchView.h

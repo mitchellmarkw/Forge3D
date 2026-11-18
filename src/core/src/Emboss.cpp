@@ -620,7 +620,8 @@ ObjectId embossedPart(const Document& doc, ObjectId id)
     const Body* body = doc.find(id);
     if (!body)
         throw std::out_of_range("No body with id " + std::to_string(id));
-    if (body->isBoolean() && body->boolean->op == BooleanOp::Emboss)
+    // An Emboss or a Socket being changed: picked on the part it works on.
+    if (body->isBoolean() && (body->boolean->op == BooleanOp::Emboss || body->boolean->op == BooleanOp::Socket))
         return body->boolean->operands.front();
     return id;
 }

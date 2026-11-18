@@ -19,6 +19,12 @@ namespace fs = std::filesystem;
 
 namespace {
 
+// A path from a name in UTF-8 (as names are kept everywhere else).
+fs::path pathOf(const std::string& utf8)
+{
+    return fs::path(std::u8string(utf8.begin(), utf8.end()));
+}
+
 std::string lower(std::string s)
 {
     std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return char(std::tolower(c)); });
@@ -115,7 +121,7 @@ fs::path save(const Document& doc, const std::vector<ObjectId>& ids, const fs::p
         if (!doc.isTopLevel(id))
             throw std::invalid_argument("'" + doc.find(id)->name + "' is part of another shape: select the whole shape.");
     }
-    const fs::path target = folder / fs::u8path(fileNameFor(name));
+    const fs::path target = folder / pathOf(fileNameFor(name));
     const Bounds box = boundsOf(doc, ids);
     if (!box.valid)
         throw std::invalid_argument("There's nothing to save in these shapes.");
@@ -197,7 +203,7 @@ std::vector<ObjectId> add(CommandStack& stack, Document& doc, const fs::path& pa
 
 fs::path rename(const fs::path& path, const std::string& newName)
 {
-    const fs::path target = path.parent_path() / fs::u8path(fileNameFor(newName));
+    const fs::path target = path.parent_path() / pathOf(fileNameFor(newName));
     std::error_code ec;
     if (fs::exists(target, ec) && !fs::equivalent(target, path, ec))
         throw std::runtime_error("There's already a custom shape called '" + newName + "'.");
