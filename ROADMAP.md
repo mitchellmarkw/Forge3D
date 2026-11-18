@@ -70,11 +70,12 @@ Gate to Phase 2: a new user prints a customised part within 10 minutes.
 | 43 | Lay out split pieces on the plate (or several plates) | Done (0.52.0) |
 | 44 | Sculpt-engine prototype: Draw brush on a 1M-triangle mesh at 60 fps | Done (0.53.0) |
 | 45 | Custom shape library: save shapes, add them again at their exact size | Done (0.54.0) |
-| 46 | Quick Socket: ball and peg sockets cut in at a clicked spot, sized to fit once printed | **Delivered for testing** |
+| 46 | Quick Socket: ball and peg sockets cut in at a clicked spot, sized to fit once printed | Done (0.55.0) |
+| — | Features tab: Hole, Thread, Quick Socket, Shell, Follow, Edges and Pattern move off the Design tab | **Delivered for testing** (0.55.1) |
 
 Slices 39–41 close the gaps found in the [Phase 1 gate review](docs/PHASE1_GATE.md).
 
-Waiting for a place: precise part alignment and reference images. See [docs/TODO.md](docs/TODO.md).
+Waiting for a place: precise part alignment, reference images and split by mask. See [docs/TODO.md](docs/TODO.md).
 
 ## Phase 2: Sculpt · Phase 3: Hybrid · Phase 4: Pro
 
