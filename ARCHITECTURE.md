@@ -1009,3 +1009,24 @@ and sharp across edges.
   the cut's axis. `DisplayItem::helper` keeps tool planes and arrows out of the fit
   warning and the Fit view.
 
+## Lay out (slice 43)
+
+- `Layout.h/.cpp`: plate k (0-based) is centred at x = k × (plate width + `kPlateGap`
+  20 mm). `plateHolding(box, plate)` gives the plate a box lies wholly on, or -1.
+- `flattestSide`: triangles grouped by facing direction (rounded to 1/60); the 12
+  largest groups, plus the way it sits now, are scored by `contactArea`, the area of
+  triangles lying flat within 0.05 mm of the lowest level with that side down. Fitting
+  the printer comes first, `favour` directions (±, within 5°) count triple, and the
+  way it sits now must be beaten by half as much again.
+- `layOut` (one macro): `laidOnFace(flattestSide)` (or `sitOnPlate`), a quarter turn
+  if that's the only way it fits or it puts the long side along X, then shelf packing
+  (sorted by depth, then width) with a 2 mm plate margin and `gap` between pieces,
+  starting a new plate when a row won't fit behind the last.
+- `CommandStack::abortMacro()` undoes and drops the innermost open macro. Every "on
+  failure, endMacro then undo" now uses it, so a failure nested inside another macro
+  (or before anything was done) can't undo an earlier step.
+- App: `refreshScene` sets `Viewport::setPlateCount` from the highest plate holding a
+  shape; `buildPlateGeometry` draws plates 2+ (edges and 50 mm lines); `checkFit`
+  judges each shape against the plate nearest its middle. Export groups shapes by plate
+  and can write one file per plate, shifted back by `plateCentreX`.
+

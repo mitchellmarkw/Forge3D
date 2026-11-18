@@ -121,8 +121,7 @@ std::vector<ObjectId> splitBody(CommandStack& stack, Document& doc, ObjectId id,
             stack.execute(std::make_unique<CombineCommand>(std::move(r)));
         }
     } catch (...) {
-        stack.endMacro();
-        stack.undo();  // put back whatever part of the split was done
+        stack.abortMacro();  // undo what was done of it
         throw;
     }
     stack.endMacro();

@@ -39,6 +39,10 @@ public:
     // Macros may nest; only the outermost one is recorded. An empty macro is dropped.
     void beginMacro(const std::string& label);
     void endMacro();
+    // Gives up the innermost open macro: what it did so far is undone, and nothing is
+    // recorded (for a step that fails half way). Nothing else is touched, so it's
+    // safe inside another macro, or when nothing had been done yet.
+    void abortMacro();
     bool inMacro() const { return !m_openMacros.empty(); }
 
     // "Clean" = matches what is saved on disk. Used for the * in the title bar.

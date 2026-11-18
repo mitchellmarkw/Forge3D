@@ -40,6 +40,7 @@ add_executable(forge_tests
     test_colour.cpp
     test_mesh_steps.cpp
     test_import_ply_gltf.cpp
+    test_layout.cpp
     fuzz_files.cpp
     test_undo_random.cpp
 )

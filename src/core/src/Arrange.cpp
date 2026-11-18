@@ -36,8 +36,7 @@ void asOneStep(CommandStack& stack, const std::string& label, Work&& work)
     try {
         work();
     } catch (...) {
-        stack.endMacro();
-        stack.undo();
+        stack.abortMacro();  // undo what was done of it
         throw;
     }
     stack.endMacro();

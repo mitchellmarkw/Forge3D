@@ -927,8 +927,7 @@ ImportResult importFile(CommandStack& stack, Document& doc, const std::filesyste
             result.bodies.push_back(b.id);
         }
     } catch (...) {
-        stack.endMacro();
-        stack.undo();
+        stack.abortMacro();  // undo what was done of it
         throw;
     }
     stack.endMacro();

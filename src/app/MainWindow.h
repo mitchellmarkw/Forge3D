@@ -147,6 +147,9 @@ private:
     void applySplit();
     void splitToFit(ObjectId target);  // the smart split, after saying what it will do
     QAction* m_splitToFit = nullptr;
+    QMenu* m_layOutMenu = nullptr;  // Lay Out: flattest side down, or as they are
+    // Lays out the selected shapes on the plates (all the shapes if none are selected).
+    void layOutShapes(bool turnOver);
     KeyOptions savedKeyOptions() const;
     void saveKeyOptions(const KeyOptions& options);
     std::array<double, 3> printerVolume() const;

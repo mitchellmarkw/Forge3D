@@ -15,6 +15,7 @@
 #include <BRepClass3d_SolidClassifier.hxx>
 #include <gp_Pnt.hxx>
 #include "SectionPanel.h"
+#include "forge/core/Layout.h"
 #include "forge/core/PrintSplit.h"
 #include "Theme.h"
 #include "ThreadPanel.h"
@@ -650,6 +651,21 @@ void MainWindow::createActions()
         }
         splitToFit(id);
     });
+    m_layOutMenu = new QMenu(tr("Lay Out"), this);
+    m_layOutMenu->menuAction()->setToolTip(
+        tr("Lay Out: put the selected shapes (or all of them) side by side on the build plate, ready to print, "
+           "using more plates beside it if they don't all fit"));
+    setIconNamed(m_layOutMenu->menuAction(), QStringLiteral("layout"));
+    m_layOutMenu->setToolTipsVisible(true);
+    {
+        QAction* flat = m_layOutMenu->addAction(tr("Flattest Side Down"));
+        flat->setToolTip(tr("Turn each shape onto the side with the most of it touching the plate, then lay them out "
+                            "(best for pieces of a split)"));
+        connect(flat, &QAction::triggered, this, [this] { QTimer::singleShot(0, this, [this] { layOutShapes(true); }); });
+        QAction* asIs = m_layOutMenu->addAction(tr("As They Stand"));
+        asIs->setToolTip(tr("Lay them out without turning them over"));
+        connect(asIs, &QAction::triggered, this, [this] { QTimer::singleShot(0, this, [this] { layOutShapes(false); }); });
+    }
     m_split = new QAction(tr("Split"), this);
     m_split->setToolTip(tr("Split: cut the selected shape in two with a plane, keeping one or both halves"));
     connect(m_split, &QAction::triggered, this, [this] {
@@ -1004,6 +1020,7 @@ void MainWindow::createMenus()
     edit->addAction(m_separate);
     edit->addAction(m_split);
     edit->addAction(m_splitToFit);
+    edit->addMenu(m_layOutMenu);
     edit->addAction(m_emboss);
     edit->addAction(m_edgesAction);
     edit->addAction(m_sketchAction);
@@ -1301,7 +1318,7 @@ void MainWindow::createToolBar()
     common(viewPage);
 
     Page print = page(tr("Print/Save"), tr("Save it, or get it to the printer"));
-    group(print, tr("Prepare"), {button(m_splitToFit)});
+    group(print, tr("Prepare"), {button(m_splitToFit), menuButton(m_layOutMenu)});
     group(print, tr("Out"), {button(m_save), button(m_export), button(m_sendToSlicer)});
     common(print);
 
@@ -1422,6 +1439,8 @@ void MainWindow::createDocks()
         Preferences().setValue(QStringLiteral("fit/angled"), angled);
         planFit(angled);
     });
+    connect(m_fitPanel, &FitPanel::layOutChanged, this,
+            [](bool on) { Preferences().setValue(QStringLiteral("fit/layOut"), on); });
     connect(m_fitPanel, &FitPanel::replanRequested, this, [this] { planFit(m_fitPanel->angled()); });
     connect(m_fitPanel, &FitPanel::applyRequested, this, [this] {
         // After the click is over: the panel is put away and a question may open.
@@ -3107,6 +3126,45 @@ void MainWindow::splitToFit(ObjectId target)
     startFit(target);
 }
 
+void MainWindow::layOutShapes(bool turnOver)
+{
+    if (toolOpen())
+        return;
+    std::vector<ObjectId> ids;
+    for (ObjectId id : m_selection)
+        if (m_doc.find(id) && m_doc.isTopLevel(id))
+            ids.push_back(id);
+    if (ids.empty())
+        ids = m_doc.topLevelIds();
+    if (ids.empty())
+        return;
+    LayoutOptions options;
+    options.plate = printerVolume();
+    options.turnOver = turnOver;
+    LayoutResult result;
+    try {
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        struct RestoreCursor {
+            ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
+        } restore;
+        result = layOut(m_stack, m_doc, ids, options);
+    } catch (const std::exception& e) {
+        QMessageBox::warning(this, tr("Lay Out"), tr("Lay Out did not work:\n%1").arg(QString::fromUtf8(e.what())));
+        return;
+    }
+    qInfo().noquote() << "Command:" << QString::fromStdString(m_stack.undoLabel()) << "-" << result.plates << "plates";
+    refreshCommandState();
+    QTimer::singleShot(50, this, [this] { m_viewport->fitView(); });  // once the plates are drawn
+    QString message = result.plates <= 1 ? tr("Laid out on the plate.")
+                                         : tr("Laid out on %1 plates, side by side. Export can save one file per plate.")
+                                               .arg(result.plates);
+    if (!result.tooBig.empty())
+        message += QStringLiteral(" ") + tr("%n shape(s) too big for the printer were left where they are (Split to "
+                                            "Fit can cut them up).",
+                                            nullptr, int(result.tooBig.size()));
+    statusBar()->showMessage(message, 15000);
+}
+
 void MainWindow::startFit(ObjectId target)
 {
     const Body* body = m_doc.find(target);
@@ -3118,7 +3176,8 @@ void MainWindow::startFit(ObjectId target)
     m_fitMode.active = true;
     m_fitMode.target = target;
     const bool angled = Preferences().value(QStringLiteral("fit/angled"), false).toBool();
-    m_fitPanel->start(tr("Split '%1' to fit the printer").arg(QString::fromStdString(body->name)), QString(), angled);
+    m_fitPanel->start(tr("Split '%1' to fit the printer").arg(QString::fromStdString(body->name)), QString(), angled,
+                      Preferences().value(QStringLiteral("fit/layOut"), true).toBool());
     m_propsDockWidth = m_propsDock->width();
     m_properties->hide();
     m_fitPanel->show();
@@ -3206,6 +3265,10 @@ void MainWindow::applyFit()
     const ObjectId target = m_fitMode.target;
     const std::vector<FitCut> cuts = m_fitMode.plan.cuts;
     const KeyOptions keys = savedKeyOptions();
+    const bool thenLayOut = m_fitPanel->layOut();
+    std::vector<Vec3> cutDirections;
+    for (const FitCut& c : cuts)
+        cutDirections.push_back(planeOf(c, m_fitMode.box).normal);
     std::vector<std::string> problems;
     try {
         problems = fitProblems(m_doc, target, m_fitMode.plan, printerVolume(), keys);
@@ -3228,7 +3291,23 @@ void MainWindow::applyFit()
         struct RestoreCursor {
             ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
         } restore;
-        made = splitAlong(m_stack, m_doc, target, cuts, keys);
+        const std::string name = m_doc.find(target)->name;
+        m_stack.beginMacro("Split " + name + " to fit the printer");
+        try {
+            made = splitAlong(m_stack, m_doc, target, cuts, keys);
+            if (thenLayOut) {
+                LayoutOptions options;
+                options.plate = printerVolume();
+                options.favour = cutDirections;  // pegs up and holes down: they print round
+                std::vector<ObjectId> all = made.pieces;
+                all.insert(all.end(), made.pins.begin(), made.pins.end());
+                layOut(m_stack, m_doc, all, options);
+            }
+        } catch (...) {
+            m_stack.abortMacro();  // undo what was done of it
+            throw;
+        }
+        m_stack.endMacro();
     } catch (const std::exception& e) {
         QMessageBox::warning(this, tr("Split to Fit"), tr("Split to Fit did not work:\n%1").arg(QString::fromUtf8(e.what())));
         return;
@@ -3238,7 +3317,11 @@ void MainWindow::applyFit()
     std::vector<ObjectId> all = made.pieces;
     all.insert(all.end(), made.pins.begin(), made.pins.end());
     setSelection(all);
-    statusBar()->showMessage(tr("Split into %1 pieces (%2 alignment %3). Move one onto the plate to print it.")
+    if (thenLayOut)
+        QTimer::singleShot(50, this, [this] { m_viewport->fitView(); });  // once the plates are drawn
+    statusBar()->showMessage((thenLayOut ? tr("Split into %1 pieces (%2 alignment %3), laid out on the plates.")
+                                         : tr("Split into %1 pieces (%2 alignment %3). Move one onto the plate to "
+                                              "print it."))
                                  .arg(made.pieces.size())
                                  .arg(made.keys)
                                  .arg(made.keys == 1 ? tr("key") : tr("keys")),
@@ -5745,6 +5828,74 @@ void MainWindow::exportShapes()
     settings.setValue(QStringLiteral("export/folder"), QFileInfo(path).absolutePath());
     settings.setValue(QStringLiteral("export/filter"), filter);
 
+    // Laid out on several plates: one file per plate, if wanted.
+    std::map<int, std::vector<ObjectId>> byPlate;
+    {
+        const auto volume = printerVolume();
+        const double pitch = volume[0] + kPlateGap;
+        for (ObjectId id : ids) {
+            const Bounds b = m_doc.worldBounds(id);
+            int k = plateHolding(b, volume);
+            if (k < 0)  // not wholly on one: the nearest
+                k = std::max(0, int(std::lround((double(b.min[0]) + b.max[0]) / 2 / pitch)));
+            byPlate[k].push_back(id);
+        }
+    }
+    if (byPlate.size() > 1) {
+        QMessageBox ask(this);
+        ask.setIcon(QMessageBox::Question);
+        ask.setWindowTitle(tr("Export"));
+        ask.setText(tr("These shapes are laid out on %1 plates.").arg(byPlate.size()));
+        ask.setInformativeText(tr("Save one file per plate (\"%1 - plate 1\", \"%1 - plate 2\"...), each with its "
+                                  "shapes in the middle, or everything in one file?")
+                                   .arg(QFileInfo(path).completeBaseName()));
+        QPushButton* perPlate = ask.addButton(tr("One File per Plate"), QMessageBox::AcceptRole);
+        QPushButton* one = ask.addButton(tr("One File"), QMessageBox::AcceptRole);
+        ask.addButton(QMessageBox::Cancel);
+        ask.setDefaultButton(perPlate);
+        ask.exec();
+        if (ask.clickedButton() != perPlate && ask.clickedButton() != one)
+            return;
+        if (ask.clickedButton() == perPlate) {
+            const QFileInfo info(path);
+            QStringList written;
+            std::size_t triangles = 0;
+            try {
+                for (const auto& [plate, shapes] : byPlate) {
+                    auto meshes = buildExportMeshes(m_doc, shapes);
+                    // Each plate's shapes where they'd sit on plate 1.
+                    const float dx = float(plateCentreX(plate, printerVolume()[0]));
+                    for (auto& m : meshes)
+                        for (std::size_t i = 0; i < m.positions.size(); i += 3)
+                            m.positions[i] -= dx;
+                    const QString file = info.dir().filePath(QStringLiteral("%1 - plate %2.%3")
+                                                                 .arg(info.completeBaseName())
+                                                                 .arg(plate + 1)
+                                                                 .arg(info.suffix()));
+                    writeMeshes(meshes, toPath(file), formatForPath(toPath(file)));
+                    for (const auto& m : meshes)
+                        triangles += m.triangleCount();
+                    written << QFileInfo(file).fileName();
+                    if (const QString warning = leakWarning(meshes); !warning.isEmpty())
+                        QMessageBox::information(this, tr("Forge3D"), warning);
+                }
+            } catch (const std::exception& e) {
+                qWarning() << "Export failed:" << e.what();
+                QMessageBox::warning(this, tr("Forge3D"),
+                                     tr("Export did not work:\n%1").arg(QString::fromUtf8(e.what())));
+                return;
+            }
+            qInfo().noquote() << "Exported" << written.size() << "plates," << triangles << "triangles to"
+                              << info.absolutePath();
+            statusBar()->showMessage(tr("Exported %1 plates to %2: %3")
+                                         .arg(written.size())
+                                         .arg(QDir::toNativeSeparators(info.absolutePath()))
+                                         .arg(written.join(QStringLiteral(", "))),
+                                     12000);
+            return;
+        }
+    }
+
     try {
         const auto meshes = buildExportMeshes(m_doc, ids);
         writeMeshes(meshes, toPath(path), formatForPath(toPath(path)));
@@ -6158,6 +6309,18 @@ void MainWindow::refreshScene()
             items.push_back(std::move(item));
         }
     }
+    {
+        // Plates 2, 3...: drawn while something lies wholly on them (after Lay Out).
+        int plates = 1;
+        const auto volume = printerVolume();
+        for (ObjectId id : m_doc.topLevelIds()) {
+            try {
+                plates = std::max(plates, plateHolding(m_doc.worldBounds(id), volume) + 1);
+            } catch (const std::exception&) {
+            }
+        }
+        m_viewport->setPlateCount(plates);
+    }
     m_viewport->setItems(std::move(items));
     if (m_sectionDock && m_sectionDock->isVisible()) {
         // The model or the selection changed: the slider reaches across what's cut now.
@@ -6279,6 +6442,7 @@ void MainWindow::refreshScene()
         a->setEnabled(anySelected && allTopLevel && !toolOpen());
     m_mirrorMenu->menuAction()->setEnabled(anySelected && allTopLevel && !toolOpen() && !rolled);
     m_colourMenu->menuAction()->setEnabled(anySelected && !toolOpen());
+    m_layOutMenu->menuAction()->setEnabled(m_doc.bodyCount() > 0 && !toolOpen() && (!anySelected || allTopLevel));
     m_group->setEnabled(m_selection.size() >= 2 && allTopLevel && !rolled);
     m_paste->setEnabled(!m_clipboard.empty() && !toolOpen());
     m_export->setEnabled(!m_doc.empty());
@@ -7100,9 +7264,7 @@ bool MainWindow::addWithStep(ObjectId target, Body tool, BooleanOp op, bool thro
         m_stack.execute(std::make_unique<CombineCommand>(std::move(result)));
     } catch (const std::exception& e) {
         qWarning().noquote() << QString::fromStdString(label) << "failed:" << e.what();
-        m_stack.endMacro();
-        if (m_stack.canUndo() && m_doc.find(toolId))
-            m_stack.undo();
+        m_stack.abortMacro();  // undo what was done of it
         QMessageBox::warning(this, tr("Forge3D"),
                              tr("%1 did not work:\n%2").arg(QString::fromStdString(label), QString::fromUtf8(e.what())));
         return false;

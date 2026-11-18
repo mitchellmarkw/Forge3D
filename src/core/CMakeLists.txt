@@ -23,6 +23,7 @@ add_library(forge_core STATIC
     include/forge/core/Transform.h
     src/Align.cpp
     src/Arrange.cpp
+    src/Layout.cpp
     src/Body.cpp
     src/CommandStack.cpp
     src/Commands.cpp

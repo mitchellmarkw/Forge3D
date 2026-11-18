@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "Viewport.h"
 
+#include "forge/core/Layout.h"
+
 #include <QOpenGLFunctions_3_3_Core>
 #include <QOpenGLVersionFunctionsFactory>
 
@@ -232,6 +234,17 @@ void Viewport::setPlateSize(float x, float y)
     update();
 }
 
+void Viewport::setPlateCount(int count)
+{
+    count = std::clamp(count, 1, 50);
+    if (count == m_plateCount)
+        return;
+    m_plateCount = count;
+    m_plateDirty = true;
+    checkFit();
+    update();
+}
+
 void Viewport::setPlateHeight(float z)
 {
     m_plateZ = std::clamp(z, 10.0f, 5000.0f);
@@ -252,15 +265,23 @@ void Viewport::checkFit()
     std::map<std::uint64_t, int> off;  // 2: too big for the printer; 1: off the plate
     if (m_fitWarning) {
         const float halfX = m_plateX * 0.5f + 0.01f, halfY = m_plateY * 0.5f + 0.01f, top = m_plateZ + 0.01f;
+        float plateMiddle = 0.0f;  // of the plate the shape is meant to be on (the nearest)
         const auto outside = [&](const QVector3D& p) {
-            return std::abs(p.x()) > halfX || std::abs(p.y()) > halfY || p.z() > top;
+            return std::abs(p.x() - plateMiddle) > halfX || std::abs(p.y()) > halfY || p.z() > top;
         };
+        const float pitch = m_plateX + float(forge::kPlateGap);
         for (const DisplayItem& item : m_items) {
             if (!item.mesh || item.ghost || item.helper || item.alpha < 1.0f || item.mesh->empty())
                 continue;
             const Bounds local = item.mesh->bounds();
             if (!local.valid)
                 continue;
+            {
+                const QVector3D middle = item.model.map(QVector3D((local.min[0] + local.max[0]) / 2,
+                                                                  (local.min[1] + local.max[1]) / 2, 0.0f));
+                const int k = std::clamp(int(std::lround(middle.x() / pitch)), 0, m_plateCount - 1);
+                plateMiddle = float(k) * pitch;
+            }
             // Its box fits: so does the shape. Otherwise look at its points (a turned
             // shape's box reaches further than the shape does).
             bool boxOut = false;
@@ -621,6 +642,26 @@ void Viewport::buildPlateGeometry()
         for (float sx : {-1.0f, 1.0f})
             for (float sy : {-1.0f, 1.0f})
                 add3(sx * halfX, sy * halfY, 0.0f, sx * halfX, sy * halfY, z);
+    }
+    // The other plates (Lay Out): their edges and 50 mm lines.
+    for (int k = 1; k < m_plateCount; ++k) {
+        const float cx = float(k) * (m_plateX + float(forge::kPlateGap));
+        for (int j = 1; static_cast<float>(j) * kMajorStep < halfX - 1e-3f; ++j) {
+            const float v = static_cast<float>(j) * kMajorStep;
+            addLine(cx + v, -halfY, cx + v, halfY, minor);
+            addLine(cx - v, -halfY, cx - v, halfY, minor);
+        }
+        for (int j = 1; static_cast<float>(j) * kMajorStep < halfY - 1e-3f; ++j) {
+            const float v = static_cast<float>(j) * kMajorStep;
+            addLine(cx - halfX, v, cx + halfX, v, minor);
+            addLine(cx - halfX, -v, cx + halfX, -v, minor);
+        }
+        addLine(cx - halfX, -halfY, cx + halfX, -halfY, edge);
+        addLine(cx + halfX, -halfY, cx + halfX, halfY, edge);
+        addLine(cx + halfX, halfY, cx - halfX, halfY, edge);
+        addLine(cx - halfX, halfY, cx - halfX, -halfY, edge);
+        addLine(cx - halfX, 0.0f, cx + halfX, 0.0f, major);
+        addLine(cx, -halfY, cx, halfY, major);
     }
     addLine(-halfX, 0.0f, 0.0f, 0.0f, major);
     addLine(0.0f, -halfY, 0.0f, 0.0f, major);

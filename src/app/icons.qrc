@@ -2,6 +2,7 @@
   <qresource prefix="/icons">
     <file alias="add-shape.svg">icons/add-shape.svg</file>
     <file alias="colour.svg">icons/colour.svg</file>
+    <file alias="layout.svg">icons/layout.svg</file>
     <file alias="smooth.svg">icons/smooth.svg</file>
     <file alias="extrude-down.svg">icons/extrude-down.svg</file>
     <file alias="look-solid.svg">icons/look-solid.svg</file>
