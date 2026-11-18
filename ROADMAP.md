@@ -66,9 +66,9 @@ Gate to Phase 2: a new user prints a customised part within 10 minutes.
 | 39 | Colours: a colour for each shape, kept in the file and exported in 3MF | Done (0.48.0) |
 | 40 | Smooth (whole shape), Extrude Down; Solid / See-Through / Wireframe | Done (0.49.0) |
 | 41 | Open PLY and GLB/glTF | Done (0.50.0) |
-| 42 | Angled smart cuts; drag a cut before it's made | **Delivered for testing** |
-| 43 | Lay out split pieces on the plate (or several plates) | Next |
-| 44 | Sculpt-engine prototype: Draw brush on a 1M-triangle mesh at 60 fps | Planned |
+| 42 | Angled smart cuts; drag a cut before it's made | Done (0.51.0) |
+| 43 | Lay out split pieces on the plate (or several plates) | **Delivered for testing** |
+| 44 | Sculpt-engine prototype: Draw brush on a 1M-triangle mesh at 60 fps | Next |
 
 Slices 39–41 close the gaps found in the [Phase 1 gate review](docs/PHASE1_GATE.md).
 

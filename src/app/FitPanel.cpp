@@ -80,6 +80,11 @@ FitPanel::FitPanel(QWidget* parent) : QWidget(parent)
     m_problems = new QLabel;
     m_problems->setWordWrap(true);
     layout->addWidget(m_problems);
+    layout->addSpacing(6);
+    m_layOut = new QCheckBox(tr("Then lay the pieces out on plates"));
+    m_layOut->setToolTip(tr("Once cut, turn each piece onto a cut face (pegs up, holes down, so they print round) or "
+                            "its flattest side, and set them out side by side on as many plates as it takes"));
+    layout->addWidget(m_layOut);
 
     auto* help = new QLabel(tr("Each cut goes right through the model and is keyed with pegs (set in Design > "
                                "Split). One Undo puts it all back."));
@@ -118,17 +123,24 @@ FitPanel::FitPanel(QWidget* parent) : QWidget(parent)
     connect(m_tilt, &QDoubleSpinBox::valueChanged, this, edited);
     connect(m_tiltAxis, &QComboBox::currentIndexChanged, this, edited);
     connect(m_angled, &QCheckBox::toggled, this, &FitPanel::angledChanged);
+    connect(m_layOut, &QCheckBox::toggled, this, &FitPanel::layOutChanged);
     connect(again, &QPushButton::clicked, this, &FitPanel::replanRequested);
     connect(m_apply, &QPushButton::clicked, this, &FitPanel::applyRequested);
     connect(cancel, &QPushButton::clicked, this, &FitPanel::cancelRequested);
 }
 
-void FitPanel::start(const QString& title, const QString& summary, bool angled)
+void FitPanel::start(const QString& title, const QString& summary, bool angled, bool layOut)
 {
     m_title->setText(title);
     m_summary->setText(summary);
-    const QSignalBlocker block(m_angled);
+    const QSignalBlocker block(m_angled), block2(m_layOut);
     m_angled->setChecked(angled);
+    m_layOut->setChecked(layOut);
+}
+
+bool FitPanel::layOut() const
+{
+    return m_layOut->isChecked();
 }
 
 void FitPanel::setSummary(const QString& summary)

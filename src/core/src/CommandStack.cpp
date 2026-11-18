@@ -110,6 +110,18 @@ void CommandStack::endMacro()
     record(std::move(macro));  // into the parent macro, or onto the stack
 }
 
+void CommandStack::abortMacro()
+{
+    if (m_openMacros.empty())
+        throw std::logic_error("CommandStack::abortMacro without beginMacro");
+    std::unique_ptr<MacroCommand> macro = std::move(m_openMacros.back());
+    m_openMacros.pop_back();
+    if (!macro->empty())
+        macro->undo(m_doc);
+    if (m_openMacros.empty())
+        changed();
+}
+
 void CommandStack::setClean()
 {
     m_cleanIndex = static_cast<long long>(m_index);

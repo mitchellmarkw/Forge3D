@@ -107,6 +107,10 @@ public:
     QSizeF plateSize() const { return {m_plateX, m_plateY}; }
     // How tall the printer can build (a faint box over the plate), mm.
     void setPlateHeight(float z);
+    // How many build plates to draw: plate 1 in the middle, the others beside it along
+    // +X (Lay Out puts pieces on them). A shape wholly on any of them isn't "off the plate".
+    void setPlateCount(int count);
+    int plateCount() const { return m_plateCount; }
     float plateHeight() const { return m_plateZ; }
     // Shapes reaching past the plate's edge or above the build height are drawn in a
     // warning colour (on by default): orange-red when too big for the printer, amber
@@ -238,6 +242,7 @@ private:
     float m_plateX = 220.0f, m_plateY = 220.0f;
     bool m_plateDirty = false;
     float m_plateZ = 250.0f;
+    int m_plateCount = 1;
     bool m_fitWarning = true;
     std::map<std::uint64_t, int> m_offPlate;
     void checkFit();

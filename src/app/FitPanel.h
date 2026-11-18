@@ -25,18 +25,21 @@ class FitPanel : public QWidget {
 public:
     explicit FitPanel(QWidget* parent = nullptr);
 
-    void start(const QString& title, const QString& summary, bool angled);
+    void start(const QString& title, const QString& summary, bool angled, bool layOut);
     // The cuts as they are now, and which one is picked (-1 none).
     void setCuts(const std::vector<FitCut>& cuts, int selected);
     void setSummary(const QString& summary);
     // Empty: the cuts will do.
     void setProblems(const QStringList& problems);
     bool angled() const;
+    // Lay the pieces out on plates once they're cut.
+    bool layOut() const;
 
 signals:
     void cutSelected(int index);
     void cutEdited(int index, forge::FitCut cut);
     void angledChanged(bool angled);
+    void layOutChanged(bool layOut);
     void replanRequested();
     void applyRequested();
     void cancelRequested();
@@ -52,6 +55,7 @@ private:
     QComboBox* m_tiltAxis = nullptr;
     QLabel* m_tiltAxisLabel = nullptr;
     QCheckBox* m_angled = nullptr;
+    QCheckBox* m_layOut = nullptr;
     QLabel* m_problems = nullptr;
     QPushButton* m_apply = nullptr;
     std::vector<FitCut> m_cuts;

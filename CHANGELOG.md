@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.52.0 Beta — Slice 43: Lay out pieces on plates (2026-11-17)
+
+- **Lay Out** (Print/Save → Prepare, and the Edit menu): sets the selected shapes (all
+  of them if none are selected) side by side on the build plate, ready to print, in
+  rows, biggest first. When they don't all fit, the rest go onto plate 2, 3... drawn
+  beside plate 1. Two ways:
+  - **Flattest Side Down** turns each shape onto the side with the most of it touching
+    the plate first (it keeps the way it stands unless another side is clearly better).
+  - **As They Stand** only moves them.
+  Shapes turn a quarter on the plate when that fits better. Anything too big for the
+  printer is left where it is, and the status bar says so. One Undo puts everything
+  back.
+- **Split to Fit → "Then lay the pieces out on plates"** (on by default, remembered):
+  after cutting, each piece is laid on a cut face where it can be (pegs up, holes down,
+  so they print round), or else its flattest side, and set out on the plates. Cutting
+  and laying out are one undo step.
+- **Plates 2, 3...** are drawn while something sits on them. A shape wholly on any
+  plate isn't counted as off the plate.
+- **Export** of shapes on more than one plate asks: **One File per Plate** ("Model -
+  plate 1.3mf", "Model - plate 2.3mf"..., each plate's shapes where they'd sit on the
+  printer) or **One File**.
+- Fixed: a step made of several parts that failed half way (Split, Split to Fit,
+  Duplicate, Import...) could undo the step before it as well when it tidied up. It
+  now undoes only what it had done itself.
+- 242 unit tests (4 new: flattest side; split pieces never on their pegs, standing on
+  the cut when it's favoured; several plates with nothing too big moved; a failed step
+  undone without touching the one before).
+
 ## 0.51.0 Beta — Slice 42: Split to Fit shows its cuts first; angled cuts (2026-11-17)
 
 - **Split to Fit shows its cuts before making them.** Instead of a question box, a

@@ -503,8 +503,7 @@ KeyedSplit splitWithKeys(CommandStack& stack, Document& doc, ObjectId id, const 
         }
         out.pieces = {front, back};
     } catch (...) {
-        stack.endMacro();
-        stack.undo();
+        stack.abortMacro();  // undo what was done of it
         throw;
     }
     stack.endMacro();
@@ -821,8 +820,7 @@ KeyedSplit splitAlong(CommandStack& stack, Document& doc, ObjectId id, const std
             out.pieces = std::move(next);
         }
     } catch (...) {
-        stack.endMacro();
-        stack.undo();
+        stack.abortMacro();  // undo what was done of it
         throw;
     }
     stack.endMacro();
