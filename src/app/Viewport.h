@@ -43,6 +43,9 @@ struct DisplayItem {
     // Below 1: drawn see-through after the solids, still hidden behind them (the
     // Split tool's plane). Not counted by Fit.
     float alpha = 1.0f;
+    // A tool's helper (a cutting plane, its arrow): not a shape, so never warned about
+    // as too big or off the plate, and not counted by Fit.
+    bool helper = false;
 };
 
 // The 3D view: draws the build plate and the scene, and handles navigation.

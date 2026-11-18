@@ -23,6 +23,7 @@
 #include "SketchPanel.h"
 #include "SketchView.h"
 #include "SculptPanel.h"
+#include "FitPanel.h"
 #include "SplitPanel.h"
 #include "Tour.h"
 #include "Viewport.h"
@@ -537,6 +538,8 @@ void MainWindow::createActions()
             endMeasure();
         else if (m_splitMode.active)
             endSplit();  // Esc leaves the Split tool without cutting
+        else if (m_fitMode.active)
+            endFit();
         else if (m_embossMode.active)
             endEmboss();
         else if (m_edgesMode.active)
@@ -1357,6 +1360,9 @@ void MainWindow::createDocks()
     stackLayout->addWidget(m_properties);
     stackLayout->addWidget(m_splitPanel);
     m_splitPanel->hide();
+    m_fitPanel = new FitPanel;
+    stackLayout->addWidget(m_fitPanel);
+    m_fitPanel->hide();
     m_embossPanel = new EmbossPanel;
     stackLayout->addWidget(m_embossPanel);
     m_embossPanel->hide();
@@ -1401,6 +1407,27 @@ void MainWindow::createDocks()
         // Its questions open once this click is done with (the panel was just put away).
         QTimer::singleShot(0, this, [this, target] { splitToFit(target); });
     });
+    connect(m_fitPanel, &FitPanel::cutSelected, this, [this](int index) {
+        m_fitMode.selected = index;
+        refreshScene();
+    });
+    connect(m_fitPanel, &FitPanel::cutEdited, this, [this](int index, FitCut cut) {
+        if (!m_fitMode.active || index < 0 || index >= int(m_fitMode.plan.cuts.size()))
+            return;
+        m_fitMode.plan.cuts[std::size_t(index)] = cut;
+        m_fitMode.selected = index;
+        updateFit();
+    });
+    connect(m_fitPanel, &FitPanel::angledChanged, this, [this](bool angled) {
+        Preferences().setValue(QStringLiteral("fit/angled"), angled);
+        planFit(angled);
+    });
+    connect(m_fitPanel, &FitPanel::replanRequested, this, [this] { planFit(m_fitPanel->angled()); });
+    connect(m_fitPanel, &FitPanel::applyRequested, this, [this] {
+        // After the click is over: the panel is put away and a question may open.
+        QTimer::singleShot(0, this, &MainWindow::applyFit);
+    });
+    connect(m_fitPanel, &FitPanel::cancelRequested, this, &MainWindow::endFit);
     m_embossTimer = new QTimer(this);
     m_embossTimer->setSingleShot(true);
     connect(m_embossTimer, &QTimer::timeout, this, &MainWindow::updateEmbossPreview);
@@ -1987,6 +2014,12 @@ void MainWindow::onLeftPressed(const QVector3D& origin, const QVector3D& directi
             m_pressOnHandle = true;
         return;
     }
+    if (m_fitMode.active) {
+        // Split to Fit: the planned cuts can be dragged.
+        if (grabFitPlane(origin, direction))
+            m_pressOnHandle = true;
+        return;
+    }
     if (m_embossMode.active || m_edgesMode.active || m_holeMode.active || m_shellMode.active || m_followMode.active ||
         m_patternMode.active || m_threadMode.active)
         return;  // shapes stay put while the tool is open
@@ -2184,6 +2217,19 @@ void MainWindow::onLeftDragged(const QVector3D& origin, const QVector3D& directi
         status = tr("Move  %1 %2 mm").arg(QChar("XYZ"[d.handle.axis])).arg(delta, 0, 'f', 1);
         break;
     }
+    case Drag::Kind::FitPlane: {
+        const auto s = view::closestOnLine(origin, direction, d.grabPoint, d.axis);
+        if (!s || m_fitMode.selected < 0 || m_fitMode.selected >= int(m_fitMode.plan.cuts.size()))
+            return;
+        FitCut& cut = m_fitMode.plan.cuts[std::size_t(m_fitMode.selected)];
+        cut.position = d.startOffset + step(*s - d.startParam, kMoveStep);
+        statusBar()->showMessage(tr("Cut %1 at %2 mm").arg(m_fitMode.selected + 1).arg(cut.position, 0, 'f', 1) +
+                                 freeHint);
+        d.moved = true;
+        m_fitPanel->setCuts(m_fitMode.plan.cuts, m_fitMode.selected);
+        updateFit();
+        return;
+    }
     case Drag::Kind::SplitPlane: {
         const auto s = view::closestOnLine(origin, direction, d.grabPoint, d.axis);
         if (!s)
@@ -2305,7 +2351,7 @@ void MainWindow::onLeftReleased(bool wasDrag)
     if (d.kind == Drag::Kind::None || !wasDrag || !d.moved)
         return;
     statusBar()->clearMessage();
-    if (d.kind == Drag::Kind::SplitPlane)
+    if (d.kind == Drag::Kind::SplitPlane || d.kind == Drag::Kind::FitPlane)
         return;  // the plane moved; nothing is cut until Split is clicked
 
     if (!d.beforeAll.empty()) {
@@ -2343,7 +2389,12 @@ void MainWindow::cancelDrag()
     m_viewport->setActiveHandle({});
     if (d.kind == Drag::Kind::SplitPlane)
         m_splitPanel->setOffset(d.startOffset);
-    else if (!d.beforeAll.empty() && d.moved)
+    else if (d.kind == Drag::Kind::FitPlane && m_fitMode.selected >= 0 &&
+             m_fitMode.selected < int(m_fitMode.plan.cuts.size())) {
+        m_fitMode.plan.cuts[std::size_t(m_fitMode.selected)].position = d.startOffset;
+        m_fitPanel->setCuts(m_fitMode.plan.cuts, m_fitMode.selected);
+        updateFit();
+    } else if (!d.beforeAll.empty() && d.moved)
         previewAll(d.beforeAll);
     else if (d.kind != Drag::Kind::None && d.moved)
         preview(d.before);
@@ -2904,6 +2955,7 @@ void MainWindow::addSplitItems(std::vector<DisplayItem>& items) const
     quad.model = planeFrame(plane.point, plane.normal, s);
     quad.color = QVector3D(1.0f, 0.82f, 0.1f);
     quad.alpha = 0.4f;
+    quad.helper = true;
     items.push_back(quad);
     for (const bool head : {false, true}) {
         DisplayItem arrow;
@@ -2911,6 +2963,7 @@ void MainWindow::addSplitItems(std::vector<DisplayItem>& items) const
         arrow.mesh = splitArrowMesh(head);
         arrow.model = planeFrame(plane.point, plane.normal, s * 0.6f);
         arrow.color = QVector3D(1.0f, 0.75f, 0.0f);
+        arrow.helper = true;
         items.push_back(arrow);
     }
 }
@@ -3051,48 +3104,131 @@ void MainWindow::splitToFit(ObjectId target)
                                      .arg(name, printer));
         return;
     }
-    QStringList cuts;
-    const QString across[] = {tr("across X"), tr("across Y"), tr("level")};
-    for (int a = 0; a < 3; ++a)
-        if (plan.cutsAcross[std::size_t(a)] > 0)
-            cuts << (plan.cutsAcross[std::size_t(a)] == 1 ? tr("1 cut %1").arg(across[a])
-                                                          : tr("%1 cuts %2").arg(plan.cutsAcross[std::size_t(a)]).arg(across[a]));
-    const QString keyed =
-        !keys.keys ? tr("The cuts won't be keyed (alignment pegs are off in Split).")
-        : keys.loosePins
-            ? tr("Each cut gets holes in both pieces and %1 mm loose pins (added beside the model).").arg(keys.diameter)
-            : tr("Each cut gets %1 mm alignment pegs, tapered %2\u00B0, standing %3 mm out of one piece into "
-                 "holes in the other.")
-                  .arg(keys.diameter)
-                  .arg(keys.taper)
-                  .arg(keys.length);
-    QMessageBox box(this);
-    box.setIcon(QMessageBox::Question);
-    box.setWindowTitle(tr("Split to Fit"));
-    box.setText(tr("'%1' is %2 \u00D7 %3 \u00D7 %4 mm, too big for your printer (%5).")
-                    .arg(name)
-                    .arg(std::round(size[0] * 10) / 10)
-                    .arg(std::round(size[1] * 10) / 10)
-                    .arg(std::round(size[2] * 10) / 10)
-                    .arg(printer));
-    box.setInformativeText(tr("Split it into %1 pieces (%2)? Each cut goes where it cuts through least.")
-                               .arg(plan.pieces)
-                               .arg(cuts.join(QStringLiteral(", "))) +
-                           QStringLiteral("\n\n") + keyed +
-                           tr("\n\nThe peg size and kind are set in Design > Split. One Undo puts it back."));
-    QPushButton* go = box.addButton(tr("Split"), QMessageBox::AcceptRole);
-    box.addButton(QMessageBox::Cancel);
-    box.setDefaultButton(go);
-    box.exec();
-    if (box.clickedButton() != go)
+    startFit(target);
+}
+
+void MainWindow::startFit(ObjectId target)
+{
+    const Body* body = m_doc.find(target);
+    if (!body || !m_doc.isTopLevel(target))
         return;
+    if (m_splitMode.active)
+        endSplit();
+    m_fitMode = FitMode{};
+    m_fitMode.active = true;
+    m_fitMode.target = target;
+    const bool angled = Preferences().value(QStringLiteral("fit/angled"), false).toBool();
+    m_fitPanel->start(tr("Split '%1' to fit the printer").arg(QString::fromStdString(body->name)), QString(), angled);
+    m_propsDockWidth = m_propsDock->width();
+    m_properties->hide();
+    m_fitPanel->show();
+    planFit(angled);
+    if (!m_fitMode.active)
+        return;  // couldn't plan
+    statusBar()->showMessage(tr("Split to Fit: these are the cuts it would make. Drag a plane (or use the panel) to "
+                                "move a cut, then click Split. Esc cancels."));
+    refreshCommandState();
+}
+
+void MainWindow::planFit(bool angled)
+{
+    if (!m_fitMode.active)
+        return;
+    try {
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        struct RestoreCursor {
+            ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
+        } restore;
+        m_fitMode.box = m_doc.worldBounds(m_fitMode.target);
+        m_fitMode.plan = planFitCuts(m_doc, m_fitMode.target, printerVolume(), savedKeyOptions(), angled);
+    } catch (const std::exception& e) {
+        const QString why = QString::fromUtf8(e.what());
+        endFit();
+        QTimer::singleShot(0, this, [this, why] { QMessageBox::warning(this, tr("Split to Fit"), why); });
+        return;
+    }
+    m_fitMode.selected = m_fitMode.plan.cuts.empty() ? -1 : 0;
+    m_fitPanel->setCuts(m_fitMode.plan.cuts, m_fitMode.selected);
+    updateFit();
+}
+
+void MainWindow::updateFit()
+{
+    if (!m_fitMode.active)
+        return;
+    const auto volume = printerVolume();
+    const KeyOptions keys = savedKeyOptions();
+    const auto size = m_fitMode.box.size();
+    QString summary = tr("%1 × %2 × %3 mm; your printer takes %4 × %5 × %6 mm. ")
+                          .arg(std::round(size[0] * 10) / 10)
+                          .arg(std::round(size[1] * 10) / 10)
+                          .arg(std::round(size[2] * 10) / 10)
+                          .arg(volume[0])
+                          .arg(volume[1])
+                          .arg(volume[2]);
+    summary += tr("%n cut(s), making about %1 pieces.", nullptr, int(m_fitMode.plan.cuts.size()))
+                   .arg(m_fitMode.plan.pieces);
+    if (m_fitMode.plan.turned)
+        summary += tr(" The pieces are meant to lie turned a quarter on the plate.");
+    if (!keys.keys)
+        summary += tr(" The cuts won't be keyed (alignment pegs are off in Split).");
+    m_fitPanel->setSummary(summary);
+    QStringList problems;
+    try {
+        for (const std::string& p : fitProblems(m_doc, m_fitMode.target, m_fitMode.plan, volume, keys))
+            problems << QString::fromStdString(p);
+    } catch (const std::exception& e) {
+        problems << QString::fromUtf8(e.what());
+    }
+    m_fitPanel->setProblems(problems);
+    refreshScene();
+}
+
+void MainWindow::endFit()
+{
+    if (!m_fitMode.active)
+        return;
+    if (m_dragState.kind == Drag::Kind::FitPlane)
+        m_dragState = Drag{};
+    m_fitMode = FitMode{};
+    m_fitPanel->hide();
+    m_properties->show();
+    QTimer::singleShot(0, this, [this] { resizeDocks({m_propsDock}, {m_propsDockWidth}, Qt::Horizontal); });
+    statusBar()->clearMessage();
+    refreshScene();
+    refreshCommandState();
+}
+
+void MainWindow::applyFit()
+{
+    if (!m_fitMode.active)
+        return;
+    const ObjectId target = m_fitMode.target;
+    const std::vector<FitCut> cuts = m_fitMode.plan.cuts;
+    const KeyOptions keys = savedKeyOptions();
+    std::vector<std::string> problems;
+    try {
+        problems = fitProblems(m_doc, target, m_fitMode.plan, printerVolume(), keys);
+    } catch (const std::exception&) {
+    }
+    if (!problems.empty()) {
+        QStringList lines;
+        for (const std::string& p : problems)
+            lines << QString::fromStdString(p);
+        if (QMessageBox::question(this, tr("Split to Fit"),
+                                  tr("These cuts may not make pieces that fit:\n\n%1\n\nSplit anyway?")
+                                      .arg(lines.join(QStringLiteral("\n"))),
+                                  QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
+            return;
+    }
+    endFit();
     KeyedSplit made;
     try {
         QApplication::setOverrideCursor(Qt::WaitCursor);
         struct RestoreCursor {
             ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
         } restore;
-        made = smartSplit(m_stack, m_doc, target, volume, keys);
+        made = splitAlong(m_stack, m_doc, target, cuts, keys);
     } catch (const std::exception& e) {
         QMessageBox::warning(this, tr("Split to Fit"), tr("Split to Fit did not work:\n%1").arg(QString::fromUtf8(e.what())));
         return;
@@ -3102,12 +3238,107 @@ void MainWindow::splitToFit(ObjectId target)
     std::vector<ObjectId> all = made.pieces;
     all.insert(all.end(), made.pins.begin(), made.pins.end());
     setSelection(all);
-    statusBar()->showMessage(tr("Split into %1 pieces that each fit the printer (%2 alignment %3). Move one onto "
-                                "the plate to print it.")
+    statusBar()->showMessage(tr("Split into %1 pieces (%2 alignment %3). Move one onto the plate to print it.")
                                  .arg(made.pieces.size())
                                  .arg(made.keys)
                                  .arg(made.keys == 1 ? tr("key") : tr("keys")),
                              20000);
+}
+
+namespace {
+constexpr std::uint64_t kFitItemBase = ~std::uint64_t{0} - 100;  // ids no body will reach
+}
+
+void MainWindow::addFitItems(std::vector<DisplayItem>& items) const
+{
+    if (!m_fitMode.active)
+        return;
+    const auto size = m_fitMode.box.size();
+    const float s = std::max({size[0], size[1], size[2], 2.0f}) * 0.6f;
+    for (std::size_t i = 0; i < m_fitMode.plan.cuts.size(); ++i) {
+        SplitPlane plane;
+        try {
+            plane = planeOf(m_fitMode.plan.cuts[i], m_fitMode.box);
+        } catch (const std::exception&) {
+            continue;
+        }
+        const bool picked = int(i) == m_fitMode.selected;
+        DisplayItem quad;
+        quad.id = kFitItemBase - i * 3;
+        quad.mesh = splitPlaneMesh();
+        quad.model = planeFrame(plane.point, plane.normal, s);
+        quad.color = picked ? QVector3D(1.0f, 0.82f, 0.1f) : QVector3D(0.35f, 0.65f, 1.0f);
+        quad.alpha = picked ? 0.45f : 0.28f;
+        quad.helper = true;
+        items.push_back(quad);
+        if (!picked)
+            continue;
+        for (const bool head : {false, true}) {
+            DisplayItem arrow;
+            arrow.id = kFitItemBase - i * 3 - (head ? 1 : 2);
+            arrow.mesh = splitArrowMesh(head);
+            arrow.model = planeFrame(plane.point, plane.normal, s * 0.6f);
+            arrow.color = QVector3D(1.0f, 0.75f, 0.0f);
+            arrow.helper = true;
+            items.push_back(arrow);
+        }
+    }
+}
+
+bool MainWindow::grabFitPlane(const QVector3D& origin, const QVector3D& direction)
+{
+    const auto size = m_fitMode.box.size();
+    const float s = std::max({size[0], size[1], size[2], 2.0f}) * 0.6f;
+    // The nearest planned plane under the mouse (the picked one first if it's hit).
+    int best = -1;
+    float bestDistance = std::numeric_limits<float>::max();
+    QVector3D grab;
+    for (std::size_t i = 0; i < m_fitMode.plan.cuts.size(); ++i) {
+        SplitPlane plane;
+        try {
+            plane = planeOf(m_fitMode.plan.cuts[i], m_fitMode.box);
+        } catch (const std::exception&) {
+            continue;
+        }
+        const QVector3D p(float(plane.point[0]), float(plane.point[1]), float(plane.point[2]));
+        QVector3D n(float(plane.normal[0]), float(plane.normal[1]), float(plane.normal[2]));
+        n.normalize();
+        const auto at = view::intersectPlane(origin, direction, p, n);
+        if (!at)
+            continue;
+        const QMatrix4x4 frame = planeFrame(plane.point, plane.normal, 1.0f);
+        const QVector3D u = frame.column(0).toVector3D(), v = frame.column(1).toVector3D();
+        const QVector3D d = *at - p;
+        if (std::abs(QVector3D::dotProduct(d, u)) > s || std::abs(QVector3D::dotProduct(d, v)) > s)
+            continue;
+        float distance = (*at - origin).length();
+        if (int(i) == m_fitMode.selected)
+            distance *= 0.5f;  // the picked plane wins where planes overlap
+        if (distance < bestDistance) {
+            bestDistance = distance;
+            best = int(i);
+            grab = *at;
+        }
+    }
+    if (best < 0)
+        return false;
+    m_fitMode.selected = best;
+    m_fitPanel->setCuts(m_fitMode.plan.cuts, best);
+    refreshScene();
+    // Dragged straight along its axis: the cut's position is where it crosses the middle.
+    const FitCut& cut = m_fitMode.plan.cuts[std::size_t(best)];
+    QVector3D axis(cut.axis == 0, cut.axis == 1, cut.axis == 2);
+    const auto startParam = view::closestOnLine(origin, direction, grab, axis);
+    if (!startParam) {
+        statusBar()->showMessage(tr("Looking straight along the cut's axis: orbit a little to drag it."), 4000);
+        return true;
+    }
+    m_dragState.kind = Drag::Kind::FitPlane;
+    m_dragState.grabPoint = grab;
+    m_dragState.axis = axis;
+    m_dragState.startParam = *startParam;
+    m_dragState.startOffset = cut.position;
+    return true;
 }
 
 void MainWindow::startEdges(ObjectId target, bool editing)
@@ -3445,7 +3676,7 @@ void MainWindow::applyEdges()
 
 bool MainWindow::toolOpen() const
 {
-    return m_splitMode.active || m_embossMode.active || m_edgesMode.active || m_sketchMode.picking ||
+    return m_splitMode.active || m_fitMode.active || m_embossMode.active || m_edgesMode.active || m_sketchMode.picking ||
            m_sketchMode.active || m_holeMode.active || m_shellMode.active || m_followMode.active ||
            m_patternMode.active || m_sculptMode.active || m_measureMode.active || m_threadMode.active;
 }
@@ -5905,7 +6136,10 @@ void MainWindow::refreshScene()
     }
     if (m_splitMode.active && !m_doc.find(m_splitMode.target))
         endSplit();  // e.g. Undo removed the shape being cut
+    if (m_fitMode.active && (!m_doc.find(m_fitMode.target) || !m_doc.isTopLevel(m_fitMode.target)))
+        endFit();
     addSplitItems(items);
+    addFitItems(items);
     if (m_measureMode.active) {
         // Measured things: picked in red, under the mouse in orange; the nearest-points
         // line in green, centre to centre in blue. Seen through the shapes.

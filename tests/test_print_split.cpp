@@ -190,3 +190,77 @@ TEST_CASE("Smart split: cuts a part too big for the printer into pieces that fit
         CHECK(s[2] <= 249.0 + 1e-3);
     }
 }
+
+TEST_CASE("Split to Fit plans its cuts first: shown, moved, checked, then made", "[printsplit]")
+{
+    Document doc;
+    CommandStack stack(doc);
+    const std::array<double, 3> printer{220, 220, 250};
+    KeyOptions keys;
+
+    // A long bar leaning 20° (rising along X): too long for the printer in X.
+    Body bar;
+    bar.id = doc.allocateId();
+    bar.name = "Bar";
+    bar.spec = BoxSpec{300, 20, 20};
+    bar.placement.rotationY = -20.0;
+    bar.placement.z = 60.0;
+    stack.execute(std::make_unique<AddBodyCommand>(bar));
+    const Bounds box = doc.worldBounds(bar.id);
+
+    const FitPlan level = planFitCuts(doc, bar.id, printer, keys, false);
+    REQUIRE(level.cuts.size() == 1);
+    CHECK(level.cuts[0].axis == 0);
+    CHECK(level.cuts[0].tilt == 0.0);
+    CHECK(fitProblems(doc, bar.id, level, printer, keys).empty());
+
+    // Angled: the cut leans with the bar, straight across it, so it cuts through less.
+    const FitPlan angled = planFitCuts(doc, bar.id, printer, keys, true);
+    REQUIRE(angled.cuts.size() == 1);
+    CHECK(angled.cuts[0].tilt < 0.0);  // leaning with the bar (10° or 20°: nearly the same)
+    CHECK(angled.cuts[0].tiltAxis == 1);
+    CHECK(sectionArea(doc, bar.id, planeOf(angled.cuts[0], box)) <
+          sectionArea(doc, bar.id, planeOf(level.cuts[0], box)) * 0.97);
+    CHECK(fitProblems(doc, bar.id, angled, printer, keys).empty());
+
+    // Moved too far: the piece on one side would be too long.
+    FitPlan moved = angled;
+    moved.cuts[0].position = box.min[0] + 20.0;
+    const auto problems = fitProblems(doc, bar.id, moved, printer, keys);
+    REQUIRE_FALSE(problems.empty());
+    CHECK(problems.front().find("could be") != std::string::npos);
+    moved.cuts[0].position = box.max[0] + 50.0;
+    CHECK_FALSE(fitProblems(doc, bar.id, moved, printer, keys).empty());  // misses
+
+    // Made: two keyed pieces that fit, as one undo step.
+    const std::size_t before = doc.bodyCount();
+    const KeyedSplit made = splitAlong(stack, doc, bar.id, angled.cuts, keys);
+    REQUIRE(made.pieces.size() == 2);
+    CHECK(made.keys >= 1);
+    for (ObjectId p : made.pieces) {
+        const auto s = doc.worldBounds(p).size();
+        CHECK(std::max(s[0], s[1]) <= 219.0 + 1e-3);
+        CHECK(s[2] <= 249.0 + 1e-3);
+    }
+    stack.undo();
+    CHECK(doc.bodyCount() == before);
+    CHECK(doc.isTopLevel(bar.id));
+
+    // A grid: every cut splits every piece it passes through.
+    const ObjectId slab = add(stack, doc, BoxSpec{400, 400, 30}, 0, 600, 0);
+    const FitPlan grid = planFitCuts(doc, slab, printer, keys, false);
+    CHECK(grid.cuts.size() == 2);
+    CHECK(grid.pieces == 4);
+    // Pegs on one cut keep clear of the other, so it doesn't slice through them.
+    const Bounds slabBox = doc.worldBounds(slab);
+    const SplitPlane first = planeOf(grid.cuts[0], slabBox), second = planeOf(grid.cuts[1], slabBox);
+    const auto spots = keySpots(doc, slab, first, keys, {second});
+    REQUIRE_FALSE(spots.empty());
+    for (const KeySpot& k : spots) {
+        double d = 0;
+        for (int c = 0; c < 3; ++c)
+            d += (k.point[std::size_t(c)] - second.point[std::size_t(c)]) * second.normal[std::size_t(c)];
+        CHECK(std::abs(d) >= k.diameter / 2 + keys.clearance);
+    }
+    CHECK(splitAlong(stack, doc, slab, grid.cuts, keys).pieces.size() == 4);
+}

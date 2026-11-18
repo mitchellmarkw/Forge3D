@@ -283,7 +283,8 @@ double sectionArea(const Document& doc, ObjectId id, const SplitPlane& plane)
     return std::max(area, 0.0);
 }
 
-std::vector<KeySpot> keySpots(const Document& doc, ObjectId id, const SplitPlane& plane, const KeyOptions& options)
+std::vector<KeySpot> keySpots(const Document& doc, ObjectId id, const SplitPlane& plane, const KeyOptions& options,
+                              const std::vector<SplitPlane>& keepClear)
 {
     std::vector<KeySpot> spots;
     if (!options.keys)
@@ -321,6 +322,19 @@ std::vector<KeySpot> keySpots(const Document& doc, ObjectId id, const SplitPlane
         return true;
     };
     const auto toWorld = [&](P2 p) { return add(plane.point, add(mul(u, p.x), mul(v, p.y))); };
+    // Far enough from the cuts still to come, all along the hole (both holes, with pins).
+    const auto clearOfCuts = [&](P2 p, double need) {
+        const Vec3 at = toWorld(p);
+        for (const SplitPlane& other : keepClear) {
+            const Vec3 m = unit(other.normal);
+            for (const double along : {holeDepth, 0.0, options.loosePins ? -holeDepth : 0.0}) {
+                const double d = dot(sub(add(at, mul(n, along)), other.point), m);
+                if (std::abs(d) < need)
+                    return false;
+            }
+        }
+        return true;
+    };
 
     // Each separate piece of the cut (an outline with any holes inside it): its own pegs.
     struct Candidate {
@@ -348,7 +362,7 @@ std::vector<KeySpot> keySpots(const Document& doc, ObjectId id, const SplitPlane
                 if (depth % 2 == 0)
                     continue;  // outside, or in a hole
                 const double room = distanceToLoops(loops, p);
-                if (room >= need)
+                if (room >= need && clearOfCuts(p, need))
                     cands.push_back({p, room, smallest});
             }
         if (cands.empty())
@@ -414,14 +428,14 @@ std::vector<KeySpot> keySpots(const Document& doc, ObjectId id, const SplitPlane
 }
 
 KeyedSplit splitWithKeys(CommandStack& stack, Document& doc, ObjectId id, const SplitPlane& plane,
-                         const KeyOptions& options)
+                         const KeyOptions& options, const std::vector<SplitPlane>& keepClear)
 {
     const Body* body = doc.find(id);
     if (!body)
         throw std::out_of_range("No body with id " + std::to_string(id));
     const std::string name = body->name;
     const Vec3 n = unit(plane.normal);
-    const std::vector<KeySpot> spots = keySpots(doc, id, plane, options);
+    const std::vector<KeySpot> spots = keySpots(doc, id, plane, options, keepClear);
     const Bounds whole = doc.worldBounds(id);
 
     KeyedSplit out;
@@ -518,59 +532,6 @@ bool fits(const Bounds& b, const std::array<double, 3>& volume)
     return flat && s[2] <= volume[2] - kFitMargin + 1e-6;
 }
 
-// The first cut to make in a piece that doesn't fit: the axis it overflows most, and
-// the place along it (within reach of a fitting first piece and a remainder that can
-// still be cut to fit) that cuts through least.
-std::optional<SplitPlane> nextCut(const Document& doc, ObjectId id, const std::array<double, 3>& volume,
-                                  const KeyOptions& options)
-{
-    const Bounds b = doc.worldBounds(id);
-    if (fits(b, volume))
-        return std::nullopt;
-    const auto room = usable(volume, options);
-    const auto s = b.size();
-    int axis = -1;
-    double worst = 1.0;
-    for (int a = 0; a < 3; ++a) {
-        const double over = s[std::size_t(a)] / (volume[std::size_t(a)] - kFitMargin);
-        if (over > worst + 1e-9) {
-            worst = over;
-            axis = a;
-        }
-    }
-    if (axis < 0)
-        return std::nullopt;
-    const double limit = room[std::size_t(axis)];
-    if (!(limit > 2.0))
-        throw std::invalid_argument("The printer is too small for these pieces (and their pegs)");
-    const double lo0 = b.min[std::size_t(axis)], extent = s[std::size_t(axis)];
-    const int pieces = int(std::ceil(extent / limit - 1e-9));
-    const double lo = std::max(lo0 + extent - (pieces - 1) * limit, lo0 + 1.0);
-    const double hi = std::min(lo0 + limit, lo0 + extent - 1.0);
-    const double ideal = lo0 + extent / pieces;
-    Vec3 normal{0, 0, 0};
-    normal[std::size_t(axis)] = 1.0;
-    const auto c = b.center();
-    SplitPlane best{{c[0], c[1], c[2]}, normal};
-    double bestCost = std::numeric_limits<double>::max();
-    const int samples = hi > lo ? 14 : 1;
-    for (int k = 0; k < samples; ++k) {
-        const double at = samples == 1 ? std::clamp(ideal, std::min(lo, hi), std::max(lo, hi))
-                                       : lo + (hi - lo) * k / (samples - 1);
-        SplitPlane p{{c[0], c[1], c[2]}, normal};
-        p.point[std::size_t(axis)] = at;
-        const double area = sectionArea(doc, id, p);
-        // A little nearer the even spacing breaks ties (and keeps pieces alike).
-        const double cost = area * (1.0 + 0.2 * std::abs(at - ideal) / std::max(limit, 1.0)) +
-                            0.01 * std::abs(at - ideal);
-        if (cost < bestCost) {
-            bestCost = cost;
-            best = p;
-        }
-    }
-    return best;
-}
-
 }  // namespace
 
 SmartPlan planSmartSplit(const Document& doc, ObjectId id, const std::array<double, 3>& volume,
@@ -601,39 +562,270 @@ SmartPlan planSmartSplit(const Document& doc, ObjectId id, const std::array<doub
 KeyedSplit smartSplit(CommandStack& stack, Document& doc, ObjectId id, const std::array<double, 3>& volume,
                       const KeyOptions& options)
 {
+    if (!doc.find(id))
+        throw std::out_of_range("No body with id " + std::to_string(id));
+    if (!doc.isTopLevel(id))
+        throw std::invalid_argument("Only a shape on the plate can be split");
+    return splitAlong(stack, doc, id, planFitCuts(doc, id, volume, options, false).cuts, options);
+}
+
+// ---- Planned cuts ---------------------------------------------------------------------
+
+SplitPlane planeOf(const FitCut& cut, const Bounds& box)
+{
+    if (cut.axis < 0 || cut.axis > 2 || cut.tiltAxis < 0 || cut.tiltAxis > 2 || cut.tiltAxis == cut.axis)
+        throw std::invalid_argument("A cut needs an axis and a different axis to tilt around");
+    const auto c = box.center();
+    SplitPlane p{{c[0], c[1], c[2]}, {0, 0, 0}};
+    p.point[std::size_t(cut.axis)] = cut.position;
+    // The cut's axis turned `tilt` degrees around tiltAxis (right-handed).
+    const double t = cut.tilt * kDeg;
+    const int other = 3 - cut.axis - cut.tiltAxis;
+    // Turning axis a around axis b moves it towards the third axis c = a x b's sign.
+    Vec3 ea{0, 0, 0}, eb{0, 0, 0};
+    ea[std::size_t(cut.axis)] = 1;
+    eb[std::size_t(cut.tiltAxis)] = 1;
+    const Vec3 towards = cross(eb, ea);  // where a turns to
+    p.normal[std::size_t(cut.axis)] = std::cos(t);
+    p.normal[std::size_t(other)] = std::sin(t) * towards[std::size_t(other)];
+    return p;
+}
+
+namespace {
+
+// Where a plane crosses `axis` over the model's box: the lowest and highest values along
+// that axis at the box's four edges running that way.
+std::pair<double, double> spanAlong(const SplitPlane& p, int axis, const Bounds& box)
+{
+    const int u = (axis + 1) % 3, w = (axis + 2) % 3;
+    double lo = std::numeric_limits<double>::max(), hi = -lo;
+    const double na = p.normal[std::size_t(axis)];
+    for (int corner = 0; corner < 4; ++corner) {
+        const double cu = (corner & 1) ? box.max[std::size_t(u)] : box.min[std::size_t(u)];
+        const double cw = (corner & 2) ? box.max[std::size_t(w)] : box.min[std::size_t(w)];
+        const double along = p.point[std::size_t(axis)] - (p.normal[std::size_t(u)] * (cu - p.point[std::size_t(u)]) +
+                                                            p.normal[std::size_t(w)] * (cw - p.point[std::size_t(w)])) /
+                                                               na;
+        lo = std::min(lo, along);
+        hi = std::max(hi, along);
+    }
+    return {lo, hi};
+}
+
+// Room for a piece along each axis (the printer, less the margin and a peg), with X and
+// Y swapped when pieces lie turned.
+std::array<double, 3> roomFor(const std::array<double, 3>& volume, const KeyOptions& options, bool turned)
+{
+    auto room = usable(volume, options);
+    if (turned)
+        std::swap(room[0], room[1]);
+    return room;
+}
+
+}  // namespace
+
+FitPlan planFitCuts(const Document& doc, ObjectId id, const std::array<double, 3>& volume, const KeyOptions& options,
+                    bool angled)
+{
+    FitPlan plan;
+    const SmartPlan counts = planSmartSplit(doc, id, volume, options);
+    plan.pieces = counts.pieces;
+    if (counts.pieces <= 1)
+        return plan;
+    const Bounds box = doc.worldBounds(id);
+    const auto size = box.size();
+    // Turned when the counts came from swapping X and Y.
+    {
+        const auto room = usable(volume, options);
+        const auto need = [](double extent, double limit) {
+            return extent <= limit + kFitMargin - 1e-6 ? 1 : int(std::ceil(extent / limit - 1e-9));
+        };
+        plan.turned = need(size[0], room[1]) * need(size[1], room[0]) < need(size[0], room[0]) * need(size[1], room[1]);
+    }
+    const auto room = roomFor(volume, options, plan.turned);
+
+    // The model's surface once, for measuring many cuts quickly.
+    const auto mesh = doc.mesh(id);
+    const std::vector<Vec3> pts = worldPoints(doc, id, *mesh);
+    const auto areaOf = [&](const SplitPlane& p) {
+        Vec3 u, v;
+        basis(unit(p.normal), u, v);
+        const auto loops = loops2d(sliceMesh(pts, *mesh, p), p.point, u, v);
+        double area = 0;
+        for (std::size_t i = 0; i < loops.size(); ++i) {
+            int depth = 0;
+            for (std::size_t j = 0; j < loops.size(); ++j)
+                if (j != i && insideLoop(loops[j], loops[i].front()))
+                    ++depth;
+            area += (depth % 2 ? -1.0 : 1.0) * std::abs(signedArea(loops[i]));
+        }
+        return std::max(area, 0.0);
+    };
+
+    for (int axis = 0; axis < 3; ++axis) {
+        const int k = counts.cutsAcross[std::size_t(axis)];
+        if (k <= 0)
+            continue;
+        const double limit = room[std::size_t(axis)];
+        if (!(limit > 2.0))
+            throw std::invalid_argument("The printer is too small for these pieces (and their pegs)");
+        const double lo0 = box.min[std::size_t(axis)], hi0 = box.max[std::size_t(axis)];
+        const double extent = hi0 - lo0;
+        double before = lo0;  // where the piece before this cut starts (its lowest point)
+        for (int i = 0; i < k; ++i) {
+            const int left = k - i;  // slabs after this cut's piece
+            const double ideal = before + (hi0 - before) / double(left + 1);
+            const double from = std::max(hi0 - double(left) * limit, before + 1.0);
+            const double to = std::min(before + limit, hi0 - 1.0);
+            const auto cost = [&](const FitCut& c, double& area) {
+                const SplitPlane p = planeOf(c, box);
+                const auto [lo, hi] = spanAlong(p, axis, box);
+                // Must leave this piece and the rest able to fit.
+                if (hi - before > limit + 1e-6 || hi0 - lo > double(left) * limit + 1e-6 || lo < before + 1.0 ||
+                    hi > hi0 - 1.0)
+                    return std::numeric_limits<double>::max();
+                area = areaOf(p);
+                if (area <= 0.0)
+                    return std::numeric_limits<double>::max();  // misses the model
+                // Nearer the even spacing breaks ties; a lean has to earn its place.
+                return area * (1.0 + 0.2 * std::abs(c.position - ideal) / std::max(limit, 1.0) +
+                               0.05 * std::abs(c.tilt) / 30.0) +
+                       0.01 * std::abs(c.position - ideal);
+            };
+            FitCut best{axis, std::clamp(ideal, std::min(from, to), std::max(from, to)), (axis + 1) % 3, 0.0};
+            double bestCost = std::numeric_limits<double>::max(), area = 0.0;
+            const int samples = to > from ? 14 : 1;
+            for (int s = -1; s < samples; ++s) {  // the even spacing itself, then along the range
+                FitCut c = best;
+                c.position = s < 0 || samples == 1 ? best.position : from + (to - from) * s / (samples - 1);
+                const double v = cost(c, area);
+                if (v < bestCost) {
+                    bestCost = v;
+                    best = c;
+                }
+            }
+            if (angled) {
+                // Leaning cuts, near the best level place.
+                const FitCut level = best;
+                const double step = samples > 1 ? (to - from) / (samples - 1) : 0.0;
+                for (int tiltAxis : {(axis + 1) % 3, (axis + 2) % 3})
+                    for (double tilt : {-30.0, -20.0, -10.0, 10.0, 20.0, 30.0})
+                        for (int shift = -2; shift <= 2; ++shift) {
+                            FitCut c{axis, level.position + shift * step, tiltAxis, tilt};
+                            const double v = cost(c, area);
+                            if (v < bestCost) {
+                                bestCost = v;
+                                best = c;
+                            }
+                        }
+            }
+            plan.cuts.push_back(best);
+            before = spanAlong(planeOf(best, box), axis, box).first;
+            (void)extent;
+        }
+    }
+    return plan;
+}
+
+std::vector<std::string> fitProblems(const Document& doc, ObjectId id, const FitPlan& plan,
+                                     const std::array<double, 3>& volume, const KeyOptions& options)
+{
+    std::vector<std::string> problems;
+    const Bounds box = doc.worldBounds(id);
+    const auto room = roomFor(volume, options, plan.turned);
+    const char* names[3] = {"X", "Y", "Z (height)"};
+    const auto mm = [](double v) { return std::to_string(int(std::lround(v))) + " mm"; };
+    for (int axis = 0; axis < 3; ++axis) {
+        struct Span {
+            double lo, hi;
+            std::size_t index;
+        };
+        std::vector<Span> spans;
+        for (std::size_t i = 0; i < plan.cuts.size(); ++i) {
+            if (plan.cuts[i].axis != axis)
+                continue;
+            const auto [lo, hi] = spanAlong(planeOf(plan.cuts[i], box), axis, box);
+            spans.push_back({lo, hi, i});
+        }
+        const double lo0 = box.min[std::size_t(axis)], hi0 = box.max[std::size_t(axis)];
+        const double limit = room[std::size_t(axis)];
+        if (spans.empty()) {
+            if (hi0 - lo0 > limit + kFitMargin + 1e-6)
+                problems.push_back(std::string("Too long along ") + names[axis] + ": " + mm(hi0 - lo0) +
+                                   " with no cut across it (the printer takes " + mm(limit) + ")");
+            continue;
+        }
+        std::sort(spans.begin(), spans.end(),
+                  [](const Span& a, const Span& b) { return a.lo + a.hi < b.lo + b.hi; });
+        for (std::size_t i = 0; i < spans.size(); ++i) {
+            const std::string name = "Cut " + std::to_string(spans[i].index + 1);
+            if (spans[i].hi <= lo0 || spans[i].lo >= hi0)
+                problems.push_back(name + " misses the model");
+            if (i > 0 && spans[i].lo < spans[i - 1].hi)
+                problems.push_back(name + " and cut " + std::to_string(spans[i - 1].index + 1) +
+                                   " cross inside the model");
+        }
+        for (std::size_t i = 0; i <= spans.size(); ++i) {
+            const double from = i == 0 ? lo0 : spans[i - 1].lo;
+            const double to = i == spans.size() ? hi0 : spans[i].hi;
+            if (to - from > limit + 1e-6) {
+                const std::string where = i == 0               ? "before cut " + std::to_string(spans[0].index + 1)
+                                          : i == spans.size() ? "after cut " + std::to_string(spans[i - 1].index + 1)
+                                                               : "between cuts " + std::to_string(spans[i - 1].index + 1) +
+                                                                     " and " + std::to_string(spans[i].index + 1);
+                problems.push_back("The piece " + where + " could be " + mm(to - from) + " along " + names[axis] +
+                                   ": the printer takes " + mm(limit) + " (with room for the pegs)");
+            }
+        }
+    }
+    return problems;
+}
+
+KeyedSplit splitAlong(CommandStack& stack, Document& doc, ObjectId id, const std::vector<FitCut>& cuts,
+                      const KeyOptions& options)
+{
     const Body* body = doc.find(id);
     if (!body)
         throw std::out_of_range("No body with id " + std::to_string(id));
     if (!doc.isTopLevel(id))
         throw std::invalid_argument("Only a shape on the plate can be split");
     KeyedSplit out;
-    const std::string name = body->name;
-    stack.beginMacro("Split " + name + " to fit the printer");
+    out.pieces = {id};
+    if (cuts.empty())
+        return out;
+    const Bounds box = doc.worldBounds(id);
+    std::vector<SplitPlane> planes;
+    for (const FitCut& c : cuts)
+        planes.push_back(planeOf(c, box));
+    stack.beginMacro("Split " + body->name + " to fit the printer");
     try {
-        std::vector<ObjectId> todo{id};
-        int cuts = 0;
-        while (!todo.empty()) {
-            const ObjectId piece = todo.back();
-            todo.pop_back();
-            const auto cut = nextCut(doc, piece, volume, options);
-            if (!cut) {
-                out.pieces.push_back(piece);
-                continue;
+        for (std::size_t k = 0; k < planes.size(); ++k) {
+            const SplitPlane& plane = planes[k];
+            // Pegs keep clear of the other cuts (those still to come, and those made).
+            std::vector<SplitPlane> others;
+            for (std::size_t j = 0; j < planes.size(); ++j)
+                if (j != k)
+                    others.push_back(planes[j]);
+            std::vector<ObjectId> next;
+            for (ObjectId piece : out.pieces) {
+                // A cut only splits the pieces it passes through.
+                if (sectionArea(doc, piece, plane) <= 1e-6) {
+                    next.push_back(piece);
+                    continue;
+                }
+                const KeyedSplit made = splitWithKeys(stack, doc, piece, plane, options, others);
+                out.pins.insert(out.pins.end(), made.pins.begin(), made.pins.end());
+                out.keys += made.keys;
+                next.insert(next.end(), made.pieces.begin(), made.pieces.end());
             }
-            if (++cuts > 60)
-                throw std::invalid_argument("That would take more than 60 cuts: is the printer size right?");
-            const KeyedSplit made = splitWithKeys(stack, doc, piece, *cut, options);
-            out.pins.insert(out.pins.end(), made.pins.begin(), made.pins.end());
-            out.keys += made.keys;
-            for (auto it = made.pieces.rbegin(); it != made.pieces.rend(); ++it)
-                todo.push_back(*it);
+            out.pieces = std::move(next);
         }
     } catch (...) {
         stack.endMacro();
         stack.undo();
         throw;
     }
-    stack.endMacro();  // (nothing to fit: an empty step, which isn't kept)
+    stack.endMacro();
     return out;
 }
 

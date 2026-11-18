@@ -986,3 +986,26 @@ and sharp across edges.
   converted from linear to sRGB for the colour.
 - `importFile` skips the "saved in metres?" question for .glb / .gltf as for .3mf.
 
+## Split to Fit, planned (slice 42)
+
+- `FitCut` {axis, position (where it crosses the middle of the model's box), tiltAxis,
+  tilt°}, and `planeOf(cut, box)`. `planFitCuts` takes its per-axis counts (and the
+  X/Y turn) from `planSmartSplit`, then places each axis's cuts in order. Each cut is
+  sampled at the even spacing and 14 places along the allowed range (and, when angled,
+  ±10/20/30° around both other axes, near the best level place). The cost is the
+  section area (from a mesh slice of the whole model, its points transformed once),
+  plus small penalties for distance from even spacing and for leaning. A candidate must
+  leave this piece and the rest able to fit: `spanAlong` gives a plane's lowest and
+  highest value along the axis over the box's four edges, so the check errs safe.
+- `fitProblems` uses the same spans to report pieces that could be too long, cuts that
+  cross inside the box, and cuts that miss it. `splitAlong` applies every cut to every
+  current piece whose section it has area in (`splitWithKeys`, one macro), passing the
+  other planes as `keepClear`. `keySpots` drops candidates whose hole (along its whole
+  depth, both ways for pins) comes within the needed radius of those planes.
+  `smartSplit` is now `splitAlong(planFitCuts(..., false))`.
+- App: `FitMode` (target, plan, selected cut, the box the plan was made from) and
+  `FitPanel` (in the Properties dock). The planes are helper `DisplayItem`s (ids from
+  `~0 - 100` down). Pressing on one picks it and starts a `Drag::Kind::FitPlane` along
+  the cut's axis. `DisplayItem::helper` keeps tool planes and arrows out of the fit
+  warning and the Fit view.
+
