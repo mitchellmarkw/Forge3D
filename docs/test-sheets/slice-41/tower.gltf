@@ -1,0 +1,92 @@
+{
+ "asset": {
+  "version": "2.0",
+  "generator": "Forge3D test sheet"
+ },
+ "scene": 0,
+ "scenes": [
+  {
+   "nodes": [
+    0
+   ]
+  }
+ ],
+ "nodes": [
+  {
+   "name": "Tower (glTF)",
+   "mesh": 0,
+   "translation": [
+    0.03,
+    0,
+    0
+   ]
+  }
+ ],
+ "meshes": [
+  {
+   "primitives": [
+    {
+     "attributes": {
+      "POSITION": 0
+     },
+     "indices": 1,
+     "material": 0
+    }
+   ]
+  }
+ ],
+ "materials": [
+  {
+   "pbrMetallicRoughness": {
+    "baseColorFactor": [
+     0.7,
+     0.03,
+     0.02,
+     1
+    ]
+   }
+  }
+ ],
+ "accessors": [
+  {
+   "bufferView": 0,
+   "componentType": 5126,
+   "count": 14,
+   "type": "VEC3",
+   "min": [
+    -0.01,
+    0,
+    -0.008660254037844387
+   ],
+   "max": [
+    0.01,
+    0.042,
+    0.008660254037844385
+   ]
+  },
+  {
+   "bufferView": 1,
+   "componentType": 5123,
+   "count": 72,
+   "type": "SCALAR"
+  }
+ ],
+ "bufferViews": [
+  {
+   "buffer": 0,
+   "byteOffset": 0,
+   "byteLength": 168
+  },
+  {
+   "buffer": 0,
+   "byteOffset": 168,
+   "byteLength": 144
+  }
+ ],
+ "buffers": [
+  {
+   "byteLength": 312,
+   "uri": "tower%20data.bin"
+  }
+ ]
+}

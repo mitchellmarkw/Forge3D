@@ -37,7 +37,14 @@ public:
 std::vector<RawMesh> readStl(const std::string& bytes, const std::string& name);
 std::vector<RawMesh> readObj(const std::string& text, const std::string& name);
 std::vector<RawMesh> read3mf(const std::string& bytes, const std::string& name);
-// By extension (.stl / .obj / .3mf).
+// PLY (scans): text or binary, one mesh; polygons split into triangles; a point colour
+// averaged into the shape's colour. No units (like STL).
+std::vector<RawMesh> readPly(const std::string& bytes, const std::string& name);
+// glTF 2 (.gltf, with its data embedded or in files in `folder`) or GLB: one mesh per
+// node with a mesh, placed by the node tree, turned from Y-up to Z-up and from metres to
+// millimetres; a material's base colour becomes the shape's colour.
+std::vector<RawMesh> readGltf(const std::string& bytes, const std::string& name, const std::filesystem::path& folder);
+// By extension (.stl / .obj / .3mf / .ply / .gltf / .glb).
 std::vector<RawMesh> readMeshFile(const std::filesystem::path& path);
 
 // What repair() did, for the user.

@@ -18,11 +18,11 @@ customised part within 10 minutes.**
 | Hollow | Shell | ✓ |
 | Print (to a slicer) | Export, Send to Slicer, plate size and fit warning | ✓ |
 | Open / save STL, OBJ, 3MF | The same | ✓ |
-| **Paint: colours on objects (and painted regions), kept in 3MF** | Shapes get palette colours that can't be changed and aren't exported | **Gap** |
-| **Smooth** (the whole model, one click) | Smooth brush only, dab by dab | **Gap** |
-| **Extrude Down** (stretch a model's underside down to the plate) | None | **Gap** |
-| **Open PLY and GLB** (scans, downloads) | STL / OBJ / 3MF only | **Gap** |
-| Wireframe view | None | Gap (small) |
+| Paint: colours on objects, kept in 3MF | Colour, per shape (0.48); painted regions not yet | ✓ |
+| Smooth (the whole model, one click) | Smooth step, strength 1–10 (0.49) | ✓ |
+| Extrude Down (stretch a model's underside down to the plate) | Extrude Down step (0.49) | ✓ |
+| Open PLY and GLB (scans, downloads) | PLY, glTF and GLB too (0.50) | ✓ |
+| Wireframe view | Solid / See-Through / Wireframe (0.49) | ✓ |
 | Webcam capture, Bing 3D library | Not planned (services Forge3D doesn't have) | — |
 
 Beyond 3D Builder, Phase 1 already includes FreeCAD-style history, sketches, holes,

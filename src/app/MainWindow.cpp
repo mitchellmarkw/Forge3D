@@ -407,14 +407,16 @@ void MainWindow::createActions()
 
     m_import = new QAction(tr("&Import..."), this);
     m_import->setShortcut(Qt::CTRL | Qt::Key_I);
-    m_import->setToolTip(tr("Import (Ctrl+I): add shapes from STL, 3MF or OBJ files, repaired for printing. "
+    m_import->setToolTip(tr("Import (Ctrl+I): add shapes from STL, 3MF, OBJ, PLY (scans) or glTF / GLB files, "
+                            "repaired for printing. "
                             "You can also drag files onto the window"));
     connect(m_import, &QAction::triggered, this, [this] {
         Preferences settings;
         const QString folder = settings.value(QStringLiteral("import/folder"), startFolder()).toString();
         const QStringList paths = QFileDialog::getOpenFileNames(
             this, tr("Import shapes"), folder,
-            tr("3D models (*.stl *.3mf *.obj);;STL (*.stl);;3MF (*.3mf);;OBJ (*.obj)"));
+            tr("3D models (*.stl *.3mf *.obj *.ply *.glb *.gltf);;STL (*.stl);;3MF (*.3mf);;OBJ (*.obj);;"
+               "PLY - scans (*.ply);;glTF / GLB (*.glb *.gltf)"));
         if (paths.isEmpty())
             return;
         settings.setValue(QStringLiteral("import/folder"), QFileInfo(paths.front()).absolutePath());
@@ -5400,7 +5402,9 @@ bool droppable(const QString& path)
 {
     const QString s = path.toLower();
     return s.endsWith(QLatin1String(".stl")) || s.endsWith(QLatin1String(".3mf")) ||
-           s.endsWith(QLatin1String(".obj")) || s.endsWith(QLatin1String(".f3d"));
+           s.endsWith(QLatin1String(".obj")) || s.endsWith(QLatin1String(".ply")) ||
+           s.endsWith(QLatin1String(".glb")) || s.endsWith(QLatin1String(".gltf")) ||
+           s.endsWith(QLatin1String(".f3d"));
 }
 }  // namespace
 

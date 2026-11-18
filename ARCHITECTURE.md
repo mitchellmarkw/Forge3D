@@ -969,3 +969,20 @@ and sharp across edges.
   `knownProblem` rather than `problemWith` for an object whose result is cached, so
   listing steps doesn't build them.
 
+## PLY and glTF import (slice 41)
+
+- `ImportPlyGltf.cpp`: `readPly` parses the header into elements and properties
+  (scalars and lists, all eight PLY number kinds), then reads the body as text or
+  binary (either byte order), skipping elements it doesn't use. Element counts are
+  checked against the bytes left before anything is reserved. Polygons become
+  triangle fans; vertex colours are averaged into `RawMesh::colour`.
+- `readGltf`: GLB chunks (JSON, BIN), or a `.gltf` whose buffers are `data:` base64 URIs
+  or files beside it (percent-decoded). It walks the default scene's node tree
+  (matrix or TRS, column-major), one `RawMesh` per node with a mesh (primitives in modes
+  4 / 5 / 6 combined). Positions go through the node's world matrix, then
+  (x, −z, y) × 1000 (Y-up metres to Z-up mm); a negative determinant reverses the
+  winding. Accessors are bounds-checked against their views and buffers; sparse
+  accessors and the Draco / meshopt extensions are refused. `baseColorFactor` is
+  converted from linear to sRGB for the colour.
+- `importFile` skips the "saved in metres?" question for .glb / .gltf as for .3mf.
+

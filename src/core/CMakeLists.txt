@@ -36,6 +36,7 @@ add_library(forge_core STATIC
     src/History.cpp
     src/FileFormat.cpp
     src/Import.cpp
+    src/ImportPlyGltf.cpp
     src/MeshKernel.cpp
     src/Mesh.cpp
     src/Picking.cpp
