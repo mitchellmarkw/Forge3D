@@ -7,6 +7,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <map>
@@ -81,6 +82,7 @@ TEST_CASE("Sculpt: Draw pushes out, inverted in, Smooth evens out", "[sculpt]")
 {
     sculpt::Sculptor s(sculpt::refined(box(20), 0.5, 10'000'000));
     const double before = volume(s.mesh());
+    const std::vector<float> start = s.mesh().positions;  // in the sculptor's own order
     // The box is centred in X and Y, from 0 to 20 in Z: aim at the middle of its top.
     const auto hit = s.hit({0, 0, 50}, {0, 0, -1});
     REQUIRE(hit);
@@ -118,7 +120,6 @@ TEST_CASE("Sculpt: Draw pushes out, inverted in, Smooth evens out", "[sculpt]")
     CHECK(volume(s.mesh()) < smoothed - 1.0);
 
     // Undo puts the points back.
-    std::vector<float> start = sculpt::refined(box(20), 0.5, 10'000'000).positions;
     s.setPositions(start);
     CHECK_THAT(volume(s.mesh()), WithinRel(before, 1e-9));
 }
@@ -807,4 +808,58 @@ TEST_CASE("Sculpt: the Pattern brush", "[sculpt][pattern]")
             if (x.id == step.id)
                 CHECK_THAT(x.boolean->sculpt->strokes[0].tile, WithinRel(6.0, 1e-9));
     }
+}
+
+TEST_CASE("Sculpt: only what a dab changed is reported, in short runs", "[sculpt]")
+{
+    sculpt::Sculptor s(sculpt::refined(box(20), 0.25, 10'000'000));
+    const auto first = s.takeChanges();
+    CHECK(first.everything);  // a new sculptor: everything to send
+    CHECK(s.takeChanges().points.empty());
+    s.setDetail(0.1);
+
+    const auto inside = [](std::uint32_t i, const std::vector<std::pair<std::uint32_t, std::uint32_t>>& runs) {
+        for (const auto& [a, b] : runs)
+            if (i >= a && i < b)
+                return true;
+        return false;
+    };
+    std::size_t sent = 0;
+    for (int k = 0; k < 6; ++k) {
+        const Mesh before = s.mesh();
+        sculpt::Dab dab;
+        dab.centre = s.onSurface({-4.0 + 1.5 * k, 2.0, 10.0});
+        dab.radius = 2.0;
+        dab.strength = 0.6;
+        s.apply(dab, s.triangleAt(dab.centre));
+        const auto changes = s.takeChanges();
+        REQUIRE_FALSE(changes.everything);
+        const Mesh& after = s.mesh();
+        std::size_t moved = 0;
+        for (std::uint32_t i = 0; i < after.vertexCount(); ++i) {
+            const bool isNew = i >= before.vertexCount();
+            bool differs = isNew;
+            for (int c = 0; c < 3 && !differs; ++c)
+                differs = after.positions[3 * i + c] != before.positions[3 * i + c] ||
+                          after.normals[3 * i + c] != before.normals[3 * i + c];
+            if (differs) {
+                ++moved;
+                CHECK(inside(i, changes.points));  // every changed point is sent
+            }
+        }
+        for (std::uint32_t t = 0; t < after.triangleCount(); ++t) {
+            const bool differs = t >= before.triangleCount() ||
+                                 !std::equal(after.indices.begin() + 3 * t, after.indices.begin() + 3 * t + 3,
+                                             before.indices.begin() + 3 * t);
+            if (differs)
+                CHECK(inside(t, changes.triangles));
+        }
+        CHECK(moved > 0);
+        for (const auto& [a, b] : changes.points)
+            sent += b - a;
+    }
+    s.settle();
+    // Points near each other are numbered near each other: a small brush sends a small
+    // part of the mesh, not a stretch from one end of it to the other.
+    CHECK(double(sent) / 6.0 < 0.25 * double(s.mesh().vertexCount()));
 }

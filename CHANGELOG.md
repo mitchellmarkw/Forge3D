@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.53.0 Beta — Slice 44: Faster sculpting on big meshes (2026-11-18)
+
+- **Sculpting keeps up on meshes of a million triangles and more.** Each dab of the
+  brush now changes only the part of the mesh under it, and only that part is sent to
+  the graphics card:
+  - The points of a mesh are numbered in order through space when sculpting starts, so
+    a brush's points sit close together, in memory and on the graphics card.
+  - Only the blocks of points and triangles a dab changed are sent (a few thousand
+    points, not the whole mesh). The card keeps a quarter more room than the mesh
+    needs, so detail added under the brush is sent on its own too.
+  - Finding the surface under the cursor no longer re-files every moved triangle on
+    every dab; they're found on their own list meanwhile and filed when you let go
+    (a share on each dab in a very long stroke).
+  - Big brushes work on several processor cores at once.
+- Measured with a 10 mm Draw brush on 2 processor cores: on 1.8 million triangles a
+  dab takes about 2 ms (about 5 ms while adding detail) and sends about 15,000 of the
+  920,000 points; on 5.2 million triangles about 6.5 ms, the slowest under 20 ms.
+  Before, each dab sent the whole stretch of points between the lowest and highest
+  numbered point it touched: often most of the mesh.
+- Files with sculpting from 0.52 open as before; their saved results are worked out
+  again once (the points are numbered differently now), so the first open after
+  updating takes a little longer.
+- Fixed (Linux builds with Qt 6.4 only; Windows uses a newer Qt): the app could crash
+  some time after sculpting, from a fault in that Qt version's form layout. The
+  Properties panel no longer uses the part that triggers it.
+- 243 unit tests (1 new: every point and triangle a dab changes is among those sent,
+  and a small brush sends a small part of the mesh), plus a benchmark
+  (`forge_tests "[.bench]"`, not run by default).
+
 ## 0.52.0 Beta — Slice 43: Lay out pieces on plates (2026-11-17)
 
 - **Lay Out** (Print/Save → Prepare, and the Edit menu): sets the selected shapes (all

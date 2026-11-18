@@ -2358,8 +2358,10 @@ void MainWindow::onLeftReleased(bool wasDrag)
             m_sculptMode.sculptor->endGrab();
         if (m_sculptMode.snaking && m_sculptMode.sculptor)
             m_sculptMode.sculptor->endSnake();
-        if (m_sculptMode.sculptor)
+        if (m_sculptMode.sculptor) {
             m_sculptMode.sculptor->endPattern();
+            m_sculptMode.sculptor->settle();  // the moved triangles refiled for finding the surface
+        }
         m_sculptMode.grabbing = false;
         m_sculptMode.snaking = false;
         return;
@@ -4350,17 +4352,21 @@ void MainWindow::sculptAt(const QVector3D& origin, const QVector3D& direction, Q
     showBrushRing(*hit, radius);
 }
 
-void MainWindow::sculptShown(std::uint32_t first, std::uint32_t last)
+void MainWindow::sculptShown(std::uint32_t, std::uint32_t)
 {
+    // Only what the sculptor changed goes to the graphics card (it keeps count).
+    const auto changes = m_sculptMode.sculptor->takeChanges();
+    Viewport::MeshChanges shown;
+    shown.points = changes.points;
+    shown.triangles = changes.triangles;
+    shown.everything = changes.everything;
+    m_viewport->meshChanged(m_sculptMode.object, shown);
     const auto version = m_sculptMode.sculptor->topologyVersion();
     if (version != m_sculptMode.topology) {
         m_sculptMode.topology = version;
-        m_viewport->meshGrew(m_sculptMode.object);
         m_sculptPanel->setStatus(tr("%1 triangles.").arg(QLocale().toString(
                                      qulonglong(m_sculptMode.sculptor->mesh().triangleCount()))),
                                  false);
-    } else {
-        m_viewport->meshPointsChanged(m_sculptMode.object, first, last);
     }
 }
 

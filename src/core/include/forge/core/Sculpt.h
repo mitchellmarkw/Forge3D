@@ -82,6 +82,10 @@ struct Hit {
 // A mesh being sculpted: its points move in place. With detail on (setDetail), long
 // edges under the brush are split first, adding points and triangles at the end of the
 // lists (a triangle that's split keeps its place as its first piece).
+// Numbers the points (and triangles) so that ones near each other in space are near
+// each other in the lists: the shape is unchanged. The Sculptor does this to its mesh.
+void spatialOrder(Mesh& mesh);
+
 class Sculptor {
 public:
     explicit Sculptor(Mesh mesh);
@@ -146,6 +150,21 @@ public:
     // Puts every point back as given (an undo); normals recomputed.
     void setPositions(const std::vector<float>& positions);
 
+    // What changed since the last call, for sending only that to the graphics card:
+    // runs of points [first, last) (positions, normals and mask) and of triangles,
+    // in order, each run a whole number of blocks of 256 (the last one cut at the end).
+    // `everything`: the whole mesh was replaced or redone; send it all.
+    struct Changes {
+        std::vector<std::pair<std::uint32_t, std::uint32_t>> points;
+        std::vector<std::pair<std::uint32_t, std::uint32_t>> triangles;
+        bool everything = false;
+    };
+    Changes takeChanges();
+    // Files the triangles moved since the last time in the grid that finds the surface
+    // (done at the end of each stroke, and some on each dab once very many have moved):
+    // all of them, or the `most` that moved first.
+    void settle(std::size_t most = SIZE_MAX);
+
 private:
     std::pair<std::uint32_t, std::uint32_t> normalsAround(const std::vector<std::uint32_t>& moved);
     void normalsOf(const std::vector<std::uint32_t>& points);
@@ -202,6 +221,17 @@ private:
     double m_detail = 0.0;
     std::size_t m_maxTriangles = 4'000'000;
     std::uint64_t m_topology = 0;
+    // What's changed since takeChanges, in blocks of 256 points / triangles.
+    void noteChanged(const std::vector<std::uint32_t>& points);
+    void noteTriangle(std::uint32_t triangle);
+    std::vector<char> m_pointBlockDirty, m_triBlockDirty;
+    std::vector<std::uint32_t> m_pointBlocks, m_triBlocks;
+    bool m_everything = true;
+    // Triangles moved but not yet refiled in the grid: hit() and triangleAt() test them
+    // all directly as well. Refiling every moved triangle on every dab was most of a
+    // big brush's time.
+    std::vector<std::uint32_t> m_stale;
+    std::vector<char> m_isStale;
     // The grid: cells m_cell across, each listing the triangles whose box reaches it.
     double m_cell = 1.0;
     std::unordered_map<std::uint64_t, std::vector<std::uint32_t>> m_cells;

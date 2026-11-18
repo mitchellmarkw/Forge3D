@@ -685,7 +685,7 @@ void Viewport::buildPlateGeometry()
     m_plateBuffer.release();
 }
 
-void Viewport::upload(GpuMesh& gpu, const std::shared_ptr<const forge::Mesh>& mesh)
+void Viewport::upload(GpuMesh& gpu, const std::shared_ptr<const forge::Mesh>& mesh, bool headroom)
 {
     if (!gpu.vao) {
         gpu.vao = std::make_unique<QOpenGLVertexArrayObject>();
@@ -693,34 +693,47 @@ void Viewport::upload(GpuMesh& gpu, const std::shared_ptr<const forge::Mesh>& me
     }
     QOpenGLVertexArrayObject::Binder bind(gpu.vao.get());
 
-    const auto fill = [](QOpenGLBuffer& buffer, const void* source, std::size_t bytes) {
+    // Sculpting: room for a quarter more (detail added under the brush), so new points
+    // and triangles can be sent on their own.
+    const double grow = headroom ? 1.25 : 1.0;
+    gpu.pointRoom = std::size_t(double(mesh->vertexCount()) * grow) + (headroom ? 4096 : 0);
+    gpu.triangleRoom = std::size_t(double(mesh->triangleCount()) * grow) + (headroom ? 8192 : 0);
+    const auto fill = [headroom](QOpenGLBuffer& buffer, const void* source, std::size_t bytes, std::size_t room) {
         if (!buffer.isCreated())
             buffer.create();
         buffer.bind();
-        buffer.setUsagePattern(QOpenGLBuffer::StaticDraw);
-        buffer.allocate(source, static_cast<int>(bytes));
+        buffer.setUsagePattern(headroom ? QOpenGLBuffer::DynamicDraw : QOpenGLBuffer::StaticDraw);
+        if (room <= bytes) {
+            buffer.allocate(source, static_cast<int>(bytes));
+        } else {
+            buffer.allocate(static_cast<int>(room));
+            if (bytes > 0)
+                buffer.write(0, source, static_cast<int>(bytes));
+        }
     };
+    const std::size_t pointBytes = gpu.pointRoom * 3 * sizeof(float);
 
-    fill(gpu.positions, mesh->positions.data(), mesh->positions.size() * sizeof(float));
+    fill(gpu.positions, mesh->positions.data(), mesh->positions.size() * sizeof(float), pointBytes);
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, nullptr);
 
-    fill(gpu.normals, mesh->normals.data(), mesh->normals.size() * sizeof(float));
+    fill(gpu.normals, mesh->normals.data(), mesh->normals.size() * sizeof(float), pointBytes);
     glEnableVertexAttribArray(1);
     glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 0, nullptr);
 
     // The mask (sculpting), or none: always a buffer, so the attribute is always there.
     if (mesh->shade.size() == mesh->vertexCount()) {
-        fill(gpu.shade, mesh->shade.data(), mesh->shade.size() * sizeof(float));
+        fill(gpu.shade, mesh->shade.data(), mesh->shade.size() * sizeof(float), gpu.pointRoom * sizeof(float));
     } else {
-        const std::vector<float> none(mesh->vertexCount(), 0.0f);
-        fill(gpu.shade, none.data(), none.size() * sizeof(float));
+        const std::vector<float> none(std::max(mesh->vertexCount(), gpu.pointRoom), 0.0f);
+        fill(gpu.shade, none.data(), none.size() * sizeof(float), gpu.pointRoom * sizeof(float));
     }
     glEnableVertexAttribArray(2);
     glVertexAttribPointer(2, 1, GL_FLOAT, GL_FALSE, 0, nullptr);
 
     // The index buffer binding is stored in the VAO, so bind it while the VAO is bound.
-    fill(gpu.indices, mesh->indices.data(), mesh->indices.size() * sizeof(std::uint32_t));
+    fill(gpu.indices, mesh->indices.data(), mesh->indices.size() * sizeof(std::uint32_t),
+         gpu.triangleRoom * 3 * sizeof(std::uint32_t));
 
     gpu.indexCount = static_cast<int>(mesh->indices.size());
     gpu.source = mesh;
@@ -728,44 +741,72 @@ void Viewport::upload(GpuMesh& gpu, const std::shared_ptr<const forge::Mesh>& me
 
 void Viewport::syncGpuMeshes()
 {
-    // Meshes that grew while sculpting: all of it again.
+    // Meshes changed throughout while sculpting: all of it again (with room to grow).
     for (std::uint64_t id : m_grown) {
         const auto found = m_gpu.find(id);
         if (found != m_gpu.end() && found->second->source) {
             const auto source = found->second->source;
-            upload(*found->second, source);
+            upload(*found->second, source, true);
         }
-        m_movedPoints.erase(id);
+        m_changes.erase(id);
     }
     m_grown.clear();
-    // Points moved by sculpting: just their stretch of the buffers.
-    for (const auto& [id, range] : m_movedPoints) {
+    // Parts changed by sculpting: just those runs of the buffers.
+    const auto merged = [](std::vector<std::pair<std::uint32_t, std::uint32_t>> runs, std::size_t end) {
+        std::sort(runs.begin(), runs.end());
+        std::vector<std::pair<std::uint32_t, std::uint32_t>> out;
+        for (auto [a, b] : runs) {
+            b = std::uint32_t(std::min<std::size_t>(b, end));
+            if (a >= b)
+                continue;
+            if (!out.empty() && a <= out.back().second)
+                out.back().second = std::max(out.back().second, b);
+            else
+                out.push_back({a, b});
+        }
+        return out;
+    };
+    for (auto& [id, changes] : m_changes) {
         const auto found = m_gpu.find(id);
-        if (found == m_gpu.end() || !found->second->source || range.first >= range.second)
+        if (found == m_gpu.end() || !found->second->source)
             continue;
         GpuMesh& gpu = *found->second;
-        const auto& mesh = *gpu.source;
-        const std::size_t last = std::min<std::size_t>(range.second, mesh.vertexCount());
-        if (range.first >= last)
+        const auto source = gpu.source;
+        const auto& mesh = *source;
+        if (mesh.vertexCount() > gpu.pointRoom || mesh.triangleCount() > gpu.triangleRoom) {
+            upload(gpu, source, true);  // outgrew its room: all again, with more
             continue;
-        const int offset = int(range.first * 3 * sizeof(float));
-        const int bytes = int((last - range.first) * 3 * sizeof(float));
-        gpu.positions.bind();
-        gpu.positions.write(offset, mesh.positions.data() + 3 * range.first, bytes);
-        gpu.normals.bind();
-        gpu.normals.write(offset, mesh.normals.data() + 3 * range.first, bytes);
-        // The mask over the same points (zeros if it was cleared).
-        const std::size_t count = last - range.first;
-        gpu.shade.bind();
-        if (mesh.shade.size() == mesh.vertexCount()) {
-            gpu.shade.write(int(range.first * sizeof(float)), mesh.shade.data() + range.first,
-                            int(count * sizeof(float)));
-        } else {
-            const std::vector<float> none(count, 0.0f);
-            gpu.shade.write(int(range.first * sizeof(float)), none.data(), int(count * sizeof(float)));
         }
+        const bool masked = mesh.shade.size() == mesh.vertexCount();
+        for (const auto& [first, last] : merged(changes.points, mesh.vertexCount())) {
+            const int offset = int(first * 3 * sizeof(float));
+            const int bytes = int((last - first) * 3 * sizeof(float));
+            gpu.positions.bind();
+            gpu.positions.write(offset, mesh.positions.data() + 3 * std::size_t(first), bytes);
+            gpu.normals.bind();
+            gpu.normals.write(offset, mesh.normals.data() + 3 * std::size_t(first), bytes);
+            // The mask over the same points (zeros if it was cleared).
+            const std::size_t count = last - first;
+            gpu.shade.bind();
+            if (masked) {
+                gpu.shade.write(int(first * sizeof(float)), mesh.shade.data() + first, int(count * sizeof(float)));
+            } else {
+                const std::vector<float> none(count, 0.0f);
+                gpu.shade.write(int(first * sizeof(float)), none.data(), int(count * sizeof(float)));
+            }
+        }
+        const auto triangles = merged(changes.triangles, mesh.triangleCount());
+        if (!triangles.empty()) {
+            QOpenGLVertexArrayObject::Binder bind(gpu.vao.get());
+            gpu.indices.bind();
+            for (const auto& [first, last] : triangles)
+                gpu.indices.write(int(std::size_t(first) * 3 * sizeof(std::uint32_t)),
+                                  mesh.indices.data() + 3 * std::size_t(first),
+                                  int(std::size_t(last - first) * 3 * sizeof(std::uint32_t)));
+        }
+        gpu.indexCount = int(mesh.indices.size());
     }
-    m_movedPoints.clear();
+    m_changes.clear();
     if (!m_itemsDirty)
         return;
     m_itemsDirty = false;
@@ -971,11 +1012,21 @@ void Viewport::meshPointsChanged(std::uint64_t id, std::uint32_t first, std::uin
 {
     if (first >= last)
         return;
-    auto [it, added] = m_movedPoints.try_emplace(id, first, last);
-    if (!added) {
-        it->second.first = std::min(it->second.first, first);
-        it->second.second = std::max(it->second.second, last);
+    m_changes[id].points.push_back({first, last});
+    update();
+}
+
+void Viewport::meshChanged(std::uint64_t id, const MeshChanges& changes)
+{
+    if (changes.everything) {
+        meshGrew(id);
+        return;
     }
+    if (changes.points.empty() && changes.triangles.empty())
+        return;
+    MeshChanges& waiting = m_changes[id];
+    waiting.points.insert(waiting.points.end(), changes.points.begin(), changes.points.end());
+    waiting.triangles.insert(waiting.triangles.end(), changes.triangles.begin(), changes.triangles.end());
     update();
 }
 

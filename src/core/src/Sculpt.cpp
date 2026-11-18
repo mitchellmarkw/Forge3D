@@ -8,6 +8,7 @@
 #include <cmath>
 #include <stdexcept>
 #include <functional>
+#include <thread>
 #include <unordered_map>
 
 namespace forge::sculpt {
@@ -244,15 +245,39 @@ void Sculptor::gridUpdate(const std::vector<std::uint32_t>& points)
             if (m_triMark[t] == m_walk)
                 continue;
             m_triMark[t] = m_walk;
-            if (cellsOf(t) != m_triCells[t]) {
-                gridRemove(t);
-                gridInsert(t);
+            // Left where it's filed until settle(); found meanwhile through m_stale.
+            if (m_isStale.size() <= t)
+                m_isStale.resize(std::size_t(t) + 1, 0);
+            if (!m_isStale[t]) {
+                m_isStale[t] = 1;
+                m_stale.push_back(t);
             }
         }
+    // Testing them all on every hit would start to tell: past a point the oldest are
+    // filed again, a share on each dab (all at once was a hitch in a big stroke).
+    if (m_stale.size() > 100'000)
+        settle(m_stale.size() / 4);
+}
+
+void Sculptor::settle(std::size_t most)
+{
+    const std::size_t n = std::min(most, m_stale.size());
+    for (std::size_t i = 0; i < n; ++i) {
+        const std::uint32_t t = m_stale[i];
+        m_isStale[t] = 0;
+        if (std::size_t(t) < m_triCells.size() && cellsOf(t) != m_triCells[t]) {
+            gridRemove(t);
+            gridInsert(t);
+        }
+    }
+    m_stale.erase(m_stale.begin(), m_stale.begin() + std::ptrdiff_t(n));
 }
 
 void Sculptor::rebuild()
 {
+    m_everything = true;
+    m_stale.clear();
+    m_isStale.clear();
     const std::size_t n = m_mesh.vertexCount();
     if (m_mesh.normals.size() != m_mesh.positions.size())
         allNormals(m_mesh);
@@ -277,8 +302,100 @@ void Sculptor::rebuild()
     ++m_topology;
 }
 
+namespace {
+
+// Runs work(begin, end) over [0, n) in pieces on several threads when n is big enough to
+// be worth it (a big brush on a dense mesh), else on this one.
+void parallelFor(std::size_t n, const std::function<void(std::size_t, std::size_t)>& work)
+{
+    const unsigned cores = std::max(1u, std::min(8u, std::thread::hardware_concurrency()));
+    if (n < 4096 || cores == 1) {
+        work(0, n);
+        return;
+    }
+    const std::size_t pieces = std::min<std::size_t>(cores, n / 2048);
+    std::vector<std::thread> threads;
+    threads.reserve(pieces - 1);
+    const std::size_t step = (n + pieces - 1) / pieces;
+    for (std::size_t i = 1; i < pieces; ++i) {
+        const std::size_t from = i * step, to = std::min(n, from + step);
+        if (from < to)
+            threads.emplace_back(work, from, to);
+    }
+    work(0, std::min(n, step));
+    for (std::thread& t : threads)
+        t.join();
+}
+
+// Spreads the low 21 bits of v out to every third bit.
+std::uint64_t spread3(std::uint64_t v)
+{
+    v &= 0x1FFFFF;
+    v = (v | v << 32) & 0x1F00000000FFFFULL;
+    v = (v | v << 16) & 0x1F0000FF0000FFULL;
+    v = (v | v << 8) & 0x100F00F00F00F00FULL;
+    v = (v | v << 4) & 0x10C30C30C30C30C3ULL;
+    v = (v | v << 2) & 0x1249249249249249ULL;
+    return v;
+}
+
+}  // namespace
+
+void spatialOrder(Mesh& mesh)
+{
+    const std::size_t n = mesh.vertexCount();
+    if (n < 2)
+        return;
+    // Points that are near each other get numbers near each other (a Z-order curve), and
+    // so do triangles: a brush then works on memory that's close together, and the
+    // points it changes go to the graphics card in a few short runs, not one spanning
+    // the whole mesh.
+    const Bounds box = mesh.bounds();
+    const double sx = box.max[0] - box.min[0], sy = box.max[1] - box.min[1], sz = box.max[2] - box.min[2];
+    const double scale = 2097151.0 / std::max({sx, sy, sz, 1e-9});
+    std::vector<std::pair<std::uint64_t, std::uint32_t>> keyed(n);
+    for (std::size_t v = 0; v < n; ++v) {
+        const auto q = [&](int k) {
+            return std::uint64_t(std::clamp((mesh.positions[3 * v + k] - box.min[std::size_t(k)]) * scale, 0.0, 2097151.0));
+        };
+        keyed[v] = {spread3(q(0)) | spread3(q(1)) << 1 | spread3(q(2)) << 2, std::uint32_t(v)};
+    }
+    std::sort(keyed.begin(), keyed.end());
+    std::vector<std::uint32_t> newIndex(n);
+    for (std::size_t i = 0; i < n; ++i)
+        newIndex[keyed[i].second] = std::uint32_t(i);
+    const auto reorder = [&](std::vector<float>& values, std::size_t width) {
+        if (values.size() != n * width)
+            return;
+        std::vector<float> out(values.size());
+        for (std::size_t i = 0; i < n; ++i)
+            for (std::size_t k = 0; k < width; ++k)
+                out[i * width + k] = values[std::size_t(keyed[i].second) * width + k];
+        values.swap(out);
+    };
+    reorder(mesh.positions, 3);
+    reorder(mesh.normals, 3);
+    reorder(mesh.shade, 1);
+    // Triangles by their first (lowest) point, keeping each one's corners in order.
+    const std::size_t tris = mesh.indices.size() / 3;
+    std::vector<std::pair<std::uint32_t, std::uint32_t>> byFirst(tris);
+    for (std::size_t t = 0; t < tris; ++t) {
+        for (int k = 0; k < 3; ++k)
+            mesh.indices[3 * t + k] = newIndex[mesh.indices[3 * t + k]];
+        byFirst[t] = {std::min({mesh.indices[3 * t], mesh.indices[3 * t + 1], mesh.indices[3 * t + 2]}),
+                      std::uint32_t(t)};
+    }
+    std::sort(byFirst.begin(), byFirst.end());
+    std::vector<std::uint32_t> indices(mesh.indices.size());
+    for (std::size_t i = 0; i < tris; ++i)
+        for (int k = 0; k < 3; ++k)
+            indices[3 * i + k] = mesh.indices[3 * std::size_t(byFirst[i].second) + k];
+    mesh.indices.swap(indices);
+}
+
 Sculptor::Sculptor(Mesh mesh) : m_mesh(std::move(mesh))
 {
+    spatialOrder(m_mesh);
     rebuild();
 }
 
@@ -286,6 +403,7 @@ void Sculptor::setMesh(Mesh mesh)
 {
     m_mesh = std::move(mesh);
     m_grab.clear();
+    spatialOrder(m_mesh);
     rebuild();
 }
 
@@ -303,6 +421,37 @@ std::optional<Hit> Sculptor::hit(const Vec3& origin, const Vec3& direction) cons
     if (!(dl > 0) || m_cells.empty())
         return std::nullopt;
     d = d * (1.0 / dl);
+    double best = 1e300;
+    std::optional<Hit> out;
+    const auto& p = m_mesh.positions;
+    const auto test = [&](std::uint32_t t) {
+        const V3 a = at(p, m_mesh.indices[3 * std::size_t(t)]), b = at(p, m_mesh.indices[3 * std::size_t(t) + 1]),
+                 c = at(p, m_mesh.indices[3 * std::size_t(t) + 2]);
+        const V3 e1 = b - a, e2 = c - a, h = cross(d, e2);
+        const double det = dot(e1, h);
+        if (std::abs(det) < 1e-14)
+            return;
+        const double f = 1.0 / det;
+        const V3 sv = o - a;
+        const double u = f * dot(sv, h);
+        if (u < 0.0 || u > 1.0)
+            return;
+        const V3 q = cross(sv, e1);
+        const double w = f * dot(d, q);
+        if (w < 0.0 || u + w > 1.0)
+            return;
+        const double dist = f * dot(e2, q);
+        if (dist > 1e-9 && dist < best) {
+            best = dist;
+            const V3 n = cross(e1, e2);
+            const double l = len(n);
+            const V3 pt = o + d * dist;
+            out = Hit{{pt.x, pt.y, pt.z}, {n.x / l, n.y / l, n.z / l}, t};
+        }
+    };
+    // The triangles moved since they were filed in the grid: each tested directly.
+    for (std::uint32_t t : m_stale)
+        test(t);
     // Into the box the grid covers.
     double t0 = 0.0, t1 = 1e300;
     const double oc[3] = {o.x, o.y, o.z}, dc[3] = {d.x, d.y, d.z};
@@ -310,7 +459,7 @@ std::optional<Hit> Sculptor::hit(const Vec3& origin, const Vec3& direction) cons
         const double lo = m_cellLo[c] * m_cell, hi = (double(m_cellHi[c]) + 1.0) * m_cell;
         if (std::abs(dc[c]) < 1e-15) {
             if (oc[c] < lo || oc[c] > hi)
-                return std::nullopt;
+                return out;
             continue;
         }
         double a = (lo - oc[c]) / dc[c], b = (hi - oc[c]) / dc[c];
@@ -320,7 +469,7 @@ std::optional<Hit> Sculptor::hit(const Vec3& origin, const Vec3& direction) cons
         t1 = std::min(t1, b);
     }
     if (t0 > t1)
-        return std::nullopt;
+        return out;
     // Cell by cell along the ray (Amanatides & Woo), testing the triangles in each.
     const double start = t0 + 1e-9;
     std::int64_t cell[3], step[3];
@@ -342,37 +491,11 @@ std::optional<Hit> Sculptor::hit(const Vec3& origin, const Vec3& direction) cons
             delta[c] = 1e300;
         }
     }
-    double best = 1e300;
-    std::optional<Hit> out;
-    const auto& p = m_mesh.positions;
     for (int guard = 0; guard < 1'000'000; ++guard) {
         const auto found = m_cells.find(cellKey(cell[0], cell[1], cell[2]));
         if (found != m_cells.end())
-            for (std::uint32_t t : found->second) {
-                const V3 a = at(p, m_mesh.indices[3 * std::size_t(t)]), b = at(p, m_mesh.indices[3 * std::size_t(t) + 1]),
-                         c = at(p, m_mesh.indices[3 * std::size_t(t) + 2]);
-                const V3 e1 = b - a, e2 = c - a, h = cross(d, e2);
-                const double det = dot(e1, h);
-                if (std::abs(det) < 1e-14)
-                    continue;
-                const double f = 1.0 / det;
-                const V3 sv = o - a;
-                const double u = f * dot(sv, h);
-                if (u < 0.0 || u > 1.0)
-                    continue;
-                const V3 q = cross(sv, e1);
-                const double w = f * dot(d, q);
-                if (w < 0.0 || u + w > 1.0)
-                    continue;
-                const double dist = f * dot(e2, q);
-                if (dist > 1e-9 && dist < best) {
-                    best = dist;
-                    const V3 n = cross(e1, e2);
-                    const double l = len(n);
-                    const V3 pt = o + d * dist;
-                    out = Hit{{pt.x, pt.y, pt.z}, {n.x / l, n.y / l, n.z / l}, t};
-                }
-            }
+            for (std::uint32_t t : found->second)
+                test(t);
         // On to the next cell, unless what's found is nearer than it.
         int axis = 0;
         if (next[1] < next[axis])
@@ -439,7 +562,9 @@ void Sculptor::normalsOf(const std::vector<std::uint32_t>& points)
 {
     auto& p = m_mesh.positions;
     auto& nrm = m_mesh.normals;
-    for (std::uint32_t v : points) {
+    parallelFor(points.size(), [&](std::size_t from, std::size_t to) {
+    for (std::size_t i = from; i < to; ++i) {
+        const std::uint32_t v = points[i];
         V3 sum{0, 0, 0};
         for (std::uint32_t t3 : m_vt[v]) {
             const std::size_t t = 3 * std::size_t(t3);
@@ -453,23 +578,42 @@ void Sculptor::normalsOf(const std::vector<std::uint32_t>& points)
         nrm[3 * v + 1] = float(sum.y);
         nrm[3 * v + 2] = float(sum.z);
     }
+    });
 }
 
 std::pair<std::uint32_t, std::uint32_t> Sculptor::normalsAround(const std::vector<std::uint32_t>& moved)
 {
-    // The moved points and their neighbours (whose triangles moved too).
-    std::vector<std::uint32_t> around = moved;
-    for (std::uint32_t v : moved)
+    // The moved points and their neighbours (whose triangles moved too), each once:
+    // marked as they're found (sorting them all took longer than the brush itself).
+    ++m_walk;
+    if (m_walk == 0) {
+        std::fill(m_mark.begin(), m_mark.end(), 0);
+        std::fill(m_triMark.begin(), m_triMark.end(), 0);
+        m_walk = 1;
+    }
+    std::vector<std::uint32_t> around;
+    around.reserve(moved.size() * 2);
+    std::uint32_t lo = UINT32_MAX, hi = 0;
+    const auto add = [&](std::uint32_t v) {
+        if (m_mark[v] == m_walk)
+            return;
+        m_mark[v] = m_walk;
+        around.push_back(v);
+        lo = std::min(lo, v);
+        hi = std::max(hi, v + 1);
+    };
+    for (std::uint32_t v : moved) {
+        add(v);
         for (std::uint32_t t : m_vt[v])
             for (int k = 0; k < 3; ++k)
-                around.push_back(m_mesh.indices[3 * std::size_t(t) + k]);
-    std::sort(around.begin(), around.end());
-    around.erase(std::unique(around.begin(), around.end()), around.end());
+                add(m_mesh.indices[3 * std::size_t(t) + k]);
+    }
     normalsOf(around);
     gridUpdate(moved);
+    noteChanged(around);
     if (around.empty())
         return {0, 0};
-    return {around.front(), around.back() + 1};
+    return {lo, hi};
 }
 
 std::uint32_t Sculptor::nearestPoint(const Vec3& point) const
@@ -545,6 +689,7 @@ std::pair<std::uint32_t, std::uint32_t> Sculptor::applyFrom(const Dab& dab, cons
             lo = std::min(lo, v);
             hi = std::max(hi, v + 1);
         }
+        noteChanged(touched);
         return {lo, hi};
     }
     // Detail where the brush is: first split long edges under it, so the shape it makes
@@ -605,16 +750,20 @@ std::pair<std::uint32_t, std::uint32_t> Sculptor::applyFrom(const Dab& dab, cons
     std::vector<V3> moved(touched.size());
     switch (dab.brush) {
     case Brush::Draw:
-        for (std::size_t i = 0; i < touched.size(); ++i) {
-            const V3 q = at(p, touched[i]);
-            moved[i] = q + areaNormal * (sign * most * falloff(len(q - c), dab.radius));
-        }
+        parallelFor(touched.size(), [&](std::size_t from, std::size_t to) {
+            for (std::size_t i = from; i < to; ++i) {
+                const V3 q = at(p, touched[i]);
+                moved[i] = q + areaNormal * (sign * most * falloff(len(q - c), dab.radius));
+            }
+        });
         break;
     case Brush::Inflate:
-        for (std::size_t i = 0; i < touched.size(); ++i) {
-            const V3 q = at(p, touched[i]);
-            moved[i] = q + normalOf(touched[i]) * (sign * most * falloff(len(q - c), dab.radius));
-        }
+        parallelFor(touched.size(), [&](std::size_t from, std::size_t to) {
+            for (std::size_t i = from; i < to; ++i) {
+                const V3 q = at(p, touched[i]);
+                moved[i] = q + normalOf(touched[i]) * (sign * most * falloff(len(q - c), dab.radius));
+            }
+        });
         break;
     case Brush::Flatten:
         for (std::size_t i = 0; i < touched.size(); ++i) {
@@ -880,6 +1029,7 @@ bool Sculptor::splitAround(const std::vector<std::uint32_t>& points, double maxE
                     next.push_back(kids[k + j]);
                 }
                 gridInsert(id);
+                noteTriangle(id);
             }
         }
         if (m_triMark.size() < m_mesh.triangleCount())
@@ -887,6 +1037,7 @@ bool Sculptor::splitAround(const std::vector<std::uint32_t>& points, double maxE
         std::sort(next.begin(), next.end());
         next.erase(std::unique(next.begin(), next.end()), next.end());
         normalsOf(next);
+        noteChanged(next);
         region = std::move(next);
     }
     if (any)
@@ -1043,6 +1194,7 @@ std::pair<std::uint32_t, std::uint32_t> Sculptor::clearMask()
     if (m_mesh.shade.empty())
         return {0, 0};
     m_mesh.shade.clear();
+    m_everything = true;
     return {0, std::uint32_t(m_mesh.vertexCount())};
 }
 
@@ -1052,6 +1204,7 @@ std::pair<std::uint32_t, std::uint32_t> Sculptor::invertMask()
         m_mesh.shade.assign(m_mesh.vertexCount(), 0.0f);
     for (float& m : m_mesh.shade)
         m = 1.0f - m;
+    m_everything = true;
     return {0, std::uint32_t(m_mesh.vertexCount())};
 }
 
@@ -1116,6 +1269,18 @@ std::uint32_t Sculptor::triangleAt(const Vec3& point) const
                     }
                 }
             }
+    for (std::uint32_t t : m_stale) {  // moved, and maybe not yet filed where they are now
+        const std::size_t b = 3 * std::size_t(t);
+        const V3 c = (at(m_mesh.positions, m_mesh.indices[b]) + at(m_mesh.positions, m_mesh.indices[b + 1]) +
+                      at(m_mesh.positions, m_mesh.indices[b + 2])) *
+                     (1.0 / 3.0);
+        const V3 d = c - p;
+        const double d2 = dot(d, d);
+        if (d2 < best) {
+            best = d2;
+            found = t;
+        }
+    }
     if (found >= 0)
         return std::uint32_t(found);
     // Far from everything: the triangle round the nearest point.
@@ -1279,6 +1444,72 @@ void Sculptor::setPositions(const std::vector<float>& positions)
     m_mesh.positions = positions;
     allNormals(m_mesh);
     rebuild();
+}
+
+namespace {
+constexpr int kBlockShift = 8;  // blocks of 256
+}
+
+void Sculptor::noteChanged(const std::vector<std::uint32_t>& points)
+{
+    if (m_everything)
+        return;
+    for (std::uint32_t v : points) {
+        const std::uint32_t b = v >> kBlockShift;
+        if (b >= m_pointBlockDirty.size())
+            m_pointBlockDirty.resize(std::size_t(b) + 1, 0);
+        if (!m_pointBlockDirty[b]) {
+            m_pointBlockDirty[b] = 1;
+            m_pointBlocks.push_back(b);
+        }
+    }
+}
+
+void Sculptor::noteTriangle(std::uint32_t triangle)
+{
+    if (m_everything)
+        return;
+    const std::uint32_t b = triangle >> kBlockShift;
+    if (b >= m_triBlockDirty.size())
+        m_triBlockDirty.resize(std::size_t(b) + 1, 0);
+    if (!m_triBlockDirty[b]) {
+        m_triBlockDirty[b] = 1;
+        m_triBlocks.push_back(b);
+    }
+}
+
+Sculptor::Changes Sculptor::takeChanges()
+{
+    Changes out;
+    out.everything = m_everything;
+    const auto runs = [](std::vector<std::uint32_t>& blocks, std::vector<char>& dirty, std::size_t count,
+                         std::vector<std::pair<std::uint32_t, std::uint32_t>>& into) {
+        std::sort(blocks.begin(), blocks.end());
+        for (std::size_t i = 0; i < blocks.size();) {
+            std::size_t j = i + 1;
+            while (j < blocks.size() && blocks[j] == blocks[j - 1] + 1)
+                ++j;
+            const std::uint32_t first = blocks[i] << kBlockShift;
+            const auto last = std::uint32_t(std::min<std::size_t>(std::size_t(blocks[j - 1] + 1) << kBlockShift, count));
+            if (first < last)
+                into.push_back({first, last});
+            i = j;
+        }
+        for (std::uint32_t b : blocks)
+            dirty[b] = 0;
+        blocks.clear();
+    };
+    if (!m_everything) {
+        runs(m_pointBlocks, m_pointBlockDirty, m_mesh.vertexCount(), out.points);
+        runs(m_triBlocks, m_triBlockDirty, m_mesh.triangleCount(), out.triangles);
+    } else {
+        std::fill(m_pointBlockDirty.begin(), m_pointBlockDirty.end(), 0);
+        std::fill(m_triBlockDirty.begin(), m_triBlockDirty.end(), 0);
+        m_pointBlocks.clear();
+        m_triBlocks.clear();
+    }
+    m_everything = false;
+    return out;
 }
 
 }  // namespace forge::sculpt
