@@ -20,6 +20,7 @@
 #include "forge/core/Socket.h"
 #include "forge/core/PrintSplit.h"
 #include "Theme.h"
+#include "JoinPanel.h"
 #include "SocketPanel.h"
 #include "ThreadPanel.h"
 #include "forge/core/Thread.h"
@@ -557,6 +558,8 @@ void MainWindow::createActions()
             endThread();
         else if (m_socketMode.active)
             endSocket();
+        else if (m_joinMode.active)
+            endJoin();
         else if (m_followMode.active)
             endFollow();
         else if (m_patternMode.active)
@@ -893,6 +896,11 @@ void MainWindow::createActions()
         startShell(target, false);
     });
 
+    m_joinAction = new QAction(tr("Join Parts"), this);
+    m_joinAction->setToolTip(tr("Join Parts: move one part so it joins another: a peg into its socket, a ball "
+                                "into its cup, a face flat against a face. Click the place on each part."));
+    connect(m_joinAction, &QAction::triggered, this, &MainWindow::startJoin);
+
     // Align Shapes: the first shape selected stays put; the others move to it.
     m_alignMenu = new QMenu(tr("Align Shapes"), this);
     m_alignMenu->setToolTipsVisible(true);
@@ -1163,6 +1171,7 @@ void MainWindow::createToolBar()
         {m_intersect, "intersect"},
         {m_separate, "separate"},
         {m_alignMenu->menuAction(), "align"},
+        {m_joinAction, "join"},
         {m_mirrorMenu->menuAction(), "mirror"},
         {m_patternAction, "pattern"},
         {m_group, "group"},
@@ -1317,7 +1326,8 @@ void MainWindow::createToolBar()
     {
         QWidget* align = menuButton(m_alignMenu, tr("Align"));
         align->setObjectName(QStringLiteral("AlignShapesButton"));
-        group(design, tr("Arrange"), {align, menuButton(m_mirrorMenu), button(m_group), button(m_duplicate)});
+        group(design, tr("Arrange"),
+              {align, button(m_joinAction), menuButton(m_mirrorMenu), button(m_group), button(m_duplicate)});
     }
     {
         // Sketch: click for a face (or the plate); the arrow offers the middle planes.
@@ -1616,6 +1626,9 @@ void MainWindow::createDocks()
     m_socketPanel = new SocketPanel;
     stackLayout->addWidget(m_socketPanel);
     m_socketPanel->hide();
+    m_joinPanel = new JoinPanel;
+    stackLayout->addWidget(m_joinPanel);
+    m_joinPanel->hide();
     m_measurePanel = new MeasurePanel;
     stackLayout->addWidget(m_measurePanel);
     m_measurePanel->hide();
@@ -1694,6 +1707,20 @@ void MainWindow::createDocks()
     connect(m_socketPanel, &SocketPanel::applyRequested, this, &MainWindow::applySocket);
     connect(m_socketPanel, &SocketPanel::cancelRequested, this, &MainWindow::endSocket);
     connect(m_socketPanel, &SocketPanel::addMatchingRequested, this, &MainWindow::addMatchingPart);
+    connect(m_joinPanel, &JoinPanel::changed, this, &MainWindow::updateJoinPreview);
+    connect(m_joinPanel, &JoinPanel::applyRequested, this, &MainWindow::applyJoin);
+    connect(m_joinPanel, &JoinPanel::cancelRequested, this, &MainWindow::endJoin);
+    connect(m_joinPanel, &JoinPanel::pickAgainRequested, this, [this](int which) {
+        if (!m_joinMode.active)
+            return;
+        m_joinMode.picking = which;
+        m_joinPanel->setPicked(0, m_joinMode.movingFeature ? m_joinPanel->property("movingText").toString() : QString(),
+                               which == 0);
+        m_joinPanel->setPicked(1, m_joinMode.fixedFeature ? m_joinPanel->property("fixedText").toString() : QString(),
+                               which == 1);
+        statusBar()->showMessage(which == 0 ? tr("Join Parts: click the part that moves, where it joins.")
+                                            : tr("Join Parts: click where it goes on the other part."));
+    });
     connect(m_shellPanel, &ShellPanel::applyRequested, this, &MainWindow::applyShell);
     connect(m_shellPanel, &ShellPanel::cancelRequested, this, &MainWindow::endShell);
 
@@ -2003,6 +2030,10 @@ void MainWindow::onViewportClicked(const QVector3D& origin, const QVector3D& dir
         socketClick(origin, direction);
         return;
     }
+    if (m_joinMode.active) {
+        joinClick(origin, direction);
+        return;
+    }
     if (m_followMode.active) {
         followClick(origin, direction);
         return;
@@ -2108,7 +2139,7 @@ void MainWindow::onLeftPressed(const QVector3D& origin, const QVector3D& directi
         return;
     }
     if (m_embossMode.active || m_edgesMode.active || m_holeMode.active || m_shellMode.active || m_followMode.active ||
-        m_patternMode.active || m_threadMode.active || m_socketMode.active)
+        m_patternMode.active || m_threadMode.active || m_socketMode.active || m_joinMode.active)
         return;  // shapes stay put while the tool is open
 
     if (handle.valid() && multiSelection()) {
@@ -3953,7 +3984,7 @@ bool MainWindow::toolOpen() const
     return m_splitMode.active || m_fitMode.active || m_embossMode.active || m_edgesMode.active || m_sketchMode.picking ||
            m_sketchMode.active || m_holeMode.active || m_shellMode.active || m_followMode.active ||
            m_patternMode.active || m_sculptMode.active || m_measureMode.active || m_threadMode.active ||
-           m_socketMode.active;
+           m_socketMode.active || m_joinMode.active;
 }
 
 void MainWindow::startEmboss(ObjectId target, bool editing)
@@ -6346,6 +6377,9 @@ void MainWindow::refreshScene()
             endThread();
         if (m_socketMode.active && !m_doc.find(m_socketMode.target))
             endSocket();
+        if (m_joinMode.active && ((m_joinMode.moving != kInvalidId && !m_doc.find(m_joinMode.moving)) ||
+                                  (m_joinMode.fixed != kInvalidId && !m_doc.find(m_joinMode.fixed))))
+            endJoin();
         if (m_followMode.active && !m_doc.find(m_followMode.target))
             endFollow();
         if (m_patternMode.active && !m_doc.find(m_patternMode.target))
@@ -6364,6 +6398,8 @@ void MainWindow::refreshScene()
                 continue;
             }
             item.model = toQMatrix(m_doc.worldTransform(id));
+            if (m_joinMode.active && m_joinMode.placed && id == m_joinMode.moving)
+                item.model = toQMatrix(placementTransform(*m_joinMode.placed, pivotOf(*m_doc.find(id))));
             if (m_edgesMode.active && id == history::objectOf(m_doc, m_edgesMode.target)) {
                 if (m_edgesMode.preview) {
                     // The step being made or changed, shown for the whole object.
@@ -6651,6 +6687,7 @@ void MainWindow::refreshScene()
         a->setEnabled(m_selection.size() >= 2 && allTopLevel && !rolled);
     m_separate->setEnabled(selected && selected->isBoolean() && m_doc.isTopLevel(selected->id));
     m_alignMenu->menuAction()->setEnabled(m_selection.size() >= 2 && allTopLevel);
+    m_joinAction->setEnabled(m_doc.bodyCount() >= 2 && !toolOpen());
     for (QAction* a : {m_duplicate, m_copy, m_cut, m_saveCustomShape})
         a->setEnabled(anySelected && allTopLevel && !toolOpen());
     m_mirrorMenu->menuAction()->setEnabled(anySelected && allTopLevel && !toolOpen() && !rolled);
@@ -9071,6 +9108,148 @@ void MainWindow::endSocket()
     m_socketTimer->stop();
     m_socketMode = SocketMode{};
     m_socketPanel->hide();
+    m_properties->show();
+    QTimer::singleShot(0, this, [this] { resizeDocks({m_propsDock}, {m_propsDockWidth}, Qt::Horizontal); });
+    statusBar()->clearMessage();
+    refreshScene();
+    refreshCommandState();
+}
+
+// ---- Join Parts -------------------------------------------------------------------
+
+void MainWindow::startJoin()
+{
+    if (toolOpen() || m_doc.bodyCount() < 2)
+        return;
+    if (m_dragState.kind != Drag::Kind::None)
+        cancelDrag();
+    m_joinMode = JoinMode{};
+    m_joinMode.active = true;
+    m_joinPanel->start();
+    m_propsDockWidth = m_propsDock->width();
+    m_properties->hide();
+    m_joinPanel->show();
+    statusBar()->showMessage(tr("Join Parts: click the part that moves, where it joins (its peg, ball or face). Esc "
+                                "cancels."));
+    refreshScene();
+    refreshCommandState();
+}
+
+void MainWindow::joinClick(const QVector3D& origin, const QVector3D& direction)
+{
+    auto& mode = m_joinMode;
+    if (mode.picking > 1)
+        mode.picking = 1;  // both picked: another click changes where it goes
+    const QVector3D d = direction.normalized();
+    Ray ray;
+    ray.origin = {origin.x(), origin.y(), origin.z()};
+    ray.direction = {d.x(), d.y(), d.z()};
+    const auto hit = pick(m_doc, ray);
+    if (!hit) {
+        statusBar()->showMessage(tr("Join Parts: click on a part."), 4000);
+        return;
+    }
+    const ObjectId id = history::objectOf(m_doc, hit->id);
+    const int which = mode.picking;
+    const ObjectId other = which == 0 ? mode.fixed : mode.moving;
+    if (id == other) {
+        m_joinPanel->setStatus(which == 0 ? tr("That's the part it goes on: click the part that moves.")
+                                          : tr("That's the part that moves: click the other part."),
+                               true);
+        return;
+    }
+    std::optional<join::Feature> f;
+    try {
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        struct RestoreCursor {
+            ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
+        } restore;
+        f = join::featureAt(m_doc, id, ray.origin, ray.direction);
+    } catch (const std::exception& e) {
+        m_joinPanel->setStatus(QString::fromUtf8(e.what()), true);
+        return;
+    }
+    if (!f)
+        return;
+    const QString text = QStringLiteral("<b>%1</b>: %2")
+                             .arg(QString::fromStdString(m_doc.find(id)->name).toHtmlEscaped(),
+                                  QString::fromStdString(f->text).toHtmlEscaped());
+    if (which == 0) {
+        mode.moving = id;
+        mode.movingFeature = f;
+        m_joinPanel->setProperty("movingText", text);
+        mode.picking = mode.fixedFeature ? 2 : 1;
+    } else {
+        mode.fixed = id;
+        mode.fixedFeature = f;
+        m_joinPanel->setProperty("fixedText", text);
+        mode.picking = 2;
+        // Start from the gap it suggests (a peg socket's fit), the rest as they were.
+        join::Offsets o = m_joinPanel->offsets();
+        o.along = f->gap;
+        m_joinPanel->setOffsets(o);
+    }
+    m_joinPanel->setPicked(0, mode.movingFeature ? m_joinPanel->property("movingText").toString() : QString(),
+                           mode.picking == 0);
+    m_joinPanel->setPicked(1, mode.fixedFeature ? m_joinPanel->property("fixedText").toString() : QString(),
+                           mode.picking != 0);
+    statusBar()->showMessage(mode.picking == 1 ? tr("Join Parts: now click where it goes on the other part.")
+                                               : tr("Join Parts: set the gap or turn if needed, then Apply. "
+                                                    "Clicking again changes where it goes."));
+    updateJoinPreview();
+}
+
+void MainWindow::updateJoinPreview()
+{
+    auto& mode = m_joinMode;
+    if (!mode.active)
+        return;
+    mode.placed.reset();
+    bool ok = false;
+    if (mode.movingFeature && mode.fixedFeature) {
+        try {
+            mode.placed = join::joinedPlacement(m_doc, mode.moving, *mode.movingFeature, *mode.fixedFeature,
+                                                m_joinPanel->offsets());
+            m_joinPanel->setStatus(tr("This is where it goes. If it points the wrong way, tick Flip."), false);
+            ok = true;
+        } catch (const std::exception& e) {
+            m_joinPanel->setStatus(QString::fromUtf8(e.what()), true);
+        }
+    } else {
+        m_joinPanel->setStatus({}, false);
+    }
+    m_joinPanel->setApplyEnabled(ok);
+    refreshScene();
+}
+
+void MainWindow::applyJoin()
+{
+    auto& mode = m_joinMode;
+    if (!mode.active || !mode.placed)
+        return;
+    const ObjectId moving = mode.moving, fixed = mode.fixed;
+    const Placement placed = *mode.placed;
+    const std::string label = "Join " + m_doc.find(moving)->name + " to " + m_doc.find(fixed)->name;
+    endJoin();
+    try {
+        m_stack.beginMacro(label);
+        m_stack.execute(std::make_unique<SetPlacementCommand>(moving, placed, false));
+        m_stack.endMacro();
+    } catch (const std::exception& e) {
+        m_stack.abortMacro();
+        QMessageBox::warning(this, tr("Forge3D"), tr("The part could not be moved:\n%1").arg(QString::fromUtf8(e.what())));
+        return;
+    }
+    qInfo().noquote() << "Command:" << QString::fromStdString(m_stack.undoLabel());
+    setSelection(moving);
+}
+
+void MainWindow::endJoin()
+{
+    if (!m_joinMode.active)
+        return;
+    m_joinMode = JoinMode{};
+    m_joinPanel->hide();
     m_properties->show();
     QTimer::singleShot(0, this, [this] { resizeDocks({m_propsDock}, {m_propsDockWidth}, Qt::Horizontal); });
     statusBar()->clearMessage();

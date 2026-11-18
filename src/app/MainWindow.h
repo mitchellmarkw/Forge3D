@@ -8,6 +8,7 @@
 #include "forge/core/Document.h"
 #include "forge/core/Edges.h"
 #include "forge/core/Emboss.h"
+#include "forge/core/Join.h"
 #include "forge/core/Measure.h"
 #include "forge/core/Sculpt.h"
 #include "forge/core/Sketch.h"
@@ -69,6 +70,7 @@ class PatternPanel;
 class ShellPanel;
 class ThreadPanel;
 class SocketPanel;
+class JoinPanel;
 class SketchPanel;
 class SketchView;
 struct DisplayItem;
@@ -687,6 +689,22 @@ private:
     void updateThreadPreview();
     void applyThread();
     void endThread();
+
+    QAction* m_joinAction = nullptr;
+    JoinPanel* m_joinPanel = nullptr;
+    struct JoinMode {
+        bool active = false;
+        int picking = 0;  // the next click picks: 0 the part that moves, 1 where it goes, 2 neither
+        ObjectId moving = kInvalidId, fixed = kInvalidId;
+        std::optional<join::Feature> movingFeature, fixedFeature;
+        std::optional<Placement> placed;  // where the moving part would go
+    };
+    JoinMode m_joinMode;
+    void startJoin();
+    void joinClick(const QVector3D& origin, const QVector3D& direction);
+    void updateJoinPreview();
+    void applyJoin();
+    void endJoin();
 
     QAction* m_socketAction = nullptr;
     SocketPanel* m_socketPanel = nullptr;
