@@ -193,7 +193,7 @@ void scaleInto(const Document& doc, ObjectId id, const Vec3& factors, const Vec3
         return;
     }
     if (body->boolean->op == BooleanOp::Split || body->boolean->op == BooleanOp::Mirror ||
-        body->boolean->op == BooleanOp::Emboss) {
+        body->boolean->op == BooleanOp::Emboss || body->boolean->op == BooleanOp::ExtrudeDown) {
         // The cutting / mirror plane (or the words' spot) stretches with everything else.
         Body next = *body;
         if (next.boolean->emboss && even(factors)) {

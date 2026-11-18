@@ -41,8 +41,8 @@ the code can stand in for that.
 | Slice | Content |
 | --- | --- |
 | 39 | Colours: choose a shape's colour (remembered in the file, kept by Merge and friends) and export them in 3MF for multi-colour printers |
-| 40 | Smooth (a step for the whole shape) and Extrude Down |
-| 41 | Open PLY and GLB/glTF; wireframe view |
+| 40 | Smooth (a step for the whole shape) and Extrude Down; Solid / See-Through / Wireframe looks |
+| 41 | Open PLY and GLB/glTF |
 
 After that come the agreed next steps: angled smart cuts, laying out split pieces,
 then the sculpt-engine prototype.

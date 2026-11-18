@@ -52,6 +52,7 @@ add_library(forge_core STATIC
     src/Updates.cpp
     src/Sculpt.cpp
     src/Remesh.cpp
+    src/MeshSteps.cpp
     src/Patterns.cpp
     src/Measure.cpp
     src/Thread.cpp

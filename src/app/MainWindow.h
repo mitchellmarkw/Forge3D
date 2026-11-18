@@ -369,6 +369,7 @@ private:
     QMenu* m_recentMenu = nullptr;
     QAction* m_plateSizeAction = nullptr;
     QAction* m_sectionAction = nullptr;
+    std::array<QAction*, 3> m_lookActions{};  // Solid, See-Through, Wireframe
     QAction* m_navOrbit = nullptr;
     QAction* m_navPan = nullptr;
     QAction* m_navZoom = nullptr;
@@ -587,6 +588,13 @@ private:
     QAction* m_sculptAction = nullptr;
     QAction* m_simplifyAction = nullptr;
     void simplifySelected();
+    QAction* m_smoothAction = nullptr;
+    void smoothSelected();
+    QAction* m_extrudeDownAction = nullptr;
+    void extrudeDownSelected();
+    // Adds a step on the selected object (at its rollback bar if it's rolled back).
+    // Fills in the spec's operand and pivot; false if it didn't work.
+    bool addStepOnSelected(BooleanSpec spec, const std::string& name);
     QAction* m_sculptSmaller = nullptr;
     QAction* m_sculptBigger = nullptr;
     void startSculpt(ObjectId target, bool editing);

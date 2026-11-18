@@ -312,7 +312,11 @@ PrimitiveSpec madeRound(const PrimitiveSpec& spec);
 
 // ---- Combine results ------------------------------------------------------------
 
-enum class BooleanOp { Merge, Subtract, Intersect, Split, Mirror, Group, Emboss, Edges, Shell, Follow, Pattern, Sculpt, Simplify, Thread };
+enum class BooleanOp {
+    Merge, Subtract, Intersect, Split, Mirror, Group, Emboss, Edges, Shell, Follow, Pattern, Sculpt, Simplify, Thread,
+    Smooth,       // the whole surface smoothed (mesh engine)
+    ExtrudeDown,  // the underside stretched straight down to a plane (planePoint / planeNormal: up)
+};
 
 // What happens to the picked edges of a shape.
 enum class EdgeFinishKind {
@@ -438,6 +442,12 @@ struct SimplifyFinish {
     bool operator==(const SimplifyFinish&) const = default;
 };
 
+// A Smooth step: how strongly the whole surface is smoothed (1 gentle .. 10 strong).
+struct SmoothFinish {
+    int strength = 3;
+    bool operator==(const SmoothFinish&) const = default;
+};
+
 // One picked face, found again by place (like EdgeRef): a point on it, which way it
 // faces there, and (once located) where that point sits in the part's box.
 struct FaceRef {
@@ -552,6 +562,8 @@ struct BooleanSpec {
     std::optional<SculptFinish> sculpt{};
     // Simplify: how many of the triangles to keep.
     std::optional<SimplifyFinish> simplify{};
+    // Smooth: how strongly.
+    std::optional<SmoothFinish> smooth{};
     // Thread: where and what size.
     std::optional<ThreadFinish> thread{};
     // Edges: what to do to which edges.

@@ -681,6 +681,14 @@ void MainWindow::createActions()
     m_simplifyAction->setToolTip(tr("Simplify: fewer triangles for the selected shape, keeping its look (for big "
                                     "imported or sculpted meshes). Set how many to keep in Properties."));
     connect(m_simplifyAction, &QAction::triggered, this, &MainWindow::simplifySelected);
+    m_smoothAction = new QAction(tr("Smooth"), this);
+    m_smoothAction->setToolTip(tr("Smooth: round off the whole surface of the selected shape, edges and corners "
+                                  "included. Set how strongly in Properties."));
+    connect(m_smoothAction, &QAction::triggered, this, &MainWindow::smoothSelected);
+    m_extrudeDownAction = new QAction(tr("Extrude Down"), this);
+    m_extrudeDownAction->setToolTip(tr("Extrude Down: stretch the underside of the selected shape straight down to "
+                                       "the plate, filling everything below it (for printing without supports)"));
+    connect(m_extrudeDownAction, &QAction::triggered, this, &MainWindow::extrudeDownSelected);
     m_sculptSmaller = new QAction(this);
     m_sculptSmaller->setShortcut(Qt::Key_BracketLeft);
     connect(m_sculptSmaller, &QAction::triggered, this, [this] {
@@ -911,6 +919,38 @@ void MainWindow::createActions()
                                    "isn't changed)"));
     m_sectionAction->setStatusTip(m_sectionAction->toolTip());
 
+    {
+        // How shapes are drawn (remembered).
+        auto* looks = new QActionGroup(this);
+        const struct {
+            Viewport::Look look;
+            QString name, icon, tip;
+        } choices[] = {
+            {Viewport::Look::Solid, tr("S&olid"), QStringLiteral("look-solid"),
+             tr("Solid: shapes are drawn solid, as they will print")},
+            {Viewport::Look::SeeThrough, tr("See-&Through"), QStringLiteral("look-see-through"),
+             tr("See-Through: shapes are half clear, so you can see into them and what's behind them")},
+            {Viewport::Look::Wireframe, tr("&Wireframe"), QStringLiteral("look-wireframe"),
+             tr("Wireframe: shapes are drawn as the edges of their triangles")},
+        };
+        const int saved = std::clamp(Preferences().value(QStringLiteral("view/look"), 0).toInt(), 0, 2);
+        for (const auto& c : choices) {
+            auto* a = new QAction(c.name, this);
+            a->setCheckable(true);
+            a->setToolTip(c.tip);
+            a->setStatusTip(c.tip);
+            setIconNamed(a, c.icon);
+            looks->addAction(a);
+            m_lookActions[std::size_t(c.look)] = a;
+            connect(a, &QAction::triggered, this, [this, look = c.look] {
+                m_viewport->setLook(look);
+                Preferences().setValue(QStringLiteral("view/look"), int(look));
+            });
+        }
+        m_lookActions[std::size_t(saved)]->setChecked(true);
+        m_viewport->setLook(Viewport::Look(saved));
+    }
+
     m_plateSizeAction = new QAction(tr("Build &Plate Size..."), this);
     m_plateSizeAction->setToolTip(tr("Plate Size: set the grid to the size of your printer's bed"));
     m_plateSizeAction->setStatusTip(m_plateSizeAction->toolTip());
@@ -1001,6 +1041,9 @@ void MainWindow::createMenus()
         Preferences().setValue(QStringLiteral("view/cube"), on);
     });
     view->addSeparator();
+    for (QAction* a : m_lookActions)
+        view->addAction(a);
+    view->addSeparator();
     view->addAction(m_plateSizeAction);
     applyPlateSize();
     {
@@ -1081,6 +1124,8 @@ void MainWindow::createToolBar()
         {m_emboss, "emboss"},
         {m_sculptAction, "sculpt"},
         {m_simplifyAction, "simplify"},
+        {m_smoothAction, "smooth"},
+        {m_extrudeDownAction, "extrude-down"},
         {m_measureAction, "measure"},
         {m_threadAction, "thread"},
         {m_layFlat, "lay-on-face"},
@@ -1233,18 +1278,19 @@ void MainWindow::createToolBar()
           {button(m_holeAction), button(m_threadAction), button(m_shellAction), button(m_followAction),
            button(m_patternAction), button(m_edgesAction)});
     group(design, tr("Change"), {button(m_split), button(m_emboss)});
-    group(design, tr("Place"), {button(m_layFlat), button(m_sitOnPlate)});
+    group(design, tr("Place"), {button(m_layFlat), button(m_sitOnPlate), button(m_extrudeDownAction)});
     common(design);
 
     Page sculpt = page(tr("Sculpt"), tr("Sculpting brushes"));
     group(sculpt, tr("Brushes"), {button(m_sculptAction)});
-    group(sculpt, tr("Triangles"), {button(m_simplifyAction)});
+    group(sculpt, tr("Whole Shape"), {button(m_smoothAction), button(m_simplifyAction)});
     common(sculpt);
 
     Page viewPage = page(tr("View"), tr("Turn, slide and zoom the view; look inside; the build plate"));
     group(viewPage, tr("Workspace"),
           {button(m_navOrbit), button(m_navPan), button(m_navZoom), named(m_fit, tr("Fit")),
            named(m_resetView, tr("Reset View"))});
+    group(viewPage, tr("Look"), {button(m_lookActions[0]), button(m_lookActions[1]), button(m_lookActions[2])});
     group(viewPage, tr("Objects"), {named(m_sectionAction, tr("Section View"))});
     group(viewPage, tr("Plate"), {named(m_plateSizeAction, tr("Plate Size"))});
     common(viewPage);
@@ -1593,6 +1639,16 @@ void MainWindow::createDocks()
         run(std::make_unique<EditBodyCommand>(*body, after, on ? "Through all" : "Not through all"));
     });
     connect(m_properties, &PropertiesPanel::keepRoundChanged, this, [this](bool on) { m_keepRound = on; });
+    connect(m_properties, &PropertiesPanel::smoothStrengthRequested, this, [this](ObjectId id, int strength) {
+        const Body* body = m_doc.find(id);
+        if (!body || !body->isBoolean() || !body->boolean->smooth || body->boolean->smooth->strength == strength)
+            return;
+        Body after = *body;
+        after.boolean->smooth->strength = strength;
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        run(std::make_unique<EditBodyCommand>(*body, after, "Smooth"));
+        QApplication::restoreOverrideCursor();
+    });
     connect(m_properties, &PropertiesPanel::simplifyKeepRequested, this, [this](ObjectId id, double keep) {
         const Body* body = m_doc.find(id);
         if (!body || !body->isBoolean() || !body->boolean->simplify ||
@@ -4541,6 +4597,97 @@ void MainWindow::simplifySelected()
                                  8000);
 }
 
+bool MainWindow::addStepOnSelected(BooleanSpec spec, const std::string& name)
+{
+    const ObjectId id = selectedOne();
+    const ObjectId target = history::tip(m_doc, id);
+    spec.operands = {target};
+    {
+        const ObjectId holder = m_doc.parentOf(target);
+        const Transform toStep = holder == kInvalidId ? Transform{} : m_doc.worldTransform(holder).inverse();
+        const auto c = m_doc.worldBounds(target).center();
+        const Vec3 centre = toStep.apply(Vec3{c[0], c[1], c[2]});
+        spec.pivot = {centre[0], centre[1], centre[2]};
+        if (spec.op == BooleanOp::ExtrudeDown) {
+            // The plate, and which way is up, as the step sees them.
+            spec.planePoint = toStep.apply(Vec3{0.0, 0.0, 0.0});
+            spec.planeNormal = toStep.applyDirection(Vec3{0.0, 0.0, 1.0});
+        }
+    }
+    Body result;
+    result.id = m_doc.allocateId();
+    result.name = m_doc.uniqueName(name);
+    result.boolean = spec;
+    const ObjectId newId = result.id;
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    bool done = false;
+    if (!m_doc.isTopLevel(target)) {
+        // Rolled back: the step goes in at the bar.
+        const ObjectId object = history::objectOf(m_doc, target);
+        done = run(std::make_unique<InsertStepCommand>(std::move(result), m_doc.parentOf(target)));
+        if (done)
+            setSelection(object);
+    } else {
+        done = run(std::make_unique<CombineCommand>(std::move(result)));
+        if (done)
+            setSelection(newId);
+    }
+    QApplication::restoreOverrideCursor();
+    return done;
+}
+
+void MainWindow::smoothSelected()
+{
+    const ObjectId id = selectedOne();
+    if (toolOpen() || id == kInvalidId || m_selection.size() != 1 || !m_doc.isTopLevel(id)) {
+        statusBar()->showMessage(tr("Smooth: select one shape on the plate first."), 6000);
+        return;
+    }
+    if (const QString open = openMeshIn({history::tip(m_doc, id)}); !open.isEmpty()) {
+        QMessageBox::information(this, tr("Forge3D"),
+                                 tr("'%1' has gaps in its surface (it isn't watertight), so it can't be smoothed.")
+                                     .arg(open));
+        return;
+    }
+    BooleanSpec spec;
+    spec.op = BooleanOp::Smooth;
+    spec.smooth = SmoothFinish{};
+    if (addStepOnSelected(spec, "Smoothed"))
+        statusBar()->showMessage(tr("Smoothed. Change how strongly in Properties (1 gentle to 10 strong)."), 8000);
+}
+
+void MainWindow::extrudeDownSelected()
+{
+    const ObjectId id = selectedOne();
+    if (toolOpen() || id == kInvalidId || m_selection.size() != 1 || !m_doc.isTopLevel(id)) {
+        statusBar()->showMessage(tr("Extrude Down: select one shape on the plate first."), 6000);
+        return;
+    }
+    if (const QString open = openMeshIn({history::tip(m_doc, id)}); !open.isEmpty()) {
+        QMessageBox::information(this, tr("Forge3D"),
+                                 tr("'%1' has gaps in its surface (it isn't watertight), so it can't be extruded "
+                                    "down.")
+                                     .arg(open));
+        return;
+    }
+    try {
+        if (m_doc.worldBounds(id).min[2] < -1e-3) {
+            QMessageBox::information(this, tr("Forge3D"),
+                                     tr("Part of '%1' is below the plate. Move it up (or Sit on Plate) first, so "
+                                        "there's room to extrude down to the plate.")
+                                         .arg(QString::fromStdString(m_doc.find(id)->name)));
+            return;
+        }
+    } catch (const std::exception&) {
+    }
+    BooleanSpec spec;
+    spec.op = BooleanOp::ExtrudeDown;
+    if (addStepOnSelected(spec, "Extruded Down"))
+        statusBar()->showMessage(tr("Extruded down to the plate. If you move it afterwards, the extra part moves "
+                                    "with it."),
+                                 8000);
+}
+
 void MainWindow::endSculpt()
 {
     if (!m_sculptMode.active)
@@ -4682,6 +4829,9 @@ bool MainWindow::openFile(const QString& path)
     try {
         std::vector<Body> bodies = file::load(toPath(path));
         m_doc.replaceAll(std::move(bodies));
+        // The slow steps' results saved with the file: no need to work them out again.
+        if (const std::size_t used = file::useSavedResults(m_doc, toPath(path)))
+            qInfo().noquote() << "Saved results used:" << used;
     } catch (const std::exception& e) {
         qWarning().noquote() << "Open failed:" << path << "-" << e.what();
         QMessageBox::critical(this, tr("Could not open %1").arg(QFileInfo(path).fileName()),
@@ -4931,6 +5081,7 @@ bool MainWindow::recoverFrom(const QString& backup)
     try {
         std::vector<Body> bodies = file::load(toPath(backup));
         m_doc.replaceAll(std::move(bodies));
+        file::useSavedResults(m_doc, toPath(backup));
     } catch (const std::exception& e) {
         qWarning().noquote() << "Recovery failed:" << backup << "-" << e.what();
         QMessageBox::critical(this, tr("Could not recover the backup"), QString::fromUtf8(e.what()));
@@ -5900,6 +6051,8 @@ void MainWindow::refreshScene()
     m_sitOnPlate->setEnabled(!m_selection.empty() && !toolOpen());
     m_sculptAction->setEnabled(m_selection.size() == 1 && m_doc.isTopLevel(m_selection.front()) && !toolOpen());
     m_simplifyAction->setEnabled(m_sculptAction->isEnabled());
+    m_smoothAction->setEnabled(m_sculptAction->isEnabled());
+    m_extrudeDownAction->setEnabled(m_sculptAction->isEnabled());
     m_split->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen() && !rolled);
     m_emboss->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_edgesAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
@@ -5943,6 +6096,14 @@ void MainWindow::addStepRows(QTreeWidgetItem* objectRow, ObjectId top)
 {
     const std::vector<ObjectId> line = history::steps(m_doc, top);
     const std::size_t shown = history::barAt(m_doc, top);
+    // A finished result (perhaps from the file) means every step in it was built, or
+    // was clean when it was saved: don't build the steps just to list them.
+    const bool built = m_doc.usesMeshEngine(top) && m_doc.cachedSolid(top).has_value();
+    const auto problemOf = [this, built](ObjectId id) -> std::optional<std::string> {
+        if (!built)
+            return m_doc.problemWith(id);
+        return m_doc.knownProblem(id) ? m_doc.problemWith(id) : std::nullopt;
+    };
     const auto addBar = [&] {
         auto* bar = new QTreeWidgetItem(objectRow);
         bar->setText(0, tr("━━━ rollback bar ━━━"));
@@ -5967,7 +6128,7 @@ void MainWindow::addStepRows(QTreeWidgetItem* objectRow, ObjectId top)
         item->setData(0, kOwnerRole, QVariant::fromValue<ObjectId>(top));
         item->setData(0, kStepIndexRole, int(i));
         item->setToolTip(0, tr("%1. Double-click to change it.").arg(QString::fromStdString(typeName(body))));
-        if (const auto problem = body.suppressed || i >= shown ? std::nullopt : m_doc.problemWith(id)) {
+        if (const auto problem = body.suppressed || i >= shown ? std::nullopt : problemOf(id)) {
             item->setText(0, QStringLiteral("\u26A0 ") + item->text(0));
             item->setText(1, tr("didn't work: left out"));
             const QString why = QString::fromStdString(*problem);
@@ -5980,7 +6141,7 @@ void MainWindow::addStepRows(QTreeWidgetItem* objectRow, ObjectId top)
             objectRowItem->setForeground(1, QColor(0xc0, 0x39, 0x2b));
         }
         const bool dim = body.suppressed || i >= shown;
-        const auto problem = dim ? std::nullopt : m_doc.problemWith(id);
+        const auto problem = dim ? std::nullopt : problemOf(id);
         for (int c = 0; c < 2; ++c) {
             item->setForeground(c, palette().brush(dim ? QPalette::Disabled : QPalette::Active,
                                                    c == 0 ? QPalette::Text : QPalette::PlaceholderText));

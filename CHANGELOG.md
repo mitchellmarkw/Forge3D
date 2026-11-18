@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.49.0 Beta — Slice 40: Smooth, Extrude Down, Solid / See-Through / Wireframe (2026-11-17)
+
+- **View → Look** (and the View tab): **Solid**, **See-Through** or **Wireframe**,
+  remembered between sessions.
+  - **Fixed:** shapes were drawn with their far faces in front of their near ones
+    after the first moment, so they looked hollow, as if you could see into them. The
+    view-cube and label drawing switched off depth testing, and it wasn't switched back
+    on. **Solid** now draws shapes as they will print.
+  - **See-Through** draws every shape half clear (far side first, then the near side),
+    so you can see into it and what's behind it.
+  - **Wireframe** draws the edges of every triangle.
+- **Smooth** (Sculpt tab → Whole Shape): rounds off the whole surface of the selected
+  shape, edges and corners included, keeping its volume. The triangles are evened out
+  again every few rounds, so strong smoothing stays even (no lumps along the edges). It's a step: set **Strength**
+  (1 takes the edge off, 10 rounds the shape right off) in Properties, or remove it
+  with **Remove the smoothing**. Plain shapes are first evened out into small triangles.
+- **Extrude Down** (Design tab → Place): stretches the underside of the selected shape
+  straight down to the plate, filling everything below it (under a ball, a ledge, a
+  figure's arms), so it prints without supports. It's a step too (**Remove the
+  extrusion**); move the shape afterwards and the added part moves with it.
+- On very big meshes (over a million triangles) Smooth and Extrude Down take several
+  seconds.
+- **Opening files is quick again with slow steps in them.** Saving now also keeps the
+  finished triangles of every shape the mesh engine works out (Smooth, Extrude Down,
+  sculpting, merges of imported meshes...), with a fingerprint of what they were made
+  from. Opening the file uses them instead of working everything out again, unless the
+  shape was changed since. Files get bigger by about the size of those shapes.
+  Listing a shape's steps in Objects no longer works them all out either.
+- File format 25 (for the two new steps): Forge3D 0.48 and older can't open files saved
+  by this version.
+- 234 unit tests (4 new: Smooth, and an even result at strength 10; Extrude Down on a
+  lifted box, a ball, a T and a ring; results saved with the file and used on opening).
+
 ## 0.48.0 Beta — Slice 39: Colours (2026-11-17)
 
 - **Colour** (Build tab, and right-click a shape in Objects): pick one of 14 filament

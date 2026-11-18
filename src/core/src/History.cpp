@@ -221,6 +221,12 @@ std::string describe(const Document& doc, ObjectId id)
                 name = s.name;
         return name + " thread" + (t.leftHand ? ", left-hand" : "");
     }
+    case BooleanOp::Smooth: {
+        if (!spec.smooth)
+            return {};
+        return "strength " + std::to_string(spec.smooth->strength);
+    }
+    case BooleanOp::ExtrudeDown: return "down to the plate";
     case BooleanOp::Simplify: {
         if (!spec.simplify)
             return {};

@@ -55,7 +55,7 @@ namespace forge::file {
 //  24  the sketch rule "gap" (an offset copy's distance from its original); a pad's
 //      "taper" (degrees its sides lean in); a sketch's "texts" (words whose letters
 //      are outlines)
-inline constexpr int kFormatVersion = 24;
+inline constexpr int kFormatVersion = 25;
 // The highest sculpt::Brush number a file may hold (Pattern).
 inline constexpr int kLastSculptBrush = 13;
 inline constexpr const char* kExtension = ".f3d";
@@ -74,6 +74,17 @@ void save(const Document& doc, const std::filesystem::path& path, const std::str
 
 // Reads a document's bodies. Use Document::replaceAll() to show them.
 std::vector<Body> load(const std::filesystem::path& path);
+
+// Saved results. Steps worked out by the mesh engine (Smooth, Extrude Down, Sculpt,
+// merges of imported meshes...) can take a long while on big meshes, so save() also
+// keeps each shape's finished triangles ("results/<id>.bin"), labelled with a
+// fingerprint of everything that went into them. After opening a file, this hands the
+// ones that still match (all of them, unless the file was edited by hand or saved by a
+// Forge3D that works them out differently) to the document. Returns how many were used;
+// a damaged or missing result is simply worked out again.
+std::size_t useSavedResults(const Document& doc, const std::filesystem::path& path);
+// The fingerprint of a shape and everything it's made from.
+std::string resultKey(const Document& doc, ObjectId id);
 
 // The JSON part on its own (for tests and tools).
 std::string toJson(const Document& doc, const std::string& createdBy);

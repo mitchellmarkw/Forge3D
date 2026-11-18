@@ -119,6 +119,8 @@ public:
     // on), or nothing if it's fine. A step like that is left out: the object carries
     // on as if it were switched off.
     std::optional<std::string> problemWith(ObjectId id) const;
+    // Whether building this step has already gone wrong (nothing is built to find out).
+    bool knownProblem(ObjectId id) const { return m_problems.count(id) > 0; }
 
     // ---- Geometry ----
     // The exact solid in the body's own coordinates (placement not applied).
@@ -167,6 +169,11 @@ public:
     // The body as a triangle solid, in its own coordinates (cached like shape()).
     // Throws MeshEngineError (e.g. an imported mesh that isn't watertight).
     MeshSolid meshSolid(ObjectId id) const;
+    // The mesh engine's result for a body if it's already worked out (nothing is built).
+    std::optional<MeshSolid> cachedSolid(ObjectId id) const;
+    // Hands over a result worked out before (a saved file's), so it isn't built again.
+    // Dropped like any other cached result when the body or its parts change.
+    void seedSolid(ObjectId id, MeshSolid solid) const;
     // Bounds of the body in its own coordinates, from whichever engine it uses.
     Bounds localBounds(ObjectId id) const;
 

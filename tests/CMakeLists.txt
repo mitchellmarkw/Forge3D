@@ -38,6 +38,7 @@ add_executable(forge_tests
     test_sketch_text.cpp
     test_print_split.cpp
     test_colour.cpp
+    test_mesh_steps.cpp
     fuzz_files.cpp
     test_undo_random.cpp
 )
