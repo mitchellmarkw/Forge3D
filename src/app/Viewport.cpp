@@ -256,7 +256,7 @@ void Viewport::checkFit()
             return std::abs(p.x()) > halfX || std::abs(p.y()) > halfY || p.z() > top;
         };
         for (const DisplayItem& item : m_items) {
-            if (!item.mesh || item.ghost || item.alpha < 1.0f || item.mesh->empty())
+            if (!item.mesh || item.ghost || item.helper || item.alpha < 1.0f || item.mesh->empty())
                 continue;
             const Bounds local = item.mesh->bounds();
             if (!local.valid)
@@ -312,7 +312,7 @@ void Viewport::noteSectionShapes()
     std::set<std::uint64_t> selected;
     bool anyLeft = false;
     for (const DisplayItem& item : m_items) {
-        if (!item.mesh || item.ghost || item.alpha < 1.0f)
+        if (!item.mesh || item.ghost || item.helper || item.alpha < 1.0f)
             continue;
         if (item.selected)
             selected.insert(item.id);
@@ -331,7 +331,7 @@ Bounds Viewport::sceneBounds(bool cutOnly) const
         return item.mesh && !item.ghost && item.alpha >= 1.0f && m_sectionIds.count(item.id) > 0;
     });
     for (const DisplayItem& item : m_items) {
-        if (!item.mesh || item.ghost || item.alpha < 1.0f)
+        if (!item.mesh || item.ghost || item.helper || item.alpha < 1.0f)
             continue;
         if (some && !m_sectionIds.count(item.id))
             continue;
@@ -352,7 +352,7 @@ void Viewport::fitView()
 {
     Bounds all;
     for (const DisplayItem& item : m_items) {
-        if (!item.mesh || item.ghost || item.alpha < 1.0f)
+        if (!item.mesh || item.ghost || item.helper || item.alpha < 1.0f)
             continue;
         const Bounds local = item.mesh->bounds();
         if (!local.valid)

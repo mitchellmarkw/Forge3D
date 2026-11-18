@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.51.0 Beta — Slice 42: Split to Fit shows its cuts first; angled cuts (2026-11-17)
+
+- **Split to Fit shows its cuts before making them.** Instead of a question box, a
+  panel lists the planned cuts, and each one is drawn through the model in the view
+  (the picked one yellow, with an arrow; the others blue).
+  - **Move a cut**: drag its plane in the view, or pick it in the list and type its
+    **Position**. **Lean** tilts it (up to 45°), **Lean around** says which way.
+  - The panel says straight away whether every piece will still fit the printer, or
+    which piece could be too long, which cuts cross, or which cut misses the model.
+    Split still works if you want it anyway (it asks first).
+  - **Let cuts lean (angled cuts)** plans again, letting each cut lean up to 30°
+    where that cuts through less (along a leaning arm or neck, say). It's remembered.
+    **Plan Again** forgets your changes.
+  - **Split** makes the cuts as one undo step; **Cancel** or Esc leaves the model as it
+    was.
+- Cuts now go right through the model (each one splits every piece it passes through),
+  so what you see is what you get. Before, each piece was cut on its own.
+- **Pegs keep clear of the other cuts**, so a later cut no longer slices through the
+  pegs and holes of an earlier one.
+- Fixed: the arrow on the Split plane counted as a shape off the plate in the status
+  bar.
+- 238 unit tests (a new Split to Fit test covers planning, leaning, checking, moving,
+  making, a grid of cuts and pegs kept clear of other cuts).
+
 ## 0.50.0 Beta — Slice 41: Open PLY and glTF / GLB (2026-11-17)
 
 - **Import PLY** (what most 3D scanners and scanning apps save): text or binary, with

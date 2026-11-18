@@ -55,6 +55,7 @@ class QToolBar;
 namespace forge::app {
 
 class PropertiesPanel;
+class FitPanel;
 class SplitPanel;
 class EmbossPanel;
 class Tour;
@@ -314,7 +315,7 @@ private:
     bool m_syncingList = false;
 
     struct Drag {
-        enum class Kind { None, Plate, Arrow, Ring, Face, SplitPlane };
+        enum class Kind { None, Plate, Arrow, Ring, Face, SplitPlane, FitPlane };
         Kind kind = Kind::None;
         Body before;                  // the body when the drag started
         view::GizmoHandle handle;
@@ -420,6 +421,23 @@ private:
         Vec3 centre{};                  // middle of `measured` on the plate
     };
     SplitMode m_splitMode;
+    // Split to Fit, with its cuts shown before they're made (slice 42).
+    struct FitMode {
+        bool active = false;
+        ObjectId target = kInvalidId;
+        FitPlan plan;
+        int selected = -1;
+        Bounds box;  // the model's, when the plan was made: the cuts are placed by it
+    };
+    FitMode m_fitMode;
+    FitPanel* m_fitPanel = nullptr;
+    void startFit(ObjectId target);
+    void endFit();
+    void updateFit();
+    void planFit(bool angled);
+    void applyFit();
+    void addFitItems(std::vector<DisplayItem>& items) const;
+    bool grabFitPlane(const QVector3D& origin, const QVector3D& direction);
     QAction* m_emboss = nullptr;
     QAction* m_layFlat = nullptr;
     QLabel* m_emptyHint = nullptr;  // over the view while the plate is empty

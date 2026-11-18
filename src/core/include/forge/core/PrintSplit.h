@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "forge/core/Mesh.h"
 #include "forge/core/Split.h"
 
 #include <array>
@@ -39,7 +40,10 @@ double sectionArea(const Document& doc, ObjectId id, const SplitPlane& plane);
 // Pegs for a cut through `id`: for each separate piece of the cut, one, two or three
 // spots well inside it (clear of its edges and of holes), with room behind them for the
 // hole. Empty when the cut is too small or thin for any.
-std::vector<KeySpot> keySpots(const Document& doc, ObjectId id, const SplitPlane& plane, const KeyOptions& options);
+// `keepClear`: other cuts still to be made, which pegs and holes keep away from (so a
+// later cut doesn't slice through them).
+std::vector<KeySpot> keySpots(const Document& doc, ObjectId id, const SplitPlane& plane, const KeyOptions& options,
+                              const std::vector<SplitPlane>& keepClear = {});
 
 struct KeyedSplit {
     std::vector<ObjectId> pieces;  // the side the plane faces, then the other side
@@ -53,7 +57,7 @@ struct KeyedSplit {
 // pieces get holes and the pins are added beside the model. Throws, changing nothing,
 // as splitBody does.
 KeyedSplit splitWithKeys(CommandStack& stack, Document& doc, ObjectId id, const SplitPlane& plane,
-                         const KeyOptions& options);
+                         const KeyOptions& options, const std::vector<SplitPlane>& keepClear = {});
 
 // The smart split: where the cuts would go to make `id` fit a printer that can print
 // `volume` (X, Y, Z mm). Cuts are level or upright, as few as will do, each put where
@@ -64,6 +68,43 @@ struct SmartPlan {
 };
 SmartPlan planSmartSplit(const Document& doc, ObjectId id, const std::array<double, 3>& volume,
                          const KeyOptions& options);
+
+// ---- Planned cuts (Split to Fit, slice 42) ----------------------------------------
+// Split to Fit plans its cuts first, as whole planes through the model (each cuts every
+// piece it passes through), so they can be shown and dragged before anything is cut.
+
+// One planned cut: across `axis` (0 X, 1 Y, 2 Z) at `position` (plate mm, where it
+// crosses the middle of the model), tilted `tilt` degrees around `tiltAxis`.
+struct FitCut {
+    int axis = 0;
+    double position = 0.0;
+    int tiltAxis = 1;
+    double tilt = 0.0;
+    bool operator==(const FitCut&) const = default;
+};
+
+struct FitPlan {
+    std::vector<FitCut> cuts;
+    int pieces = 1;
+    bool turned = false;  // pieces lie turned a quarter on the plate (X and Y swapped)
+};
+
+// The plane of a cut, for a model whose box is `box`.
+SplitPlane planeOf(const FitCut& cut, const Bounds& box);
+// The cuts that make `id` fit `volume`: as few as will do, each where it cuts through
+// least. Level and upright cuts only, unless `angled`: then each may lean up to 30°
+// where that cuts through less. Empty cuts when it already fits.
+FitPlan planFitCuts(const Document& doc, ObjectId id, const std::array<double, 3>& volume, const KeyOptions& options,
+                    bool angled);
+// What's wrong with a set of cuts (after the user moved them): pieces that would be
+// too long for the printer, cuts that cross inside the model or miss it. Worked out
+// from the model's box, so it errs on the safe side. Empty when they'll do.
+std::vector<std::string> fitProblems(const Document& doc, ObjectId id, const FitPlan& plan,
+                                     const std::array<double, 3>& volume, const KeyOptions& options);
+// Makes the cuts (keyed), as one undo step: each cut splits every piece it passes
+// through. Returns the pieces and pins. Throws, changing nothing, if a cut fails.
+KeyedSplit splitAlong(CommandStack& stack, Document& doc, ObjectId id, const std::vector<FitCut>& cuts,
+                      const KeyOptions& options);
 
 // Does it: cuts `id` (keyed) until every piece fits `volume`, as one undo step.
 // Returns the pieces (and pins). Throws, changing nothing, if a piece can't be made
