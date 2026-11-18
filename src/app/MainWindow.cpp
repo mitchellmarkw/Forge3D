@@ -1312,7 +1312,7 @@ void MainWindow::createToolBar()
     group(build, tr("Remove"), {button(m_delete), button(m_clear)});
     common(build);
 
-    Page design = page(tr("Design"), tr("Combine and arrange shapes; sketches, holes, shells, edges, text and cuts"));
+    Page design = page(tr("Design"), tr("Combine and arrange shapes; sketches, words and cuts"));
     group(design, tr("Combine"), {button(m_merge), button(m_subtract), button(m_intersect), button(m_separate)});
     {
         QWidget* align = menuButton(m_alignMenu, tr("Align"));
@@ -1330,13 +1330,15 @@ void MainWindow::createToolBar()
         sketchButton->setAutoRaise(true);
         group(design, tr("Sketch"), {sketchButton});
     }
-    group(design, tr("Features"),
-          {button(m_holeAction), button(m_threadAction), button(m_socketAction), button(m_shellAction),
-           button(m_followAction),
-           button(m_patternAction), button(m_edgesAction)});
     group(design, tr("Change"), {button(m_split), button(m_emboss)});
     group(design, tr("Place"), {button(m_layFlat), button(m_sitOnPlate), button(m_extrudeDownAction)});
     common(design);
+
+    Page features = page(tr("Features"), tr("Holes, threads, sockets, shells, grooves, patterns and edges"));
+    group(features, tr("Holes and Joints"), {button(m_holeAction), button(m_threadAction), button(m_socketAction)});
+    group(features, tr("Surface"), {button(m_shellAction), button(m_followAction), button(m_edgesAction)});
+    group(features, tr("Repeat"), {button(m_patternAction)});
+    common(features);
 
     Page sculpt = page(tr("Sculpt"), tr("Sculpting brushes"));
     group(sculpt, tr("Brushes"), {button(m_sculptAction)});
@@ -1359,10 +1361,25 @@ void MainWindow::createToolBar()
     common(print);
 
     // Keep the tab you were on.
+    // Kept by name ("ribbon/tabName"), so a new tab doesn't move you. Before 0.55.1 it was
+    // kept by place (Build, Design, Sculpt, View, Print/Save): Features now follows Design.
     Preferences settings;
-    tabs->setCurrentIndex(std::clamp(settings.value(QStringLiteral("ribbon/tab"), 0).toInt(), 0, tabs->count() - 1));
-    connect(tabs, &QTabWidget::currentChanged, this,
-            [](int index) { Preferences().setValue(QStringLiteral("ribbon/tab"), index); });
+    int start = 0;
+    const QString lastTab = settings.value(QStringLiteral("ribbon/tabName")).toString();
+    bool found = false;
+    for (int i = 0; i < tabs->count() && !lastTab.isEmpty(); ++i)
+        if (tabs->tabText(i) == lastTab) {
+            start = i;
+            found = true;
+        }
+    if (!found && settings.contains(QStringLiteral("ribbon/tab"))) {
+        const int old = settings.value(QStringLiteral("ribbon/tab"), 0).toInt();
+        start = old >= 2 ? old + 1 : old;
+    }
+    tabs->setCurrentIndex(std::clamp(start, 0, tabs->count() - 1));
+    connect(tabs, &QTabWidget::currentChanged, this, [tabs](int index) {
+        Preferences().setValue(QStringLiteral("ribbon/tabName"), tabs->tabText(index));
+    });
     m_ribbonTabs = tabs;
 }
 
@@ -7263,12 +7280,13 @@ void MainWindow::startTour()
          [this] { return m_objects->parentWidget(); }, tab(0)},
         {tr("Words and pictures"),
          tr("Also on the <b>Design</b> tab, <b>Emboss</b> raises or engraves your name, or a logo or photo, on "
-            "any surface, even round a cylinder. Holes, shells, rounded edges and sketches are here too."),
+            "any surface, even round a cylinder. Sketches are here too; holes, threads, sockets, shells and "
+            "rounded edges are on the <b>Features</b> tab."),
          onTab(m_emboss, 1), tab(1)},
         {tr("Ready to print"),
          tr("On the <b>Print/Save</b> tab, <b>Send to Slicer</b> opens it in your slicer (or <b>Export</b> "
             "saves an STL or 3MF). If it needs a different face down first, <b>Design → Lay on Face</b>."),
-         onTab(m_sendToSlicer, 4), tab(4)},
+         onTab(m_sendToSlicer, 5), tab(5)},
         {tr("That's it"),
          tr("<b>Help → Quick Start Guide</b> walks through a first print (a key tag with your name) with "
             "pictures. <b>Help → Take the Tour</b> shows this again. Point at any button for a tip, and "

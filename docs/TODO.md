@@ -34,3 +34,20 @@ Today's Align lines shapes up by their boxes and centres. This is for joining pa
   bottom.
 
 Notes: build on Measure's picking (faces, edges, centres, axes).
+
+## Split by mask
+
+Cut a part in two along a line painted on it, rather than along a flat plane.
+
+- **Paint a mask** on the part (as the Sculpt tool's Mask brush does), then **Split by
+  Mask**: the masked area becomes one piece and the rest another.
+- **The holes are closed**: each piece is capped where it was cut, so both are solid
+  and printable.
+
+Notes: the Sculpt mask (each point's shade) already exists and is saved with sculpt
+steps; the split could be a step like Split, keeping the painted mask so it can be
+changed. The cut follows the mask's edge (where the shade crosses half), smoothed so
+it isn't jagged along the triangles. Capping a flat-ish cut is a fill of the edge
+loop; a strongly curved one needs a surface spanning it. Pegs or keys (as Split to Fit
+adds) may be wanted on the cut.
+

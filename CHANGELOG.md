@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.55.1 Beta — Features tab (2026-11-18)
+
+- **A Features tab**, after Design, so the Design tab isn't crowded: **Holes and
+  Joints** (Hole, Thread, Quick Socket), **Surface** (Shell, Follow, Edges) and
+  **Repeat** (Pattern). Design keeps Combine, Arrange, Sketch, Change and Place.
+- The ribbon remembers the tab you were on by its name, so new tabs don't move you
+  (the first time, it works out where you were from before).
+- The tour points to the Features tab for holes, threads, sockets, shells and edges.
+- Added to the to-do list: Split by Mask.
+
 ## 0.55.0 Beta — Slice 46: Quick Socket (2026-11-18)
 
 - **Quick Socket** (Design tab → Features): select a shape, click the spot where the
