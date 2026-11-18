@@ -19,6 +19,8 @@ add_executable(Forge3D WIN32
     SplitPanel.h
     SplitPanel.cpp
     FitPanel.cpp
+    CustomShapesDialog.h
+    CustomShapesDialog.cpp
     EdgesPanel.h
     EdgesPanel.cpp
     FollowPanel.h

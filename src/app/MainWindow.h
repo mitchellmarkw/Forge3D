@@ -127,6 +127,12 @@ private:
     void addBody(const PrimitiveSpec& spec);
     void deleteSelected();
     void duplicateSelected();
+    // Custom shapes (the shape library).
+    QString customShapesFolder() const;
+    void saveCustomShape();
+    void addCustomShape(const QString& file);
+    void fillCustomMenu();
+    void manageCustomShapes();
     void copySelected();
     void cutSelected();
     void paste();
@@ -392,6 +398,8 @@ private:
     QAction* m_delete = nullptr;
     QAction* m_deselect = nullptr;
     QMenu* m_addMenu = nullptr;  // Add Shape (toolbar dropdown and Add menu)
+    QMenu* m_customMenu = nullptr;  // Add Shape → Custom: the saved custom shapes
+    QAction* m_saveCustomShape = nullptr;
     QAction* m_clear = nullptr;
     QAction* m_merge = nullptr;
     QAction* m_subtract = nullptr;

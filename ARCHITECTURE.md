@@ -1060,3 +1060,23 @@ and sharp across edges.
   with hidden rows (QTBUG-109237). The Properties panel keeps its wrapping "Made
   from" label outside the form, and `showRow` hides rows by their widgets before Qt
   6.5.
+
+## Custom shape library (slice 45)
+
+- `ShapeLibrary.h/.cpp` (`forge::library`): a custom shape is an ordinary `.f3d` file
+  in the library folder, named by `fileNameFor` (characters Windows can't hold become
+  '-', at most 80 bytes). `save` copies each selected shape's tree (`captureTree`) into
+  a scratch `Document`, moves the roots so the group's box is centred on the plate's
+  middle and resting on it, renames a single root after the shape, seeds the scratch
+  document with any results already worked out (`cachedSolid` → `seedSolid`, valid
+  because a result doesn't include the root's placement), and `file::save`s it, saved
+  results included.
+- `add` loads the file into a scratch document, `useSavedResults`, then for each root
+  `cloneTree`s it into the model (new ids) shifted to where `suggestPlacement` puts a
+  new shape, restores the saved names (a single root takes the file's name), adds it
+  in one macro ("Add <name>", `abortMacro` on failure), and seeds each new root with
+  the scratch document's result.
+- App: `MainWindow::customShapesFolder()` (preference `library/folder`, else
+  Documents/Forge3D/Custom Shapes). The Custom submenu of Add Shape is filled on
+  `aboutToShow`. `CustomShapesDialog` lists, adds, renames (`library::rename`),
+  deletes (`QFile::moveToTrash`) and changes the folder.

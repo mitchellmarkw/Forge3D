@@ -22,22 +22,6 @@ Notes: the picture loading from Emboss can be reused. Inactive pictures are draw
 left out of picking. Pictures are saved in the `.f3d` file, but not exported or
 printed.
 
-## Custom shape library
-
-Shapes you build once and add again and again, at their exact size.
-
-- Build the shape the usual way, select it, then **Save Custom Shape** (Print/Save
-  tab, and File menu). Give it a name.
-- **Add → Custom →** lists your saved shapes. One comes in **at the size it was
-  saved**, not 20 × 20 × 20, so a 3 mm ball joint and its 3.2 mm socket always come in
-  at 3 and 3.2.
-- Example: action-figure bucks. Their joints must stay compatible across figures,
-  without importing parts from a folder and checking each app's import scale.
-
-Notes: save each shape with its full history (a small `.f3d` in a library folder), so
-it can still be changed after it's added. Also needed: rename and delete in the
-library, and perhaps a thumbnail in the menu.
-
 ## Precise part alignment
 
 Today's Align lines shapes up by their boxes and centres. This is for joining parts:
