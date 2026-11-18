@@ -1080,3 +1080,26 @@ and sharp across edges.
   Documents/Forge3D/Custom Shapes). The Custom submenu of Add Shape is filled on
   `aboutToShow`. `CustomShapesDialog` lists, adds, renames (`library::rename`),
   deletes (`QFile::moveToTrash`) and changes the folder.
+
+## Quick Socket (slice 46)
+
+- `BooleanOp::Socket` (mesh engine), with `SocketFinish` (kind, size, depth, fit,
+  printer, snap / grip, peg shape, turn, relief cuts). Like Emboss, the spot is the
+  step's `planePoint` / `planeNormal` (facing out), in the coordinates of whatever holds
+  the part. File format 26 (`"operation": "socket"`, a `"socket"` object).
+- `Socket.h/.cpp`: `socket::cutters` builds closed meshes in a frame at the spot (z into
+  the part; x across, as Emboss lays words, turned by `turn`): a ball (UV sphere, its
+  corners pushed out so the facets' middles are on the true radius), a prism for pegs
+  (polygon corners at `half / cos(π/n)`, so the flats are where asked) or, for round
+  shapes, enough sides to stay within about 5 µm. Each starts `max(0.5, size/2)` outside
+  the surface. A snap-in ball's middle is at `sqrt(R² − (opening/2)²)` below the opening.
+  Relief cuts are slots from the axis out past the hollow. `Document::combineMeshes`
+  subtracts them all from the part.
+- `socketSpec` / `withSocket` / `socketSpot`; `surfaceUnder` picks on the part of a
+  Socket step (as it does for Emboss), so a socket can be moved. `socket::matchingPart`
+  gives a Sphere, Cylinder, Box, or a Pad of a hexagon / octagon sketch.
+- `Scale`: the spot moves with the shape; scaled evenly, size and depth scale, the fit
+  doesn't.
+- App: `SocketPanel`, `MainWindow::SocketMode`. The preview is `previewMesh` of the
+  step, or, for parts over 300,000 triangles, the cutters drawn as a red ghost. The last
+  settings are kept in the preferences (`socket/...`).

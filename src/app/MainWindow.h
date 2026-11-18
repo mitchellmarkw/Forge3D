@@ -68,6 +68,7 @@ class HolePanel;
 class PatternPanel;
 class ShellPanel;
 class ThreadPanel;
+class SocketPanel;
 class SketchPanel;
 class SketchView;
 struct DisplayItem;
@@ -686,6 +687,26 @@ private:
     void updateThreadPreview();
     void applyThread();
     void endThread();
+
+    QAction* m_socketAction = nullptr;
+    SocketPanel* m_socketPanel = nullptr;
+    QTimer* m_socketTimer = nullptr;
+    struct SocketMode {
+        bool active = false;
+        bool editing = false;
+        ObjectId target = kInvalidId;  // the shape getting the socket, or the Socket step being changed
+        std::optional<emboss::SurfacePoint> spot;  // the opening (plate coordinates)
+        std::shared_ptr<const Mesh> preview;      // the result as it would be (result coordinates)
+        std::shared_ptr<const Mesh> cut;          // a big shape: just what's cut away (plate coordinates)
+    };
+    SocketMode m_socketMode;
+    void startSocket(ObjectId target, bool editing);
+    void socketClick(const QVector3D& origin, const QVector3D& direction);
+    std::optional<BooleanSpec> currentSocketSpec() const;
+    void updateSocketPreview();
+    void applySocket();
+    void endSocket();
+    void addMatchingPart();
 
     QAction* m_followAction = nullptr;
     FollowPanel* m_followPanel = nullptr;

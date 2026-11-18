@@ -316,6 +316,7 @@ enum class BooleanOp {
     Merge, Subtract, Intersect, Split, Mirror, Group, Emboss, Edges, Shell, Follow, Pattern, Sculpt, Simplify, Thread,
     Smooth,       // the whole surface smoothed (mesh engine)
     ExtrudeDown,  // the underside stretched straight down to a plane (planePoint / planeNormal: up)
+    Socket,       // a ball or peg socket cut in at a spot (planePoint, facing out: planeNormal)
 };
 
 // What happens to the picked edges of a shape.
@@ -479,6 +480,28 @@ struct ThreadFinish {
     bool operator==(const ThreadFinish&) const = default;
 };
 
+// A Quick Socket: a hole cut into the surface at a spot (the step's planePoint, facing
+// out along planeNormal), sized to take a ball or a peg once printed. Sizes in mm.
+enum class SocketKind { Ball, Peg };
+enum class PegShape { Round, Square, Hexagon, Octagon };
+struct SocketFinish {
+    SocketKind kind = SocketKind::Ball;
+    double size = 3.0;    // the ball's diameter; the peg's diameter (round) or across its flats
+    double depth = 4.0;   // Peg: how far it goes in
+    double fit = 0.1;     // room all round (and at the bottom of a peg socket) for printing
+    bool resin = true;    // the printer the fit was chosen for (Resin 0.1, FDM 0.2 to start)
+    bool snap = true;     // Ball: the opening narrower than the ball, so it snaps in and stays
+    double grip = 10.0;   // Ball, snap: how much narrower, as a percentage of the ball
+    PegShape shape = PegShape::Round;
+    double turn = 0.0;    // degrees round the socket's axis (a peg's flats, the relief cuts)
+    // Strain relief: slots from the opening down through the socket's side, so it can open
+    // as the ball or peg goes in. 0 = none.
+    int reliefCuts = 0;
+    double reliefWidth = 0.4;
+    double reliefDepth = 0.0;  // how far down from the opening; 0: to the ball's middle (pegs: half way)
+    bool operator==(const SocketFinish&) const = default;
+};
+
 // Follow: a groove cut along (or a ridge raised along) a path drawn on the surface.
 // The path is a sketch drawn at a spot on the surface (`origin`, facing `normal`, its X
 // along `xAxis`) and laid over the surface from there: on a flat face it stays as
@@ -566,6 +589,8 @@ struct BooleanSpec {
     std::optional<SmoothFinish> smooth{};
     // Thread: where and what size.
     std::optional<ThreadFinish> thread{};
+    // Socket: what it takes (the spot is planePoint / planeNormal).
+    std::optional<SocketFinish> socket{};
     // Edges: what to do to which edges.
     std::optional<EdgeFinish> edges{};
     // Shell: how thick, and which faces are left open.

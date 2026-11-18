@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.55.0 Beta — Slice 46: Quick Socket (2026-11-18)
+
+- **Quick Socket** (Design tab → Features): select a shape, click the spot where the
+  opening goes, and a socket is cut in there, square to the surface, sized to fit once
+  printed. It works on imported and sculpted meshes as well as shapes made in
+  Forge3D, and becomes a step in the shape's history (double-click it to change it, or
+  click elsewhere to move it).
+  - **Ball socket**: give the ball's diameter. **Snap-in** makes the opening narrower
+    than the ball by the **grip** (10% to start), so it pops in and stays; **Open**
+    lets the ball drop in, its top level with the surface.
+  - **Peg socket**: round, square, hexagon or octagon (flats stop it turning), with its
+    size and how far it goes in. **Turn** sets which way the flats face.
+  - **Printer**: Resin or FDM sets the **fit** (0.1 or 0.2 mm to start), the room left
+    all round and at the bottom of a peg socket. The ball or peg keeps its true size.
+  - **Relief cuts**: 2 to 8 slots from the opening down through the socket's side, so
+    it can open as the ball or peg goes in. Their width and depth can be set (depth on
+    Auto: to the ball's middle, or half way down a peg).
+  - **Add the Matching Ball / Peg** adds the ball or peg the socket takes, at its true
+    size, beside the shapes.
+  - The settings used last come back next time, so a figure's joints come out alike.
+  - On shapes of over 300,000 triangles, the panel shows what will be cut away in red
+    instead of the finished result, so changing the settings stays quick.
+- Scaling a shape evenly scales its sockets too (so they still take a ball scaled with
+  it); the fit stays as it is.
+- Files with sockets need Forge3D 0.55 or later to open (format 26).
+- 255 unit tests (7 new: how a ball sits; a ball and a hexagon peg seated in their
+  sockets without touching, and the peg no longer fitting when the socket is turned;
+  round and square pegs and relief cuts; a socket on the side of a moved and turned
+  shape, saved and changed; scaling; a socket in an imported mesh at a clicked spot).
+
 ## 0.54.0 Beta — Slice 45: Custom shape library (2026-11-18)
 
 - **Save Custom Shape** (Print/Save tab → Library, and the File menu): keeps the

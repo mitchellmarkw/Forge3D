@@ -193,7 +193,8 @@ void scaleInto(const Document& doc, ObjectId id, const Vec3& factors, const Vec3
         return;
     }
     if (body->boolean->op == BooleanOp::Split || body->boolean->op == BooleanOp::Mirror ||
-        body->boolean->op == BooleanOp::Emboss || body->boolean->op == BooleanOp::ExtrudeDown) {
+        body->boolean->op == BooleanOp::Emboss || body->boolean->op == BooleanOp::ExtrudeDown ||
+        body->boolean->op == BooleanOp::Socket) {
         // The cutting / mirror plane (or the words' spot) stretches with everything else.
         Body next = *body;
         if (next.boolean->emboss && even(factors)) {
@@ -204,6 +205,15 @@ void scaleInto(const Document& doc, ObjectId id, const Vec3& factors, const Vec3
         if (next.boolean->picture && even(factors)) {
             next.boolean->picture->width *= factors[0];
             next.boolean->picture->depth *= factors[0];
+        }
+        if (next.boolean->socket && even(factors)) {
+            // Scaled evenly, the socket grows with the shape (so does its ball, scaled with
+            // it); the fit for printing stays as it is.
+            SocketFinish& sf = *next.boolean->socket;
+            sf.size *= factors[0];
+            sf.depth *= factors[0];
+            if (sf.reliefDepth > 0.0)
+                sf.reliefDepth *= factors[0];
         }
         if (body->boolean->op == BooleanOp::Mirror && !even(factors)) {
             // A reflection only survives a stretch along or across its mirror.
