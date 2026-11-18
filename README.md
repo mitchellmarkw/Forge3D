@@ -33,8 +33,9 @@ New to Forge3D? See the **[Quick Start](docs/QUICK_START.md)**: your first print
   countersunk, tapped, metric sizes); Follow grooves and ridges along a path drawn on
   a flat or curved surface; linked patterns in rows, grids and circles.
 - **Print:** Lay on Face (click a face to put the shape down on it) and Sit on Plate;
-  export STL, 3MF and OBJ, or send straight to your slicer; import STL, 3MF
-  and OBJ with automatic repair, and a fast mesh engine for big imported models.
+  export STL, 3MF and OBJ, or send straight to your slicer; import STL, 3MF,
+  OBJ, PLY (scans) and glTF / GLB with automatic repair, and a fast mesh engine for
+  big imported models.
 - A ribbon with Build, Design, Sculpt and Print tabs; undo / redo for everything;
   Forge3D's own `.f3d` file format.
 

@@ -495,7 +495,11 @@ std::vector<RawMesh> readMeshFile(const std::filesystem::path& path)
         return readObj(readWholeFile(path), name);
     if (ext == ".3mf")
         return read3mf(readWholeFile(path), name);
-    throw ImportError("Forge3D can import .stl, .3mf and .obj files.");
+    if (ext == ".ply")
+        return readPly(readWholeFile(path), name);
+    if (ext == ".glb" || ext == ".gltf")
+        return readGltf(readWholeFile(path), name, path.parent_path());
+    throw ImportError("Forge3D can import .stl, .3mf, .obj, .ply, .glb and .gltf files.");
 }
 
 // ---- repair --------------------------------------------------------------------------
@@ -883,7 +887,8 @@ ImportResult importFile(CommandStack& stack, Document& doc, const std::filesyste
     // No units in STL / OBJ: a tiny result was probably saved in metres or inches.
     const std::string ext = lower(path.extension().string());
     const double largest = std::max({all.size()[0], all.size()[1], all.size()[2]});
-    if (askScale && ext != ".3mf" && largest < kTinyImport) {
+    // (3MF and glTF say their units, and are already in millimetres.)
+    if (askScale && ext != ".3mf" && ext != ".glb" && ext != ".gltf" && largest < kTinyImport) {
         const double s = askScale(largest);
         if (s > 0.0 && s != 1.0) {
             for (Body& b : bodies) {

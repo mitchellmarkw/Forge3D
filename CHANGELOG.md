@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.50.0 Beta — Slice 41: Open PLY and glTF / GLB (2026-11-17)
+
+- **Import PLY** (what most 3D scanners and scanning apps save): text or binary, with
+  any of the usual kinds of numbers. Faces with more than three corners are split into
+  triangles. A scan coloured point by point comes in with its average colour. A PLY
+  that's only points (a point cloud, no surface) is refused with a message saying to
+  turn it into a mesh first. PLY has no units, so a tiny import offers to scale it, as
+  STL does.
+- **Import glTF and GLB** (models from the web, Blender, game tools): each part of the
+  model comes in as its own shape, named as in the file, placed as the file places it,
+  turned upright (glTF's "up" is Y, Forge3D's is Z) and converted from metres to
+  millimetres, with no question about scale. A material's base colour becomes the
+  shape's colour. A `.gltf` can keep its data inside it or in a `.bin` file beside it.
+  Compressed (Draco / meshopt) and old version 1 files get a message saying to export
+  them again.
+- Import (Ctrl+I) and dragging files onto the window both take `.ply`, `.glb` and `.gltf`.
+- Damaged PLY and glTF files are refused with a plain message (cut short, numbers that
+  aren't numbers, points that don't exist, data running past the end).
+- 237 unit tests (3 new: PLY text and binary, both byte orders; glTF / GLB embedded,
+  separate and mirrored; a GLB import in millimetres with its colour).
+
 ## 0.49.0 Beta — Slice 40: Smooth, Extrude Down, Solid / See-Through / Wireframe (2026-11-17)
 
 - **View → Look** (and the View tab): **Solid**, **See-Through** or **Wireframe**,
