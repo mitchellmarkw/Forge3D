@@ -1216,3 +1216,14 @@ and sharp across edges.
   the pieces. A printed pin is cut to the part's width there (rays from both sides along
   the pin). Changing either half (double-click) changes its partner too.
 
+
+## Scale Calculator and mask colours (0.59.1)
+
+- `ScaleCalculator` (Tools menu, a modeless dialog, made when first opened):
+  `reference::modelLength` and `reference::fromMm` (units now include yards);
+  settings kept under `scaleCalculator/*`.
+- Painting a mask: `DisplayItem::maskColours` (with `unmasked` / `masked`) makes the
+  mesh shader draw the shade as a mix of two plain colours with nearly flat light
+  (`uMaskOn`). Used for Split by Mask's part and for the sculpted part while the Mask
+  brush is chosen (`SculptPanel::brushChanged` refreshes the scene). The colours live
+  in `MaskPanel` (preferences `mask/unmaskedColour`, `mask/maskedColour`).

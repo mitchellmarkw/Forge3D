@@ -3,6 +3,7 @@
 
 #include "forge/core/Split.h"
 
+#include <QColor>
 #include <QWidget>
 
 class QComboBox;
@@ -27,8 +28,13 @@ public:
     void setStrokes(int strokes);
     void setStatus(const QString& text, bool problem);
     void setApplyEnabled(bool on);
+    // The colours the shape is shown in while painting (kept between runs; sculpting's
+    // Mask brush uses them too).
+    QColor unmaskedColour() const { return m_unmaskedColour; }
+    QColor maskedColour() const { return m_maskedColour; }
 
 signals:
+    void coloursChanged();
     void brushSizeChanged(double radius);
     void undoStrokeRequested();
     void clearRequested();
@@ -45,6 +51,12 @@ private:
     QLabel* m_strokes = nullptr;
     QLabel* m_status = nullptr;
     QPushButton* m_apply = nullptr;
+    QPushButton* m_unmaskedButton = nullptr;
+    QPushButton* m_maskedButton = nullptr;
+    QColor m_unmaskedColour;
+    QColor m_maskedColour;
+    void showColours();
+    void saveColours();
 };
 
 }  // namespace forge::app

@@ -26,6 +26,7 @@
 #include "HingePanel.h"
 #include "MaskPanel.h"
 #include "ReferencePanel.h"
+#include "ScaleCalculator.h"
 #include "SocketPanel.h"
 #include "ThreadPanel.h"
 #include "forge/core/Thread.h"
@@ -1213,6 +1214,16 @@ void MainWindow::createMenus()
     view->addSeparator();
     m_viewMenu = view;  // the panels' show/hide entries are added in createDocks()
 
+    QMenu* tools = menuBar()->addMenu(tr("&Tools"));
+    QAction* scaleCalculator = tools->addAction(tr("&Scale Calculator..."), this, [this] {
+        if (!m_scaleCalculator)
+            m_scaleCalculator = new ScaleCalculator(this);
+        m_scaleCalculator->show();
+        m_scaleCalculator->raise();
+        m_scaleCalculator->activateWindow();
+    });
+    scaleCalculator->setStatusTip(tr("Work out a size at a scale: a real size in any unit, at 1:X, on the model"));
+
     QMenu* help = menuBar()->addMenu(tr("&Help"));
     help->addAction(tr("Open &log folder"), this, [] {
         const QString path = logFilePath();
@@ -1916,6 +1927,11 @@ void MainWindow::createDocks()
         }
         m_socketMode.spot = moved;
         updateSocketPreview();
+    });
+    connect(m_maskPanel, &MaskPanel::coloursChanged, this, [this] { refreshScene(); });
+    connect(m_sculptPanel, &SculptPanel::brushChanged, this, [this] {
+        if (m_sculptMode.active)
+            refreshScene();
     });
     connect(m_maskPanel, &MaskPanel::undoStrokeRequested, this, &MainWindow::undoMaskStroke);
     connect(m_maskPanel, &MaskPanel::clearRequested, this, [this] {
@@ -6693,6 +6709,7 @@ void MainWindow::refreshScene()
             if (m_maskMode.active && id == m_maskMode.object && m_maskMode.shown) {
                 item.mesh = m_maskMode.shown;
                 item.model = toQMatrix(m_maskMode.toPlate);
+                item.maskColours = true;
             }
             if (m_joinMode.active && m_joinMode.placed && id == m_joinMode.moving)
                 item.model = toQMatrix(placementTransform(*m_joinMode.placed, pivotOf(*m_doc.find(id))));
@@ -6827,6 +6844,15 @@ void MainWindow::refreshScene()
             }
             item.color = colourOf(id);
             item.selected = isSelected(id);
+            // Painting a mask (Split by Mask, or sculpting's Mask brush): plain, strong colours.
+            if (m_sculptMode.active && id == m_sculptMode.object && m_sculptPanel->brush() == int(sculpt::Brush::Mask))
+                item.maskColours = true;
+            if (item.maskColours) {
+                const QColor u = m_maskPanel->unmaskedColour(), m = m_maskPanel->maskedColour();
+                item.unmasked = QVector3D(float(u.redF()), float(u.greenF()), float(u.blueF()));
+                item.masked = QVector3D(float(m.redF()), float(m.greenF()), float(m.blueF()));
+                item.selected = false;
+            }
             triangles += item.mesh->triangleCount();
             items.push_back(std::move(item));
         }

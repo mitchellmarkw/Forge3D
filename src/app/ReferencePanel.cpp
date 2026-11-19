@@ -154,7 +154,7 @@ ReferencePanel::ReferencePanel(QWidget* parent) : QWidget(parent)
     sizingColumn->addWidget(sizingHelp);
     m_length = number(0.001, 1000000, 3, QString(), tr("The length between the two points"));
     m_unit = new QComboBox;
-    m_unit->addItems({tr("mm"), tr("cm"), tr("m"), tr("inches"), tr("feet")});
+    m_unit->addItems({tr("mm"), tr("cm"), tr("m"), tr("inches"), tr("feet"), tr("yards")});
     m_unit->setToolTip(tr("The unit the length is in"));
     m_scale = number(1, 10000, 2, QString(), tr("The model's scale: 1 for full size, 12 for 1:12, 48 for 1:48..."));
     {
@@ -196,7 +196,7 @@ ReferencePanel::ReferencePanel(QWidget* parent) : QWidget(parent)
     {
         Preferences prefs;
         m_length->setValue(prefs.value(QStringLiteral("reference/length"), 100.0).toDouble());
-        m_unit->setCurrentIndex(std::clamp(prefs.value(QStringLiteral("reference/unit"), 0).toInt(), 0, 4));
+        m_unit->setCurrentIndex(std::clamp(prefs.value(QStringLiteral("reference/unit"), 0).toInt(), 0, reference::kUnitCount - 1));
         m_scale->setValue(prefs.value(QStringLiteral("reference/scale"), 1.0).toDouble());
     }
     refreshLength();

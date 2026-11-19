@@ -50,6 +50,11 @@ struct DisplayItem {
     // A tool's helper (a cutting plane, its arrow): not a shape, so never warned about
     // as too big or off the plate, and not counted by Fit.
     bool helper = false;
+    // Painting a mask: the mesh's shade drawn as two plain colours, evenly lit (no
+    // shadows to mistake for the mask).
+    bool maskColours = false;
+    QVector3D unmasked{1.0f, 0.82f, 0.10f};
+    QVector3D masked{0.08f, 0.08f, 0.10f};
 };
 
 // The 3D view: draws the build plate and the scene, and handles navigation.
