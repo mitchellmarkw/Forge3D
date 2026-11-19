@@ -35,6 +35,8 @@ signals:
     void cancelRequested();
     // Add the ball or peg this socket takes, as a shape of its own.
     void addMatchingRequested();
+    // Move the socket to the middle of the face it's on: 0 both ways, 1 up-down, 2 across.
+    void centerRequested(int how);
 
 private:
     void showKind();

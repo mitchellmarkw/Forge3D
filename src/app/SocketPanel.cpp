@@ -4,6 +4,7 @@
 #include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QFormLayout>
+#include <QGroupBox>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QPushButton>
@@ -119,6 +120,21 @@ SocketPanel::SocketPanel(QWidget* parent) : QWidget(parent)
     pegForm->addRow(tr("Length:"), m_pegDepth);
     peg->addLayout(pegForm);
     layout->addWidget(m_pegBox);
+
+    auto* centerGroup = new QGroupBox(tr("Center on the face"));
+    centerGroup->setToolTip(tr("Moves the socket to the middle of the face it's on, so it's exactly central"));
+    auto* centerRow = new QHBoxLayout(centerGroup);
+    const QString centerNames[3] = {tr("All"), tr("Top-Bottom"), tr("Left-Right")};
+    const QString centerTips[3] = {tr("Move it to the middle of the face it's on"),
+                                   tr("Move it up or down to the middle of the face"),
+                                   tr("Move it across to the middle of the face")};
+    for (int i = 0; i < 3; ++i) {
+        auto* button = new QPushButton(centerNames[i]);
+        button->setToolTip(centerTips[i]);
+        connect(button, &QPushButton::clicked, this, [this, i] { emit centerRequested(i); });
+        centerRow->addWidget(button);
+    }
+    layout->addWidget(centerGroup);
 
     auto* turnForm = new QFormLayout;
     m_turn = new QDoubleSpinBox;

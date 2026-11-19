@@ -9,6 +9,7 @@
 
 namespace forge {
 
+class CommandStack;
 class Document;
 
 // Join Parts: one part moved so a feature on it meets a feature on another (a peg into
@@ -57,6 +58,12 @@ Transform mating(const Feature& moving, const Feature& fixed, const Offsets& off
 // Where the shape `moving` (on the plate) goes for that.
 Placement joinedPlacement(const Document& doc, ObjectId moving, const Feature& movingFeature,
                           const Feature& fixed, const Offsets& offsets);
+
+// Moves `moving` to `placed` as one undo step ("Join A to B"). With `together`, the two
+// are then grouped so they move as one; joining onto a group adds to it (the group is
+// made again with the part in it, keeping its name). Returns the group, or `moving`.
+ObjectId apply(CommandStack& stack, Document& doc, ObjectId moving, ObjectId fixed, const Placement& placed,
+               bool together);
 
 }  // namespace join
 }  // namespace forge

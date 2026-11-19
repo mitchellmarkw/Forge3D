@@ -1707,6 +1707,35 @@ void MainWindow::createDocks()
     connect(m_socketPanel, &SocketPanel::applyRequested, this, &MainWindow::applySocket);
     connect(m_socketPanel, &SocketPanel::cancelRequested, this, &MainWindow::endSocket);
     connect(m_socketPanel, &SocketPanel::addMatchingRequested, this, &MainWindow::addMatchingPart);
+    connect(m_socketPanel, &SocketPanel::centerRequested, this, [this](int how) {
+        if (!m_socketMode.active)
+            return;
+        if (!m_socketMode.spot) {
+            statusBar()->showMessage(tr("Click on the shape first, to say which face."), 5000);
+            return;
+        }
+        std::optional<emboss::SurfacePoint> moved;
+        try {
+            QApplication::setOverrideCursor(Qt::WaitCursor);
+            struct RestoreCursor {
+                ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
+            } restore;
+            const emboss::Center c = how == 0   ? emboss::Center::Both
+                                     : how == 1 ? emboss::Center::TopBottom
+                                                : emboss::Center::LeftRight;
+            const SocketFinish f = m_socketPanel->finish();
+            moved = centeredSpot(m_doc, m_socketMode.target, *m_socketMode.spot, f.turn,
+                                 std::max(0.25, f.size / 2.0), c);
+        } catch (const std::exception& e) {
+            qWarning() << "Centering the socket failed:" << e.what();
+        }
+        if (!moved) {
+            statusBar()->showMessage(tr("The middle of that face isn't on the face (it may be hollow there)."), 6000);
+            return;
+        }
+        m_socketMode.spot = moved;
+        updateSocketPreview();
+    });
     connect(m_joinPanel, &JoinPanel::changed, this, &MainWindow::updateJoinPreview);
     connect(m_joinPanel, &JoinPanel::applyRequested, this, &MainWindow::applyJoin);
     connect(m_joinPanel, &JoinPanel::cancelRequested, this, &MainWindow::endJoin);
@@ -9126,6 +9155,7 @@ void MainWindow::startJoin()
     m_joinMode = JoinMode{};
     m_joinMode.active = true;
     m_joinPanel->start();
+    m_joinPanel->setKeepTogether(Preferences().value(QStringLiteral("join/keepTogether"), false).toBool());
     m_propsDockWidth = m_propsDock->width();
     m_properties->hide();
     m_joinPanel->show();
@@ -9229,19 +9259,18 @@ void MainWindow::applyJoin()
         return;
     const ObjectId moving = mode.moving, fixed = mode.fixed;
     const Placement placed = *mode.placed;
-    const std::string label = "Join " + m_doc.find(moving)->name + " to " + m_doc.find(fixed)->name;
+    const bool together = m_joinPanel->keepTogether();
+    Preferences().setValue(QStringLiteral("join/keepTogether"), together);
     endJoin();
+    ObjectId selected = moving;
     try {
-        m_stack.beginMacro(label);
-        m_stack.execute(std::make_unique<SetPlacementCommand>(moving, placed, false));
-        m_stack.endMacro();
+        selected = join::apply(m_stack, m_doc, moving, fixed, placed, together);
     } catch (const std::exception& e) {
-        m_stack.abortMacro();
         QMessageBox::warning(this, tr("Forge3D"), tr("The part could not be moved:\n%1").arg(QString::fromUtf8(e.what())));
         return;
     }
     qInfo().noquote() << "Command:" << QString::fromStdString(m_stack.undoLabel());
-    setSelection(moving);
+    setSelection(selected);
 }
 
 void MainWindow::endJoin()

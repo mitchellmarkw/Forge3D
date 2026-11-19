@@ -1116,12 +1116,23 @@ and sharp across edges.
   open end is the one further from the shape's middle; peg or hole from the hit
   normal against the axis), Sphere (ball or cup); for meshes, `ballAround` fits a
   sphere (least squares) to the points round the hit over growing reaches and keeps
-  the largest that stays round (RMS < 2% of r, and the hit on it); else the spot.
+  the largest that stays round (RMS < 2% of r, and the hit on it); then a round side:
+  `patchAround` grows the smooth patch from the triangle under the hit (corners joined
+  by place; edges bending under 30°), and `roundAround` takes the axis as the
+  eigenvector of the area-weighted normals' covariance with the smallest eigenvalue
+  (normals all across it, spread round it), fits a circle to the corners across it, and
+  gives its ends along the axis; growing pieces of the patch round the click are tried
+  and the largest still round is kept; else the spot.
 - `mating`: the least turn taking the moving direction (flipped if asked) onto minus
   the fixed one, a spin about the fixed direction by `turn`, then the shift putting the
   moving point on the fixed point plus `along` along it and `acrossX/Y` in the Emboss
   frame. `joinedPlacement` applies it to the shape's world transform
   (`placementFromTransform`).
+- `join::apply`: one macro, a `SetPlacementCommand`, then (kept together) `groupBodies`
+  with the fixed shape, or, when the fixed shape is a Group, a `SeparateCommand` of it
+  and a new group of its members plus the moving part, renamed as it was.
+- Quick Socket's Center buttons use `centeredSpot` (Emboss's `centeredOnFace`), which
+  picks on a Socket step's part as it does for Emboss.
 - App: `JoinPanel`, `MainWindow::JoinMode` (`pick` finds the shape clicked; the moving
   shape's display item takes the new placement as a preview). Apply is one macro
   ("Join A to B") with a `SetPlacementCommand`.

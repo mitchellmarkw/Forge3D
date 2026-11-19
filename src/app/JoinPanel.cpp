@@ -82,6 +82,10 @@ JoinPanel::JoinPanel(QWidget* parent) : QWidget(parent)
     m_flip = new QCheckBox(tr("Flip it round (if it goes in the wrong way)"));
     m_flip->setToolTip(tr("Turns the moving part end for end, for when it was worked out pointing the wrong way"));
     layout->addWidget(m_flip);
+    m_together = new QCheckBox(tr("Keep them together (group them)"));
+    m_together->setToolTip(tr("Groups the two parts once joined, so moving or turning one moves the other with it. "
+                              "Joining onto a group adds to that group. Separate takes them apart again."));
+    layout->addWidget(m_together);
 
     m_status = new QLabel;
     m_status->setWordWrap(true);
@@ -145,6 +149,16 @@ join::Offsets JoinPanel::offsets() const
     o.turn = m_turn->value();
     o.flip = m_flip->isChecked();
     return o;
+}
+
+bool JoinPanel::keepTogether() const
+{
+    return m_together->isChecked();
+}
+
+void JoinPanel::setKeepTogether(bool on)
+{
+    m_together->setChecked(on);
 }
 
 void JoinPanel::setStatus(const QString& text, bool problem)

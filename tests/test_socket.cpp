@@ -278,3 +278,23 @@ TEST_CASE("Socket: in an imported mesh, at a clicked spot", "[socket]")
     const double hollow = 4.0 / 3.0 * pi * std::pow(seat.radius, 3) - pi * cap * cap * (3 * seat.radius - cap) / 3.0;
     CHECK_THAT(before - volumeOf(doc, s), WithinRel(hollow, 0.01));
 }
+
+TEST_CASE("Socket: centred on the face it's on", "[socket]")
+{
+    Document doc;
+    CommandStack stack(doc);
+    const ObjectId block = add(stack, doc, BoxSpec{20, 30, 10});
+    const emboss::SurfacePoint off{{3.0, -7.0, 10.0}, {0.0, 0.0, 1.0}};
+    const auto both = centeredSpot(doc, block, off, 0.0, 1.5, emboss::Center::Both);
+    REQUIRE(both);
+    CHECK_THAT(both->point[0], WithinAbs(0.0, 1e-6));
+    CHECK_THAT(both->point[1], WithinAbs(0.0, 1e-6));
+    CHECK_THAT(both->point[2], WithinAbs(10.0, 1e-6));
+    // Changing a socket: centred on the part it's in (not on its own hollow).
+    SocketFinish f;
+    const ObjectId s = addSocket(stack, doc, block, off, f);
+    const auto again = centeredSpot(doc, s, socketSpot(doc, s), 0.0, 1.5, emboss::Center::Both);
+    REQUIRE(again);
+    CHECK_THAT(again->point[0], WithinAbs(0.0, 1e-6));
+    CHECK_THAT(again->point[1], WithinAbs(0.0, 1e-6));
+}

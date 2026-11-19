@@ -7,8 +7,11 @@
   there straight away; Apply moves it (one Undo puts it back).
   - What a click picks is worked out from where you click:
     - a **flat face**: its middle, facing out (faces go flat together, centred);
-    - a **peg** (a round side sticking out): its tip, pointing along it;
-    - a **hole**: its bottom, pointing out of the opening (a peg goes in to the bottom);
+    - a **peg** (a round side sticking out): its tip, pointing along it (on meshes too);
+    - a **hole**: its bottom, pointing out of the opening (a peg goes in to the bottom),
+      also in shapes that have become meshes (with a Quick Socket, sculpting, an
+      import...): the round side is found from the smooth patch of surface round the
+      click;
     - a **ball**: its middle, on shapes made in Forge3D and on imported or sculpted
       meshes too (a mesh is checked for a ball round the spot clicked);
     - a **round cup**, or a **Quick Socket** in the part's history: where the ball's
@@ -21,10 +24,16 @@
     and **Flip** turns it end for end if it was worked out pointing the wrong way.
   - **Pick Again** changes either pick; clicking once both are picked changes where it
     goes.
-- 260 unit tests (5 new: the move itself (gap, across, turn, flip); a face against a
+  - **Keep them together (group them)**: once joined, the two are grouped, so moving
+    or turning one moves the other. Joining onto a group adds to that group (it keeps
+    its name), so a figure can be built up part by part. Separate takes them apart.
+- **Quick Socket: Center on the face** (All, Top-Bottom, Left-Right) moves the socket
+  to the exact middle of the face it's on.
+- 263 unit tests (8 new: the move itself (gap, across, turn, flip); a face against a
   face; a peg into a drilled hole, touching nothing; a ball into a Quick Socket and a
   peg seated flush in its socket; a ball found on a mesh, and just the spot on a mesh
-  box).
+  box; a hole found in a shape that has become a mesh, and a peg on a mesh; grouping
+  when kept together, and joining onto a group; a socket centred on its face).
 
 ## 0.55.1 Beta — Features tab (2026-11-18)
 

@@ -24,3 +24,14 @@ download the `Forge3D-windows-x64-…` artifact, unzip and run `Forge3D.exe`.
 | 11 | Click a flat spot on a mesh part, then a face on another part | Step 1 says "A spot on the surface"; the parts meet there, facing each other | |
 | 12 | **Pick Again** on step 1, click elsewhere on the moving part | Step 1 changes; the preview follows | |
 | 13 | Esc (or Cancel) partway through | Nothing moves; the panel closes | |
+
+## Rechecks and additions after the first test (same 0.56.0)
+
+| # | Do this | You should see | Result |
+| --- | --- | --- | --- |
+| 14 | Check 8 again, but give the holed box a Quick Socket somewhere first (so it's a mesh now): join the peg into the drilled hole | Step 2 says "Hole Ø…" (not "A spot on the surface") and the peg goes in to the bottom, centred | |
+| 15 | Join Parts with a peg on one of your mesh parts | Step 1 says "Peg Ø…" with about the right size | |
+| 16 | Tick **Keep them together (group them)** and join a part to a torso | Objects shows a Group holding both; moving it moves both | |
+| 17 | Rename the group "Figure", then join another part onto it (click the figure), ticked | The new part goes into "Figure" (still called that). Undo takes just that part out again | |
+| 18 | Quick Socket: click near the edge of a box's top, then **Center on the face → All** (then try Top-Bottom and Left-Right from an off-centre spot) | The socket jumps to the exact middle of the face (or to the middle one way only) | |
+| 19 | Change a socket (double-click its step) and press All | It centres on the face of the part it's in | |
