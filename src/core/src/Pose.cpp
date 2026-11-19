@@ -144,6 +144,12 @@ std::vector<Joint> findJoints(const Document& doc)
                     j.kind = JointKind::Ball;
                     j.pivot = sub(spot.point, scaled(n, socket::ballSeat(f).centreDepth));
                     j.name = "Ball socket in " + holderName;
+                } else if (f.kind == SocketKind::Magnet) {
+                    j.kind = JointKind::Fixed;  // holds a swappable part on
+                    j.pivot = sub(spot.point, scaled(n, f.cover + f.depth / 2.0));
+                    j.name = "Magnet in " + holderName;
+                    // The part held on sits against the face, just outside it.
+                    j.other = partAround(doc, sub(spot.point, scaled(n, -0.3)), holder);
                 } else {
                     j.kind = f.shape == PegShape::Round ? JointKind::Swivel : JointKind::Fixed;
                     j.pivot = sub(spot.point, scaled(n, f.depth / 2.0));

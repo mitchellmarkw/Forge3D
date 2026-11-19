@@ -5,6 +5,7 @@
 
 #include <QWidget>
 
+class QCheckBox;
 class QComboBox;
 class QDoubleSpinBox;
 class QSpinBox;
@@ -29,6 +30,9 @@ public:
     void setPlaced(bool placed);
     void setStatus(const QString& text, bool problem);
     void setApplyEnabled(bool on);
+    // A magnet: a matching pocket in another part, and which part ("" none yet).
+    bool matchingPocket() const;
+    void setOtherPart(const QString& name, bool picking);
 
 signals:
     void changed();
@@ -38,6 +42,8 @@ signals:
     void addMatchingRequested();
     // Move the socket to the middle of the face it's on: 0 both ways, 1 up-down, 2 across.
     void centerRequested(int how);
+    // A magnet: pick the part against this face, for the matching pocket.
+    void pickOtherRequested();
 
 private:
     void showKind();
@@ -51,6 +57,16 @@ private:
     QComboBox* m_hold = nullptr;
     QLabel* m_gripLabel = nullptr;
     QDoubleSpinBox* m_grip = nullptr;
+    QWidget* m_magnetBox = nullptr;
+    QComboBox* m_magnetSize = nullptr;
+    QDoubleSpinBox* m_magnetDiameter = nullptr;
+    QDoubleSpinBox* m_magnetThickness = nullptr;
+    QCheckBox* m_buried = nullptr;
+    QDoubleSpinBox* m_cover = nullptr;
+    QCheckBox* m_matchingPocket = nullptr;
+    QPushButton* m_pickOther = nullptr;
+    QLabel* m_otherName = nullptr;
+    QWidget* m_cutsRow = nullptr;
     QSpinBox* m_ridges = nullptr;
     QDoubleSpinBox* m_ridgeHeight = nullptr;
     QComboBox* m_shape = nullptr;

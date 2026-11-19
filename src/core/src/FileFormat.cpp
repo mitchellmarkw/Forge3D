@@ -327,7 +327,9 @@ json bodyToJson(const Body& b)
         }
         if (const auto& so = b.boolean->socket) {
             static const char* shapes[] = {"round", "square", "hexagon", "octagon"};
-            j["socket"] = json{{"kind", so->kind == SocketKind::Ball ? "ball" : "peg"},
+            j["socket"] = json{{"kind", so->kind == SocketKind::Ball     ? "ball"
+                                        : so->kind == SocketKind::Magnet ? "magnet"
+                                                                         : "peg"},
                                {"size", so->size},
                                {"depth", so->depth},
                                {"fit", so->fit},
@@ -339,6 +341,8 @@ json bodyToJson(const Body& b)
                                {"reliefCuts", so->reliefCuts},
                                {"reliefWidth", so->reliefWidth},
                                {"reliefDepth", so->reliefDepth}};
+            if (so->kind == SocketKind::Magnet && so->cover > 0.0)
+                j["socket"]["cover"] = so->cover;
             if (so->ridges > 0) {
                 j["socket"]["ridges"] = so->ridges;
                 j["socket"]["ridgeHeight"] = so->ridgeHeight;
@@ -738,7 +742,9 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
             if (sj == j.end() || !sj->is_object())
                 damaged(where + ": missing the socket's settings");
             SocketFinish so;
-            so.kind = sj->value("kind", std::string("ball")) == "peg" ? SocketKind::Peg : SocketKind::Ball;
+            const std::string kind = sj->value("kind", std::string("ball"));
+            so.kind = kind == "peg" ? SocketKind::Peg : kind == "magnet" ? SocketKind::Magnet : SocketKind::Ball;
+            so.cover = sj->value("cover", 0.0);
             so.size = number(*sj, "size", where);
             so.depth = sj->value("depth", so.depth);
             so.fit = sj->value("fit", so.fit);

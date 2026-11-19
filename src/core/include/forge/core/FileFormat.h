@@ -68,7 +68,8 @@ namespace forge::file {
 //      the step that makes the joint)
 //  31  clicks on Quick Hinge steps ("clicks", "clickDepth") and ridges in ball
 //      sockets ("ridges", "ridgeHeight")
-inline constexpr int kFormatVersion = 31;
+//  32  magnet pockets (a socket's kind "magnet", and "cover": the skin over it)
+inline constexpr int kFormatVersion = 32;
 // The highest sculpt::Brush number a file may hold (Pattern).
 inline constexpr int kLastSculptBrush = 13;
 inline constexpr const char* kExtension = ".f3d";

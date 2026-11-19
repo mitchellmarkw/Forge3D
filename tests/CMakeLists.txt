@@ -50,6 +50,7 @@ add_executable(forge_tests
     test_pose.cpp
     test_tolerance.cpp
     test_clicks.cpp
+    test_magnet.cpp
     bench_sculpt.cpp
     fuzz_files.cpp
     test_undo_random.cpp
