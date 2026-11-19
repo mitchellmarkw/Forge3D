@@ -263,3 +263,99 @@ TEST_CASE("Join: a ball found on a mesh; elsewhere just the spot", "[join]")
     near(s->direction, {0, 0, 1}, 1e-6);
     CHECK(!join::featureAt(doc, boxId, {bc[0], bc[1] + 100, 50}, {0, 0, -1}));  // missed
 }
+
+TEST_CASE("Join: a peg into a hole in a shape that's now a mesh (it has a socket too)", "[join]")
+{
+    Document doc;
+    CommandStack stack(doc);
+    // A block with a hole 6 deep from its top, then a Quick Socket elsewhere on it (so
+    // the shape is worked out as triangles from then on).
+    const ObjectId block = add(stack, doc, BoxSpec{20, 20, 10});
+    const ObjectId drill = add(stack, doc, CylinderSpec{1.6, 10}, 3, 0, 4);
+    BooleanSpec cut;
+    cut.op = BooleanOp::Subtract;
+    cut.operands = {block, drill};
+    const ObjectId holed = combine(stack, doc, cut);
+    SocketFinish f;
+    f.size = 3.0;
+    Body s;
+    s.id = doc.allocateId();
+    s.name = "Socketed";
+    s.boolean = socketSpec(doc, holed, {{-5, 0, 10}, {0, 0, 1}}, f);
+    stack.execute(std::make_unique<CombineCommand>(s));
+    REQUIRE(doc.usesMeshEngine(s.id));
+    const ObjectId peg = add(stack, doc, CylinderSpec{1.5, 5}, 40, 0, 0);
+
+    const auto hole = join::featureAt(doc, s.id, {3, 0, 20}, {0.15, 0, -1});
+    REQUIRE(hole);
+    CHECK(hole->kind == join::Feature::Kind::Hole);
+    CHECK_THAT(hole->size, WithinAbs(3.2, 0.05));
+    near(hole->point, {3, 0, 4}, 0.05);
+    near(hole->direction, {0, 0, 1}, 0.01);
+    const auto p = join::featureAt(doc, peg, {50, 0, 2.5}, {-1, 0, 0});
+    REQUIRE(p);
+    place(stack, doc, peg, join::joinedPlacement(doc, peg, *p, *hole, {}));
+    const Bounds box = doc.worldBounds(peg);
+    CHECK_THAT(box.min[2], WithinAbs(4.0, 0.05));
+    CHECK_THAT(box.center()[0], WithinAbs(3.0, 0.05));
+    CHECK(overlap(doc, s.id, peg) < 0.01);
+
+    // A peg on a mesh is found too: the matching peg made into a mesh by a socket in its end.
+    SocketFinish tiny;
+    tiny.size = 1.0;
+    Body pegMesh;
+    pegMesh.id = doc.allocateId();
+    pegMesh.name = "Peg with a dimple";
+    pegMesh.boolean = socketSpec(doc, peg, {doc.worldTransform(peg).apply({0, 0, 0}),
+                                            doc.worldTransform(peg).applyDirection({0, 0, -1})}, tiny);
+    stack.execute(std::make_unique<CombineCommand>(pegMesh));
+    REQUIRE(doc.usesMeshEngine(pegMesh.id));
+    const auto c = doc.worldBounds(pegMesh.id).center();
+    const auto q = join::featureAt(doc, pegMesh.id, {c[0] + 20, c[1], c[2]}, {-1, 0, 0});
+    REQUIRE(q);
+    CHECK(q->kind == join::Feature::Kind::Peg);
+    CHECK_THAT(q->size, WithinAbs(3.0, 0.05));
+}
+
+TEST_CASE("Join: kept together, they're grouped; joining onto a group adds to it", "[join]")
+{
+    Document doc;
+    CommandStack stack(doc);
+    const ObjectId torso = add(stack, doc, BoxSpec{20, 20, 20});
+    const ObjectId arm = add(stack, doc, BoxSpec{5, 5, 15}, 40, 0, 0);
+    const ObjectId head = add(stack, doc, BoxSpec{8, 8, 8}, -40, 0, 0);
+    const auto side = join::featureAt(doc, torso, {50, 0, 10}, {-1, 0, 0});
+    const auto armEnd = join::featureAt(doc, arm, {40, 0, 50}, {0, 0, -1});
+    REQUIRE(side);
+    REQUIRE(armEnd);
+    const ObjectId group =
+        join::apply(stack, doc, arm, torso, join::joinedPlacement(doc, arm, *armEnd, *side, {}), true);
+    REQUIRE(doc.find(group)->isBoolean());
+    CHECK(doc.find(group)->boolean->op == BooleanOp::Group);
+    CHECK(!doc.isTopLevel(arm));
+    CHECK(stack.undoLabel() == "Join Shape 2 to Shape 1");
+    stack.execute(std::make_unique<RenameBodyCommand>(group, "Figure"));
+
+    // The head onto the figure's top: the figure group takes it in, keeping its name.
+    const auto top = join::featureAt(doc, group, {0, 0, 60}, {0, 0, -1});
+    const auto neck = join::featureAt(doc, head, {-40, 0, -20}, {0, 0, 1});
+    REQUIRE(top);
+    REQUIRE(neck);
+    const ObjectId figure =
+        join::apply(stack, doc, head, group, join::joinedPlacement(doc, head, *neck, *top, {}), true);
+    CHECK(doc.find(figure)->name == "Figure");
+    CHECK(doc.find(figure)->boolean->operands.size() == 3);
+    CHECK(!doc.isTopLevel(head));
+    // One Undo takes the head back off and leaves the figure as it was.
+    stack.undo();
+    CHECK(doc.isTopLevel(head));
+    CHECK(doc.find(group));
+    CHECK(doc.find(group)->boolean->operands.size() == 2);
+
+    // Not kept together: just moved.
+    const ObjectId moved =
+        join::apply(stack, doc, head, group, join::joinedPlacement(doc, head, *neck, *top, {}), false);
+    CHECK(moved == head);
+    CHECK(doc.isTopLevel(head));
+    CHECK_THAT(doc.worldBounds(head).min[2], WithinAbs(20.0, 1e-3));
+}
