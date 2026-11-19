@@ -24,6 +24,7 @@
 #include "Theme.h"
 #include "JoinPanel.h"
 #include "HingePanel.h"
+#include "PosePanel.h"
 #include "MaskPanel.h"
 #include "ReferencePanel.h"
 #include "ScaleCalculator.h"
@@ -92,6 +93,7 @@
 #include <QDropEvent>
 #include <QMimeData>
 #include <QInputDialog>
+#include <QThreadPool>
 #include <QProcess>
 #include <QKeySequence>
 #include <QLabel>
@@ -140,6 +142,7 @@
 #include <array>
 #include <exception>
 #include <filesystem>
+#include <numbers>
 #include <variant>
 
 namespace forge::app {
@@ -389,6 +392,11 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
 
     m_doc.addListener([this](const Document::Change& change) {
         ++m_docSerial;
+        if (m_poseMode.active)  // an undo while posing: the joints may have changed
+            QTimer::singleShot(0, this, [this] {
+                if (m_poseMode.active)
+                    rebuildPose();
+            });
         if (!m_keptLabels.empty()) {
             // The shapes changed: the kept numbers may no longer be true.
             m_keptLabels.clear();
@@ -593,6 +601,8 @@ void MainWindow::createActions()
             m_hingePanel->setOtherPart(other ? QString::fromStdString(other->name) : QString(), false);
         } else if (m_hingeMode.active)
             endHinge();
+        else if (m_poseMode.active)
+            endPose();
         else if (m_joinMode.active)
             endJoin();
         else if (m_maskMode.active)
@@ -903,6 +913,11 @@ void MainWindow::createActions()
         }
         startThread(target, false);
     });
+    m_poseAction = new QAction(tr("Pose Test"), this);
+    m_poseAction->setToolTip(tr("Pose Test: turn the joints made with Quick Hinge and Quick Socket to see how far "
+                                "they go before parts hit, and save poses by name. The parts aren't changed."));
+    m_poseAction->setStatusTip(m_poseAction->toolTip());
+    connect(m_poseAction, &QAction::triggered, this, &MainWindow::startPose);
     m_hingeAction = new QAction(tr("Quick Hinge"), this);
     m_hingeAction->setToolTip(tr("Quick Hinge: a hinge (single or double) or a swivel at the spot you click on "
                                  "the selected shape: a fork and a tab that turns in it on a pin, sized to fit "
@@ -1292,6 +1307,7 @@ void MainWindow::createToolBar()
         {m_threadAction, "thread"},
         {m_socketAction, "socket"},
         {m_hingeAction, "hinge"},
+        {m_poseAction, "pose"},
         {m_layFlat, "lay-on-face"},
         {m_sitOnPlate, "sit-on-plate"},
         {m_export, "export"},
@@ -1446,7 +1462,8 @@ void MainWindow::createToolBar()
     common(design);
 
     Page features = page(tr("Features"), tr("Holes, threads, sockets, shells, grooves, patterns and edges"));
-    group(features, tr("Holes and Joints"), {button(m_holeAction), button(m_threadAction), button(m_socketAction), button(m_hingeAction)});
+    group(features, tr("Holes and Joints"), {button(m_holeAction), button(m_threadAction), button(m_socketAction), button(m_hingeAction),
+                                       button(m_poseAction)});
     group(features, tr("Surface"), {button(m_shellAction), button(m_followAction), button(m_edgesAction)});
     group(features, tr("Repeat"), {button(m_patternAction)});
     common(features);
@@ -1732,6 +1749,102 @@ void MainWindow::createDocks()
     m_hingePanel = new HingePanel;
     stackLayout->addWidget(m_hingePanel);
     m_hingePanel->hide();
+    m_posePanel = new PosePanel;
+    stackLayout->addWidget(m_posePanel);
+    m_posePanel->hide();
+    m_poseTimer = new QTimer(this);
+    m_poseTimer->setSingleShot(true);
+    m_poseTimer->setInterval(200);
+    connect(m_poseTimer, &QTimer::timeout, this, &MainWindow::checkPoseHits);
+    connect(m_posePanel, &PosePanel::jointChosen, this, &MainWindow::choosePoseJoint);
+    connect(m_posePanel, &PosePanel::anglesEdited, this, [this](bool dragging) {
+        auto& mode = m_poseMode;
+        if (!mode.active || mode.joint < 0)
+            return;
+        mode.angles[mode.joints[std::size_t(mode.joint)].step] = m_posePanel->angles();
+        mode.savedPose = -1;
+        posed();
+        if (dragging)
+            m_poseTimer->start();  // checked when it stops moving
+    });
+    connect(m_posePanel, &PosePanel::rangeRequested, this, &MainWindow::findPoseRange);
+    connect(m_posePanel, &PosePanel::straightenRequested, this, [this] {
+        auto& mode = m_poseMode;
+        if (!mode.active || mode.joint < 0)
+            return;
+        mode.angles.erase(mode.joints[std::size_t(mode.joint)].step);
+        choosePoseJoint(mode.joint);
+        posed();
+    });
+    connect(m_posePanel, &PosePanel::buildPoseRequested, this, [this] {
+        if (!m_poseMode.active)
+            return;
+        m_poseMode.angles.clear();
+        m_poseMode.savedPose = -1;
+        refreshSavedPoses();
+        choosePoseJoint(m_poseMode.joint);
+        posed();
+    });
+    connect(m_posePanel, &PosePanel::holdRequested, this, [this] {
+        const ObjectId id = selectedOne();
+        if (!m_poseMode.active || id == kInvalidId || !m_doc.isTopLevel(id)) {
+            m_posePanel->setStatus(tr("Click the part to hold still first."), true);
+            return;
+        }
+        // Held from somewhere else, the same pose is a different one: start straight.
+        m_poseMode.angles.clear();
+        rebuildPose(id);
+    });
+    connect(m_posePanel, &PosePanel::poseChosen, this, [this](int index) {
+        if (!m_poseMode.active || index < 0 || index >= int(m_doc.poses().size()))
+            return;
+        const SavedPose& p = m_doc.poses()[std::size_t(index)];
+        m_poseMode.angles = p.angles;
+        m_poseMode.savedPose = index;
+        rebuildPose(p.hold);
+    });
+    connect(m_posePanel, &PosePanel::savePoseRequested, this, [this] {
+        if (!m_poseMode.active)
+            return;
+        bool ok = false;
+        const QString name =
+            QInputDialog::getText(this, tr("Save Pose"), tr("Name for this pose:"), QLineEdit::Normal,
+                                  tr("Pose %1").arg(m_doc.poses().size() + 1), &ok)
+                .trimmed();
+        if (!ok || name.isEmpty())
+            return;
+        auto poses = m_doc.poses();
+        SavedPose p{name.toStdString(), m_poseMode.rig.hold, m_poseMode.angles};
+        const auto same = std::find_if(poses.begin(), poses.end(), [&p](const SavedPose& q) { return q.name == p.name; });
+        if (same != poses.end()) {
+            if (QMessageBox::question(this, tr("Save Pose"), tr("There's already a pose called \"%1\". Replace it?").arg(name)) !=
+                QMessageBox::Yes)
+                return;
+            *same = p;
+        } else {
+            poses.push_back(p);
+        }
+        m_poseMode.savedPose = int(std::distance(poses.begin(), std::find_if(poses.begin(), poses.end(),
+                                                [&p](const SavedPose& q) { return q.name == p.name; })));
+        m_stack.execute(std::make_unique<SetPosesCommand>(std::move(poses), "Save Pose"));
+        m_posePanel->setStatus(tr("Saved \"%1\" (in the file).").arg(name), false);
+    });
+    connect(m_posePanel, &PosePanel::deletePoseRequested, this, [this] {
+        const int index = m_poseMode.savedPose >= 0 ? m_poseMode.savedPose : -1;
+        auto poses = m_doc.poses();
+        if (!m_poseMode.active || index < 0 || index >= int(poses.size())) {
+            m_posePanel->setStatus(tr("Choose a saved pose to delete."), true);
+            return;
+        }
+        poses.erase(poses.begin() + index);
+        m_poseMode.savedPose = -1;
+        m_stack.execute(std::make_unique<SetPosesCommand>(std::move(poses), "Delete Pose"));
+    });
+    connect(m_posePanel, &PosePanel::doneRequested, this, &MainWindow::endPose);
+    m_doc.addPoseListener([this] {
+        if (m_poseMode.active)
+            refreshSavedPoses();
+    });
     m_joinPanel = new JoinPanel;
     stackLayout->addWidget(m_joinPanel);
     m_joinPanel->hide();
@@ -2282,6 +2395,10 @@ void MainWindow::onViewportClicked(const QVector3D& origin, const QVector3D& dir
         referenceClick(origin, direction);
         return;
     }
+    if (m_poseMode.active) {
+        poseClick(origin, direction);
+        return;
+    }
     if (m_followMode.active) {
         followClick(origin, direction);
         return;
@@ -2382,6 +2499,10 @@ void MainWindow::onLeftPressed(const QVector3D& origin, const QVector3D& directi
         m_maskMode.lastDab.reset();
         m_maskMode.strokeStarts.push_back(m_maskMode.dabs.size());
         maskAt(origin, direction);
+        return;
+    }
+    if (m_poseMode.active) {
+        poseGrab(origin, direction);  // a part on a joint turns as it's dragged
         return;
     }
     if (m_referenceMode.active) {
@@ -2543,6 +2664,10 @@ void MainWindow::onLeftDragged(const QVector3D& origin, const QVector3D& directi
     if (m_referenceMode.active || m_referenceMode.dragging) {
         if (m_referenceMode.dragging)
             dragReference(origin, direction);
+        return;
+    }
+    if (m_poseMode.active) {
+        poseDrag(origin, direction);
         return;
     }
     Drag& d = m_dragState;
@@ -2734,6 +2859,10 @@ void MainWindow::onLeftDragged(const QVector3D& origin, const QVector3D& directi
 
 void MainWindow::onLeftReleased(bool wasDrag)
 {
+    if (m_poseMode.active) {
+        m_poseMode.dragging = false;
+        return;
+    }
     if (m_referenceMode.active || m_referenceMode.dragging) {
         m_referenceMode.dragging = false;
         return;
@@ -4283,7 +4412,7 @@ bool MainWindow::toolOpen() const
            m_sketchMode.active || m_holeMode.active || m_shellMode.active || m_followMode.active ||
            m_patternMode.active || m_sculptMode.active || m_measureMode.active || m_threadMode.active ||
            m_socketMode.active || m_joinMode.active || m_maskMode.active || m_referenceMode.active ||
-           m_hingeMode.active;
+           m_hingeMode.active || m_poseMode.active;
 }
 
 void MainWindow::startEmboss(ObjectId target, bool editing)
@@ -5648,6 +5777,7 @@ void MainWindow::newDocument()
         return;
     m_doc.replaceAll({});
     m_doc.setReferences({});
+    m_doc.setPoses({});
     m_stack.clear();
     m_selection.clear();
     m_expanded.clear();
@@ -5673,6 +5803,7 @@ bool MainWindow::openFile(const QString& path)
         std::vector<Body> bodies = file::load(toPath(path));
         m_doc.replaceAll(std::move(bodies));
         m_doc.setReferences(file::loadReferences(toPath(path)));
+        m_doc.setPoses(file::loadPoses(toPath(path)));
         // The slow steps' results saved with the file: no need to work them out again.
         if (const std::size_t used = file::useSavedResults(m_doc, toPath(path)))
             qInfo().noquote() << "Saved results used:" << used;
@@ -5926,6 +6057,7 @@ bool MainWindow::recoverFrom(const QString& backup)
         std::vector<Body> bodies = file::load(toPath(backup));
         m_doc.replaceAll(std::move(bodies));
         m_doc.setReferences(file::loadReferences(toPath(backup)));
+        m_doc.setPoses(file::loadPoses(toPath(backup)));
         file::useSavedResults(m_doc, toPath(backup));
     } catch (const std::exception& e) {
         qWarning().noquote() << "Recovery failed:" << backup << "-" << e.what();
@@ -6844,6 +6976,12 @@ void MainWindow::refreshScene()
             }
             item.color = colourOf(id);
             item.selected = isSelected(id);
+            if (m_poseMode.active) {
+                if (const auto m = m_poseMode.moved.find(id); m != m_poseMode.moved.end())
+                    item.model = toQMatrix(m->second) * item.model;
+                if (m_poseMode.hitParts.count(id))
+                    item.color = 0.45f * item.color + 0.55f * QVector3D(0.95f, 0.25f, 0.2f);
+            }
             // Painting a mask (Split by Mask, or sculpting's Mask brush): plain, strong colours.
             if (m_sculptMode.active && id == m_sculptMode.object && m_sculptPanel->brush() == int(sculpt::Brush::Mask))
                 item.maskColours = true;
@@ -6855,6 +6993,16 @@ void MainWindow::refreshScene()
             }
             triangles += item.mesh->triangleCount();
             items.push_back(std::move(item));
+        }
+        // Pose Test: where parts overlap, bright red, seen through the parts.
+        if (m_poseMode.active && m_poseMode.hitMesh) {
+            DisplayItem hit;
+            hit.id = kEdgesPickedItem;
+            hit.mesh = m_poseMode.hitMesh;
+            hit.color = QVector3D(1.0f, 0.1f, 0.05f);
+            hit.ghost = true;
+            hit.helper = true;
+            items.push_back(hit);
         }
         // ...plus selected parts of combined shapes, see-through, where they are.
         for (ObjectId id : m_selection) {
@@ -7062,6 +7210,7 @@ void MainWindow::refreshScene()
     m_threadAction->setEnabled(m_shellAction->isEnabled());
     m_socketAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_hingeAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
+    m_poseAction->setEnabled(!toolOpen() && !m_doc.topLevelIds().empty());
     m_followAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_patternAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_clear->setEnabled(!m_doc.empty());
@@ -9464,6 +9613,367 @@ void MainWindow::endSocket()
     statusBar()->clearMessage();
     refreshScene();
     refreshCommandState();
+}
+
+namespace {
+std::shared_ptr<const Mesh> together(const std::vector<Mesh>& pieces);
+}
+
+// ---- Pose Test ----------------------------------------------------------------------
+
+void MainWindow::startPose()
+{
+    if (toolOpen())
+        return;
+    if (m_dragState.kind != Drag::Kind::None)
+        cancelDrag();
+    m_poseMode = PoseMode{};
+    m_poseMode.active = true;
+    m_propsDockWidth = m_propsDock->width();
+    m_properties->hide();
+    m_posePanel->show();
+    m_posePanel->setRange({});
+    m_posePanel->setStatus({}, false);
+    rebuildPose();
+    if (m_poseMode.joints.empty())
+        m_posePanel->setStatus(tr("No joints yet: make some with Quick Hinge or Quick Socket (Features tab), then "
+                                  "come back."),
+                               false);
+    refreshSavedPoses();
+    statusBar()->showMessage(tr("Pose Test: drag a part to turn its joint. Parts that hit show in red. Done or Esc "
+                                "puts them back as built."));
+    refreshCommandState();
+}
+
+void MainWindow::endPose()
+{
+    if (!m_poseMode.active)
+        return;
+    m_poseTimer->stop();
+    ++m_poseMode.generation;  // any answer still coming is dropped
+    m_poseMode = PoseMode{};
+    m_posePanel->hide();
+    m_properties->show();
+    QTimer::singleShot(0, this, [this] { resizeDocks({m_propsDock}, {m_propsDockWidth}, Qt::Horizontal); });
+    statusBar()->clearMessage();
+    refreshScene();
+    refreshCommandState();
+}
+
+void MainWindow::rebuildPose(ObjectId hold)
+{
+    auto& mode = m_poseMode;
+    const ObjectId chosenStep = mode.joint >= 0 && mode.joint < int(mode.joints.size())
+                                    ? mode.joints[std::size_t(mode.joint)].step
+                                    : kInvalidId;
+    if (hold == kInvalidId && m_doc.find(mode.rig.hold) && m_doc.isTopLevel(mode.rig.hold))
+        hold = mode.rig.hold;
+    mode.joints = pose::findJoints(m_doc);
+    std::map<ObjectId, double> sizes;
+    std::map<ObjectId, Bounds> bounds;
+    for (ObjectId id : m_doc.topLevelIds()) {
+        const Bounds b = m_doc.worldBounds(id);
+        bounds[id] = b;
+        if (b.valid) {
+            const auto s = b.size();
+            sizes[id] = double(s[0]) * s[1] * s[2];
+        }
+    }
+    mode.rig = pose::build(mode.joints, sizes, bounds, hold);
+    // Angles for joints that are gone are forgotten.
+    std::map<ObjectId, std::array<double, 3>> kept;
+    mode.joint = -1;
+    QStringList names;
+    for (std::size_t i = 0; i < mode.joints.size(); ++i) {
+        const pose::Joint& j = mode.joints[i];
+        if (const auto a = mode.angles.find(j.step); a != mode.angles.end())
+            kept[j.step] = a->second;
+        if (j.step == chosenStep)
+            mode.joint = int(i);
+        QString name = QString::fromStdString(j.name);
+        if (j.other != kInvalidId && m_doc.find(j.other))
+            name += tr(" ↔ %1").arg(QString::fromStdString(m_doc.find(j.other)->name));
+        else
+            name += tr(" (nothing turns in it)");
+        names << name;
+    }
+    mode.angles = std::move(kept);
+    m_posePanel->setJoints(names);
+    const Body* held = m_doc.find(mode.rig.hold);
+    m_posePanel->setHold(held ? QString::fromStdString(held->name) : QString());
+    choosePoseJoint(mode.joint);
+    posed();
+}
+
+void MainWindow::posed(bool checkSoon)
+{
+    auto& mode = m_poseMode;
+    mode.moved = pose::transforms(mode.joints, mode.rig, mode.angles);
+    ++mode.generation;
+    if (checkSoon) {
+        mode.hitParts.clear();
+        mode.hitMesh.reset();
+        m_posePanel->setHits(tr("Checking for parts that hit..."), false);
+        m_poseTimer->start();
+    }
+    refreshScene();
+}
+
+void MainWindow::choosePoseJoint(int index)
+{
+    auto& mode = m_poseMode;
+    if (index < 0 || index >= int(mode.joints.size())) {
+        mode.joint = -1;
+        m_posePanel->showJoint(-1, pose::JointKind::Hinge, {0, 0, 0});
+        return;
+    }
+    mode.joint = index;
+    const pose::Joint& j = mode.joints[std::size_t(index)];
+    const auto a = mode.angles.find(j.step);
+    m_posePanel->showJoint(index, j.kind, a == mode.angles.end() ? std::array<double, 3>{0, 0, 0} : a->second);
+    m_posePanel->setRange({});
+    if (j.other == kInvalidId)
+        m_posePanel->setStatus(tr("Nothing was found turning in this joint (the other part should reach in to "
+                                  "the pin or ball)."),
+                               true);
+    else if (j.kind != pose::JointKind::Fixed)
+        m_posePanel->setStatus({}, false);
+}
+
+std::vector<pose::PosedPart> MainWindow::posedParts() const
+{
+    std::vector<pose::PosedPart> parts;
+    for (ObjectId id : m_doc.topLevelIds()) {
+        try {
+            pose::PosedPart p;
+            p.id = id;
+            p.solid = meshkernel::transformed(m_doc.meshSolid(id), m_doc.worldTransform(id));
+            if (const auto m = m_poseMode.moved.find(id); m != m_poseMode.moved.end())
+                p.moved = m->second;
+            parts.push_back(std::move(p));
+        } catch (const std::exception&) {
+            // a part that can't be worked out isn't checked
+        }
+    }
+    return parts;
+}
+
+void MainWindow::checkPoseHits()
+{
+    if (!m_poseMode.active)
+        return;
+    if (m_poseMode.moved.empty()) {
+        m_poseMode.hitParts.clear();
+        m_poseMode.hitMesh.reset();
+        m_posePanel->setHits(tr("The build pose."), false);
+        refreshScene();
+        return;
+    }
+    const int generation = m_poseMode.generation;
+    auto parts = posedParts();
+    QPointer<MainWindow> self(this);
+    QThreadPool::globalInstance()->start([self, generation, parts = std::move(parts)] {
+        std::vector<pose::Hit> hits;
+        try {
+            hits = pose::collisions(parts);
+        } catch (const std::exception& e) {
+            qWarning() << "Checking the pose failed:" << e.what();
+        }
+        QMetaObject::invokeMethod(
+            qApp,
+            [self, generation, hits = std::move(hits)] {
+                if (!self || !self->m_poseMode.active || self->m_poseMode.generation != generation)
+                    return;  // the pose has changed since
+                auto& mode = self->m_poseMode;
+                mode.hitParts.clear();
+                std::vector<Mesh> overlaps;
+                QStringList pairs;
+                for (const pose::Hit& h : hits) {
+                    mode.hitParts.insert(h.a);
+                    mode.hitParts.insert(h.b);
+                    overlaps.push_back(h.overlap);
+                    const Body* a = self->m_doc.find(h.a);
+                    const Body* b = self->m_doc.find(h.b);
+                    if (a && b)
+                        pairs << tr("%1 and %2").arg(QString::fromStdString(a->name), QString::fromStdString(b->name));
+                }
+                mode.hitMesh = overlaps.empty() ? nullptr : together(overlaps);
+                if (hits.empty())
+                    self->m_posePanel->setHits(tr("Clear: no parts hit."), false);
+                else
+                    self->m_posePanel->setHits(tr("Hit: %1.").arg(pairs.join(QStringLiteral("; "))), true);
+                self->refreshScene();
+            },
+            Qt::QueuedConnection);
+    });
+}
+
+void MainWindow::findPoseRange()
+{
+    auto& mode = m_poseMode;
+    if (mode.busy || mode.joint < 0)
+        return;
+    const std::size_t index = std::size_t(mode.joint);
+    const pose::Joint& j = mode.joints[index];
+    if (j.kind != pose::JointKind::Hinge && j.kind != pose::JointKind::Swivel)
+        return;
+    if (j.other == kInvalidId) {
+        m_posePanel->setRange(tr("Nothing turns in this joint."));
+        return;
+    }
+    mode.busy = true;
+    m_posePanel->setRange(tr("Turning it each way until parts hit..."));
+    const int generation = mode.generation;
+    auto parts = posedParts();
+    for (auto& p : parts)
+        p.moved = Transform{};
+    QPointer<MainWindow> self(this);
+    QThreadPool::globalInstance()->start([self, generation, index, joints = mode.joints, rig = mode.rig,
+                                          angles = mode.angles, parts = std::move(parts)] {
+        std::optional<std::array<double, 2>> range;
+        try {
+            range = pose::range(joints, rig, angles, index, parts);
+        } catch (const std::exception& e) {
+            qWarning() << "Finding the range failed:" << e.what();
+        }
+        QMetaObject::invokeMethod(
+            qApp,
+            [self, generation, index, range] {
+                if (!self || !self->m_poseMode.active)
+                    return;
+                self->m_poseMode.busy = false;
+                if (self->m_poseMode.joint != int(index))
+                    return;
+                if (!range) {
+                    self->m_posePanel->setRange(tr("Couldn't find the range."));
+                    return;
+                }
+                const double back = -(*range)[0], forward = (*range)[1];
+                const auto say = [](double a) {
+                    return a >= 180.0 ? tr("all the way (180°)") : tr("%1°").arg(a, 0, 'f', 0);
+                };
+                self->m_posePanel->setRange(tr("From straight it turns %1 one way (+) and %2 the other (−) "
+                                               "before parts hit.")
+                                                .arg(say(forward), say(back)));
+                if (forward < 3.0 && back < 3.0)
+                    self->m_posePanel->setRange(
+                        tr("It hits almost straight away, both ways: the parts' ends are too close round the joint. "
+                           "Round them off or bevel them (or move the parts apart a little) so they can swing."));
+                Q_UNUSED(generation);
+            },
+            Qt::QueuedConnection);
+    });
+}
+
+void MainWindow::poseClick(const QVector3D& origin, const QVector3D& direction)
+{
+    Ray ray;
+    ray.origin = {origin.x(), origin.y(), origin.z()};
+    ray.direction = {direction.x(), direction.y(), direction.z()};
+    const auto hit = pick(m_doc, ray, nullptr, &m_poseMode.moved);
+    if (!hit)
+        return;
+    ObjectId part = hit->id;
+    if (const auto r = m_poseMode.rig.rides.find(part); r != m_poseMode.rig.rides.end())
+        part = r->second;
+    setSelection(part);
+    const auto j = m_poseMode.rig.joint.find(part);
+    if (j == m_poseMode.rig.joint.end()) {
+        statusBar()->showMessage(part == m_poseMode.rig.hold || !m_poseMode.rig.parent.count(part)
+                                     ? tr("That part is held still (Hold Still holds another).")
+                                     : tr("That part isn't on a joint."),
+                                 5000);
+        return;
+    }
+    choosePoseJoint(int(j->second));
+}
+
+bool MainWindow::poseGrab(const QVector3D& origin, const QVector3D& direction)
+{
+    auto& mode = m_poseMode;
+    Ray ray;
+    ray.origin = {origin.x(), origin.y(), origin.z()};
+    ray.direction = {direction.x(), direction.y(), direction.z()};
+    const auto hit = pick(m_doc, ray, nullptr, &mode.moved);
+    if (!hit)
+        return false;
+    ObjectId part = hit->id;
+    if (const auto r = mode.rig.rides.find(part); r != mode.rig.rides.end())
+        part = r->second;
+    const auto ji = mode.rig.joint.find(part);
+    if (ji == mode.rig.joint.end())
+        return false;
+    const pose::Joint& j = mode.joints[ji->second];
+    if (j.kind == pose::JointKind::Fixed)
+        return false;
+    choosePoseJoint(int(ji->second));
+    setSelection(part);
+    // The joint where it is now: moved with the part it turns from.
+    const ObjectId parent = mode.rig.parent.at(part);
+    const auto pm = mode.moved.find(parent);
+    const Transform parentMoved = pm == mode.moved.end() ? Transform{} : pm->second;
+    mode.dragPivot = parentMoved.apply(j.pivot);
+    const QVector3D view = direction.normalized();
+    const Vec3 viewDir{view.x(), view.y(), view.z()};
+    mode.dragAxis = j.kind == pose::JointKind::Ball ? viewDir : parentMoved.applyDirection(j.axis);
+    const auto a = mode.angles.find(j.step);
+    mode.startAngles = a == mode.angles.end() ? std::array<double, 3>{0, 0, 0} : a->second;
+    mode.startTurn = pose::turn(j, mode.startAngles);
+    mode.dragViewAxis = parentMoved.inverse().applyDirection(viewDir);
+    // Where the mouse is on the plane the joint turns in.
+    const QVector3D n(float(mode.dragAxis[0]), float(mode.dragAxis[1]), float(mode.dragAxis[2]));
+    const QVector3D p(float(mode.dragPivot[0]), float(mode.dragPivot[1]), float(mode.dragPivot[2]));
+    const auto at = view::intersectPlane(origin, direction, p, n);
+    if (!at)
+        return false;
+    mode.grabbed = {at->x(), at->y(), at->z()};
+    mode.dragging = true;
+    return true;
+}
+
+void MainWindow::poseDrag(const QVector3D& origin, const QVector3D& direction)
+{
+    auto& mode = m_poseMode;
+    if (!mode.dragging || mode.joint < 0)
+        return;
+    const pose::Joint& j = mode.joints[std::size_t(mode.joint)];
+    const QVector3D n(float(mode.dragAxis[0]), float(mode.dragAxis[1]), float(mode.dragAxis[2]));
+    const QVector3D p(float(mode.dragPivot[0]), float(mode.dragPivot[1]), float(mode.dragPivot[2]));
+    const auto at = view::intersectPlane(origin, direction, p, n);
+    if (!at)
+        return;
+    // The angle the mouse has gone round the pivot, round the axis.
+    const QVector3D from = QVector3D(float(mode.grabbed[0]), float(mode.grabbed[1]), float(mode.grabbed[2])) - p;
+    const QVector3D to = *at - p;
+    if (from.lengthSquared() < 1e-8f || to.lengthSquared() < 1e-8f)
+        return;
+    const float s = QVector3D::dotProduct(n, QVector3D::crossProduct(from, to));
+    const float c = QVector3D::dotProduct(from, to);
+    const double degrees = std::atan2(double(s), double(c)) * 180.0 / std::numbers::pi;
+    std::array<double, 3> angles = mode.startAngles;
+    if (j.kind == pose::JointKind::Ball) {
+        const Transform r = pose::rotationAbout(j.pivot, mode.dragViewAxis, degrees) * mode.startTurn;
+        angles = pose::ballAngles(j, r);
+    } else {
+        double a = mode.startAngles[0] + degrees;
+        while (a > 180.0)
+            a -= 360.0;
+        while (a < -180.0)
+            a += 360.0;
+        angles[0] = std::round(a * 2.0) / 2.0;  // half degrees: easy to read
+    }
+    mode.angles[j.step] = angles;
+    m_posePanel->showJoint(mode.joint, j.kind, angles);
+    mode.savedPose = -1;
+    posed();
+}
+
+void MainWindow::refreshSavedPoses()
+{
+    QStringList names;
+    for (const SavedPose& p : m_doc.poses())
+        names << QString::fromStdString(p.name);
+    m_posePanel->setPoses(names, m_poseMode.savedPose);
 }
 
 // ---- Quick Hinge -------------------------------------------------------------------

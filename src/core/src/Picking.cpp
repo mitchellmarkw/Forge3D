@@ -46,7 +46,8 @@ double intersect(V3 o, V3 d, V3 a, V3 b, V3 c)
 
 }  // namespace
 
-std::optional<PickHit> pick(const Document& doc, const Ray& ray, const PickClip* clip)
+std::optional<PickHit> pick(const Document& doc, const Ray& ray, const PickClip* clip,
+                            const std::map<ObjectId, Transform>* posed)
 {
     const double len = std::sqrt(ray.direction[0] * ray.direction[0] + ray.direction[1] * ray.direction[1] +
                                  ray.direction[2] * ray.direction[2]);
@@ -58,7 +59,11 @@ std::optional<PickHit> pick(const Document& doc, const Ray& ray, const PickClip*
     for (const ObjectId id : doc.topLevelIds()) {  // parts inside a result are not on the plate
         // Move the ray into the body's own coordinates instead of moving every vertex.
         // Rigid transforms keep lengths, so t along the local ray = distance in mm.
-        const Transform toLocal = doc.worldTransform(id).inverse();
+        Transform world = doc.worldTransform(id);
+        if (posed)
+            if (const auto p = posed->find(id); p != posed->end())
+                world = p->second * world;
+        const Transform toLocal = world.inverse();
         const Vec3 lo = toLocal.apply(ray.origin);
         const Vec3 ld = toLocal.applyDirection({worldDir.x, worldDir.y, worldDir.z});
         const V3 o{lo[0], lo[1], lo[2]};

@@ -48,6 +48,8 @@ add_executable(Forge3D WIN32
     ReferencePanel.h
     HingePanel.h
     ScaleCalculator.h
+    PosePanel.h
+    PosePanel.cpp
     ScaleCalculator.cpp
     HingePanel.cpp
     ReferencePanel.cpp

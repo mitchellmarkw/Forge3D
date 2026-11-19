@@ -1656,6 +1656,37 @@ void Document::setReferences(std::vector<ReferenceImage> images)
         listener();
 }
 
+void Document::setPoses(std::vector<SavedPose> poses)
+{
+    for (std::size_t i = 0; i < poses.size(); ++i) {
+        if (poses[i].name.empty())
+            throw std::invalid_argument("A pose needs a name.");
+        for (std::size_t k = 0; k < i; ++k)
+            if (poses[k].name == poses[i].name)
+                throw std::invalid_argument("There's already a pose called \"" + poses[i].name + "\".");
+        for (const auto& [step, a] : poses[i].angles)
+            for (double d : a)
+                if (!std::isfinite(d))
+                    throw std::invalid_argument("A pose has a broken angle.");
+    }
+    m_poses = std::move(poses);
+    const auto listeners = m_poseListeners;
+    for (const auto& [handle, listener] : listeners)
+        listener();
+}
+
+int Document::addPoseListener(std::function<void()> listener)
+{
+    const int handle = m_nextListener++;
+    m_poseListeners.emplace(handle, std::move(listener));
+    return handle;
+}
+
+void Document::removePoseListener(int handle)
+{
+    m_poseListeners.erase(handle);
+}
+
 int Document::addReferenceListener(std::function<void()> listener)
 {
     const int handle = m_nextListener++;

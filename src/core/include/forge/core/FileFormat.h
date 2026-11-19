@@ -2,6 +2,7 @@
 #pragma once
 
 #include "forge/core/Body.h"
+#include "forge/core/Pose.h"
 #include "forge/core/Reference.h"
 
 #include <filesystem>
@@ -63,7 +64,9 @@ namespace forge::file {
 //      shown and active; the picture file kept as it was in "references/<view>.<kind>")
 //  29  Quick Hinge steps (operation "hinge": kind, which half, sizes, pin, fit, swing,
 //      turn, and the number both halves of one hinge share)
-inline constexpr int kFormatVersion = 29;
+//  30  saved poses ("poses": a name, the part held still, and each joint's angles by
+//      the step that makes the joint)
+inline constexpr int kFormatVersion = 30;
 // The highest sculpt::Brush number a file may hold (Pattern).
 inline constexpr int kLastSculptBrush = 13;
 inline constexpr const char* kExtension = ".f3d";
@@ -82,6 +85,10 @@ void save(const Document& doc, const std::filesystem::path& path, const std::str
 
 // Reads a document's bodies. Use Document::replaceAll() to show them.
 std::vector<Body> load(const std::filesystem::path& path);
+
+// The poses saved in a file (none if it has none); a broken one is left out.
+std::vector<SavedPose> loadPoses(const std::filesystem::path& path);
+std::vector<SavedPose> posesFromJson(const std::string& json);
 
 // The reference images kept in a file (none if it has none). A picture that can't be
 // read is left out, never a reason to refuse the file. Use Document::setReferences().

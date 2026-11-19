@@ -1227,3 +1227,25 @@ and sharp across edges.
   (`uMaskOn`). Used for Split by Mask's part and for the sculpted part while the Mask
   brush is chosen (`SculptPanel::brushChanged` refreshes the scene). The colours live
   in `MaskPanel` (preferences `mask/unmaskedColour`, `mask/maskedColour`).
+
+## Pose Test (slice 51)
+
+- `Pose.h/.cpp`: `findJoints` reads the Hinge (fork) and Socket steps: pivot (the pin's
+  middle, the ball's middle, half way down a bore), axis, kind (hinge, swivel, ball,
+  fixed), the holder (`history::objectOf` the step) and the other part (the tab's, by
+  the hinge's link number, else the biggest part on the plate whose box holds the
+  pivot). `build` makes the rig: a breadth-first tree from the held part (the biggest
+  jointed one unless chosen), other groups from their biggest part, and parts with a
+  pivot inside them (pins) riding with the joint's parent side. `transforms` composes
+  each joint's turn (about the build-pose pivot) down the tree; `turn` /
+  `ballAngles` (bend, sideways, twist: R(across) R(axis × across) R(axis)).
+  `collisions` intersects pairs that don't move together (bounding boxes first);
+  `range` steps a hinge 5° then 1° each way until parts it moves hit others.
+- The pose never touches the bodies: `MainWindow::PoseMode` keeps the angles and the
+  moved transforms, multiplies them into the display items' models, and picks with
+  `pick(..., posed)`. Hit checks and Find Range run on `QThreadPool`, on copies of the
+  parts' solids, and their answers are dropped if the pose has changed since
+  (`generation`).
+- `SavedPose` (name, held part, angles by step id) in `Document::poses()`, changed with
+  `SetPosesCommand`; file format 30 (`"poses"`), read with `file::loadPoses`.
+

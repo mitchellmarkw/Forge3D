@@ -4,6 +4,7 @@
 #include "forge/core/Body.h"
 #include "forge/core/Mesh.h"
 #include "forge/core/MeshKernel.h"
+#include "forge/core/Pose.h"
 #include "forge/core/Reference.h"
 #include "forge/core/Transform.h"
 
@@ -204,6 +205,14 @@ public:
     int addReferenceListener(std::function<void()> listener);
     void removeReferenceListener(int handle);
 
+    // ---- Saved poses ----
+    // Poses saved by name in Pose Test (see Pose.h). Only for looking: the parts stay as
+    // built. Names are unique; throws std::invalid_argument and changes nothing if not.
+    const std::vector<SavedPose>& poses() const { return m_poses; }
+    void setPoses(std::vector<SavedPose> poses);
+    int addPoseListener(std::function<void()> listener);
+    void removePoseListener(int handle);
+
     // ---- Change notification ----
     int addListener(Listener listener);
     void removeListener(int handle);
@@ -248,6 +257,8 @@ private:
     int m_nextListener = 1;
     std::vector<ReferenceImage> m_references;
     std::map<int, std::function<void()>> m_referenceListeners;
+    std::vector<SavedPose> m_poses;
+    std::map<int, std::function<void()>> m_poseListeners;
 };
 
 // Validates a primitive's parameters; throws std::invalid_argument if not buildable.

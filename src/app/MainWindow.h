@@ -72,6 +72,7 @@ class ShellPanel;
 class ThreadPanel;
 class SocketPanel;
 class HingePanel;
+class PosePanel;
 class JoinPanel;
 class MaskPanel;
 class ReferencePanel;
@@ -792,6 +793,46 @@ private:
     void applySocket();
     void endSocket();
     void addMatchingPart();
+
+    // Pose Test
+    QAction* m_poseAction = nullptr;
+    PosePanel* m_posePanel = nullptr;
+    QTimer* m_poseTimer = nullptr;  // checks for parts hitting once the pose stops changing
+    struct PoseMode {
+        bool active = false;
+        std::vector<pose::Joint> joints;
+        pose::Rig rig;
+        std::map<ObjectId, std::array<double, 3>> angles;  // by the step that makes the joint
+        std::map<ObjectId, Transform> moved;               // each moved part, on top of where it is
+        int joint = -1;                                    // chosen (index into joints)
+        std::set<ObjectId> hitParts;
+        std::shared_ptr<const Mesh> hitMesh;  // where parts overlap (plate coordinates)
+        int generation = 0;                   // the pose's version: late answers are dropped
+        bool busy = false;                    // finding a range
+        int savedPose = -1;                   // the saved pose being shown
+        // Dragging a part
+        bool dragging = false;
+        Vec3 grabbed{0, 0, 0};
+        Vec3 dragPivot{0, 0, 0}, dragAxis{0, 0, 1};
+        std::array<double, 3> startAngles{0, 0, 0};
+        Transform startTurn;
+        Vec3 dragViewAxis{0, 0, 1};  // a ball: turned round the line of sight, in its own frame
+    };
+    PoseMode m_poseMode;
+    void startPose();
+    void endPose();
+    // The joints again (after an undo, say), keeping the angles that still apply.
+    void rebuildPose(ObjectId hold = kInvalidId);
+    // After the angles change: where the parts go, the panel, and (soon) the hit check.
+    void posed(bool checkSoon = true);
+    void choosePoseJoint(int index);
+    void checkPoseHits();
+    void findPoseRange();
+    void poseClick(const QVector3D& origin, const QVector3D& direction);
+    bool poseGrab(const QVector3D& origin, const QVector3D& direction);
+    void poseDrag(const QVector3D& origin, const QVector3D& direction);
+    std::vector<pose::PosedPart> posedParts() const;
+    void refreshSavedPoses();
 
     // Quick Hinge
     QAction* m_hingeAction = nullptr;
