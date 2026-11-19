@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.56.0 Beta — Slice 47: Join Parts (2026-11-18)
+
+- **Join Parts** (Design → Arrange): moves one part so it joins another. Click the
+  place on the part that moves, then where it goes on the other part, and it's shown
+  there straight away; Apply moves it (one Undo puts it back).
+  - What a click picks is worked out from where you click:
+    - a **flat face**: its middle, facing out (faces go flat together, centred);
+    - a **peg** (a round side sticking out): its tip, pointing along it;
+    - a **hole**: its bottom, pointing out of the opening (a peg goes in to the bottom);
+    - a **ball**: its middle, on shapes made in Forge3D and on imported or sculpted
+      meshes too (a mesh is checked for a ball round the spot clicked);
+    - a **round cup**, or a **Quick Socket** in the part's history: where the ball's
+      middle or the peg's end goes;
+    - anywhere else on a mesh: the **spot** clicked, facing out.
+  - **Gap** leaves room along the join. Into a Quick Socket peg socket it starts at
+    the socket's fit, so the peg's end stops short of the bottom by that much and its
+    shoulder meets the surface. **Across** slides it either way, **Turn** spins it
+    round the line of the join (to face it the right way or line up a peg's flats),
+    and **Flip** turns it end for end if it was worked out pointing the wrong way.
+  - **Pick Again** changes either pick; clicking once both are picked changes where it
+    goes.
+- 260 unit tests (5 new: the move itself (gap, across, turn, flip); a face against a
+  face; a peg into a drilled hole, touching nothing; a ball into a Quick Socket and a
+  peg seated flush in its socket; a ball found on a mesh, and just the spot on a mesh
+  box).
+
 ## 0.55.1 Beta — Features tab (2026-11-18)
 
 - **A Features tab**, after Design, so the Design tab isn't crowded: **Holes and

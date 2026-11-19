@@ -1103,3 +1103,25 @@ and sharp across edges.
 - App: `SocketPanel`, `MainWindow::SocketMode`. The preview is `previewMesh` of the
   step, or, for parts over 300,000 triangles, the cutters drawn as a red ghost. The last
   settings are kept in the preferences (`socket/...`).
+
+## Join Parts (slice 47)
+
+- `Join.h/.cpp` (`forge::join`): a `Feature` is a point and an outward direction in
+  plate coordinates, of a kind (Flat, Peg, Hole, Ball, BallSocket, Socket, Spot), with
+  a size and a suggested gap. `featureAt` casts the click against the shape's display
+  mesh (`emboss::surfaceAt`), then: a Quick Socket step in its history whose hollow
+  holds the hit (point: the ball seat's middle, or the peg socket's bottom; gap: its
+  fit); for shapes not using the mesh engine, `measure::Shape` gives the face's kind:
+  Flat (middle by area), Cylinder (ends from the face's triangles along the axis; the
+  open end is the one further from the shape's middle; peg or hole from the hit
+  normal against the axis), Sphere (ball or cup); for meshes, `ballAround` fits a
+  sphere (least squares) to the points round the hit over growing reaches and keeps
+  the largest that stays round (RMS < 2% of r, and the hit on it); else the spot.
+- `mating`: the least turn taking the moving direction (flipped if asked) onto minus
+  the fixed one, a spin about the fixed direction by `turn`, then the shift putting the
+  moving point on the fixed point plus `along` along it and `acrossX/Y` in the Emboss
+  frame. `joinedPlacement` applies it to the shape's world transform
+  (`placementFromTransform`).
+- App: `JoinPanel`, `MainWindow::JoinMode` (`pick` finds the shape clicked; the moving
+  shape's display item takes the new placement as a preview). Apply is one macro
+  ("Join A to B") with a `SetPlacementCommand`.

@@ -22,19 +22,6 @@ Notes: the picture loading from Emboss can be reused. Inactive pictures are draw
 left out of picking. Pictures are saved in the `.f3d` file, but not exported or
 printed.
 
-## Precise part alignment
-
-Today's Align lines shapes up by their boxes and centres. This is for joining parts:
-
-- Pick a **face or edge on each part** (say the shoulder end of an arm's peg and the
-  inside face of the torso's socket), and the first part moves so they meet: faces
-  flat together, and round faces or edges sharing an axis.
-- **Offsets**: a gap along and/or across. The peg is a little shorter and thinner than
-  its socket, so it should sit where it would when plugged in, not jammed against the
-  bottom.
-
-Notes: build on Measure's picking (faces, edges, centres, axes).
-
 ## Split by mask
 
 Cut a part in two along a line painted on it, rather than along a flat plane.

@@ -26,6 +26,7 @@ add_library(forge_core STATIC
     src/Layout.cpp
     src/ShapeLibrary.cpp
     src/Socket.cpp
+    src/Join.cpp
     src/Body.cpp
     src/CommandStack.cpp
     src/Commands.cpp
