@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "SocketPanel.h"
 
+#include "Fits.h"
+
 #include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QFormLayout>
@@ -17,8 +19,6 @@ namespace forge::app {
 
 namespace {
 
-constexpr double kResinFit = 0.1;
-constexpr double kFdmFit = 0.2;
 const std::array<int, 6> kCutCounts{0, 2, 3, 4, 6, 8};
 
 QDoubleSpinBox* millimetres(double low, double high, double step, int decimals = 2)
@@ -203,8 +203,14 @@ SocketPanel::SocketPanel(QWidget* parent) : QWidget(parent)
             showKind();
             emit changed();
         });
-    connect(m_printer, &QComboBox::currentIndexChanged, this, [this](int index) {
-        m_fit->setValue(index == 0 ? kResinFit : kFdmFit);  // emits changed
+    // The fit found with the tolerance test print for this printer and joint, if any.
+    const auto fitKind = [this] { return m_kind->currentIndex() == 0 ? tolerance::Kind::Ball : tolerance::Kind::Peg; };
+    connect(m_printer, &QComboBox::currentIndexChanged, this, [this, fitKind](int index) {
+        m_fit->setValue(fits::starting(index == 0, fitKind()));  // emits changed
+    });
+    connect(m_kind, &QComboBox::currentIndexChanged, this, [this, fitKind] {
+        if (const auto f = fits::measured(m_printer->currentIndex() == 0, fitKind()))
+            m_fit->setValue(*f);
     });
     for (QDoubleSpinBox* box :
          {m_ballSize, m_grip, m_pegSize, m_pegDepth, m_turn, m_fit, m_cutWidth, m_cutDepth})

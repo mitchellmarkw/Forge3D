@@ -15,6 +15,7 @@
 #include "forge/core/Split.h"
 #include "forge/core/Transform.h"
 #include "forge/core/Scale.h"
+#include "forge/core/Tolerance.h"
 #include "forge/view/Gizmo.h"
 
 #include "SketchPanel.h"
@@ -77,6 +78,7 @@ class JoinPanel;
 class MaskPanel;
 class ReferencePanel;
 class ScaleCalculator;
+class ToleranceDialog;
 class SketchPanel;
 class SketchView;
 struct DisplayItem;
@@ -718,6 +720,8 @@ private:
     MaskMode m_maskMode;
 
     ScaleCalculator* m_scaleCalculator = nullptr;  // Tools → Scale Calculator, made when first opened
+    ToleranceDialog* m_toleranceDialog = nullptr;  // Tools → Tolerance Test Print
+    void addToleranceTest(const tolerance::Settings& settings);
 
     // Reference Images
     QAction* m_referenceAction = nullptr;

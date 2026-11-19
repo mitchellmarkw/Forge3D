@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.61.0 Beta — Slice 52: Tolerance Test Print (2026-11-19)
+
+- **Tools → Tolerance Test Print...**: find the fit that suits your printer, once.
+  - **1. Make the test**: bars of holes for a round peg, snap-in cups for a ball, and
+    holes for a hinge pin, at stepped fits (0.10 to 0.30 mm every 0.05 to start;
+    from, to and step can be changed, up to 12), each labelled with raised digits
+    (".15" is 0.15 mm of room all round), plus two test pegs, a ball on a stalk and two
+    pins. The holes and cups are cut exactly as Quick Socket cuts them. Sizes can be set
+    to the ones you use, and **Add to the Plate** puts it all beside what's there.
+  - **2. Record what fit best**: for each printer (resin, FDM), the peg, ball and hinge
+    pin fits that worked. **Use These Fits**: Quick Socket and Quick Hinge start from
+    them whenever that printer is chosen (and when the socket's kind changes), and
+    Split for Printing's pegs use the peg fit. The fit can still be changed each time.
+- 288 unit tests (3 new: the fits and labels; the bars and pieces, closed, on the plate
+  and apart; a test peg clearing each hole by its labelled fit, and a fatter one not).
+
 ## 0.60.0 Beta — Slice 51: Pose Test (2026-11-19)
 
 - **Pose Test** (Features → Holes and Joints): turn a figure's joints to see how far

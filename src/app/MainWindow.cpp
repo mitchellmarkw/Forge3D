@@ -28,6 +28,7 @@
 #include "MaskPanel.h"
 #include "ReferencePanel.h"
 #include "ScaleCalculator.h"
+#include "ToleranceDialog.h"
 #include "SocketPanel.h"
 #include "ThreadPanel.h"
 #include "forge/core/Thread.h"
@@ -1238,6 +1239,17 @@ void MainWindow::createMenus()
         m_scaleCalculator->activateWindow();
     });
     scaleCalculator->setStatusTip(tr("Work out a size at a scale: a real size in any unit, at 1:X, on the model"));
+    QAction* toleranceTest = tools->addAction(tr("&Tolerance Test Print..."), this, [this] {
+        if (!m_toleranceDialog) {
+            m_toleranceDialog = new ToleranceDialog(this);
+            connect(m_toleranceDialog, &ToleranceDialog::addRequested, this, &MainWindow::addToleranceTest);
+        }
+        m_toleranceDialog->show();
+        m_toleranceDialog->raise();
+        m_toleranceDialog->activateWindow();
+    });
+    toleranceTest->setStatusTip(tr("Print holes, cups and pin holes at stepped fits once, and use the fit that worked "
+                                   "best from then on"));
 
     QMenu* help = menuBar()->addMenu(tr("&Help"));
     help->addAction(tr("Open &log folder"), this, [] {
@@ -9617,6 +9629,57 @@ void MainWindow::endSocket()
 
 namespace {
 std::shared_ptr<const Mesh> together(const std::vector<Mesh>& pieces);
+}
+
+// ---- Tolerance test print -----------------------------------------------------------
+
+void MainWindow::addToleranceTest(const tolerance::Settings& settings)
+{
+    if (toolOpen()) {
+        statusBar()->showMessage(tr("Close the open tool first."), 5000);
+        return;
+    }
+    std::vector<Body> bodies;
+    try {
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        struct RestoreCursor {
+            ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
+        } restore;
+        for (const tolerance::Piece& piece : tolerance::pieces(settings))
+            bodies.push_back(hinge::pieceBody(piece.mesh, piece.name));
+    } catch (const std::exception& e) {
+        QMessageBox::warning(this, tr("Forge3D"), tr("The test could not be made:\n%1").arg(QString::fromUtf8(e.what())));
+        return;
+    }
+    // Beside anything already on the plate.
+    const Bounds there = m_doc.worldBounds();
+    double shift = 0.0;
+    if (there.valid) {
+        double lowest = 1e300;
+        for (const Body& b : bodies)
+            lowest = std::min(lowest, b.placement.x - std::get<MeshSpec>(b.spec).width / 2.0);
+        shift = there.max[0] + 10.0 - lowest;
+    }
+    std::vector<ObjectId> added;
+    m_stack.beginMacro("Tolerance Test");
+    try {
+        for (Body& b : bodies) {
+            b.id = m_doc.allocateId();
+            b.placement.x += shift;
+            b.name = m_doc.uniqueName(b.name);
+            added.push_back(b.id);
+            m_stack.execute(std::make_unique<AddBodyCommand>(std::move(b)));
+        }
+        m_stack.endMacro();
+    } catch (const std::exception& e) {
+        m_stack.abortMacro();
+        QMessageBox::warning(this, tr("Forge3D"), tr("The test could not be made:\n%1").arg(QString::fromUtf8(e.what())));
+        return;
+    }
+    refreshScene();
+    setSelection(added);
+    m_viewport->fitView();
+    refreshCommandState();
 }
 
 // ---- Pose Test ----------------------------------------------------------------------

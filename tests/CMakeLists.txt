@@ -48,6 +48,7 @@ add_executable(forge_tests
     test_reference.cpp
     test_hinge.cpp
     test_pose.cpp
+    test_tolerance.cpp
     bench_sculpt.cpp
     fuzz_files.cpp
     test_undo_random.cpp
