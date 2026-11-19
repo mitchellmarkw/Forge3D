@@ -1136,3 +1136,27 @@ and sharp across edges.
 - App: `JoinPanel`, `MainWindow::JoinMode` (`pick` finds the shape clicked; the moving
   shape's display item takes the new placement as a preview). Apply is one macro
   ("Join A to B") with a `SetPlacementCommand`.
+
+## Split by Mask (slice 48)
+
+- `BooleanOp::MaskSplit` (mesh engine), `MaskSplitFinish`: the dabs (centre, radius,
+  erase) in the step's coordinates, in order, and which piece the step keeps. File
+  format 27 (`"operation": "maskSplit"`, `"mask": {"piece", "dabs": [[x, y, z, r, erase]]}`).
+- `MaskSplit.h/.cpp`: `mask::Field` files the dabs in a grid of cells as big as the
+  largest; a point is masked if the last dab covering it painted. `mask::split`:
+  `refineNearEdge` splits long edges whose middle is near a dab's sphere (1-, 2- and
+  3-edge splits keep the surface joined) down to a quarter of the smallest radius; each
+  edge crossing the mask's edge is cut where 32 halvings from its masked end find the
+  edge; crossing triangles are split three ways. The masked piece's open edges are
+  chained into loops; each loop gets rings drawn in to its middle, then 300 passes of
+  umbrella smoothing (a membrane). The masked piece takes the caps, the rest takes them
+  reversed: the pieces share the cap exactly.
+- `splitByMask` mirrors `splitBody` (a copy of the shape for the second piece, both
+  worked out first). `withMask` changes a step and, if it's still on the plate with the
+  same dabs, its other piece (the dabs copied in step coordinates, since the pieces may
+  have moved apart). `Scale` moves the dabs and grows them when scaled evenly.
+- App: `MaskPanel`, `MainWindow::MaskMode`. The part's surface is shown (refined to
+  about 60,000 triangles if coarser) with the paint as its shade (the sculpting mask's
+  look); each dab sets the shade of the points it covers and sends just those runs to
+  the graphics card (`Viewport::meshChanged`). Mouse jumps are filled with dabs a
+  quarter of the brush apart.

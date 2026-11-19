@@ -17,10 +17,12 @@
 #include "SectionPanel.h"
 #include "forge/core/Layout.h"
 #include "forge/core/ShapeLibrary.h"
+#include "forge/core/MaskSplit.h"
 #include "forge/core/Socket.h"
 #include "forge/core/PrintSplit.h"
 #include "Theme.h"
 #include "JoinPanel.h"
+#include "MaskPanel.h"
 #include "SocketPanel.h"
 #include "ThreadPanel.h"
 #include "forge/core/Thread.h"
@@ -349,6 +351,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
             edgesHover(o, d, px);
         if (m_sculptMode.active)
             sculptHover(o, d);
+        if (m_maskMode.active)
+            maskHover(o, d);
         if (m_measureMode.active)
             measureHover(o, d, px);
     });
@@ -458,6 +462,10 @@ void MainWindow::createActions()
             undoStroke();
             return;
         }
+        if (m_maskMode.active) {
+            undoMaskStroke();
+            return;
+        }
         const QString label = QString::fromStdString(m_stack.undoLabel());
         m_stack.undo();
         qInfo().noquote() << "Undo:" << label;
@@ -560,6 +568,8 @@ void MainWindow::createActions()
             endSocket();
         else if (m_joinMode.active)
             endJoin();
+        else if (m_maskMode.active)
+            endMask();
         else if (m_followMode.active)
             endFollow();
         else if (m_patternMode.active)
@@ -738,12 +748,16 @@ void MainWindow::createActions()
     connect(m_sculptSmaller, &QAction::triggered, this, [this] {
         if (m_sculptMode.active)
             m_sculptPanel->setSize(m_sculptPanel->size() / 1.2);
+        if (m_maskMode.active)
+            m_maskPanel->setBrushSize(m_maskPanel->brushSize() / 1.2);
     });
     m_sculptBigger = new QAction(this);
     m_sculptBigger->setShortcut(Qt::Key_BracketRight);
     connect(m_sculptBigger, &QAction::triggered, this, [this] {
         if (m_sculptMode.active)
             m_sculptPanel->setSize(m_sculptPanel->size() * 1.2);
+        if (m_maskMode.active)
+            m_maskPanel->setBrushSize(m_maskPanel->brushSize() * 1.2);
     });
     addAction(m_sculptSmaller);
     addAction(m_sculptBigger);
@@ -896,6 +910,17 @@ void MainWindow::createActions()
         startShell(target, false);
     });
 
+    m_maskAction = new QAction(tr("Split by Mask"), this);
+    m_maskAction->setToolTip(tr("Split by Mask: paint over part of the selected shape, and it's cut off along the "
+                                "edge of the paint; both pieces are closed with the same smooth cap"));
+    connect(m_maskAction, &QAction::triggered, this, [this] {
+        const ObjectId id = selectedOne();
+        if (id == kInvalidId || m_selection.size() != 1 || !m_doc.isTopLevel(id)) {
+            statusBar()->showMessage(tr("Split by Mask: select one shape on the plate first."), 6000);
+            return;
+        }
+        startMask(id, false);
+    });
     m_joinAction = new QAction(tr("Join Parts"), this);
     m_joinAction->setToolTip(tr("Join Parts: move one part so it joins another: a peg into its socket, a ball "
                                 "into its cup, a face flat against a face. Click the place on each part."));
@@ -1172,6 +1197,7 @@ void MainWindow::createToolBar()
         {m_separate, "separate"},
         {m_alignMenu->menuAction(), "align"},
         {m_joinAction, "join"},
+        {m_maskAction, "split-mask"},
         {m_mirrorMenu->menuAction(), "mirror"},
         {m_patternAction, "pattern"},
         {m_group, "group"},
@@ -1340,7 +1366,7 @@ void MainWindow::createToolBar()
         sketchButton->setAutoRaise(true);
         group(design, tr("Sketch"), {sketchButton});
     }
-    group(design, tr("Change"), {button(m_split), button(m_emboss)});
+    group(design, tr("Change"), {button(m_split), button(m_maskAction), button(m_emboss)});
     group(design, tr("Place"), {button(m_layFlat), button(m_sitOnPlate), button(m_extrudeDownAction)});
     common(design);
 
@@ -1629,6 +1655,9 @@ void MainWindow::createDocks()
     m_joinPanel = new JoinPanel;
     stackLayout->addWidget(m_joinPanel);
     m_joinPanel->hide();
+    m_maskPanel = new MaskPanel;
+    stackLayout->addWidget(m_maskPanel);
+    m_maskPanel->hide();
     m_measurePanel = new MeasurePanel;
     stackLayout->addWidget(m_measurePanel);
     m_measurePanel->hide();
@@ -1736,6 +1765,16 @@ void MainWindow::createDocks()
         m_socketMode.spot = moved;
         updateSocketPreview();
     });
+    connect(m_maskPanel, &MaskPanel::undoStrokeRequested, this, &MainWindow::undoMaskStroke);
+    connect(m_maskPanel, &MaskPanel::clearRequested, this, [this] {
+        if (!m_maskMode.active)
+            return;
+        m_maskMode.dabs.clear();
+        m_maskMode.strokeStarts.clear();
+        repaintMask();
+    });
+    connect(m_maskPanel, &MaskPanel::applyRequested, this, &MainWindow::applyMask);
+    connect(m_maskPanel, &MaskPanel::cancelRequested, this, &MainWindow::endMask);
     connect(m_joinPanel, &JoinPanel::changed, this, &MainWindow::updateJoinPreview);
     connect(m_joinPanel, &JoinPanel::applyRequested, this, &MainWindow::applyJoin);
     connect(m_joinPanel, &JoinPanel::cancelRequested, this, &MainWindow::endJoin);
@@ -2063,6 +2102,8 @@ void MainWindow::onViewportClicked(const QVector3D& origin, const QVector3D& dir
         joinClick(origin, direction);
         return;
     }
+    if (m_maskMode.active)
+        return;  // painting is done by pressing and dragging
     if (m_followMode.active) {
         followClick(origin, direction);
         return;
@@ -2155,6 +2196,14 @@ void MainWindow::onLeftPressed(const QVector3D& origin, const QVector3D& directi
         beginStroke(origin, direction, modifiers);
         return;
     }
+    if (m_maskMode.active) {
+        m_maskMode.stroking = true;
+        m_maskMode.erasing = modifiers.testFlag(Qt::ControlModifier);
+        m_maskMode.lastDab.reset();
+        m_maskMode.strokeStarts.push_back(m_maskMode.dabs.size());
+        maskAt(origin, direction);
+        return;
+    }
     if (m_splitMode.active) {
         // The Split tool is open: shapes stay put, but the plane can be dragged.
         if (grabSplitPlane(origin, direction))
@@ -2168,7 +2217,8 @@ void MainWindow::onLeftPressed(const QVector3D& origin, const QVector3D& directi
         return;
     }
     if (m_embossMode.active || m_edgesMode.active || m_holeMode.active || m_shellMode.active || m_followMode.active ||
-        m_patternMode.active || m_threadMode.active || m_socketMode.active || m_joinMode.active)
+        m_patternMode.active || m_threadMode.active || m_socketMode.active || m_joinMode.active ||
+        m_maskMode.active)
         return;  // shapes stay put while the tool is open
 
     if (handle.valid() && multiSelection()) {
@@ -2288,6 +2338,12 @@ void MainWindow::onLeftDragged(const QVector3D& origin, const QVector3D& directi
     if (m_sculptMode.active) {
         if (m_sculptMode.stroking)
             sculptAt(origin, direction, modifiers);
+        return;
+    }
+    if (m_maskMode.active) {
+        if (m_maskMode.stroking)
+            maskAt(origin, direction);
+        maskHover(origin, direction);
         return;
     }
     Drag& d = m_dragState;
@@ -2479,6 +2535,16 @@ void MainWindow::onLeftDragged(const QVector3D& origin, const QVector3D& directi
 
 void MainWindow::onLeftReleased(bool wasDrag)
 {
+    if (m_maskMode.active) {
+        m_maskMode.stroking = false;
+        m_maskMode.lastDab.reset();
+        // A press that painted nothing isn't a stroke.
+        if (!m_maskMode.strokeStarts.empty() && m_maskMode.strokeStarts.back() == m_maskMode.dabs.size())
+            m_maskMode.strokeStarts.pop_back();
+        m_maskPanel->setStrokes(int(m_maskMode.strokeStarts.size()));
+        m_maskPanel->setApplyEnabled(!m_maskMode.dabs.empty());
+        return;
+    }
     if (m_sculptMode.active) {
         m_sculptMode.stroking = false;
         m_sculptMode.lastDab.reset();
@@ -4013,7 +4079,7 @@ bool MainWindow::toolOpen() const
     return m_splitMode.active || m_fitMode.active || m_embossMode.active || m_edgesMode.active || m_sketchMode.picking ||
            m_sketchMode.active || m_holeMode.active || m_shellMode.active || m_followMode.active ||
            m_patternMode.active || m_sculptMode.active || m_measureMode.active || m_threadMode.active ||
-           m_socketMode.active || m_joinMode.active;
+           m_socketMode.active || m_joinMode.active || m_maskMode.active;
 }
 
 void MainWindow::startEmboss(ObjectId target, bool editing)
@@ -6406,6 +6472,8 @@ void MainWindow::refreshScene()
             endThread();
         if (m_socketMode.active && !m_doc.find(m_socketMode.target))
             endSocket();
+        if (m_maskMode.active && !m_doc.find(m_maskMode.target))
+            endMask();
         if (m_joinMode.active && ((m_joinMode.moving != kInvalidId && !m_doc.find(m_joinMode.moving)) ||
                                   (m_joinMode.fixed != kInvalidId && !m_doc.find(m_joinMode.fixed))))
             endJoin();
@@ -6415,6 +6483,8 @@ void MainWindow::refreshScene()
             endPattern();
         QString unbuilt;  // the first shape that couldn't be built: the others still show
         for (ObjectId id : m_doc.topLevelIds()) {
+            if (m_maskMode.active && id == m_maskMode.hidden)
+                continue;  // the other piece, while its mask is being changed
             DisplayItem item;
             item.id = id;
             try {
@@ -6427,6 +6497,10 @@ void MainWindow::refreshScene()
                 continue;
             }
             item.model = toQMatrix(m_doc.worldTransform(id));
+            if (m_maskMode.active && id == m_maskMode.object && m_maskMode.shown) {
+                item.mesh = m_maskMode.shown;
+                item.model = toQMatrix(m_maskMode.toPlate);
+            }
             if (m_joinMode.active && m_joinMode.placed && id == m_joinMode.moving)
                 item.model = toQMatrix(placementTransform(*m_joinMode.placed, pivotOf(*m_doc.find(id))));
             if (m_edgesMode.active && id == history::objectOf(m_doc, m_edgesMode.target)) {
@@ -6717,6 +6791,7 @@ void MainWindow::refreshScene()
     m_separate->setEnabled(selected && selected->isBoolean() && m_doc.isTopLevel(selected->id));
     m_alignMenu->menuAction()->setEnabled(m_selection.size() >= 2 && allTopLevel);
     m_joinAction->setEnabled(m_doc.bodyCount() >= 2 && !toolOpen());
+    m_maskAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     for (QAction* a : {m_duplicate, m_copy, m_cut, m_saveCustomShape})
         a->setEnabled(anySelected && allTopLevel && !toolOpen());
     m_mirrorMenu->menuAction()->setEnabled(anySelected && allTopLevel && !toolOpen() && !rolled);
@@ -6905,6 +6980,7 @@ void MainWindow::editStep(ObjectId id)
     case BooleanOp::Shell: startShell(id, true); break;
     case BooleanOp::Thread: startThread(id, true); break;
     case BooleanOp::Socket: startSocket(id, true); break;
+    case BooleanOp::MaskSplit: startMask(id, true); break;
     case BooleanOp::Follow: startFollow(id, true); break;
     case BooleanOp::Pattern: startPattern(id, true); break;
     case BooleanOp::Emboss: startEmboss(id, true); break;
@@ -7084,6 +7160,7 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
                                                   op == BooleanOp::Follow || op == BooleanOp::Pattern ||
                                                   op == BooleanOp::Emboss || op == BooleanOp::Sculpt ||
                                                   op == BooleanOp::Thread || op == BooleanOp::Socket ||
+                                                  op == BooleanOp::MaskSplit ||
                                                   (op == BooleanOp::Split && m_doc.isTopLevel(id))));
         if (!opens) {
             // Nothing to open: show or hide what's inside, as a list does.
@@ -9137,6 +9214,263 @@ void MainWindow::endSocket()
     m_socketTimer->stop();
     m_socketMode = SocketMode{};
     m_socketPanel->hide();
+    m_properties->show();
+    QTimer::singleShot(0, this, [this] { resizeDocks({m_propsDock}, {m_propsDockWidth}, Qt::Horizontal); });
+    statusBar()->clearMessage();
+    refreshScene();
+    refreshCommandState();
+}
+
+// ---- Split by Mask -----------------------------------------------------------------
+
+namespace {
+
+std::uint64_t maskCellKey(std::int64_t i, std::int64_t j, std::int64_t k)
+{
+    const auto q = [](std::int64_t v) { return std::uint64_t(v + (1 << 20)) & 0x1FFFFF; };
+    return q(i) | q(j) << 21 | q(k) << 42;
+}
+
+}  // namespace
+
+void MainWindow::startMask(ObjectId target, bool editing)
+{
+    const Body* body = m_doc.find(target);
+    if (!body || toolOpen())
+        return;
+    if (m_dragState.kind != Drag::Kind::None)
+        cancelDrag();
+    MaskMode mode;
+    mode.active = true;
+    mode.editing = editing;
+    mode.target = target;
+    mode.object = history::objectOf(m_doc, target);
+    try {
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        struct RestoreCursor {
+            ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
+        } restore;
+        if (editing) {
+            if (!body->isBoolean() || body->boolean->op != BooleanOp::MaskSplit)
+                return;
+            mode.part = body->boolean->operands.front();
+            mode.dabs = maskDabs(m_doc, target);
+            for (const Body& b : withMask(m_doc, target, mode.dabs))
+                if (b.id != target)
+                    mode.hidden = history::objectOf(m_doc, b.id);
+            if (!mode.dabs.empty())
+                mode.strokeStarts.push_back(0);  // what was painted before, as one stroke
+        } else {
+            mode.part = target;
+        }
+        mode.toPlate = m_doc.worldTransform(mode.part);
+        const auto surface = m_doc.mesh(mode.part);
+        if (!surface || surface->empty())
+            throw std::runtime_error("The shape has no surface to paint on.");
+        // Shown finely enough for the paint to show where it goes (a box or a cylinder
+        // has few points); the cut itself is worked out on the real surface.
+        auto shown = std::make_shared<Mesh>(*surface);
+        if (shown->triangleCount() < 60'000) {
+            const Mesh welded = sculpt::welded(*surface, 1e-4);
+            *shown = sculpt::refined(welded, sculpt::edgeForTriangles(welded, 60'000), 200'000);
+        }
+        shown->shade.assign(shown->vertexCount(), 0.0f);
+        mode.shown = shown;
+        // The points filed in a grid, to find those under a dab quickly.
+        const Bounds b = shown->bounds();
+        mode.cell = std::max(0.25, double(b.radius()) / 60.0);
+        for (std::uint32_t v = 0; v < shown->vertexCount(); ++v) {
+            const float* p = &shown->positions[3 * std::size_t(v)];
+            mode.grid[maskCellKey(std::int64_t(std::floor(p[0] / mode.cell)), std::int64_t(std::floor(p[1] / mode.cell)),
+                                  std::int64_t(std::floor(p[2] / mode.cell)))]
+                .push_back(v);
+        }
+    } catch (const std::exception& e) {
+        QMessageBox::information(this, tr("Forge3D"), QString::fromUtf8(e.what()));
+        return;
+    }
+    m_maskMode = std::move(mode);
+    const QString name = QString::fromStdString(body->name);
+    m_maskPanel->start(editing ? tr("Change the mask of '%1'").arg(name) : tr("Split '%1' by mask").arg(name), editing);
+    m_propsDockWidth = m_propsDock->width();
+    m_properties->hide();
+    m_maskPanel->show();
+    statusBar()->showMessage(tr("Split by Mask: drag over the shape to paint the part to cut off (Ctrl rubs it out), "
+                                "then Apply. Esc cancels."));
+    repaintMask();
+    refreshScene();
+    refreshCommandState();
+}
+
+std::optional<emboss::SurfacePoint> MainWindow::maskHit(const QVector3D& origin, const QVector3D& direction) const
+{
+    const auto& mode = m_maskMode;
+    if (!mode.shown)
+        return std::nullopt;
+    const Transform toLocal = mode.toPlate.inverse();
+    const auto hit = emboss::surfaceAt(mode.shown->positions, mode.shown->indices,
+                                       toLocal.apply({origin.x(), origin.y(), origin.z()}),
+                                       toLocal.applyDirection({direction.x(), direction.y(), direction.z()}), 0.2);
+    if (!hit)
+        return std::nullopt;
+    return emboss::SurfacePoint{mode.toPlate.apply(hit->point), mode.toPlate.applyDirection(hit->normal)};
+}
+
+void MainWindow::maskHover(const QVector3D& origin, const QVector3D& direction)
+{
+    const auto hit = maskHit(origin, direction);
+    if (!hit) {
+        m_viewport->setBrushRing(std::nullopt);
+        return;
+    }
+    m_viewport->setBrushRing(Viewport::BrushRing{
+        QVector3D(float(hit->point[0]), float(hit->point[1]), float(hit->point[2])),
+        QVector3D(float(hit->normal[0]), float(hit->normal[1]), float(hit->normal[2])), float(m_maskPanel->brushSize())});
+}
+
+void MainWindow::maskAt(const QVector3D& origin, const QVector3D& direction)
+{
+    auto& mode = m_maskMode;
+    const auto hit = maskHit(origin, direction);
+    if (!hit)
+        return;
+    const double radius = m_maskPanel->brushSize();
+    // Dabs about a quarter of the brush apart, filled in along the way when the mouse
+    // jumps, so a stroke is even however fast it goes.
+    const double spacing = radius * 0.25;
+    if (mode.lastDab) {
+        const Vec3 last = *mode.lastDab;
+        const double d = std::hypot(hit->point[0] - last[0], hit->point[1] - last[1], hit->point[2] - last[2]);
+        if (d < spacing)
+            return;
+        if (d < radius * 8.0) {  // a jump further than that is to another place: no line to it
+            const int steps = int(std::floor(d / spacing));
+            for (int i = 1; i < steps; ++i) {
+                const double t = double(i) / steps;
+                maskDab({last[0] + (hit->point[0] - last[0]) * t, last[1] + (hit->point[1] - last[1]) * t,
+                         last[2] + (hit->point[2] - last[2]) * t},
+                        radius, mode.erasing);
+            }
+        }
+    }
+    mode.lastDab = hit->point;
+    maskDab(hit->point, radius, mode.erasing);
+}
+
+void MainWindow::maskDab(const Vec3& centre, double radius, bool erase)
+{
+    auto& mode = m_maskMode;
+    mode.dabs.push_back({centre, radius, erase});
+    const Vec3 c = mode.toPlate.inverse().apply(centre);
+    std::vector<std::uint32_t> touched;
+    const auto lo = [&](int k) { return std::int64_t(std::floor((c[std::size_t(k)] - radius) / mode.cell)); };
+    const auto hi = [&](int k) { return std::int64_t(std::floor((c[std::size_t(k)] + radius) / mode.cell)); };
+    auto& shade = mode.shown->shade;
+    const auto& pos = mode.shown->positions;
+    for (std::int64_t i = lo(0); i <= hi(0); ++i)
+        for (std::int64_t j = lo(1); j <= hi(1); ++j)
+            for (std::int64_t k = lo(2); k <= hi(2); ++k) {
+                const auto found = mode.grid.find(maskCellKey(i, j, k));
+                if (found == mode.grid.end())
+                    continue;
+                for (std::uint32_t v : found->second) {
+                    const double dx = pos[3 * std::size_t(v)] - c[0], dy = pos[3 * std::size_t(v) + 1] - c[1],
+                                 dz = pos[3 * std::size_t(v) + 2] - c[2];
+                    if (dx * dx + dy * dy + dz * dz <= radius * radius) {
+                        shade[v] = erase ? 0.0f : 1.0f;
+                        touched.push_back(v);
+                    }
+                }
+            }
+    if (touched.empty())
+        return;
+    std::sort(touched.begin(), touched.end());
+    Viewport::MeshChanges changes;
+    for (std::size_t i = 0; i < touched.size();) {
+        std::size_t j = i + 1;
+        while (j < touched.size() && touched[j] <= touched[j - 1] + 1)
+            ++j;
+        changes.points.push_back({touched[i], touched[j - 1] + 1});
+        i = j;
+    }
+    m_viewport->meshChanged(mode.object, changes);
+}
+
+void MainWindow::repaintMask()
+{
+    auto& mode = m_maskMode;
+    if (!mode.active || !mode.shown)
+        return;
+    const mask::Field field(mode.dabs);
+    auto& shade = mode.shown->shade;
+    const auto& pos = mode.shown->positions;
+    for (std::size_t v = 0; v < shade.size(); ++v)
+        shade[v] = field.masked(mode.toPlate.apply({pos[3 * v], pos[3 * v + 1], pos[3 * v + 2]})) ? 1.0f : 0.0f;
+    Viewport::MeshChanges all;
+    all.everything = true;
+    m_viewport->meshChanged(mode.object, all);
+    m_maskPanel->setStrokes(int(mode.strokeStarts.size()));
+    m_maskPanel->setApplyEnabled(!mode.dabs.empty());
+}
+
+void MainWindow::undoMaskStroke()
+{
+    auto& mode = m_maskMode;
+    if (!mode.active || mode.strokeStarts.empty())
+        return;
+    mode.dabs.resize(mode.strokeStarts.back());
+    mode.strokeStarts.pop_back();
+    repaintMask();
+}
+
+void MainWindow::applyMask()
+{
+    auto& mode = m_maskMode;
+    if (!mode.active)
+        return;
+    if (mode.dabs.empty()) {
+        m_maskPanel->setStatus(tr("Paint over the part to cut off first."), true);
+        return;
+    }
+    const ObjectId target = mode.target;
+    const std::vector<MaskDab> dabs = mode.dabs;
+    std::vector<ObjectId> made;
+    try {
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        struct RestoreCursor {
+            ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
+        } restore;
+        if (mode.editing) {
+            const std::vector<Body> after = withMask(m_doc, target, dabs);
+            std::vector<Body> before;
+            for (const Body& b : after)
+                before.push_back(*m_doc.find(b.id));
+            // Worked out first, so a mask that doesn't cut it is refused here.
+            for (const Body& b : after)
+                if (m_doc.previewResult(*b.boolean).empty)
+                    throw std::invalid_argument("The mask doesn't cut the shape in two.");
+            endMask();
+            run(std::make_unique<EditBodiesCommand>(before, after, "Change mask"));
+            setSelection(history::objectOf(m_doc, target));
+            return;
+        }
+        made = splitByMask(m_stack, m_doc, target, dabs, m_maskPanel->keep());
+    } catch (const std::exception& e) {
+        m_maskPanel->setStatus(QString::fromUtf8(e.what()), true);
+        return;
+    }
+    endMask();
+    qInfo().noquote() << "Command:" << QString::fromStdString(m_stack.undoLabel());
+    setSelection(made);
+}
+
+void MainWindow::endMask()
+{
+    if (!m_maskMode.active)
+        return;
+    m_maskMode = MaskMode{};
+    m_viewport->setBrushRing(std::nullopt);
+    m_maskPanel->hide();
     m_properties->show();
     QTimer::singleShot(0, this, [this] { resizeDocks({m_propsDock}, {m_propsDockWidth}, Qt::Horizontal); });
     statusBar()->clearMessage();

@@ -28,6 +28,7 @@
 #include <QVector3D>
 
 #include <map>
+#include <unordered_map>
 #include <functional>
 #include <memory>
 
@@ -71,6 +72,7 @@ class ShellPanel;
 class ThreadPanel;
 class SocketPanel;
 class JoinPanel;
+class MaskPanel;
 class SketchPanel;
 class SketchView;
 struct DisplayItem;
@@ -689,6 +691,38 @@ private:
     void updateThreadPreview();
     void applyThread();
     void endThread();
+
+    QAction* m_maskAction = nullptr;
+    MaskPanel* m_maskPanel = nullptr;
+    struct MaskMode {
+        bool active = false;
+        bool editing = false;
+        ObjectId target = kInvalidId;  // the shape being split, or the Split by Mask step being changed
+        ObjectId object = kInvalidId;  // the shape on the plate it's shown as
+        ObjectId part = kInvalidId;    // whose surface is painted
+        ObjectId hidden = kInvalidId;  // the other piece, out of the way while the mask changes
+        Transform toPlate;             // the part's coordinates to the plate
+        std::shared_ptr<Mesh> shown;   // the part's surface, the paint as its shade
+        std::vector<MaskDab> dabs;     // plate coordinates, in order
+        std::vector<std::size_t> strokeStarts;
+        bool stroking = false;
+        bool erasing = false;
+        std::optional<Vec3> lastDab;   // plate coordinates
+        double cell = 1.0;             // the shown points filed in a grid (part coordinates)
+        std::unordered_map<std::uint64_t, std::vector<std::uint32_t>> grid;
+    };
+    MaskMode m_maskMode;
+    void startMask(ObjectId target, bool editing);
+    std::optional<emboss::SurfacePoint> maskHit(const QVector3D& origin, const QVector3D& direction) const;
+    void maskAt(const QVector3D& origin, const QVector3D& direction);
+    void maskHover(const QVector3D& origin, const QVector3D& direction);
+    // Paints one dab onto the shown surface (and records it).
+    void maskDab(const Vec3& centre, double radius, bool erase);
+    // The shade worked out again from all the dabs.
+    void repaintMask();
+    void undoMaskStroke();
+    void applyMask();
+    void endMask();
 
     QAction* m_joinAction = nullptr;
     JoinPanel* m_joinPanel = nullptr;

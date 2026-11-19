@@ -180,6 +180,19 @@ void scaleInto(const Document& doc, ObjectId id, const Vec3& factors, const Vec3
         out.push_back(std::move(next));
         return;
     }
+    if (body->boolean->op == BooleanOp::MaskSplit && body->boolean->maskSplit) {
+        // The mask is painted on the shape: it moves and stretches with it (each dab's
+        // reach grows only when scaled evenly).
+        Body next = *body;
+        for (MaskDab& d : next.boolean->maskSplit->dabs) {
+            for (std::size_t k = 0; k < 3; ++k)
+                d.centre[k] = factors[k] * (d.centre[k] - anchor[k]) + anchor[k];
+            if (even(factors))
+                d.radius *= factors[0];
+        }
+        out.push_back(std::move(next));
+        return;
+    }
     if (body->boolean->op == BooleanOp::Shell && body->boolean->shell) {
         // The open faces' picks move with the shape; evenly scaled, the walls grow too.
         Body next = *body;

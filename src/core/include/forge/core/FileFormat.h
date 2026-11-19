@@ -57,7 +57,8 @@ namespace forge::file {
 //      are outlines)
 //  25  Smooth and Extrude Down steps
 //  26  Quick Socket steps (operation "socket": a ball or peg socket at a spot)
-inline constexpr int kFormatVersion = 26;
+//  27  Split by Mask steps (operation "maskSplit": the dabs painted, which piece)
+inline constexpr int kFormatVersion = 27;
 // The highest sculpt::Brush number a file may hold (Pattern).
 inline constexpr int kLastSculptBrush = 13;
 inline constexpr const char* kExtension = ".f3d";
