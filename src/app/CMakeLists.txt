@@ -49,6 +49,10 @@ add_executable(Forge3D WIN32
     HingePanel.h
     ScaleCalculator.h
     PosePanel.h
+    Fits.h
+    Fits.cpp
+    ToleranceDialog.h
+    ToleranceDialog.cpp
     PosePanel.cpp
     ScaleCalculator.cpp
     HingePanel.cpp

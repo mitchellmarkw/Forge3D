@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "HingePanel.h"
 
+#include "Fits.h"
+
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDoubleSpinBox>
@@ -18,8 +20,6 @@ namespace forge::app {
 
 namespace {
 
-constexpr double kResinFit = 0.1;
-constexpr double kFdmFit = 0.2;
 constexpr double kFilament = 1.75;
 
 QDoubleSpinBox* millimetres(double low, double high, double step, int decimals = 2)
@@ -228,8 +228,11 @@ HingePanel::HingePanel(QWidget* parent) : QWidget(parent)
         }
         emit changed();
     });
+    // The fit found with the tolerance test print for this printer, if any (pins; a
+    // swivel's peg is a peg).
     connect(m_printer, &QComboBox::currentIndexChanged, this, [this](int index) {
-        m_fit->setValue(index == 0 ? kResinFit : kFdmFit);  // emits changed
+        const auto kind = m_kind->currentIndex() == 2 ? tolerance::Kind::Peg : tolerance::Kind::Pin;
+        m_fit->setValue(fits::starting(index == 0, kind));  // emits changed
     });
     for (QDoubleSpinBox* box : {m_width, m_barrel, m_gap, m_lip, m_pinSize, m_turn, m_reach, m_fit})
         connect(box, &QDoubleSpinBox::valueChanged, this, &HingePanel::changed);

@@ -1249,3 +1249,17 @@ and sharp across edges.
 - `SavedPose` (name, held part, angles by step id) in `Document::poses()`, changed with
   `SetPosesCommand`; file format 30 (`"poses"`), read with `file::loadPoses`.
 
+## Tolerance test print (slice 52)
+
+- `Tolerance.h/.cpp`: `steps` (the fits, to 0.01 mm, at most 12), `label` (".15"),
+  `digits` (raised seven-segment numbers, no font needed), and `pieces`: a bar per kind
+  with `socket::cutters` at each fit (a round peg; a snap ball; a through hole for a
+  pin), labels merged on, and the pieces to try (pegs, a ball on a stalk, pins), all as
+  closed meshes standing on the plate. The app adds them as mesh shapes
+  (`hinge::pieceBody`) in one undo step, beside what's on the plate.
+- `app/Fits.h/.cpp`: the measured fits per printer and kind (preferences
+  `fit/<resin|fdm>/<peg|ball|pin>`); `fits::starting` gives the measured fit or the
+  usual 0.1 / 0.2. SocketPanel and HingePanel use it when the printer (or the socket's
+  kind) changes; recording also updates `socket/fit`, `hinge/fit` and
+  `split/clearance`. `ToleranceDialog` (Tools menu) makes the test and records.
+
