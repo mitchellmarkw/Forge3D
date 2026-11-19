@@ -18,10 +18,12 @@
 #include "forge/core/Layout.h"
 #include "forge/core/ShapeLibrary.h"
 #include "forge/core/MaskSplit.h"
+#include "forge/core/Hinge.h"
 #include "forge/core/Socket.h"
 #include "forge/core/PrintSplit.h"
 #include "Theme.h"
 #include "JoinPanel.h"
+#include "HingePanel.h"
 #include "MaskPanel.h"
 #include "ReferencePanel.h"
 #include "SocketPanel.h"
@@ -82,6 +84,7 @@
 #include <QSignalBlocker>
 #include <QSpinBox>
 #include <QFileDialog>
+#include <QRandomGenerator>
 #include <QImageReader>
 #include <QFileInfo>
 #include <QDragEnterEvent>
@@ -583,6 +586,12 @@ void MainWindow::createActions()
             endThread();
         else if (m_socketMode.active)
             endSocket();
+        else if (m_hingeMode.active && m_hingeMode.pickingOther) {
+            m_hingeMode.pickingOther = false;
+            const Body* other = m_doc.find(m_hingeMode.other);
+            m_hingePanel->setOtherPart(other ? QString::fromStdString(other->name) : QString(), false);
+        } else if (m_hingeMode.active)
+            endHinge();
         else if (m_joinMode.active)
             endJoin();
         else if (m_maskMode.active)
@@ -892,6 +901,19 @@ void MainWindow::createActions()
             return;
         }
         startThread(target, false);
+    });
+    m_hingeAction = new QAction(tr("Quick Hinge"), this);
+    m_hingeAction->setToolTip(tr("Quick Hinge: a hinge (single or double) or a swivel at the spot you click on "
+                                 "the selected shape: a fork and a tab that turns in it on a pin, sized to fit "
+                                 "once printed"));
+    m_hingeAction->setStatusTip(m_hingeAction->toolTip());
+    connect(m_hingeAction, &QAction::triggered, this, [this] {
+        const ObjectId id = selectedOne();
+        if (id == kInvalidId || m_selection.size() != 1 || !m_doc.isTopLevel(id)) {
+            statusBar()->showMessage(tr("Quick Hinge: select one shape on the plate first."), 6000);
+            return;
+        }
+        startHinge(history::tip(m_doc, id), false);
     });
     m_socketAction = new QAction(tr("Quick Socket"), this);
     m_socketAction->setToolTip(tr("Quick Socket: cut a socket for a ball joint or a peg into the selected shape, "
@@ -1258,6 +1280,7 @@ void MainWindow::createToolBar()
         {m_measureAction, "measure"},
         {m_threadAction, "thread"},
         {m_socketAction, "socket"},
+        {m_hingeAction, "hinge"},
         {m_layFlat, "lay-on-face"},
         {m_sitOnPlate, "sit-on-plate"},
         {m_export, "export"},
@@ -1412,7 +1435,7 @@ void MainWindow::createToolBar()
     common(design);
 
     Page features = page(tr("Features"), tr("Holes, threads, sockets, shells, grooves, patterns and edges"));
-    group(features, tr("Holes and Joints"), {button(m_holeAction), button(m_threadAction), button(m_socketAction)});
+    group(features, tr("Holes and Joints"), {button(m_holeAction), button(m_threadAction), button(m_socketAction), button(m_hingeAction)});
     group(features, tr("Surface"), {button(m_shellAction), button(m_followAction), button(m_edgesAction)});
     group(features, tr("Repeat"), {button(m_patternAction)});
     common(features);
@@ -1695,6 +1718,9 @@ void MainWindow::createDocks()
     m_socketPanel = new SocketPanel;
     stackLayout->addWidget(m_socketPanel);
     m_socketPanel->hide();
+    m_hingePanel = new HingePanel;
+    stackLayout->addWidget(m_hingePanel);
+    m_hingePanel->hide();
     m_joinPanel = new JoinPanel;
     stackLayout->addWidget(m_joinPanel);
     m_joinPanel->hide();
@@ -1818,6 +1844,50 @@ void MainWindow::createDocks()
     connect(m_socketPanel, &SocketPanel::applyRequested, this, &MainWindow::applySocket);
     connect(m_socketPanel, &SocketPanel::cancelRequested, this, &MainWindow::endSocket);
     connect(m_socketPanel, &SocketPanel::addMatchingRequested, this, &MainWindow::addMatchingPart);
+    m_hingeTimer = new QTimer(this);
+    m_hingeTimer->setSingleShot(true);
+    m_hingeTimer->setInterval(250);
+    connect(m_hingeTimer, &QTimer::timeout, this, &MainWindow::updateHingePreview);
+    connect(m_hingePanel, &HingePanel::changed, this, [this] { m_hingeTimer->start(); });
+    connect(m_hingePanel, &HingePanel::applyRequested, this, &MainWindow::applyHinge);
+    connect(m_hingePanel, &HingePanel::cancelRequested, this, &MainWindow::endHinge);
+    connect(m_hingePanel, &HingePanel::addPiecesRequested, this, &MainWindow::addHingePieces);
+    connect(m_hingePanel, &HingePanel::pickOtherRequested, this, [this] {
+        if (!m_hingeMode.active)
+            return;
+        m_hingeMode.pickingOther = true;
+        m_hingePanel->setOtherPart({}, true);
+        statusBar()->showMessage(tr("Quick Hinge: click the other part. Esc stops."), 6000);
+    });
+    connect(m_hingePanel, &HingePanel::centerRequested, this, [this](int how) {
+        if (!m_hingeMode.active)
+            return;
+        if (!m_hingeMode.spot) {
+            statusBar()->showMessage(tr("Click on the shape first, to say which face."), 5000);
+            return;
+        }
+        std::optional<emboss::SurfacePoint> moved;
+        try {
+            QApplication::setOverrideCursor(Qt::WaitCursor);
+            struct RestoreCursor {
+                ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
+            } restore;
+            const emboss::Center c = how == 0   ? emboss::Center::Both
+                                     : how == 1 ? emboss::Center::TopBottom
+                                                : emboss::Center::LeftRight;
+            const HingeFinish f = m_hingePanel->finish();
+            moved = centeredSpot(m_doc, m_hingeMode.target, *m_hingeMode.spot, f.turn,
+                                 std::max(0.25, std::max(f.width, f.barrel) / 2.0), c);
+        } catch (const std::exception& e) {
+            qWarning() << "Centering the hinge failed:" << e.what();
+        }
+        if (!moved) {
+            statusBar()->showMessage(tr("The middle of that face isn't on the face (it may be hollow there)."), 6000);
+            return;
+        }
+        m_hingeMode.spot = moved;
+        updateHingePreview();
+    });
     connect(m_socketPanel, &SocketPanel::centerRequested, this, [this](int how) {
         if (!m_socketMode.active)
             return;
@@ -2180,6 +2250,10 @@ void MainWindow::onViewportClicked(const QVector3D& origin, const QVector3D& dir
     }
     if (m_socketMode.active) {
         socketClick(origin, direction);
+        return;
+    }
+    if (m_hingeMode.active) {
+        hingeClick(origin, direction);
         return;
     }
     if (m_joinMode.active) {
@@ -4192,7 +4266,8 @@ bool MainWindow::toolOpen() const
     return m_splitMode.active || m_fitMode.active || m_embossMode.active || m_edgesMode.active || m_sketchMode.picking ||
            m_sketchMode.active || m_holeMode.active || m_shellMode.active || m_followMode.active ||
            m_patternMode.active || m_sculptMode.active || m_measureMode.active || m_threadMode.active ||
-           m_socketMode.active || m_joinMode.active || m_maskMode.active || m_referenceMode.active;
+           m_socketMode.active || m_joinMode.active || m_maskMode.active || m_referenceMode.active ||
+           m_hingeMode.active;
 }
 
 void MainWindow::startEmboss(ObjectId target, bool editing)
@@ -6588,6 +6663,8 @@ void MainWindow::refreshScene()
             endThread();
         if (m_socketMode.active && !m_doc.find(m_socketMode.target))
             endSocket();
+        if (m_hingeMode.active && !m_doc.find(m_hingeMode.target))
+            endHinge();
         if (m_maskMode.active && !m_doc.find(m_maskMode.target))
             endMask();
         if (m_joinMode.active && ((m_joinMode.moving != kInvalidId && !m_doc.find(m_joinMode.moving)) ||
@@ -6679,6 +6756,30 @@ void MainWindow::refreshScene()
                     cut.ghost = true;
                     cut.helper = true;
                     items.push_back(cut);
+                }
+            }
+            if (m_hingeMode.active && id == history::objectOf(m_doc, m_hingeMode.target)) {
+                if (m_hingeMode.preview) {
+                    item.mesh = m_hingeMode.preview;
+                    item.model = previewFrame(m_hingeMode.target, m_hingeMode.editing);
+                }
+                if (m_hingeMode.cut) {
+                    DisplayItem cut;
+                    cut.id = kEdgesPickedItem;
+                    cut.mesh = m_hingeMode.cut;
+                    cut.color = QVector3D(0.9f, 0.15f, 0.1f);
+                    cut.ghost = true;
+                    cut.helper = true;
+                    items.push_back(cut);
+                }
+                if (m_hingeMode.ghost) {
+                    DisplayItem ghost;
+                    ghost.id = kEdgesPickedItem;
+                    ghost.mesh = m_hingeMode.ghost;
+                    ghost.color = QVector3D(0.17f, 0.55f, 0.85f);
+                    ghost.ghost = true;
+                    ghost.helper = true;
+                    items.push_back(ghost);
                 }
             }
             if (m_threadMode.active && id == history::objectOf(m_doc, m_threadMode.target)) {
@@ -6934,6 +7035,7 @@ void MainWindow::refreshScene()
     m_shellAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_threadAction->setEnabled(m_shellAction->isEnabled());
     m_socketAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
+    m_hingeAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_followAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_patternAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_clear->setEnabled(!m_doc.empty());
@@ -7096,6 +7198,7 @@ void MainWindow::editStep(ObjectId id)
     case BooleanOp::Shell: startShell(id, true); break;
     case BooleanOp::Thread: startThread(id, true); break;
     case BooleanOp::Socket: startSocket(id, true); break;
+    case BooleanOp::Hinge: startHinge(id, true); break;
     case BooleanOp::MaskSplit: startMask(id, true); break;
     case BooleanOp::Follow: startFollow(id, true); break;
     case BooleanOp::Pattern: startPattern(id, true); break;
@@ -7276,7 +7379,7 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
                                                   op == BooleanOp::Follow || op == BooleanOp::Pattern ||
                                                   op == BooleanOp::Emboss || op == BooleanOp::Sculpt ||
                                                   op == BooleanOp::Thread || op == BooleanOp::Socket ||
-                                                  op == BooleanOp::MaskSplit ||
+                                                  op == BooleanOp::Hinge || op == BooleanOp::MaskSplit ||
                                                   (op == BooleanOp::Split && m_doc.isTopLevel(id))));
         if (!opens) {
             // Nothing to open: show or hide what's inside, as a list does.
@@ -9330,6 +9433,444 @@ void MainWindow::endSocket()
     m_socketTimer->stop();
     m_socketMode = SocketMode{};
     m_socketPanel->hide();
+    m_properties->show();
+    QTimer::singleShot(0, this, [this] { resizeDocks({m_propsDock}, {m_propsDockWidth}, Qt::Horizontal); });
+    statusBar()->clearMessage();
+    refreshScene();
+    refreshCommandState();
+}
+
+// ---- Quick Hinge -------------------------------------------------------------------
+
+namespace {
+
+// The settings used last (kept between runs), so a figure's joints come out alike.
+HingeFinish rememberedHinge()
+{
+    const Preferences p;
+    HingeFinish f;
+    f.kind = HingeKind(std::clamp(p.value(QStringLiteral("hinge/kind"), 0).toInt(), 0, 2));
+    f.width = p.value(QStringLiteral("hinge/width"), f.width).toDouble();
+    f.barrel = p.value(QStringLiteral("hinge/barrel"), f.barrel).toDouble();
+    f.pin = PinKind(std::clamp(p.value(QStringLiteral("hinge/pin"), 0).toInt(), 0, 2));
+    f.pinSize = p.value(QStringLiteral("hinge/pinSize"), f.pinSize).toDouble();
+    f.resin = p.value(QStringLiteral("hinge/printer"), QStringLiteral("resin")).toString() != QStringLiteral("fdm");
+    f.fit = p.value(QStringLiteral("hinge/fit"), f.resin ? 0.1 : 0.2).toDouble();
+    f.stiff = p.value(QStringLiteral("hinge/stiff"), true).toBool();
+    f.swing = HingeSwing(std::clamp(p.value(QStringLiteral("hinge/swing"), 0).toInt(), 0, 2));
+    f.gap = p.value(QStringLiteral("hinge/gap"), f.gap).toDouble();
+    f.lip = p.value(QStringLiteral("hinge/lip"), f.lip).toDouble();
+    try {
+        hinge::check(f);
+    } catch (const std::exception&) {
+        return HingeFinish{};
+    }
+    return f;
+}
+
+void rememberHinge(const HingeFinish& f, bool fromPart)
+{
+    Preferences p;
+    p.setValue(QStringLiteral("hinge/kind"), int(f.kind));
+    p.setValue(QStringLiteral("hinge/width"), f.width);
+    p.setValue(QStringLiteral("hinge/barrel"), f.barrel);
+    p.setValue(QStringLiteral("hinge/pin"), int(f.pin));
+    p.setValue(QStringLiteral("hinge/pinSize"), f.pinSize);
+    p.setValue(QStringLiteral("hinge/printer"), f.resin ? QStringLiteral("resin") : QStringLiteral("fdm"));
+    p.setValue(QStringLiteral("hinge/fit"), f.fit);
+    p.setValue(QStringLiteral("hinge/stiff"), f.stiff);
+    p.setValue(QStringLiteral("hinge/swing"), int(f.swing));
+    p.setValue(QStringLiteral("hinge/gap"), f.gap);
+    p.setValue(QStringLiteral("hinge/lip"), f.lip);
+    p.setValue(QStringLiteral("hinge/fromPart"), fromPart);
+}
+
+// Closed surfaces, as one mesh to show.
+std::shared_ptr<const Mesh> together(const std::vector<Mesh>& pieces)
+{
+    auto out = std::make_shared<Mesh>();
+    for (const Mesh& piece : pieces) {
+        const auto first = std::uint32_t(out->positions.size() / 3);
+        out->positions.insert(out->positions.end(), piece.positions.begin(), piece.positions.end());
+        for (std::uint32_t i : piece.indices)
+            out->indices.push_back(first + i);
+    }
+    out->normals.assign(out->positions.size(), 0.0f);
+    for (std::size_t t = 0; t + 2 < out->indices.size(); t += 3) {
+        const float* a = &out->positions[3 * out->indices[t]];
+        const float* b = &out->positions[3 * out->indices[t + 1]];
+        const float* c = &out->positions[3 * out->indices[t + 2]];
+        const float u[3] = {b[0] - a[0], b[1] - a[1], b[2] - a[2]}, v[3] = {c[0] - a[0], c[1] - a[1], c[2] - a[2]};
+        const float n[3] = {u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]};
+        for (int k = 0; k < 3; ++k)
+            for (int j = 0; j < 3; ++j)
+                out->normals[3 * out->indices[t + std::size_t(k)] + std::size_t(j)] += n[j];
+    }
+    for (std::size_t i = 0; i + 2 < out->normals.size(); i += 3) {
+        const float l = std::sqrt(out->normals[i] * out->normals[i] + out->normals[i + 1] * out->normals[i + 1] +
+                                  out->normals[i + 2] * out->normals[i + 2]);
+        if (l > 0)
+            for (int j = 0; j < 3; ++j)
+                out->normals[i + std::size_t(j)] /= l;
+    }
+    return out;
+}
+
+// A number both halves of one hinge share.
+std::uint32_t newHingeLink()
+{
+    std::uint32_t link = 0;
+    while (link == 0)
+        link = QRandomGenerator::global()->generate();
+    return link;
+}
+
+}  // namespace
+
+void MainWindow::startHinge(ObjectId target, bool editing)
+{
+    const Body* body = m_doc.find(target);
+    if (!body || toolOpen())
+        return;
+    if (m_dragState.kind != Drag::Kind::None)
+        cancelDrag();
+    HingeMode mode;
+    mode.active = true;
+    mode.editing = editing;
+    mode.target = target;
+    HingeFinish finish = rememberedHinge();
+    if (editing) {
+        if (!body->isBoolean() || body->boolean->op != BooleanOp::Hinge || !body->boolean->hinge)
+            return;
+        finish = *body->boolean->hinge;
+        try {
+            mode.spot = hingeSpot(m_doc, target);
+        } catch (const std::exception& e) {
+            QMessageBox::information(this, tr("Forge3D"), QString::fromUtf8(e.what()));
+            return;
+        }
+    }
+    m_hingeMode = std::move(mode);
+    const QString name = QString::fromStdString(body->name);
+    m_hingePanel->start(editing ? tr("Change the joint in '%1'").arg(name) : tr("Joint in '%1'").arg(name), editing);
+    m_hingePanel->setFinish(finish);
+    if (!editing)
+        m_hingePanel->setOtherFromPart(Preferences().value(QStringLiteral("hinge/fromPart"), false).toBool());
+    m_propsDockWidth = m_propsDock->width();
+    m_properties->hide();
+    m_hingePanel->show();
+    statusBar()->showMessage(editing ? tr("Quick Hinge: change the settings, or click elsewhere on the shape to "
+                                          "move it, then Apply. The other half changes with it. Esc cancels.")
+                                     : tr("Quick Hinge: click the spot on the shape where the joint goes. Esc "
+                                          "cancels."));
+    updateHingePreview();
+    refreshCommandState();
+}
+
+void MainWindow::hingeClick(const QVector3D& origin, const QVector3D& direction)
+{
+    const QVector3D d = direction.normalized();
+    const Vec3 o{origin.x(), origin.y(), origin.z()}, dir{d.x(), d.y(), d.z()};
+    if (m_hingeMode.pickingOther) {
+        Ray ray;
+        ray.origin = o;
+        ray.direction = dir;
+        const auto hit = pickShown(ray);
+        const ObjectId fork = history::objectOf(m_doc, m_hingeMode.target);
+        if (!hit) {
+            statusBar()->showMessage(tr("Quick Hinge: click on the other part."), 4000);
+            return;
+        }
+        const ObjectId part = history::objectOf(m_doc, hit->id);
+        if (part == fork) {
+            statusBar()->showMessage(tr("That's the part with the fork: click the other part."), 5000);
+            return;
+        }
+        m_hingeMode.other = part;
+        m_hingeMode.pickingOther = false;
+        m_hingePanel->setOtherPart(QString::fromStdString(m_doc.find(part)->name), false);
+        m_hingeTimer->start(0);
+        return;
+    }
+    std::optional<emboss::SurfacePoint> spot;
+    try {
+        const HingeFinish f = m_hingePanel->finish();
+        spot = surfaceUnder(m_doc, m_hingeMode.target, o, dir, std::max(0.25, std::max(f.width, f.barrel) / 2.0));
+    } catch (const std::exception& e) {
+        m_hingePanel->setStatus(QString::fromUtf8(e.what()), true);
+        return;
+    }
+    if (!spot) {
+        statusBar()->showMessage(tr("Quick Hinge: click on the shape itself."), 4000);
+        return;
+    }
+    m_hingeMode.spot = spot;
+    m_hingePanel->setPlaced(true);
+    m_hingeTimer->start(0);
+}
+
+std::optional<BooleanSpec> MainWindow::currentHingeSpec() const
+{
+    if (!m_hingeMode.active || !m_hingeMode.spot)
+        return std::nullopt;
+    HingeFinish f = m_hingePanel->finish();
+    if (m_hingeMode.editing) {
+        const Body* now = m_doc.find(m_hingeMode.target);
+        if (now && now->boolean && now->boolean->hinge) {
+            f.half = now->boolean->hinge->half;
+            f.link = now->boolean->hinge->link;
+        }
+        return withHinge(m_doc, m_hingeMode.target, *m_hingeMode.spot, f).boolean;
+    }
+    return hingeSpec(m_doc, m_hingeMode.target, *m_hingeMode.spot, f);
+}
+
+std::array<double, 2> MainWindow::hingePinSpan(const HingeFinish& f, const emboss::SurfacePoint& spot,
+                                               ObjectId forkPart) const
+{
+    // A printed pin as long as the part is wide there: from the surface on one side of
+    // the pin's line to the surface on the other.
+    std::array<double, 2> span{0.0, 0.0};
+    if (f.pin == PinKind::Printed && f.kind != HingeKind::Swivel) {
+        const Vec3 axis = hinge::pinAxis(f, spot.normal);
+        const double depth = hinge::pinDepth(f);
+        const Vec3 centre{spot.point[0] - spot.normal[0] * depth, spot.point[1] - spot.normal[1] * depth,
+                          spot.point[2] - spot.normal[2] * depth};
+        const double far = 4.0 * hinge::reachOf(f) + 50.0;
+        std::optional<double> ends[2];
+        for (int side = 0; side < 2; ++side) {
+            const double s = side == 0 ? 1.0 : -1.0;
+            const Vec3 from{centre[0] + axis[0] * far * s, centre[1] + axis[1] * far * s, centre[2] + axis[2] * far * s};
+            const Vec3 toward{-axis[0] * s, -axis[1] * s, -axis[2] * s};
+            try {
+                if (const auto hit = surfaceUnder(m_doc, forkPart, from, toward, 0.0)) {
+                    const Vec3 v{hit->point[0] - centre[0], hit->point[1] - centre[1], hit->point[2] - centre[2]};
+                    ends[side] = std::abs(v[0] * axis[0] + v[1] * axis[1] + v[2] * axis[2]);
+                }
+            } catch (const std::exception&) {
+            }
+        }
+        // ends[0] is on the + side of the pin's line; the span runs - then +.
+        if (ends[0] && ends[1])
+            span = {std::min(*ends[1], hinge::reachOf(f)), std::min(*ends[0], hinge::reachOf(f))};
+    }
+    return span;
+}
+
+std::vector<Body> MainWindow::hingePieceBodies(const HingeFinish& f, const emboss::SurfacePoint& spot, bool withTab,
+                                               ObjectId forkPart) const
+{
+    const auto span = hingePinSpan(f, spot, forkPart);
+    std::vector<Body> out;
+    for (const hinge::Piece& piece : hinge::pieces(f, spot.point, spot.normal, withTab, span))
+        out.push_back(hinge::pieceBody(piece.mesh, piece.name));
+    return out;
+}
+
+void MainWindow::updateHingePreview()
+{
+    if (!m_hingeMode.active)
+        return;
+    m_hingeTimer->stop();
+    m_hingeMode.preview.reset();
+    m_hingeMode.cut.reset();
+    m_hingeMode.ghost.reset();
+    bool ok = false;
+    try {
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        struct RestoreCursor {
+            ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
+        } restore;
+        const HingeFinish f = m_hingePanel->finish();
+        hinge::check(f);
+        if (const auto spec = currentHingeSpec()) {
+            const ObjectId part = spec->operands.front();
+            const auto shown = m_doc.mesh(part);
+            const HingeFinish& g = *spec->hinge;
+            if (shown && shown->triangleCount() > kSocketPreviewTriangles) {
+                if (g.half == HingeHalf::Fork)
+                    m_hingeMode.cut = together(hinge::forkCutters(g, m_hingeMode.spot->point, m_hingeMode.spot->normal));
+                m_hingePanel->setStatus(tr("Red is what will be cut away (the shape is too big to show the finished "
+                                           "joint quickly); blue is the other half. Apply makes it."),
+                                        false);
+            } else {
+                m_hingeMode.preview = m_doc.previewMesh(*spec);
+                m_hingePanel->setStatus(tr("This is how it will look; blue is the other half."), false);
+            }
+            // The other half, as a ghost: the tab (or link, or peg) and the pins.
+            if (g.half == HingeHalf::Fork) {
+                std::vector<Mesh> ghosts;
+                const auto span = hingePinSpan(g, *m_hingeMode.spot, part);
+                for (const hinge::Piece& p :
+                     hinge::pieces(g, m_hingeMode.spot->point, m_hingeMode.spot->normal, true, span))
+                    ghosts.push_back(p.mesh);
+                if (!ghosts.empty())
+                    m_hingeMode.ghost = together(ghosts);
+            }
+            ok = !m_hingePanel->otherFromPart() || m_hingeMode.editing || m_hingeMode.other != kInvalidId;
+            if (!ok)
+                m_hingePanel->setStatus(tr("Pick the other part, or choose a new shape for the other half."), false);
+        } else {
+            m_hingePanel->setStatus({}, false);
+        }
+    } catch (const std::exception& e) {
+        m_hingePanel->setStatus(QString::fromUtf8(e.what()), true);
+    }
+    m_hingePanel->setApplyEnabled(ok);
+    refreshScene();
+}
+
+void MainWindow::applyHinge()
+{
+    if (!m_hingeMode.active)
+        return;
+    std::optional<BooleanSpec> spec;
+    try {
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        struct RestoreCursor {
+            ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
+        } restore;
+        spec = currentHingeSpec();
+        if (!spec)
+            return;
+        m_doc.previewMesh(*spec);
+    } catch (const std::exception& e) {
+        QMessageBox::warning(this, tr("Forge3D"), tr("The joint could not be made:\n%1").arg(QString::fromUtf8(e.what())));
+        return;
+    }
+    const bool fromPart = m_hingePanel->otherFromPart();
+    const emboss::SurfacePoint spot = *m_hingeMode.spot;
+    const ObjectId target = m_hingeMode.target;
+    HingeFinish f = *spec->hinge;
+
+    if (m_hingeMode.editing) {
+        rememberHinge(f, fromPart);
+        const Body* now = m_doc.find(target);
+        if (!now)
+            return endHinge();
+        const ObjectId partner = hingePartner(m_doc, target);
+        endHinge();
+        try {
+            m_stack.beginMacro("Change joint");
+            Body after = *now;
+            after.boolean = *spec;
+            m_stack.execute(std::make_unique<EditBodyCommand>(*now, after, "Change joint"));
+            if (partner != kInvalidId) {
+                // The other half follows: the same joint, from the new spot.
+                const Body* other = m_doc.find(partner);
+                const hinge::Half h = hinge::otherHalf(f, spot.point, spot.normal);
+                HingeFinish g = h.finish;
+                g.half = other->boolean->hinge->half;
+                const Body moved = withHinge(m_doc, partner, {h.point, h.normal}, g);
+                m_doc.previewMesh(*moved.boolean);
+                m_stack.execute(std::make_unique<EditBodyCommand>(*other, moved, "Change joint"));
+            }
+            m_stack.endMacro();
+        } catch (const std::exception& e) {
+            m_stack.abortMacro();
+            QMessageBox::warning(this, tr("Forge3D"),
+                                 tr("The joint could not be changed:\n%1").arg(QString::fromUtf8(e.what())));
+            return;
+        }
+        refreshScene();
+        refreshCommandState();
+        setSelection(history::objectOf(m_doc, target));
+        return;
+    }
+
+    const ObjectId other = fromPart ? m_hingeMode.other : kInvalidId;
+    if (other != kInvalidId)
+        f.link = newHingeLink();
+    spec->hinge = f;
+    rememberHinge(f, fromPart);
+    // The shapes to print with it (worked out before anything changes, on the part as it is).
+    std::vector<Body> pieces;
+    try {
+        pieces = hingePieceBodies(f, spot, other == kInvalidId, target);
+    } catch (const std::exception& e) {
+        QMessageBox::warning(this, tr("Forge3D"), tr("The joint could not be made:\n%1").arg(QString::fromUtf8(e.what())));
+        return;
+    }
+    endHinge();
+    try {
+        m_stack.beginMacro(f.kind == HingeKind::Swivel ? "Quick Swivel" : "Quick Hinge");
+        Body result;
+        result.id = m_doc.allocateId();
+        result.name = m_doc.uniqueName("Hinged");
+        result.boolean = *spec;
+        if (!m_doc.isTopLevel(target))
+            m_stack.execute(std::make_unique<InsertStepCommand>(std::move(result), m_doc.parentOf(target)));
+        else
+            m_stack.execute(std::make_unique<CombineCommand>(std::move(result)));
+        if (other != kInvalidId && m_doc.find(other)) {
+            const hinge::Half h = hinge::otherHalf(f, spot.point, spot.normal);
+            Body half;
+            half.id = m_doc.allocateId();
+            half.name = m_doc.uniqueName("Hinged");
+            half.boolean = hingeSpec(m_doc, history::tip(m_doc, other), {h.point, h.normal}, h.finish);
+            m_doc.previewMesh(*half.boolean);
+            m_stack.execute(std::make_unique<CombineCommand>(std::move(half)));
+        }
+        for (Body& piece : pieces) {
+            piece.id = m_doc.allocateId();
+            std::string name = piece.name;
+            for (int n = 2; std::any_of(m_doc.bodies().begin(), m_doc.bodies().end(),
+                                        [&](const Body& b) { return b.name == name; });
+                 ++n)
+                name = piece.name + " " + std::to_string(n);
+            piece.name = name;
+            m_stack.execute(std::make_unique<AddBodyCommand>(std::move(piece)));
+        }
+        m_stack.endMacro();
+    } catch (const std::exception& e) {
+        m_stack.abortMacro();
+        QMessageBox::warning(this, tr("Forge3D"), tr("The joint could not be made:\n%1").arg(QString::fromUtf8(e.what())));
+        refreshScene();
+        return;
+    }
+    qInfo().noquote() << "Command:" << QString::fromStdString(m_stack.undoLabel());
+    refreshScene();
+    refreshCommandState();
+    setSelection(history::objectOf(m_doc, target));
+    if (!pieces.empty())
+        statusBar()->showMessage(tr("Made. The tab, link, peg or pins are new shapes in place: Merge a tab onto its "
+                                    "part, or lay them out to print."),
+                                 8000);
+}
+
+void MainWindow::addHingePieces()
+{
+    if (!m_hingeMode.active || !m_hingeMode.spot)
+        return;
+    const HingeFinish f = m_hingePanel->finish();
+    std::vector<Body> pieces;
+    try {
+        const ObjectId part = m_hingeMode.editing ? m_doc.find(m_hingeMode.target)->boolean->operands.front()
+                                                  : m_hingeMode.target;
+        pieces = hingePieceBodies(f, *m_hingeMode.spot, true, part);
+        m_stack.beginMacro("Add joint pieces");
+        for (Body& piece : pieces) {
+            piece.id = m_doc.allocateId();
+            m_stack.execute(std::make_unique<AddBodyCommand>(std::move(piece)));
+        }
+        m_stack.endMacro();
+    } catch (const std::exception& e) {
+        m_stack.abortMacro();
+        m_hingePanel->setStatus(QString::fromUtf8(e.what()), true);
+        return;
+    }
+    refreshScene();
+    refreshCommandState();
+    m_hingePanel->setStatus(tr("Added %n shape(s) in place.", nullptr, int(pieces.size())), false);
+}
+
+void MainWindow::endHinge()
+{
+    if (!m_hingeMode.active)
+        return;
+    m_hingeTimer->stop();
+    m_hingeMode = HingeMode{};
+    m_hingePanel->hide();
     m_properties->show();
     QTimer::singleShot(0, this, [this] { resizeDocks({m_propsDock}, {m_propsDockWidth}, Qt::Horizontal); });
     statusBar()->clearMessage();

@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.59.0 Beta — Slice 50: Quick Hinge (2026-11-19)
+
+- **Quick Hinge** (Features → Holes and Joints): a joint at the spot you click on the
+  selected shape, sized to fit once printed.
+  - **Single hinge**: a fork (a slot with a pin hole across it) cut into this part, and
+    a tab with a rounded end that turns in it on a pin.
+  - **Double hinge**: a fork in each part and a link between them with a pin at each
+    end, so it bends further (knees, elbows).
+  - **Swivel**: a bore with a groove at the bottom, and a peg with a lip that snaps into
+    the groove (a slit across its end lets the lip squeeze through), for waists and
+    wrists.
+  - **The other half**, chosen each time: a **new shape in place** (the tab or peg, to
+    Merge onto the other part or keep apart), or **made from another part** (pick it:
+    its end is trimmed into the tab, or the peg goes on it, standing just clear of the
+    fork's face). For a double hinge the link is always a shape of its own; the other
+    part can get its fork too, lined up with the link.
+  - **Pin**: printed (the default; a pin shape is added, cut to the part's width there),
+    1.75 mm filament, or a wire or rod of a typed size. The holes are made bigger by the
+    fit: snug in the fork's arms; in the tab, snug when **Stiff** (holds a pose) or with
+    room to turn freely.
+  - **Bends** both ways or one way only (the slot is cut deep on that side), **Turn**
+    (which way the pin lies; +90° turns it a quarter), **Reach** (how far the slot and
+    pin hole go out), **Center on the face**, and the printer and fit, remembered for
+    next time.
+  - One undo step for the lot. Double-click either half to change it: the other half
+    changes with it. Big shapes show the cut in red while you set it up.
+- Files with Quick Hinge need Forge3D 0.59 or later to open (format 29).
+- 280 unit tests (6 new: the settings checked; the tab and pin clear of the fork and
+  bending 90° both ways, or stopped one way; another part made into the tab, saved and
+  opened again as a pair; a double hinge's link clear of both forks; a swivel's peg
+  seated clear and caught by its lip; scaling keeps a filament pin's size).
+
 ## 0.58.0 Beta — Slice 49: Reference Images (2026-11-18)
 
 - **Reference Images** (View → Pictures, or the View menu): a photo, drawing or model

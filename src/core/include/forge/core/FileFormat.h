@@ -61,7 +61,9 @@ namespace forge::file {
 //  27  Split by Mask steps (operation "maskSplit": the dabs painted, which piece)
 //  28  reference images ("references": one per direction, its size, place, opacity,
 //      shown and active; the picture file kept as it was in "references/<view>.<kind>")
-inline constexpr int kFormatVersion = 28;
+//  29  Quick Hinge steps (operation "hinge": kind, which half, sizes, pin, fit, swing,
+//      turn, and the number both halves of one hinge share)
+inline constexpr int kFormatVersion = 29;
 // The highest sculpt::Brush number a file may hold (Pattern).
 inline constexpr int kLastSculptBrush = 13;
 inline constexpr const char* kExtension = ".f3d";

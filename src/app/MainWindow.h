@@ -71,6 +71,7 @@ class PatternPanel;
 class ShellPanel;
 class ThreadPanel;
 class SocketPanel;
+class HingePanel;
 class JoinPanel;
 class MaskPanel;
 class ReferencePanel;
@@ -788,6 +789,36 @@ private:
     void applySocket();
     void endSocket();
     void addMatchingPart();
+
+    // Quick Hinge
+    QAction* m_hingeAction = nullptr;
+    HingePanel* m_hingePanel = nullptr;
+    QTimer* m_hingeTimer = nullptr;
+    struct HingeMode {
+        bool active = false;
+        bool editing = false;
+        ObjectId target = kInvalidId;  // the part getting the fork, or the Hinge step being changed
+        std::optional<emboss::SurfacePoint> spot;  // on the fork's face (plate coordinates)
+        ObjectId other = kInvalidId;  // the part the other half is made from (top level), if any
+        bool pickingOther = false;
+        std::shared_ptr<const Mesh> preview;  // the result as it would be (result coordinates)
+        std::shared_ptr<const Mesh> cut;      // a big shape: just what's cut away (plate coordinates)
+        std::shared_ptr<const Mesh> ghost;    // the tab, link, peg and pins (plate coordinates)
+    };
+    HingeMode m_hingeMode;
+    void startHinge(ObjectId target, bool editing);
+    void hingeClick(const QVector3D& origin, const QVector3D& direction);
+    std::optional<BooleanSpec> currentHingeSpec() const;
+    void updateHingePreview();
+    void applyHinge();
+    void endHinge();
+    void addHingePieces();
+    // The shapes to print with a joint (tab, link, peg, pins), in place. The pins are as
+    // long as the part is wide there.
+    // How far a printed pin reaches each way from the spot, to the part's surface ({0, 0}: unknown).
+    std::array<double, 2> hingePinSpan(const HingeFinish& f, const emboss::SurfacePoint& spot, ObjectId forkPart) const;
+    std::vector<Body> hingePieceBodies(const HingeFinish& f, const emboss::SurfacePoint& spot, bool withTab,
+                                       ObjectId forkPart) const;
 
     QAction* m_followAction = nullptr;
     FollowPanel* m_followPanel = nullptr;

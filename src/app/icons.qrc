@@ -66,6 +66,7 @@
     <file alias="measure.svg">icons/measure.svg</file>
     <file alias="thread.svg">icons/thread.svg</file>
     <file alias="socket.svg">icons/socket.svg</file>
+    <file alias="hinge.svg">icons/hinge.svg</file>
     <file alias="join.svg">icons/join.svg</file>
     <file alias="split-mask.svg">icons/split-mask.svg</file>
   </qresource>
