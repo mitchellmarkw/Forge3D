@@ -339,6 +339,10 @@ json bodyToJson(const Body& b)
                                {"reliefCuts", so->reliefCuts},
                                {"reliefWidth", so->reliefWidth},
                                {"reliefDepth", so->reliefDepth}};
+            if (so->ridges > 0) {
+                j["socket"]["ridges"] = so->ridges;
+                j["socket"]["ridgeHeight"] = so->ridgeHeight;
+            }
         }
         if (const auto& h = b.boolean->hinge) {
             static const char* kinds[] = {"single", "double", "swivel"};
@@ -359,6 +363,10 @@ json bodyToJson(const Body& b)
                               {"gap", h->gap},
                               {"lip", h->lip},
                               {"link", h->link}};
+            if (h->clicks > 0) {
+                j["hinge"]["clicks"] = h->clicks;
+                j["hinge"]["clickDepth"] = h->clickDepth;
+            }
         }
         if (const auto& sf = b.boolean->simplify)
             j["simplify"] = json{{"keep", sf->keep}};
@@ -746,6 +754,8 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
             so.reliefCuts = sj->value("reliefCuts", 0);
             so.reliefWidth = sj->value("reliefWidth", so.reliefWidth);
             so.reliefDepth = sj->value("reliefDepth", 0.0);
+            so.ridges = sj->value("ridges", 0);
+            so.ridgeHeight = sj->value("ridgeHeight", so.ridgeHeight);
             spec.socket = so;
         }
         if (spec.op == BooleanOp::Hinge) {
@@ -771,6 +781,8 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
             h.gap = hj->value("gap", h.gap);
             h.lip = hj->value("lip", h.lip);
             h.link = hj->value("link", std::uint32_t(0));
+            h.clicks = hj->value("clicks", 0);
+            h.clickDepth = hj->value("clickDepth", h.clickDepth);
             spec.hinge = h;
         }
         if (spec.op == BooleanOp::Smooth) {

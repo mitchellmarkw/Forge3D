@@ -8,6 +8,7 @@
 class QCheckBox;
 class QComboBox;
 class QDoubleSpinBox;
+class QSpinBox;
 class QLabel;
 class QPushButton;
 
@@ -70,6 +71,8 @@ private:
     QComboBox* m_pin = nullptr;
     QDoubleSpinBox* m_pinSize = nullptr;
     QCheckBox* m_stiff = nullptr;
+    QSpinBox* m_clicks = nullptr;
+    QDoubleSpinBox* m_clickDepth = nullptr;
     QWidget* m_swingBox = nullptr;
     QComboBox* m_swing = nullptr;
     QDoubleSpinBox* m_turn = nullptr;

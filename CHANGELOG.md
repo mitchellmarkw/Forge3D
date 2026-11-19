@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.62.0 Beta — Slice 53: Clicks and ridges (2026-11-19)
+
+- **Clicks** (a ratchet) in Quick Hinge: **Clicks a turn** and **Click depth**.
+  - Hinges: V-shaped ridges on both faces of the tab (or a double hinge's link), round
+    the pin, and matching grooves in the fork's arms. Straight, and at every click, the
+    ridges sit in the grooves with the fit all round; in between they press on the arms
+    by the click depth less the fit, so the joint clicks round and holds a pose.
+  - Swivels: ridges along the peg and grooves along the bore (the slit across the peg
+    lets it squeeze round).
+  - The click depth must be more than the fit; a tab or peg too small for that many
+    clicks says so. Remembered for next time.
+- **Ridges** in Quick Socket's ball sockets: **Ridges** and **Ridge height**. Ridges are
+  left standing inside the cup, between any relief cuts, pressing on the ball by their
+  height less the fit, for a stiffer hold.
+- **Pose Test** rests a joint with clicks on its clicks (dragging or typing snaps to the
+  nearest), and Find Range counts in clicks.
+- The history says "8 clicks" or "6 ridges". Files with clicks or ridges need Forge3D
+  0.62 or later to open (format 31).
+- 294 unit tests (6 new: a hinge's ridges clear at every click and pressing between;
+  a swivel's likewise; the settings checked; a ball socket's ridges pressing on the
+  ball; clicks and ridges kept in the file; Pose Test's clicks).
+
 ## 0.61.0 Beta — Slice 52: Tolerance Test Print (2026-11-19)
 
 - **Tools → Tolerance Test Print...**: find the fit that suits your printer, once.

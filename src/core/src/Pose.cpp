@@ -127,6 +127,7 @@ std::vector<Joint> findJoints(const Document& doc)
                     j.name = (f.kind == HingeKind::Double ? "Double hinge in " : "Hinge in ") + holderName;
                 }
                 j.across = squareTo(j.axis);
+                j.clicks = f.clicks;
                 const ObjectId partner = hingePartner(doc, b.id);
                 if (partner != kInvalidId) {
                     const Body* p = doc.find(partner);
@@ -240,6 +241,14 @@ Rig build(const std::vector<Joint>& joints, const std::map<ObjectId, double>& si
         }
     }
     return rig;
+}
+
+double nearestClick(const Joint& joint, double degrees)
+{
+    if (joint.clicks <= 0 || (joint.kind != JointKind::Hinge && joint.kind != JointKind::Swivel))
+        return degrees;
+    const double step = 360.0 / joint.clicks;
+    return std::round(degrees / step) * step;
 }
 
 Transform rotationAbout(const Vec3& point, const Vec3& axisIn, double degrees)
@@ -407,7 +416,9 @@ std::array<double, 2> range(const std::vector<Joint>& joints, const Rig& rig,
     for (int side = 0; side < 2; ++side) {
         const double s = side == 0 ? -1.0 : 1.0;
         double ok = 0.0;
-        double step = 5.0;
+        // A joint with clicks only rests on a click: try those.
+        const bool clicky = j.clicks > 0;
+        double step = clicky ? 360.0 / j.clicks : 5.0;
         double a = step;
         bool hit = false;
         while (a <= 180.0 + 1e-9) {
@@ -418,7 +429,7 @@ std::array<double, 2> range(const std::vector<Joint>& joints, const Rig& rig,
             ok = a;
             a += step;
         }
-        if (hit) {
+        if (hit && !clicky) {
             // Closer: a degree at a time from the last clear angle.
             for (double b = ok + 1.0; b < a - 1e-9; b += 1.0) {
                 if (!clear(s * b))

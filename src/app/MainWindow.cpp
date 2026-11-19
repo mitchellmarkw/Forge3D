@@ -1773,7 +1773,13 @@ void MainWindow::createDocks()
         auto& mode = m_poseMode;
         if (!mode.active || mode.joint < 0)
             return;
-        mode.angles[mode.joints[std::size_t(mode.joint)].step] = m_posePanel->angles();
+        const pose::Joint& j = mode.joints[std::size_t(mode.joint)];
+        auto a = m_posePanel->angles();
+        if (j.clicks > 0 && !dragging) {
+            a[0] = pose::nearestClick(j, a[0]);
+            m_posePanel->showJoint(mode.joint, j.kind, a);
+        }
+        mode.angles[j.step] = a;
         mode.savedPose = -1;
         posed();
         if (dragging)
@@ -9355,6 +9361,8 @@ SocketFinish rememberedSocket()
     f.grip = p.value(QStringLiteral("socket/grip"), f.grip).toDouble();
     f.shape = PegShape(std::clamp(p.value(QStringLiteral("socket/shape"), 0).toInt(), 0, 3));
     f.reliefCuts = p.value(QStringLiteral("socket/reliefCuts"), 0).toInt();
+    f.ridges = std::clamp(p.value(QStringLiteral("socket/ridges"), 0).toInt(), 0, 24);
+    f.ridgeHeight = p.value(QStringLiteral("socket/ridgeHeight"), f.ridgeHeight).toDouble();
     f.reliefWidth = p.value(QStringLiteral("socket/reliefWidth"), f.reliefWidth).toDouble();
     try {
         socket::check(f);
@@ -9376,6 +9384,8 @@ void rememberSocket(const SocketFinish& f)
     p.setValue(QStringLiteral("socket/grip"), f.grip);
     p.setValue(QStringLiteral("socket/shape"), int(f.shape));
     p.setValue(QStringLiteral("socket/reliefCuts"), f.reliefCuts);
+    p.setValue(QStringLiteral("socket/ridges"), f.ridges);
+    p.setValue(QStringLiteral("socket/ridgeHeight"), f.ridgeHeight);
     p.setValue(QStringLiteral("socket/reliefWidth"), f.reliefWidth);
 }
 
@@ -10023,7 +10033,8 @@ void MainWindow::poseDrag(const QVector3D& origin, const QVector3D& direction)
             a -= 360.0;
         while (a < -180.0)
             a += 360.0;
-        angles[0] = std::round(a * 2.0) / 2.0;  // half degrees: easy to read
+        angles[0] = j.clicks > 0 ? pose::nearestClick(j, a)  // it only rests on a click
+                                 : std::round(a * 2.0) / 2.0;  // half degrees: easy to read
     }
     mode.angles[j.step] = angles;
     m_posePanel->showJoint(mode.joint, j.kind, angles);
@@ -10059,6 +10070,8 @@ HingeFinish rememberedHinge()
     f.swing = HingeSwing(std::clamp(p.value(QStringLiteral("hinge/swing"), 0).toInt(), 0, 2));
     f.gap = p.value(QStringLiteral("hinge/gap"), f.gap).toDouble();
     f.lip = p.value(QStringLiteral("hinge/lip"), f.lip).toDouble();
+    f.clicks = std::clamp(p.value(QStringLiteral("hinge/clicks"), 0).toInt(), 0, 36);
+    f.clickDepth = p.value(QStringLiteral("hinge/clickDepth"), f.clickDepth).toDouble();
     try {
         hinge::check(f);
     } catch (const std::exception&) {
@@ -10081,6 +10094,8 @@ void rememberHinge(const HingeFinish& f, bool fromPart)
     p.setValue(QStringLiteral("hinge/swing"), int(f.swing));
     p.setValue(QStringLiteral("hinge/gap"), f.gap);
     p.setValue(QStringLiteral("hinge/lip"), f.lip);
+    p.setValue(QStringLiteral("hinge/clicks"), f.clicks);
+    p.setValue(QStringLiteral("hinge/clickDepth"), f.clickDepth);
     p.setValue(QStringLiteral("hinge/fromPart"), fromPart);
 }
 

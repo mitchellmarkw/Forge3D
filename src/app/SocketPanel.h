@@ -7,6 +7,7 @@
 
 class QComboBox;
 class QDoubleSpinBox;
+class QSpinBox;
 class QLabel;
 class QPushButton;
 
@@ -50,6 +51,8 @@ private:
     QComboBox* m_hold = nullptr;
     QLabel* m_gripLabel = nullptr;
     QDoubleSpinBox* m_grip = nullptr;
+    QSpinBox* m_ridges = nullptr;
+    QDoubleSpinBox* m_ridgeHeight = nullptr;
     QComboBox* m_shape = nullptr;
     QLabel* m_pegSizeLabel = nullptr;
     QDoubleSpinBox* m_pegSize = nullptr;

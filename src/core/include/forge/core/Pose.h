@@ -46,7 +46,10 @@ struct Joint {
     ObjectId holder = kInvalidId;  // the part with the fork or socket (on the plate)
     ObjectId other = kInvalidId;   // the part that turns in it, if one was found
     std::string name;              // "Hinge in Thigh", "Ball socket in Torso"
+    int clicks = 0;                // clicks a turn (a ratchet): it only rests on a click
 };
+// Where a joint with clicks rests nearest `degrees` (unchanged without clicks).
+double nearestClick(const Joint& joint, double degrees);
 
 // Every joint in the document: the fork halves of Quick Hinges (each fork of a double
 // hinge is a joint of its own, the link between them a part) and Quick Sockets. The
@@ -97,7 +100,7 @@ struct Hit {
 std::vector<Hit> collisions(const std::vector<PosedPart>& parts, double smallest = 0.005);
 
 // How far a hinge or swivel turns each way from straight before parts hit (degrees,
-// to 1 degree; up to 180). Other joints keep their angles. Parts not moved by the joint
+// to 1 degree, or to the last click it rests on; up to 180). Other joints keep their angles. Parts not moved by the joint
 // aren't moved. `parts` as built (their `moved` is ignored).
 std::array<double, 2> range(const std::vector<Joint>& joints, const Rig& rig,
                             std::map<ObjectId, std::array<double, 3>> angles, std::size_t joint,

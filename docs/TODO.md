@@ -4,17 +4,7 @@ Ideas waiting for a place on the [roadmap](../ROADMAP.md), in the order to build
 (agreed 2026-11-19: joints and fit first, then print checks, scale, detailing, workflow).
 Each has what's wanted, then notes on how it could fit Forge3D.
 
-## 1. Ratchet and click joints
-
-Joints that hold a pose.
-
-1. Teeth on a hinge's faces or round a swivel, with how many teeth (clicks per turn)
-   and how deep.
-2. A ball-and-cup option with ridges for a stiffer hold.
-
-Notes: an option on Quick Hinge (from 0.59) and Quick Socket rather than a new tool.
-
-## 2. Magnet pockets
+## 1. Magnet pockets
 
 Swappable heads, hands and accessories.
 
@@ -24,7 +14,7 @@ Swappable heads, hands and accessories.
 
 Notes: another Quick Socket kind with a plain cylinder cutter.
 
-## 3. Thin-wall and overhang check
+## 2. Thin-wall and overhang check
 
 Find print problems before printing.
 
@@ -36,7 +26,7 @@ Find print problems before printing.
 Notes: a view mode like See-Through, using the mesh's shade (as the mask does).
 Thickness: a ray inward from each point, against the same mesh.
 
-## 4. Simplify a mesh
+## 3. Simplify a mesh
 
 Bring a heavy sculpt down to a target size (number of triangles, or a percentage)
 while keeping its shape, for lighter exports and a quicker app.
@@ -44,7 +34,7 @@ while keeping its shape, for lighter exports and a quicker app.
 Notes: a mesh step (edge collapse with an error measure that keeps sharp edges and the
 silhouette), undoable and changeable like Smooth.
 
-## 5. Rescale, keeping joint sizes
+## 4. Rescale, keeping joint sizes
 
 Move a design to another scale (1:12 to 1:18, say) where the shapes scale but the
 hardware doesn't.
@@ -56,7 +46,7 @@ hardware doesn't.
 Notes: the joint steps keep their placement but not their size when scaled
 (`Scale.cpp` today scales them all).
 
-## 6. Proportion guide (mannequin)
+## 5. Proportion guide (mannequin)
 
 A simple posable stick figure to build to, like a 3D reference image.
 
@@ -66,7 +56,7 @@ A simple posable stick figure to build to, like a 3D reference image.
 
 Notes: kept beside the reference images (not a body), drawn as simple shapes.
 
-## 7. Hollow with drain holes
+## 6. Hollow with drain holes
 
 For resin printing: Shell plus drain and vent holes.
 
@@ -77,7 +67,7 @@ For resin printing: Shell plus drain and vent holes.
 Notes: an option on Shell (holes through both walls), and plugs from Quick Socket's
 peg cutters.
 
-## 8. Surface stamps
+## 7. Surface stamps
 
 Small details stamped onto a surface: rivets, bolts, panel vents, scales, stitching,
 fabric seams.
@@ -88,7 +78,7 @@ fabric seams.
 Notes: each stamp a small mesh merged onto the surface (raised) or cut in (sunk),
 placed on the surface like Emboss.
 
-## 9. Panel-line cutter
+## 8. Panel-line cutter
 
 Draw a line on the surface and cut a groove of a set width and depth (for armour
 plates, vehicle panels, scale models).
@@ -96,7 +86,7 @@ plates, vehicle panels, scale models).
 Notes: a path on the surface (as Follow draws one) swept with a small V or square
 profile and cut away.
 
-## 10. Split for painting
+## 9. Split for painting
 
 Cut along a colour boundary into pieces easier to paint, then glued back.
 
@@ -105,7 +95,7 @@ Cut along a colour boundary into pieces easier to paint, then glued back.
 
 Notes: Split by Mask plus the split pegs from Split for Printing.
 
-## 11. Kit layout (sprue tree)
+## 10. Kit layout (sprue tree)
 
 Lay out small parts (hands, accessories) on a frame like a model kit, joined by thin
 gates, numbered.
@@ -113,7 +103,7 @@ gates, numbered.
 Notes: an extension of Lay Out: a frame round the parts, gates to the nearest part
 edges, embossed numbers.
 
-## 12. Parts list
+## 11. Parts list
 
 For every part: name, size, volume, and the estimated print weight and filament or
 resin cost; printed or saved as a table (for planning, quoting, or a kit's

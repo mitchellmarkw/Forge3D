@@ -501,6 +501,10 @@ struct SocketFinish {
     int reliefCuts = 0;
     double reliefWidth = 0.4;
     double reliefDepth = 0.0;  // how far down from the opening; 0: to the ball's middle (pegs: half way)
+    // Ball: ridges left inside the cup, from the opening down, that press on the ball for
+    // a stiffer hold. 0: none.
+    int ridges = 0;
+    double ridgeHeight = 0.2;  // how far they stand in (more than the fit, to grip)
     bool operator==(const SocketFinish&) const = default;
 };
 
@@ -533,6 +537,10 @@ struct HingeFinish {
     double reach = 0.0;    // how far the slot and the pin hole go out each side; 0: auto
     double gap = 1.0;      // Double: room between the two parts' faces
     double lip = 0.4;      // Swivel: how far the lip stands out
+    // Clicks (a ratchet): ridges on the tab's faces (Swivel: along the peg) that snap into
+    // grooves in the fork's arms (the bore), so the joint holds a pose. 0: none.
+    int clicks = 0;          // per turn
+    double clickDepth = 0.4;  // how far the ridges stand out (more than the fit, to click)
     std::uint32_t link = 0;  // both halves of one hinge share this number (0: none)
     bool operator==(const HingeFinish&) const = default;
 };
