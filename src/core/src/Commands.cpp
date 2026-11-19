@@ -365,6 +365,25 @@ bool SetReferencesCommand::mergeWith(const Command& next)
     return true;
 }
 
+SetPosesCommand::SetPosesCommand(std::vector<SavedPose> poses, std::string label)
+    : m_after(std::move(poses)), m_label(std::move(label))
+{
+}
+
+void SetPosesCommand::redo(Document& doc)
+{
+    std::vector<SavedPose> before = doc.poses();
+    doc.setPoses(m_after);
+    if (!m_before)
+        m_before = std::move(before);
+}
+
+void SetPosesCommand::undo(Document& doc)
+{
+    if (m_before)
+        doc.setPoses(*m_before);
+}
+
 MacroCommand::MacroCommand(std::string label) : m_label(std::move(label)) {}
 
 void MacroCommand::appendApplied(std::unique_ptr<Command> command)

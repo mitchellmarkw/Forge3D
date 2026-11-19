@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.60.0 Beta — Slice 51: Pose Test (2026-11-19)
+
+- **Pose Test** (Features → Holes and Joints): turn a figure's joints to see how far
+  they go before parts hit, without changing the parts.
+  - The joints are found from the document: every Quick Hinge fork (each fork of a
+    double hinge, with the link between them) and every Quick Socket (a ball turns any
+    way; a round peg turns round its axis; a keyed peg just holds). The part that turns
+    in each is the tab's part, or else the biggest part round the pin or ball (so not
+    the pin itself).
+  - **Drag a part** in the view to turn its joint (a hinge round its pin; a ball round
+    your line of sight), or choose a joint in the list and type its angle (a ball:
+    Bend, Bend sideways and Twist). Parts further out move with it; pins move with the
+    part they're held in.
+  - **Parts that hit** are tinted red, with the overlap shown bright red, and named in
+    the panel. It's checked as soon as you stop moving, in the background, so dragging
+    stays smooth on big meshes.
+  - **Find Range**: turns a hinge or swivel each way from straight until parts hit and
+    says how far it went (to the degree). If it hits straight away, it says why.
+  - **Hold Still**: the biggest part is held still to start (a figure's body); click a
+    part and Hold Still to hold another.
+  - **Saved poses**: Save Pose... keeps the joints' angles by name, in the file (undo
+    works); choose one to show it again; Delete forgets it. **Back to the Build Pose**
+    straightens everything; **Done** shows the parts as built again.
+- Files with saved poses need Forge3D 0.60 or later to open (format 30).
+- 285 unit tests (5 new: a hinge's joint and its parts, the pin riding along; parts that
+  hit, and the range to just before they do; a ball's three angles; a double hinge's
+  link between two forks; saved poses kept, undone and saved in the file).
+
 ## 0.59.1 Beta — Scale Calculator, mask colours (2026-11-19)
 
 - **Tools menu → Scale Calculator**: a real-world size in mm, cm, m, inches, feet or

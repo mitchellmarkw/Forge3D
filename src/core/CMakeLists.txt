@@ -30,6 +30,7 @@ add_library(forge_core STATIC
     src/MaskSplit.cpp
     src/Reference.cpp
     src/Hinge.cpp
+    src/Pose.cpp
     src/Body.cpp
     src/CommandStack.cpp
     src/Commands.cpp

@@ -2,8 +2,10 @@
 #pragma once
 
 #include "forge/core/Body.h"
+#include "forge/core/Transform.h"
 
 #include <array>
+#include <map>
 #include <optional>
 #include <vector>
 
@@ -33,6 +35,8 @@ struct PickClip {
 
 // The body whose surface the ray hits first, if any. Tests every triangle of
 // every body (fine for hundreds of bodies; a BVH comes with sculpting).
-std::optional<PickHit> pick(const Document& doc, const Ray& ray, const PickClip* clip = nullptr);
+// `posed`: bodies shown moved (Pose Test), by how much on top of where they are.
+std::optional<PickHit> pick(const Document& doc, const Ray& ray, const PickClip* clip = nullptr,
+                            const std::map<ObjectId, Transform>* posed = nullptr);
 
 }  // namespace forge

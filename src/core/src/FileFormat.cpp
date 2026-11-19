@@ -1078,6 +1078,16 @@ std::string toJson(const Document& doc, const std::string& createdBy)
                     {"createdBy", createdBy},
                     {"units", "mm"},
                     {"bodies", std::move(bodies)}};
+    if (!doc.poses().empty()) {
+        json poses = json::array();
+        for (const SavedPose& p : doc.poses()) {
+            json joints = json::array();
+            for (const auto& [step, a] : p.angles)
+                joints.push_back({{"step", step}, {"angles", {a[0], a[1], a[2]}}});
+            poses.push_back({{"name", p.name}, {"hold", p.hold}, {"joints", std::move(joints)}});
+        }
+        root["poses"] = std::move(poses);
+    }
     if (!doc.references().empty()) {
         json pictures = json::array();
         for (const ReferenceImage& r : doc.references())
@@ -1421,6 +1431,61 @@ std::vector<Body> load(const std::filesystem::path& path)
         mz_zip_reader_end(&zip);
         throw;
     }
+}
+
+std::vector<SavedPose> posesFromJson(const std::string& text)
+{
+    std::vector<SavedPose> out;
+    json root;
+    try {
+        root = json::parse(text);
+    } catch (const json::parse_error&) {
+        return out;
+    }
+    if (!root.is_object())
+        return out;
+    const auto list = root.find("poses");
+    if (list == root.end() || !list->is_array())
+        return out;
+    for (const json& j : *list) {
+        try {
+            SavedPose p;
+            p.name = j.at("name").get<std::string>();
+            p.hold = j.value("hold", kInvalidId);
+            for (const json& a : j.at("joints")) {
+                const json& v = a.at("angles");
+                p.angles[a.at("step").get<ObjectId>()] = {v.at(0).get<double>(), v.at(1).get<double>(),
+                                                          v.at(2).get<double>()};
+            }
+            if (p.name.empty() || std::any_of(out.begin(), out.end(), [&p](const SavedPose& q) { return q.name == p.name; }))
+                continue;
+            out.push_back(std::move(p));
+        } catch (const std::exception&) {
+            continue;
+        }
+    }
+    return out;
+}
+
+std::vector<SavedPose> loadPoses(const std::filesystem::path& path)
+{
+    std::string bytes;
+    try {
+        bytes = readWholeFile(path);
+    } catch (const std::exception&) {
+        return {};
+    }
+    mz_zip_archive zip{};
+    if (!mz_zip_reader_init_mem(&zip, bytes.data(), bytes.size(), 0))
+        return {};
+    std::vector<SavedPose> out;
+    size_t size = 0;
+    if (void* data = mz_zip_reader_extract_file_to_heap(&zip, kDocumentEntry, &size, 0)) {
+        out = posesFromJson(std::string(static_cast<const char*>(data), size));
+        mz_free(data);
+    }
+    mz_zip_reader_end(&zip);
+    return out;
 }
 
 std::vector<ReferenceImage> loadReferences(const std::filesystem::path& path)

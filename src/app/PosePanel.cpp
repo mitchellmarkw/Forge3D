@@ -1,0 +1,224 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+#include "PosePanel.h"
+
+#include <QComboBox>
+#include <QDoubleSpinBox>
+#include <QGridLayout>
+#include <QGroupBox>
+#include <QHBoxLayout>
+#include <QLabel>
+#include <QListWidget>
+#include <QPushButton>
+#include <QSignalBlocker>
+#include <QSlider>
+#include <QVBoxLayout>
+
+#include <cmath>
+
+namespace forge::app {
+
+PosePanel::PosePanel(QWidget* parent) : QWidget(parent)
+{
+    auto* layout = new QVBoxLayout(this);
+    auto* title = new QLabel(tr("Pose Test"));
+    QFont bold = title->font();
+    bold.setBold(true);
+    title->setFont(bold);
+    layout->addWidget(title);
+    auto* help = new QLabel(tr("Turn the joints to see how far they go before parts hit (shown in red). Drag a "
+                               "part in the view to turn its joint, or choose a joint and type its angle. The "
+                               "parts aren't changed: Done puts them back as built."));
+    help->setWordWrap(true);
+    help->setStyleSheet(QStringLiteral("color: palette(mid);"));
+    layout->addWidget(help);
+
+    layout->addWidget(new QLabel(tr("Joints:")));
+    m_joints = new QListWidget;
+    m_joints->setToolTip(tr("The joints made with Quick Hinge and Quick Socket. Click one, or click a part in the "
+                            "view to choose the joint it turns on."));
+    m_joints->setMaximumHeight(150);
+    layout->addWidget(m_joints);
+
+    m_angleBox = new QWidget;
+    auto* angles = new QGridLayout(m_angleBox);
+    angles->setContentsMargins(0, 0, 0, 0);
+    for (int i = 0; i < 3; ++i) {
+        m_angleLabels[i] = new QLabel;
+        m_angle[i] = new QDoubleSpinBox;
+        m_angle[i]->setRange(-180.0, 180.0);
+        m_angle[i]->setDecimals(1);
+        m_angle[i]->setSingleStep(5.0);
+        m_angle[i]->setSuffix(QStringLiteral("°"));
+        m_angle[i]->setWrapping(true);
+        angles->addWidget(m_angleLabels[i], i, 0);
+        angles->addWidget(m_angle[i], i, 1);
+        connect(m_angle[i], &QDoubleSpinBox::valueChanged, this, [this, i](double v) {
+            if (i == 0) {
+                const QSignalBlocker block(m_slider);
+                m_slider->setValue(int(std::lround(v)));
+            }
+            emit anglesEdited(false);
+        });
+    }
+    m_slider = new QSlider(Qt::Horizontal);
+    m_slider->setRange(-180, 180);
+    m_slider->setToolTip(tr("Drag to turn the joint"));
+    angles->addWidget(m_slider, 3, 0, 1, 2);
+    connect(m_slider, &QSlider::valueChanged, this, [this](int v) {
+        {
+            const QSignalBlocker block(m_angle[0]);
+            m_angle[0]->setValue(v);
+        }
+        emit anglesEdited(m_slider->isSliderDown());
+    });
+    connect(m_slider, &QSlider::sliderReleased, this, [this] { emit anglesEdited(false); });
+    layout->addWidget(m_angleBox);
+
+    auto* jointButtons = new QHBoxLayout;
+    m_range = new QPushButton(tr("Find Range"));
+    m_range->setToolTip(tr("Turn the joint each way from straight until parts hit, and say how far it went"));
+    auto* straighten = new QPushButton(tr("Straighten"));
+    straighten->setToolTip(tr("Put this joint back to straight"));
+    jointButtons->addWidget(m_range);
+    jointButtons->addWidget(straighten);
+    layout->addLayout(jointButtons);
+    m_rangeText = new QLabel;
+    m_rangeText->setWordWrap(true);
+    layout->addWidget(m_rangeText);
+
+    m_hits = new QLabel;
+    m_hits->setWordWrap(true);
+    layout->addWidget(m_hits);
+
+    auto* holdRow = new QHBoxLayout;
+    m_hold = new QLabel;
+    m_hold->setWordWrap(true);
+    auto* hold = new QPushButton(tr("Hold Still"));
+    hold->setToolTip(tr("Hold the selected part still and turn the others from it (click the part first)"));
+    holdRow->addWidget(m_hold, 1);
+    holdRow->addWidget(hold);
+    layout->addLayout(holdRow);
+    auto* buildPose = new QPushButton(tr("Back to the Build Pose"));
+    buildPose->setToolTip(tr("Every joint straight, as the parts are made"));
+    layout->addWidget(buildPose);
+
+    auto* saved = new QGroupBox(tr("Saved poses"));
+    auto* savedColumn = new QVBoxLayout(saved);
+    auto* posesBox = new QWidget;
+    auto* posesColumn = new QVBoxLayout(posesBox);
+    posesColumn->setContentsMargins(0, 0, 0, 0);
+    posesColumn->setSpacing(0);
+    posesColumn->addWidget(new QLabel(tr("Pose:")));
+    m_poses = new QComboBox;
+    m_poses->setToolTip(tr("Choose a saved pose to show it"));
+    posesColumn->addWidget(m_poses);
+    savedColumn->addWidget(posesBox);
+    auto* poseButtons = new QHBoxLayout;
+    auto* save = new QPushButton(tr("Save Pose..."));
+    save->setToolTip(tr("Keep this pose by name, in the file (the parts stay as built)"));
+    m_deletePose = new QPushButton(tr("Delete"));
+    m_deletePose->setToolTip(tr("Forget the chosen pose"));
+    poseButtons->addWidget(save);
+    poseButtons->addWidget(m_deletePose);
+    savedColumn->addLayout(poseButtons);
+    layout->addWidget(saved);
+
+    m_status = new QLabel;
+    m_status->setWordWrap(true);
+    layout->addWidget(m_status);
+    auto* done = new QPushButton(tr("Done"));
+    done->setDefault(true);
+    done->setToolTip(tr("Close Pose Test; the parts show as built again"));
+    layout->addWidget(done);
+    layout->addStretch(1);
+
+    connect(m_joints, &QListWidget::currentRowChanged, this, &PosePanel::jointChosen);
+    connect(m_range, &QPushButton::clicked, this, &PosePanel::rangeRequested);
+    connect(straighten, &QPushButton::clicked, this, &PosePanel::straightenRequested);
+    connect(buildPose, &QPushButton::clicked, this, &PosePanel::buildPoseRequested);
+    connect(hold, &QPushButton::clicked, this, &PosePanel::holdRequested);
+    connect(m_poses, &QComboBox::activated, this, &PosePanel::poseChosen);
+    connect(save, &QPushButton::clicked, this, &PosePanel::savePoseRequested);
+    connect(m_deletePose, &QPushButton::clicked, this, &PosePanel::deletePoseRequested);
+    connect(done, &QPushButton::clicked, this, &PosePanel::doneRequested);
+    showJoint(-1, pose::JointKind::Hinge, {0, 0, 0});
+}
+
+void PosePanel::setJoints(const QStringList& names)
+{
+    const QSignalBlocker block(m_joints);
+    m_joints->clear();
+    m_joints->addItems(names);
+}
+
+int PosePanel::joint() const { return m_joints->currentRow(); }
+
+void PosePanel::showJoint(int index, pose::JointKind kind, const std::array<double, 3>& a)
+{
+    m_kind = kind;
+    {
+        const QSignalBlocker block(m_joints);
+        m_joints->setCurrentRow(index);
+    }
+    const bool any = index >= 0;
+    const bool ball = kind == pose::JointKind::Ball;
+    const bool turns = kind != pose::JointKind::Fixed;
+    m_angleBox->setVisible(any && turns);
+    m_range->setEnabled(any && (kind == pose::JointKind::Hinge || kind == pose::JointKind::Swivel));
+    m_range->setToolTip(ball ? tr("A ball turns every way: turn it by hand to check it")
+                             : tr("Turn the joint each way from straight until parts hit, and say how far it went"));
+    m_angleLabels[0]->setText(ball ? tr("Bend:") : kind == pose::JointKind::Swivel ? tr("Turn:") : tr("Bend:"));
+    m_angleLabels[1]->setText(tr("Bend sideways:"));
+    m_angleLabels[2]->setText(tr("Twist:"));
+    for (int i = 1; i < 3; ++i) {
+        m_angleLabels[i]->setVisible(ball);
+        m_angle[i]->setVisible(ball);
+    }
+    for (int i = 0; i < 3; ++i) {
+        const QSignalBlocker block(m_angle[i]);
+        m_angle[i]->setValue(a[std::size_t(i)]);
+    }
+    const QSignalBlocker block(m_slider);
+    m_slider->setValue(int(std::lround(a[0])));
+    if (any && kind == pose::JointKind::Fixed)
+        setStatus(tr("This joint holds its parts together without turning (a peg with flats)."), false);
+}
+
+std::array<double, 3> PosePanel::angles() const
+{
+    return {m_angle[0]->value(), m_angle[1]->value(), m_angle[2]->value()};
+}
+
+void PosePanel::setHold(const QString& name)
+{
+    m_hold->setText(name.isEmpty() ? tr("<i>No joints to hold from.</i>")
+                                   : tr("Held still: <b>%1</b>").arg(name.toHtmlEscaped()));
+}
+
+void PosePanel::setHits(const QString& text, bool problem)
+{
+    m_hits->setText(text);
+    m_hits->setStyleSheet(problem ? QStringLiteral("color: #c0392b; font-weight: bold;") : QString());
+}
+
+void PosePanel::setRange(const QString& text)
+{
+    m_rangeText->setText(text);
+}
+
+void PosePanel::setPoses(const QStringList& names, int current)
+{
+    const QSignalBlocker block(m_poses);
+    m_poses->clear();
+    m_poses->addItems(names);
+    m_poses->setCurrentIndex(current);
+    m_deletePose->setEnabled(!names.isEmpty());
+}
+
+void PosePanel::setStatus(const QString& text, bool problem)
+{
+    m_status->setText(text);
+    m_status->setStyleSheet(problem ? QStringLiteral("color: #c0392b;") : QString());
+}
+
+}  // namespace forge::app

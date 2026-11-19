@@ -2,6 +2,7 @@
 #pragma once
 
 #include "forge/core/Body.h"
+#include "forge/core/Pose.h"
 #include "forge/core/Reference.h"
 
 #include <cstddef>
@@ -242,6 +243,20 @@ private:
     std::optional<std::vector<ReferenceImage>> m_before;
     std::string m_label;
     bool m_mergeable;
+};
+
+// Changes the saved poses (all of them at once).
+class SetPosesCommand final : public Command {
+public:
+    SetPosesCommand(std::vector<SavedPose> poses, std::string label);
+    std::string label() const override { return m_label; }
+    void redo(Document& doc) override;
+    void undo(Document& doc) override;
+
+private:
+    std::vector<SavedPose> m_after;
+    std::optional<std::vector<SavedPose>> m_before;
+    std::string m_label;
 };
 
 class MacroCommand final : public Command {
