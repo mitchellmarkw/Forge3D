@@ -3,6 +3,7 @@
 #include "forge/core/MeshSteps.h"
 #include "forge/core/Remesh.h"
 #include "forge/core/MaskSplit.h"
+#include "forge/core/Hinge.h"
 #include "forge/core/Socket.h"
 #include "forge/core/Thread.h"
 #include "forge/core/Sculpt.h"
@@ -247,6 +248,17 @@ void Document::validateBoolean(const Body& body, const std::map<ObjectId, Object
         const auto& n = body.boolean->planeNormal;
         if (!(std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]) > 1e-9))
             throw std::invalid_argument("A socket needs a direction");
+    } else if (op == BooleanOp::Hinge) {
+        if (ops.size() != 1)
+            throw std::invalid_argument("A hinge half goes in exactly one shape");
+        if (!body.boolean->hinge)
+            throw std::invalid_argument("A hinge needs its settings");
+        hinge::check(*body.boolean->hinge);
+        if (body.boolean->hinge->kind == HingeKind::Double && body.boolean->hinge->half == HingeHalf::Tab)
+            throw std::invalid_argument("A double hinge's parts each get a fork");
+        const auto& n = body.boolean->planeNormal;
+        if (!(std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]) > 1e-9))
+            throw std::invalid_argument("A hinge needs a direction");
     } else if (op == BooleanOp::Smooth) {
         if (ops.size() != 1)
             throw std::invalid_argument("Smooth works on exactly one shape");
@@ -564,7 +576,7 @@ TopoDS_Shape Document::combine(const BooleanSpec& spec) const
     try {
         if (op == BooleanOp::Emboss || op == BooleanOp::Sculpt || op == BooleanOp::Simplify ||
             op == BooleanOp::Thread || op == BooleanOp::Smooth || op == BooleanOp::ExtrudeDown ||
-            op == BooleanOp::Socket || op == BooleanOp::MaskSplit)
+            op == BooleanOp::Socket || op == BooleanOp::Hinge || op == BooleanOp::MaskSplit)
             throw GeometryError(toString(op) + " is worked out by the mesh engine");
         if (op == BooleanOp::Pattern)
             return patternShape(spec);
@@ -687,6 +699,7 @@ TopoDS_Shape Document::combine(const BooleanSpec& spec) const
             case BooleanOp::Smooth:
             case BooleanOp::ExtrudeDown:
             case BooleanOp::Socket:
+            case BooleanOp::Hinge:
             case BooleanOp::MaskSplit:
                 break;  // handled above / by the mesh engine
             }
@@ -804,7 +817,7 @@ TopoDS_Shape Document::previewCombine(const BooleanSpec& spec) const
          spec.op == BooleanOp::Edges || spec.op == BooleanOp::Shell ||
          spec.op == BooleanOp::Follow || spec.op == BooleanOp::Pattern || spec.op == BooleanOp::Sculpt ||
          spec.op == BooleanOp::Simplify || spec.op == BooleanOp::Thread || spec.op == BooleanOp::Smooth ||
-         spec.op == BooleanOp::ExtrudeDown || spec.op == BooleanOp::Socket ||
+         spec.op == BooleanOp::ExtrudeDown || spec.op == BooleanOp::Socket || spec.op == BooleanOp::Hinge ||
          spec.op == BooleanOp::MaskSplit) &&
         spec.operands.size() != 1)
         throw std::invalid_argument(toString(spec.op) + " works on exactly one shape");
@@ -1038,7 +1051,7 @@ bool Document::specUsesMesh(const BooleanSpec& spec) const
 {
     if (spec.op == BooleanOp::Emboss || spec.op == BooleanOp::Sculpt || spec.op == BooleanOp::Simplify ||
         spec.op == BooleanOp::Thread || spec.op == BooleanOp::Smooth || spec.op == BooleanOp::ExtrudeDown ||
-        spec.op == BooleanOp::Socket || spec.op == BooleanOp::MaskSplit)
+        spec.op == BooleanOp::Socket || spec.op == BooleanOp::Hinge || spec.op == BooleanOp::MaskSplit)
         return true;  // letters following a surface, and sculpting, only exist as triangles
     for (ObjectId part : spec.operands)
         if (usesMeshEngine(part))
@@ -1365,6 +1378,28 @@ MeshSolid Document::combineMeshes(const BooleanSpec& spec) const
         for (const Mesh& cut : socket::cutters(*spec.socket, spec.planePoint, spec.planeNormal))
             tools.push_back(meshkernel::fromTriangles(cut.positions, cut.indices));
         return meshkernel::subtracted(parts.front(), tools);
+    }
+    case BooleanOp::Hinge: {
+        if (!spec.hinge)
+            throw GeometryError("Hinge has no settings");
+        try {
+            if (spec.hinge->half == HingeHalf::Fork) {
+                std::vector<MeshSolid> tools;
+                for (const Mesh& cut : hinge::forkCutters(*spec.hinge, spec.planePoint, spec.planeNormal))
+                    tools.push_back(meshkernel::fromTriangles(cut.positions, cut.indices));
+                return meshkernel::subtracted(parts.front(), tools);
+            }
+            const hinge::TabHalf t = hinge::tabHalf(*spec.hinge, spec.planePoint, spec.planeNormal);
+            MeshSolid result = meshkernel::subtracted(
+                parts.front(), {meshkernel::fromTriangles(t.clear.positions, t.clear.indices)});
+            result = meshkernel::merged({result, meshkernel::fromTriangles(t.add.positions, t.add.indices)});
+            std::vector<MeshSolid> tools;
+            for (const Mesh& cut : t.cut)
+                tools.push_back(meshkernel::fromTriangles(cut.positions, cut.indices));
+            return meshkernel::subtracted(result, tools);
+        } catch (const std::invalid_argument& e) {
+            throw GeometryError(e.what());
+        }
     }
     case BooleanOp::Thread: {
         if (!spec.thread)

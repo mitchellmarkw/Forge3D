@@ -46,6 +46,8 @@ add_executable(Forge3D WIN32
     MaskPanel.h
     MaskPanel.cpp
     ReferencePanel.h
+    HingePanel.h
+    HingePanel.cpp
     ReferencePanel.cpp
     SketchPanel.h
     SketchPanel.cpp

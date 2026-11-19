@@ -207,7 +207,7 @@ void scaleInto(const Document& doc, ObjectId id, const Vec3& factors, const Vec3
     }
     if (body->boolean->op == BooleanOp::Split || body->boolean->op == BooleanOp::Mirror ||
         body->boolean->op == BooleanOp::Emboss || body->boolean->op == BooleanOp::ExtrudeDown ||
-        body->boolean->op == BooleanOp::Socket) {
+        body->boolean->op == BooleanOp::Socket || body->boolean->op == BooleanOp::Hinge) {
         // The cutting / mirror plane (or the words' spot) stretches with everything else.
         Body next = *body;
         if (next.boolean->emboss && even(factors)) {
@@ -227,6 +227,18 @@ void scaleInto(const Document& doc, ObjectId id, const Vec3& factors, const Vec3
             sf.depth *= factors[0];
             if (sf.reliefDepth > 0.0)
                 sf.reliefDepth *= factors[0];
+        }
+        if (next.boolean->hinge && even(factors)) {
+            // Scaled evenly, the joint grows with the shape; a filament pin or a rod
+            // doesn't (it's bought, not printed), nor does the fit for printing.
+            HingeFinish& h = *next.boolean->hinge;
+            h.width *= factors[0];
+            h.barrel *= factors[0];
+            h.reach *= factors[0];
+            h.gap *= factors[0];
+            h.lip *= factors[0];
+            if (h.pin == PinKind::Printed)
+                h.pinSize *= factors[0];
         }
         if (body->boolean->op == BooleanOp::Mirror && !even(factors)) {
             // A reflection only survives a stretch along or across its mirror.

@@ -75,10 +75,11 @@ Gate to Phase 2: a new user prints a customised part within 10 minutes.
 | 47 | Join Parts: a peg into its socket, a ball into its cup, a face against a face | Done (0.56.0) |
 | 48 | Split by Mask: paint where to cut; both pieces closed with the same smooth cap | Done (0.57.0) |
 | 49 | Reference images: a picture per side, sized from two points, opacity, active or not | Done (0.58.0) |
+| 50 | Quick Hinge: single and double hinges and swivels, with pins, sized to fit once printed | **Delivered for testing** |
 
 Slices 39–41 close the gaps found in the [Phase 1 gate review](docs/PHASE1_GATE.md).
 
-Waiting for a place: 15 figure, toy and scale-model features, in order (Quick Hinge first). See [docs/TODO.md](docs/TODO.md).
+Waiting for a place: 14 figure, toy and scale-model features, in order (Pose test next). See [docs/TODO.md](docs/TODO.md).
 
 ## Phase 2: Sculpt · Phase 3: Hybrid · Phase 4: Pro
 

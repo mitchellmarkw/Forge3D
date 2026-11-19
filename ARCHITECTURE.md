@@ -1188,3 +1188,31 @@ and sharp across edges.
   `Viewport::readPicture` (camera rotation applied) both for their size and for drawing.
   A click outside the panel that hits no shape but an active picture opens the panel on
   it; dragging it moves it. **Show Pictures** hides them all (the view only).
+
+## Quick Hinge (slice 50)
+
+- `BooleanOp::Hinge` (mesh engine), `HingeFinish`: the kind (single, double, swivel),
+  the half this step makes (`Fork`: the slot and pin hole, or the swivel's bore with its
+  groove; `Tab`: the part's end made into the tab, or the peg put on it), sizes, the pin
+  (printed, 1.75 filament, rod), fit, stiff, swing, turn, reach, gap (double), lip
+  (swivel) and `link`, a number both halves of one hinge share. The spot is the step's
+  planePoint / planeNormal, on the fork's face, facing out of the fork. File format 29
+  (`"operation": "hinge"`, `"hinge": {...}`).
+- `Hinge.h/.cpp`: a frame at the spot (x along the pin, from `emboss::upFor` and the
+  turn; z into the fork). `forkCutters`: the slot down to the pin, a round room for the
+  tab's end, deeper slots on the side(s) it bends to, the pin hole through the arms
+  (pin + fit). `tabHalf`: clears the other part inside the reach and `fit` off the
+  fork's face, adds the tab (or the peg), cuts its pin hole (pin + fit/2 when stiff,
+  + 2 fit when free; the peg's slit). `pieces`: the tab, link or peg and printed pins,
+  in place, as closed meshes; `pieceBody` makes each an imported-style mesh shape.
+  `otherHalf`: the partner's spot and settings (a double hinge's second fork faces back,
+  `gap` out, its turn worked out so the pins line up, forward and back swapped).
+  `hingePartner` finds the other half by its link number.
+- Scaling evenly grows the joint, and a printed pin, but not a filament pin or rod, nor
+  the fit.
+- App: `HingePanel`, `MainWindow::HingeMode` (like Quick Socket: a spot on the part,
+  centring on the face, preview or the red cut on big shapes, a blue ghost of the other
+  half). Apply is one undo step: the fork step, the other part's step (if picked), and
+  the pieces. A printed pin is cut to the part's width there (rays from both sides along
+  the pin). Changing either half (double-click) changes its partner too.
+

@@ -228,6 +228,7 @@ const char* opName(BooleanOp op)
     case BooleanOp::ExtrudeDown: return "extrudeDown";
     case BooleanOp::Thread: return "thread";
     case BooleanOp::Socket: return "socket";
+    case BooleanOp::Hinge: return "hinge";
     case BooleanOp::MaskSplit: return "maskSplit";
     }
     return "merge";
@@ -248,7 +249,7 @@ json bodyToJson(const Body& b)
         j["pivot"] = b.boolean->pivot;
         if (b.boolean->op == BooleanOp::Split || b.boolean->op == BooleanOp::Mirror ||
             b.boolean->op == BooleanOp::ExtrudeDown || b.boolean->op == BooleanOp::Socket ||
-            b.boolean->op == BooleanOp::Emboss) {
+            b.boolean->op == BooleanOp::Hinge || b.boolean->op == BooleanOp::Emboss) {
             j["planePoint"] = b.boolean->planePoint;
             j["planeNormal"] = b.boolean->planeNormal;
         }
@@ -338,6 +339,26 @@ json bodyToJson(const Body& b)
                                {"reliefCuts", so->reliefCuts},
                                {"reliefWidth", so->reliefWidth},
                                {"reliefDepth", so->reliefDepth}};
+        }
+        if (const auto& h = b.boolean->hinge) {
+            static const char* kinds[] = {"single", "double", "swivel"};
+            static const char* pins[] = {"printed", "filament", "rod"};
+            static const char* swings[] = {"both", "forward", "back"};
+            j["hinge"] = json{{"kind", kinds[int(h->kind)]},
+                              {"half", h->half == HingeHalf::Fork ? "fork" : "tab"},
+                              {"width", h->width},
+                              {"barrel", h->barrel},
+                              {"pin", pins[int(h->pin)]},
+                              {"pinSize", h->pinSize},
+                              {"fit", h->fit},
+                              {"printer", h->resin ? "resin" : "fdm"},
+                              {"stiff", h->stiff},
+                              {"swing", swings[int(h->swing)]},
+                              {"turn", h->turn},
+                              {"reach", h->reach},
+                              {"gap", h->gap},
+                              {"lip", h->lip},
+                              {"link", h->link}};
         }
         if (const auto& sf = b.boolean->simplify)
             j["simplify"] = json{{"keep", sf->keep}};
@@ -529,6 +550,8 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
             spec.op = BooleanOp::Socket;
         else if (op == "maskSplit" && version >= 27)
             spec.op = BooleanOp::MaskSplit;
+        else if (op == "hinge" && version >= 29)
+            spec.op = BooleanOp::Hinge;
         else
             damaged(where + ": unknown combine operation '" + op + "'");
         const auto operands = j.find("operands");
@@ -548,7 +571,7 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
             spec.pivot[i] = (*pivot)[i].get<double>();
         }
         if (spec.op == BooleanOp::Split || spec.op == BooleanOp::Mirror || spec.op == BooleanOp::Emboss ||
-            spec.op == BooleanOp::ExtrudeDown || spec.op == BooleanOp::Socket) {
+            spec.op == BooleanOp::ExtrudeDown || spec.op == BooleanOp::Socket || spec.op == BooleanOp::Hinge) {
             const auto readVec = [&](const char* key, std::array<double, 3>& out) {
                 const auto v = j.find(key);
                 if (v == j.end() || !v->is_array() || v->size() != 3)
@@ -724,6 +747,31 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
             so.reliefWidth = sj->value("reliefWidth", so.reliefWidth);
             so.reliefDepth = sj->value("reliefDepth", 0.0);
             spec.socket = so;
+        }
+        if (spec.op == BooleanOp::Hinge) {
+            const auto hj = j.find("hinge");
+            if (hj == j.end() || !hj->is_object())
+                damaged(where + ": missing the hinge's settings");
+            HingeFinish h;
+            const std::string kind = hj->value("kind", std::string("single"));
+            h.kind = kind == "double" ? HingeKind::Double : kind == "swivel" ? HingeKind::Swivel : HingeKind::Single;
+            h.half = hj->value("half", std::string("fork")) == "tab" ? HingeHalf::Tab : HingeHalf::Fork;
+            h.width = number(*hj, "width", where);
+            h.barrel = number(*hj, "barrel", where);
+            const std::string pin = hj->value("pin", std::string("printed"));
+            h.pin = pin == "filament" ? PinKind::Filament : pin == "rod" ? PinKind::Rod : PinKind::Printed;
+            h.pinSize = hj->value("pinSize", h.pinSize);
+            h.fit = hj->value("fit", h.fit);
+            h.resin = hj->value("printer", std::string("resin")) != "fdm";
+            h.stiff = hj->value("stiff", true);
+            const std::string swing = hj->value("swing", std::string("both"));
+            h.swing = swing == "forward" ? HingeSwing::Forward : swing == "back" ? HingeSwing::Back : HingeSwing::Both;
+            h.turn = hj->value("turn", 0.0);
+            h.reach = hj->value("reach", 0.0);
+            h.gap = hj->value("gap", h.gap);
+            h.lip = hj->value("lip", h.lip);
+            h.link = hj->value("link", std::uint32_t(0));
+            spec.hinge = h;
         }
         if (spec.op == BooleanOp::Smooth) {
             const auto sj = j.find("smooth");

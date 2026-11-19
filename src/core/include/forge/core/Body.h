@@ -317,6 +317,7 @@ enum class BooleanOp {
     Smooth,       // the whole surface smoothed (mesh engine)
     ExtrudeDown,  // the underside stretched straight down to a plane (planePoint / planeNormal: up)
     Socket,       // a ball or peg socket cut in at a spot (planePoint, facing out: planeNormal)
+    Hinge,        // one half of a hinge or swivel at a spot (planePoint, facing out: planeNormal)
     MaskSplit,    // the part cut along the edge of a painted mask: the masked piece or the rest
 };
 
@@ -503,6 +504,39 @@ struct SocketFinish {
     bool operator==(const SocketFinish&) const = default;
 };
 
+// A Quick Hinge: one half of a hinge or swivel joint at a spot (the step's planePoint,
+// on the fork's surface, facing out of the fork along planeNormal). Sizes in mm.
+//  - Single hinge: a fork (a slot with a pin hole across it) and a tab with a rounded
+//    end that turns in it on a pin.
+//  - Double hinge: a fork in each part and a link between them, with two pins.
+//  - Swivel: a bore with a groove, and a peg with a lip that snaps into the groove.
+enum class HingeKind { Single, Double, Swivel };
+// What this step makes of its part: the fork (Swivel: the bore) cut in, or the part's
+// end made into the tab (Swivel: the peg).
+enum class HingeHalf { Fork, Tab };
+// The pin: printed with the parts, a length of 1.75 mm filament, or a wire or rod.
+enum class PinKind { Printed, Filament, Rod };
+// Which way a hinge can bend from straight: the slot is open deeper on that side.
+enum class HingeSwing { Both, Forward, Back };
+struct HingeFinish {
+    HingeKind kind = HingeKind::Single;
+    HingeHalf half = HingeHalf::Fork;
+    double width = 3.0;    // the tab's thickness, along the pin; Swivel: the peg's diameter
+    double barrel = 5.0;   // the tab's rounded end, across; Swivel: how far the peg goes in
+    PinKind pin = PinKind::Printed;
+    double pinSize = 2.0;  // the pin's diameter (filament: 1.75)
+    double fit = 0.1;      // room all round, for printing
+    bool resin = true;     // the printer the fit was chosen for
+    bool stiff = true;     // the tab grips the pin, to hold a pose (else it turns freely)
+    HingeSwing swing = HingeSwing::Both;
+    double turn = 0.0;     // degrees round the spot: which way the pin lies
+    double reach = 0.0;    // how far the slot and the pin hole go out each side; 0: auto
+    double gap = 1.0;      // Double: room between the two parts' faces
+    double lip = 0.4;      // Swivel: how far the lip stands out
+    std::uint32_t link = 0;  // both halves of one hinge share this number (0: none)
+    bool operator==(const HingeFinish&) const = default;
+};
+
 // Split by Mask: a mask painted on a part with a round brush, as dabs in order (a later
 // dab wins where they overlap: a point is masked if the last dab covering it painted).
 // The part is cut along the mask's edge and each piece closed with a smooth cap.
@@ -607,6 +641,8 @@ struct BooleanSpec {
     std::optional<ThreadFinish> thread{};
     // Socket: what it takes (the spot is planePoint / planeNormal).
     std::optional<SocketFinish> socket{};
+    // Hinge: which half and its settings (the spot is planePoint / planeNormal).
+    std::optional<HingeFinish> hinge{};
     // Split by Mask: the painted mask, and which piece this is.
     std::optional<MaskSplitFinish> maskSplit{};
     // Edges: what to do to which edges.
