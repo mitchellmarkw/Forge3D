@@ -72,6 +72,9 @@ uniform float uWarn;      // 1: the shape doesn't fit the build plate
 uniform float uSelected;  // 0 or 1
 uniform float uAlpha;     // 1 = solid, less = see-through (ghost)
 uniform float uWire;      // 1: drawing triangle edges (no lighting)
+uniform float uMaskOn;    // 1: painting a mask: two plain colours, evenly lit
+uniform vec3 uUnmasked;
+uniform vec3 uMasked;
 out vec4 fragColor;
 void main() {
     if (uClipOn > 0.5 && dot(uClip.xyz, vWorldPos) > uClip.w) discard;
@@ -93,6 +96,14 @@ void main() {
     }
     vec3 key = normalize(vec3(-0.5, 0.7, 0.6)); // light fixed to the camera, upper left
     float diffuse = max(dot(n, key), 0.0);
+    if (uMaskOn > 0.5) {
+        // Mostly flat light, so a shadow never looks like mask (just enough to see the form).
+        float s = clamp(vShade, 0.0, 1.0);
+        vec3 paint = mix(uUnmasked, uMasked, s);
+        float light = 0.80 + 0.12 * diffuse + 0.08 * max(dot(n, toEye), 0.0);
+        fragColor = vec4(paint * light, uAlpha);
+        return;
+    }
     float head = max(dot(n, toEye), 0.0);
     float spec = pow(max(dot(n, normalize(key + toEye)), 0.0), 48.0) * 0.20;
     // 1: too big for the printer (orange-red); 0.5: only off the plate (amber).
@@ -940,6 +951,9 @@ void Viewport::paintGL()
                 m_meshShader->setUniformValue("uClipOn", m_sectionIds.count(item.id) ? 1.0f : 0.0f);
             m_meshShader->setUniformValue("uNormalMatrix", modelView.normalMatrix());
             m_meshShader->setUniformValue("uColor", item.color);
+            m_meshShader->setUniformValue("uMaskOn", item.maskColours && pass != Pass::Ghost ? 1.0f : 0.0f);
+            m_meshShader->setUniformValue("uUnmasked", item.unmasked);
+            m_meshShader->setUniformValue("uMasked", item.masked);
             {
                 const auto warn = m_offPlate.find(item.id);
                 m_meshShader->setUniformValue("uWarn", pass == Pass::Ghost || item.alpha < 1.0f || warn == m_offPlate.end() ? 0.0f

@@ -104,6 +104,10 @@ TEST_CASE("Calibrating sizes a picture from two points and keeps the first one s
 
     // Full size, in inches.
     CHECK_THAT(reference::modelLength(2, reference::Unit::Inches, 1), WithinAbs(50.8, 1e-9));
+    // The Scale Calculator's example: a 6 ft person at 1:60 is 30.48 mm.
+    CHECK_THAT(reference::modelLength(6, reference::Unit::Feet, 60), WithinAbs(30.48, 1e-9));
+    CHECK_THAT(reference::modelLength(1, reference::Unit::Yards, 1), WithinAbs(914.4, 1e-9));
+    CHECK_THAT(reference::fromMm(30.48, reference::Unit::Inches), WithinAbs(1.2, 1e-9));
     CHECK_THROWS(reference::calibrated(r, a, a, 10));
     CHECK_THROWS(reference::calibrated(r, a, b, 0));
     CHECK_THROWS(reference::modelLength(1, reference::Unit::Millimetres, 0));

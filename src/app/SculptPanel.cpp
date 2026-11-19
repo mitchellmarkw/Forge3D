@@ -127,8 +127,9 @@ SculptPanel::SculptPanel(QWidget* parent) : QWidget(parent)
                               "from the shape.");
             break;
         case 9:
-            hint = QT_TR_NOOP("Paints a mask (shown dark): the other brushes leave masked parts alone. Ctrl: "
-                              "unpaints.");
+            hint = QT_TR_NOOP("Paints a mask: the other brushes leave masked parts alone. Ctrl: unpaints. While "
+                              "this brush is on, the shape shows in plain colours (black paint on yellow; change "
+                              "them in Split by Mask).");
             break;
         case 13:
             hint = QT_TR_NOOP("Presses a repeating pattern into the surface where you drag (scales, cloth, skin...). "
@@ -140,6 +141,7 @@ SculptPanel::SculptPanel(QWidget* parent) : QWidget(parent)
         m_patternBox->setVisible(brush == 13);
     };
     connect(m_brush, &QComboBox::currentIndexChanged, this, describe);
+    connect(m_brush, &QComboBox::currentIndexChanged, this, &SculptPanel::brushChanged);
     describe(0);
 
     // The whole mask at once.

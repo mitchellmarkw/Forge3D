@@ -1,16 +1,38 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "MaskPanel.h"
 
+#include <QColorDialog>
 #include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QFormLayout>
+#include <QGridLayout>
+#include <QGroupBox>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QPushButton>
 #include <QSignalBlocker>
+#include <QSettings>
 #include <QVBoxLayout>
 
+#include <utility>
+
 namespace forge::app {
+
+namespace {
+
+// The app's preferences (see MainWindow.cpp).
+class Preferences : public QSettings {
+public:
+    Preferences() : QSettings(QSettings::NativeFormat, QSettings::UserScope, QStringLiteral("Forge3D"),
+                              QStringLiteral("Forge3D"))
+    {
+    }
+};
+
+const QString kUnmaskedDefault = QStringLiteral("#ffd21a");  // yellow
+const QString kMaskedDefault = QStringLiteral("#141418");    // black
+
+}  // namespace
 
 MaskPanel::MaskPanel(QWidget* parent) : QWidget(parent)
 {
@@ -64,6 +86,56 @@ MaskPanel::MaskPanel(QWidget* parent) : QWidget(parent)
     m_strokes = new QLabel;
     layout->addWidget(m_strokes);
 
+    // Strong, plain colours, so it's plain what's painted (shadows don't look like paint).
+    auto* colours = new QGroupBox(tr("Colours while painting"));
+    auto* colourGrid = new QGridLayout(colours);
+    m_unmaskedButton = new QPushButton;
+    m_unmaskedButton->setToolTip(tr("The colour of the shape where it isn't painted"));
+    m_maskedButton = new QPushButton;
+    m_maskedButton->setToolTip(tr("The colour of the paint (the mask)"));
+    auto* swap = new QPushButton(tr("Swap"));
+    swap->setToolTip(tr("Swap the two colours"));
+    auto* reset = new QPushButton(tr("Reset"));
+    reset->setToolTip(tr("Back to yellow and black"));
+    colourGrid->addWidget(new QLabel(tr("Not painted:")), 0, 0);
+    colourGrid->addWidget(m_unmaskedButton, 0, 1);
+    colourGrid->addWidget(new QLabel(tr("Painted:")), 1, 0);
+    colourGrid->addWidget(m_maskedButton, 1, 1);
+    auto* colourButtons = new QHBoxLayout;
+    colourButtons->addWidget(swap);
+    colourButtons->addWidget(reset);
+    colourGrid->addLayout(colourButtons, 2, 0, 1, 2);
+    layout->addWidget(colours);
+    {
+        const Preferences prefs;
+        m_unmaskedColour = QColor(prefs.value(QStringLiteral("mask/unmaskedColour"), kUnmaskedDefault).toString());
+        m_maskedColour = QColor(prefs.value(QStringLiteral("mask/maskedColour"), kMaskedDefault).toString());
+        if (!m_unmaskedColour.isValid())
+            m_unmaskedColour = QColor(kUnmaskedDefault);
+        if (!m_maskedColour.isValid())
+            m_maskedColour = QColor(kMaskedDefault);
+    }
+    showColours();
+    const auto pick = [this](QColor& colour, const QString& title) {
+        const QColor chosen = QColorDialog::getColor(colour, this, title);
+        if (!chosen.isValid())
+            return;
+        colour = chosen;
+        saveColours();
+    };
+    connect(m_unmaskedButton, &QPushButton::clicked, this,
+            [this, pick] { pick(m_unmaskedColour, tr("Colour where it isn't painted")); });
+    connect(m_maskedButton, &QPushButton::clicked, this, [this, pick] { pick(m_maskedColour, tr("Colour of the paint")); });
+    connect(swap, &QPushButton::clicked, this, [this] {
+        std::swap(m_unmaskedColour, m_maskedColour);
+        saveColours();
+    });
+    connect(reset, &QPushButton::clicked, this, [this] {
+        m_unmaskedColour = QColor(kUnmaskedDefault);
+        m_maskedColour = QColor(kMaskedDefault);
+        saveColours();
+    });
+
     m_status = new QLabel;
     m_status->setWordWrap(true);
     layout->addWidget(m_status);
@@ -81,6 +153,28 @@ MaskPanel::MaskPanel(QWidget* parent) : QWidget(parent)
     connect(m_clear, &QPushButton::clicked, this, &MaskPanel::clearRequested);
     connect(m_apply, &QPushButton::clicked, this, &MaskPanel::applyRequested);
     connect(cancel, &QPushButton::clicked, this, &MaskPanel::cancelRequested);
+}
+
+void MaskPanel::showColours()
+{
+    const auto paint = [](QPushButton* button, const QColor& c) {
+        button->setText(c.name().toUpper());
+        const QColor text = c.lightnessF() > 0.55 ? Qt::black : Qt::white;
+        button->setStyleSheet(QStringLiteral("QPushButton { background-color: %1; color: %2; border: 1px solid "
+                                             "palette(mid); padding: 4px; }")
+                                  .arg(c.name(), text.name()));
+    };
+    paint(m_unmaskedButton, m_unmaskedColour);
+    paint(m_maskedButton, m_maskedColour);
+}
+
+void MaskPanel::saveColours()
+{
+    Preferences prefs;
+    prefs.setValue(QStringLiteral("mask/unmaskedColour"), m_unmaskedColour.name());
+    prefs.setValue(QStringLiteral("mask/maskedColour"), m_maskedColour.name());
+    showColours();
+    emit coloursChanged();
 }
 
 void MaskPanel::start(const QString& title, bool editing)

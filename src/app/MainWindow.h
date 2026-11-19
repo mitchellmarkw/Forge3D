@@ -75,6 +75,7 @@ class HingePanel;
 class JoinPanel;
 class MaskPanel;
 class ReferencePanel;
+class ScaleCalculator;
 class SketchPanel;
 class SketchView;
 struct DisplayItem;
@@ -714,6 +715,8 @@ private:
         std::unordered_map<std::uint64_t, std::vector<std::uint32_t>> grid;
     };
     MaskMode m_maskMode;
+
+    ScaleCalculator* m_scaleCalculator = nullptr;  // Tools → Scale Calculator, made when first opened
 
     // Reference Images
     QAction* m_referenceAction = nullptr;

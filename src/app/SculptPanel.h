@@ -54,6 +54,7 @@ public:
     void setStatus(const QString& text, bool problem);
 
 signals:
+    void brushChanged();
     void detailChanged();
     void addDetailChanged();
     void undoRequested();

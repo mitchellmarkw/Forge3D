@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.59.1 Beta — Scale Calculator, mask colours (2026-11-19)
+
+- **Tools menu → Scale Calculator**: a real-world size in mm, cm, m, inches, feet or
+  yards, at a scale of 1 : X, gives the size on the model in the unit you choose (a 6 ft
+  person at 1:60 is 30.48 mm). It stays open beside the window while you work,
+  remembers what you typed, and **Copy** puts the answer on the clipboard to paste
+  into a size box. No ribbon tab.
+- **Mask colours**: while painting a mask (Split by Mask, and sculpting's Mask brush)
+  the shape is shown in two plain colours, black paint on yellow, evenly lit, so a
+  shadow never looks like paint. Change either colour (or **Swap** or **Reset**) under
+  **Colours while painting** in the Split by Mask panel; they're kept between runs.
+- Reference Images' "Size from two points" takes yards too.
+- 280 unit tests (the scale sums checked: 6 ft at 1:60 is 30.48 mm; yards).
+
 ## 0.59.0 Beta — Slice 50: Quick Hinge (2026-11-19)
 
 - **Quick Hinge** (Features → Holes and Joints): a joint at the spot you click on the

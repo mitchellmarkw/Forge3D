@@ -174,8 +174,15 @@ double toMm(double value, Unit unit)
         return value * 25.4;
     case Unit::Feet:
         return value * 304.8;
+    case Unit::Yards:
+        return value * 914.4;
     }
     return value;
+}
+
+double fromMm(double mm, Unit unit)
+{
+    return mm / toMm(1.0, unit);
 }
 
 double modelLength(double value, Unit unit, double scale)

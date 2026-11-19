@@ -83,8 +83,10 @@ std::optional<std::size_t> pick(const std::vector<ReferenceImage>& images, const
 ReferenceImage calibrated(const ReferenceImage& image, std::array<double, 2> a, std::array<double, 2> b, double mm);
 
 // Units a length can be typed in.
-enum class Unit { Millimetres, Centimetres, Metres, Inches, Feet };
+enum class Unit { Millimetres, Centimetres, Metres, Inches, Feet, Yards };
+inline constexpr int kUnitCount = 6;
 double toMm(double value, Unit unit);
+double fromMm(double mm, Unit unit);
 // The length on the model for a measured length: a real-world size shown at a scale
 // of 1 : `scale` (1 = full size).
 double modelLength(double value, Unit unit, double scale);
