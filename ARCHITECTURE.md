@@ -1263,3 +1263,19 @@ and sharp across edges.
   kind) changes; recording also updates `socket/fit`, `hinge/fit` and
   `split/clearance`. `ToleranceDialog` (Tools menu) makes the test and records.
 
+## Clicks and ridges (slice 53)
+
+- `HingeFinish::clicks` / `clickDepth`: `wedge` makes a triangular ridge or groove;
+  `clicksOf` gives where they run (round the pin from the tab hole to the end's edge,
+  or along a swivel's peg between the face and the lip) and their width (no more than
+  1.2 × the depth, and 0.225 of the spacing). `tabRidges` (the tab, the tab half, each
+  end of a link) and `armGrooves` (fork cutters: the groove is the ridge grown by
+  1.5 × the fit and set the fit back); `swivelClicks` for pegs and bores. At every
+  click the ridges clear the grooves; between, they overlap the arms by about the depth
+  less the fit.
+- `SocketFinish::ridges` / `ridgeHeight`: the ball cutter has slices of its outer shell
+  (a slot through the axis minus the ball shrunk by the height) taken out of it, so
+  ribs stay in the cup.
+- `pose::Joint::clicks` and `nearestClick`: Pose Test snaps such joints to their
+  clicks, and `range` steps by clicks. File format 31.
+

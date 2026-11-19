@@ -175,14 +175,121 @@ const char* kTimes = " \xC3\x97 ";
 // How far the tab's stem (or the peg) stands out of the fork's surface.
 double stemOut(const HingeFinish& f) { return std::max(2.0, f.barrel); }
 
+double lipHeight(const HingeFinish& f) { return std::max(0.8, 2.0 * f.lip); }
+
+// A ridge (or groove) with a triangular section, `half` wide each side of its middle
+// line and `height` tall, from a to b (points in the frame); `side` across it and `up`
+// out of the face (directions in the frame).
+Mesh wedge(const Frame& f, const Vec3& a, const Vec3& b, const Vec3& side, const Vec3& up, double half, double height)
+{
+    Mesh m;
+    for (const Vec3& p : {a, b}) {
+        const Vec3 q0 = add(p, scaled(side, -half)), q1 = add(p, scaled(side, half)), q2 = add(p, scaled(up, height));
+        for (const Vec3& q : {q0, q1, q2})
+            pushPoint(m, f.at(q[0], q[1], q[2]));
+    }
+    const std::uint32_t tris[8][3] = {{0, 1, 2}, {3, 5, 4}, {0, 3, 4}, {0, 4, 1}, {1, 4, 5}, {1, 5, 2}, {2, 5, 3}, {2, 3, 0}};
+    for (const auto& t : tris)
+        pushTriangle(m, t[0], t[1], t[2]);
+    faceOut(m);
+    return m;
+}
+
+// Clicks: the ridges' width, and where they run (radially round a pin, or along a peg).
+struct Clicks {
+    double from = 0.0, to = 0.0;  // radius (hinge) or depth (swivel)
+    double half = 0.0;            // half the ridge's width at its base
+};
+
+Clicks clicksOf(const HingeFinish& f)
+{
+    Clicks c;
+    const double h = f.clickDepth;
+    double around = 0.0;  // the length of the circle the ridges are spread round
+    if (f.kind == HingeKind::Swivel) {
+        c.from = 0.6;
+        c.to = f.barrel - lipHeight(f) - 0.6;
+        around = kPi * f.width;
+    } else {
+        c.from = tabHole(f) / 2.0 + 0.5;
+        c.to = f.barrel / 2.0 - 0.3;
+        around = kPi * (c.from + c.to);
+    }
+    c.half = std::min(1.2 * h, 0.225 * around / f.clicks);
+    return c;
+}
+
+// The ridges on the tab's two faces round the pin (one end of a link at `depth`).
+std::vector<MeshSolid> tabRidges(const HingeFinish& f, const Frame& fr, double depth)
+{
+    std::vector<MeshSolid> out;
+    if (f.clicks <= 0)
+        return out;
+    const Clicks c = clicksOf(f);
+    const Frame p = alongPin(fr, depth);
+    for (int i = 0; i < f.clicks; ++i) {
+        const double a = 2.0 * kPi * i / f.clicks;
+        const Vec3 u{std::cos(a), std::sin(a), 0}, v{-std::sin(a), std::cos(a), 0};
+        for (double s : {-1.0, 1.0}) {
+            const double z = s * (f.width / 2.0 - 0.05);
+            out.push_back(solid(wedge(p, {c.from * u[0], c.from * u[1], z}, {c.to * u[0], c.to * u[1], z}, v,
+                                      {0, 0, s}, c.half, f.clickDepth + 0.05)));
+        }
+    }
+    return out;
+}
+
+// The grooves in the fork's arms the tab's ridges click into.
+std::vector<Mesh> armGrooves(const HingeFinish& f, const Frame& fr)
+{
+    std::vector<Mesh> out;
+    if (f.clicks <= 0)
+        return out;
+    const Clicks c = clicksOf(f);
+    const double g = f.fit;
+    const Frame p = alongPin(fr, pinDepth(f));
+    for (int i = 0; i < f.clicks; ++i) {
+        const double a = 2.0 * kPi * i / f.clicks;
+        const Vec3 u{std::cos(a), std::sin(a), 0}, v{-std::sin(a), std::cos(a), 0};
+        for (double s : {-1.0, 1.0}) {
+            const double z = s * (f.width / 2.0 + g - 0.02);
+            out.push_back(wedge(p, {(c.from - g) * u[0], (c.from - g) * u[1], z},
+                                {(c.to + g) * u[0], (c.to + g) * u[1], z}, v, {0, 0, s}, c.half + 1.5 * g,
+                                f.clickDepth + 1.5 * g + 0.02));
+        }
+    }
+    return out;
+}
+
+// A swivel's ridges along its peg, and the grooves along its bore.
+std::vector<Mesh> swivelClicks(const HingeFinish& f, const Frame& fr, bool grooves)
+{
+    std::vector<Mesh> out;
+    if (f.clicks <= 0)
+        return out;
+    const Clicks c = clicksOf(f);
+    const double g = grooves ? f.fit : 0.0, r = f.width / 2.0;
+    const double base = grooves ? r + g - 0.02 : r - 0.05;
+    const double half = grooves ? c.half + 1.5 * g : c.half;
+    const double height = grooves ? f.clickDepth + 1.5 * g + 0.02 : f.clickDepth + 0.05;
+    for (int i = 0; i < f.clicks; ++i) {
+        const double a = 2.0 * kPi * i / f.clicks;
+        const Vec3 u{std::cos(a), std::sin(a), 0}, v{-std::sin(a), std::cos(a), 0};
+        out.push_back(wedge(fr, {base * u[0], base * u[1], c.from - g}, {base * u[0], base * u[1], c.to + g}, v, u,
+                            half, height));
+    }
+    return out;
+}
+
 // The tab: its rounded end round the pin, a stem out of the fork, its pin hole cut.
 MeshSolid tabSolid(const HingeFinish& f, const Frame& fr)
 {
     const double r = f.barrel / 2.0, half = f.width / 2.0, d = pinDepth(f);
-    const MeshSolid end = solid(round(alongPin(fr, d), r, r, -half, half, false));
-    const MeshSolid stem = solid(box(fr, -half, half, -r, r, -stemOut(f), d));
+    std::vector<MeshSolid> parts = tabRidges(f, fr, d);
+    parts.push_back(solid(round(alongPin(fr, d), r, r, -half, half, false)));
+    parts.push_back(solid(box(fr, -half, half, -r, r, -stemOut(f), d)));
     const MeshSolid hole = solid(round(alongPin(fr, d), tabHole(f) / 2.0, tabHole(f) / 2.0, -half - 1, half + 1, true));
-    return meshkernel::subtracted(meshkernel::merged({end, stem}), {hole});
+    return meshkernel::subtracted(meshkernel::merged(parts), {hole});
 }
 
 // The link of a double hinge: a rounded end on each pin, the second pin outside the
@@ -194,22 +301,28 @@ MeshSolid linkSolid(const HingeFinish& f, const Frame& fr)
     const auto hole = [&](double depth) {
         return solid(round(alongPin(fr, depth), tabHole(f) / 2.0, tabHole(f) / 2.0, -half - 1, half + 1, true));
     };
-    const MeshSolid body = meshkernel::merged({solid(round(alongPin(fr, d), r, r, -half, half, false)),
-                                               solid(round(alongPin(fr, d2), r, r, -half, half, false)),
-                                               solid(box(fr, -half, half, -r, r, d2, d))});
+    std::vector<MeshSolid> parts = tabRidges(f, fr, d);
+    for (MeshSolid& s : tabRidges(f, fr, d2))
+        parts.push_back(std::move(s));
+    parts.push_back(solid(round(alongPin(fr, d), r, r, -half, half, false)));
+    parts.push_back(solid(round(alongPin(fr, d2), r, r, -half, half, false)));
+    parts.push_back(solid(box(fr, -half, half, -r, r, d2, d)));
+    const MeshSolid body = meshkernel::merged(parts);
     return meshkernel::subtracted(body, {hole(d), hole(d2)});
 }
 
 // The swivel's peg: down to the bottom of the bore, a lip round its end (with a lead-in
 // so it goes in) and a slit across it so the lip can squeeze through.
-double lipHeight(const HingeFinish& f) { return std::max(0.8, 2.0 * f.lip); }
 
 MeshSolid pegBody(const HingeFinish& f, const Frame& fr)
 {
     const double r = f.width / 2.0, depth = f.barrel, lip = f.lip, h = lipHeight(f);
-    return meshkernel::merged({solid(round(fr, r, r, -stemOut(f), depth, false)),
-                               solid(round(fr, r + lip, r + lip, depth - h, depth - h / 2.0, false)),
-                               solid(round(fr, r + lip, r, depth - h / 2.0, depth, false))});
+    std::vector<MeshSolid> parts{solid(round(fr, r, r, -stemOut(f), depth, false)),
+                                 solid(round(fr, r + lip, r + lip, depth - h, depth - h / 2.0, false)),
+                                 solid(round(fr, r + lip, r, depth - h / 2.0, depth, false))};
+    for (const Mesh& m : swivelClicks(f, fr, false))
+        parts.push_back(solid(m));
+    return meshkernel::merged(parts);
 }
 
 Mesh pegSlit(const HingeFinish& f, const Frame& fr)
@@ -231,6 +344,15 @@ void check(const HingeFinish& f)
         throw std::invalid_argument("The fit must be from 0 to 1 mm.");
     if (f.reach < 0.0)
         throw std::invalid_argument("The reach can't be less than 0.");
+    if (f.clicks < 0 || f.clicks > 36)
+        throw std::invalid_argument("A joint can have up to 36 clicks a turn.");
+    if (f.clicks > 0) {
+        if (!std::isfinite(f.clickDepth) || f.clickDepth > 2.0)
+            throw std::invalid_argument("The clicks can be up to 2 mm deep.");
+        if (!(f.clickDepth >= f.fit + 0.05))
+            throw std::invalid_argument("Make the clicks deeper than the fit (by 0.05 mm or more), or they won't "
+                                        "click.");
+    }
     if (f.kind == HingeKind::Swivel) {
         if (!(f.width >= 1.0))
             throw std::invalid_argument("The swivel's peg must be at least 1 mm across.");
@@ -240,6 +362,13 @@ void check(const HingeFinish& f)
             throw std::invalid_argument("The lip must be more than 0 and no more than a quarter of the peg.");
         if (lipHeight(f) > f.barrel * 0.6)
             throw std::invalid_argument("The swivel's peg is too short for its lip: make it go in further.");
+        if (f.clicks > 0) {
+            const Clicks c = clicksOf(f);
+            if (c.to - c.from < 0.8)
+                throw std::invalid_argument("The peg is too short for clicks: make it go in further.");
+            if (c.half < 0.75 * f.clickDepth)
+                throw std::invalid_argument("Too many clicks for a peg this size: use fewer.");
+        }
         return;
     }
     if (!(f.width >= 0.8))
@@ -251,6 +380,13 @@ void check(const HingeFinish& f)
                                     "each side).");
     if (f.kind == HingeKind::Double && f.gap < 0.0)
         throw std::invalid_argument("The gap between the parts can't be less than 0.");
+    if (f.clicks > 0) {
+        const Clicks c = clicksOf(f);
+        if (c.to - c.from < 0.5)
+            throw std::invalid_argument("The tab's end is too small round the pin for clicks: make it wider.");
+        if (c.half < 0.75 * f.clickDepth)
+            throw std::invalid_argument("Too many clicks for a tab this size: use fewer.");
+    }
 }
 
 double reachOf(const HingeFinish& f)
@@ -287,6 +423,8 @@ std::vector<Mesh> forkCutters(const HingeFinish& f, const Vec3& point, const Vec
         cuts.push_back(round(fr, r + g, r + g, -kOut, depth + g, true));
         // The groove the lip snaps into.
         cuts.push_back(round(fr, r + f.lip + g, r + f.lip + g, depth - lipHeight(f) - g, depth + g, true));
+        for (Mesh& m : swivelClicks(f, fr, true))
+            cuts.push_back(std::move(m));
         return cuts;
     }
     const double half = f.width / 2.0 + g, d = pinDepth(f), r = f.barrel / 2.0 + g;
@@ -301,6 +439,9 @@ std::vector<Mesh> forkCutters(const HingeFinish& f, const Vec3& point, const Vec
         cuts.push_back(box(fr, -half, half, -reach, 0.0, -kOut, d + r));
     // The pin hole, right through the arms.
     cuts.push_back(round(alongPin(fr, d), armHole(f) / 2.0, armHole(f) / 2.0, -reach, reach, true));
+    // Clicks: grooves in the arms' faces round the pin.
+    for (Mesh& m : armGrooves(f, fr))
+        cuts.push_back(std::move(m));
     return cuts;
 }
 
@@ -322,8 +463,10 @@ TabHalf tabHalf(const HingeFinish& f, const Vec3& point, const Vec3& normal)
     const double deep = pinDepth(f) + f.barrel / 2.0 + f.fit + reach;
     t.clear = box(fr, -reach, reach, -reach, reach, -f.fit, deep);
     const double r = f.barrel / 2.0, half = f.width / 2.0, d = pinDepth(f);
-    t.add = meshOf(meshkernel::merged(
-        {solid(round(alongPin(fr, d), r, r, -half, half, false)), solid(box(fr, -half, half, -r, r, -stemOut(f), d))}));
+    std::vector<MeshSolid> parts = tabRidges(f, fr, d);
+    parts.push_back(solid(round(alongPin(fr, d), r, r, -half, half, false)));
+    parts.push_back(solid(box(fr, -half, half, -r, r, -stemOut(f), d)));
+    t.add = meshOf(meshkernel::merged(parts));
     t.cut.push_back(round(alongPin(fr, d), tabHole(f) / 2.0, tabHole(f) / 2.0, -half - 1, half + 1, true));
     return t;
 }
@@ -394,7 +537,7 @@ std::string describe(const HingeFinish& f)
 {
     if (f.kind == HingeKind::Swivel)
         return std::string(f.half == HingeHalf::Fork ? "Swivel bore " : "Swivel peg ") + kDia + num(f.width) + kTimes +
-               num(f.barrel);
+               num(f.barrel) + (f.clicks > 0 ? ", " + std::to_string(f.clicks) + " clicks" : std::string());
     std::string text = f.kind == HingeKind::Double ? "Double hinge fork " :
                        f.half == HingeHalf::Fork  ? "Hinge fork " :
                                                     "Hinge tab ";
@@ -404,7 +547,10 @@ std::string describe(const HingeFinish& f)
     case PinKind::Filament: text += "filament pin "; break;
     case PinKind::Rod: text += "rod "; break;
     }
-    return text + kDia + num(f.pinSize);
+    text += kDia + num(f.pinSize);
+    if (f.clicks > 0)
+        text += ", " + std::to_string(f.clicks) + " clicks";
+    return text;
 }
 
 Body pieceBody(const Mesh& mesh, const std::string& name)

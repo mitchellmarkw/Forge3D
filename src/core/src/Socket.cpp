@@ -2,6 +2,7 @@
 #include "forge/core/Socket.h"
 
 #include "forge/core/Document.h"
+#include "forge/core/MeshKernel.h"
 
 #include <algorithm>
 #include <cmath>
@@ -274,6 +275,13 @@ void check(const SocketFinish& f)
         throw std::invalid_argument("The relief cuts need a width, less than the socket's size.");
     if (!(f.reliefDepth >= 0.0) || !std::isfinite(f.turn))
         throw std::invalid_argument("The relief cuts' depth can't be less than 0.");
+    if (f.ridges < 0 || f.ridges > 24)
+        throw std::invalid_argument("A ball socket can have up to 24 ridges.");
+    if (f.kind == SocketKind::Ball && f.ridges > 0) {
+        if (!std::isfinite(f.ridgeHeight) || !(f.ridgeHeight > f.fit) || f.ridgeHeight > f.size / 6.0)
+            throw std::invalid_argument("The ridges must stand in more than the fit (so they press on the ball), "
+                                        "and no more than a sixth of the ball.");
+    }
 }
 
 std::vector<Mesh> cutters(const SocketFinish& f, const Vec3& point, const Vec3& normal)
@@ -284,7 +292,27 @@ std::vector<Mesh> cutters(const SocketFinish& f, const Vec3& point, const Vec3& 
     std::vector<Mesh> cuts;
     if (f.kind == SocketKind::Ball) {
         const BallSeat seat = ballSeat(f);
-        cuts.push_back(ball(frame, seat.radius, seat.centreDepth));
+        if (f.ridges > 0) {
+            // Ridges left standing inside the cup, from the opening down: slices of the
+            // shell between the cup and `ridgeHeight` in from it are not cut away.
+            const auto solidOf = [](const Mesh& m) { return meshkernel::fromTriangles(m.positions, m.indices); };
+            const double width = std::max(0.4, 0.08 * f.size);
+            const MeshSolid inner = solidOf(ball(frame, seat.radius - f.ridgeHeight, seat.centreDepth));
+            std::vector<MeshSolid> ribs;
+            for (int i = 0; i < f.ridges; ++i) {
+                const double a = 2.0 * kPi * (i + 0.5) / f.ridges;  // between the relief cuts
+                ribs.push_back(meshkernel::subtracted(
+                    solidOf(slot(frame, a, width, seat.radius + 1.0, seat.centreDepth - seat.radius - 1.0,
+                                 seat.centreDepth + seat.radius + 1.0)),
+                    {inner}));
+            }
+            Mesh cup;
+            meshkernel::triangles(meshkernel::subtracted(solidOf(ball(frame, seat.radius, seat.centreDepth)), ribs),
+                                  cup.positions, cup.indices);
+            cuts.push_back(std::move(cup));
+        } else {
+            cuts.push_back(ball(frame, seat.radius, seat.centreDepth));
+        }
         if (!f.snap)  // straight down to the ball's middle, so it drops in
             cuts.push_back(prism(frame, roundSides(seat.radius), seat.radius / std::cos(kPi / roundSides(seat.radius)),
                                  0.0, -out, seat.centreDepth));
@@ -322,6 +350,8 @@ std::string describe(const SocketFinish& f)
                (f.shape == PegShape::Round ? "\xC3\x98" : "") + num(f.size) + " \xC3\x97 " + num(f.depth);
     if (f.reliefCuts > 0)
         text += ", " + std::to_string(f.reliefCuts) + " relief cuts";
+    if (f.kind == SocketKind::Ball && f.ridges > 0)
+        text += ", " + std::to_string(f.ridges) + " ridges";
     return text;
 }
 

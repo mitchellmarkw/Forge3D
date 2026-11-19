@@ -6,6 +6,7 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDoubleSpinBox>
+#include <QSpinBox>
 #include <QFormLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
@@ -146,6 +147,18 @@ HingePanel::HingePanel(QWidget* parent) : QWidget(parent)
     swingColumn->addWidget(labelled(tr("Bends:"), m_swing));
     pinColumn->addWidget(m_swingBox);
     layout->addWidget(m_pinBox);
+    auto* clickForm = new QFormLayout;
+    m_clicks = new QSpinBox;
+    m_clicks->setRange(0, 36);
+    m_clicks->setSpecialValueText(tr("None"));
+    m_clicks->setKeyboardTracking(false);
+    m_clicks->setToolTip(tr("A ratchet: ridges on the tab's faces (a swivel: along its peg) that snap into "
+                            "grooves, so the joint clicks round and holds a pose. How many clicks in a whole turn"));
+    clickForm->addRow(tr("Clicks a turn:"), m_clicks);
+    m_clickDepth = millimetres(0.05, 2.0, 0.05);
+    m_clickDepth->setToolTip(tr("How far the ridges stand out. More than the fit to click: the more, the firmer"));
+    clickForm->addRow(tr("Click depth:"), m_clickDepth);
+    layout->addLayout(clickForm);
 
     auto* placeForm = new QFormLayout;
     auto* turnRow = new QHBoxLayout;
@@ -241,6 +254,11 @@ HingePanel::HingePanel(QWidget* parent) : QWidget(parent)
             m_lastPinSize = v;
     });
     connect(m_stiff, &QCheckBox::toggled, this, &HingePanel::changed);
+    connect(m_clicks, &QSpinBox::valueChanged, this, [this] {
+        m_clickDepth->setEnabled(m_clicks->value() > 0);
+        emit changed();
+    });
+    connect(m_clickDepth, &QDoubleSpinBox::valueChanged, this, &HingePanel::changed);
     connect(quarter, &QPushButton::clicked, this, [this] {
         double t = m_turn->value() + 90.0;
         if (t > 180.0)
@@ -328,6 +346,10 @@ void HingePanel::setFinish(const HingeFinish& f)
         if (f.pin != PinKind::Filament)
             m_lastPinSize = f.pinSize;
         m_stiff->setChecked(f.stiff);
+        const QSignalBlocker c1(m_clicks), c2(m_clickDepth);
+        m_clicks->setValue(f.clicks);
+        m_clickDepth->setValue(f.clickDepth);
+        m_clickDepth->setEnabled(f.clicks > 0);
         m_swing->setCurrentIndex(int(f.swing));
         m_turn->setValue(f.turn);
         m_reach->setValue(f.reach);
@@ -348,6 +370,8 @@ HingeFinish HingePanel::finish() const
     f.pin = PinKind(m_pin->currentIndex());
     f.pinSize = f.pin == PinKind::Filament ? kFilament : m_pinSize->value();
     f.stiff = m_stiff->isChecked();
+    f.clicks = m_clicks->value();
+    f.clickDepth = m_clickDepth->value();
     f.swing = HingeSwing(m_swing->currentIndex());
     f.turn = m_turn->value();
     f.reach = m_reach->value();

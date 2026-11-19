@@ -78,11 +78,12 @@ Gate to Phase 2: a new user prints a customised part within 10 minutes.
 | 50 | Quick Hinge: single and double hinges and swivels, with pins, sized to fit once printed | Done (0.59.0) |
 | — | Tools menu with a Scale Calculator; mask painted in plain, high-contrast colours you can choose | Done (0.59.1) |
 | 51 | Pose test: turn the joints, see where parts hit, find each hinge's range, save poses | Done (0.60.0) |
-| 52 | Tolerance test print: holes, cups and pin holes at stepped fits; the best becomes the starting fit | **Delivered for testing** |
+| 52 | Tolerance test print: holes, cups and pin holes at stepped fits; the best becomes the starting fit | Done (0.61.0) |
+| 53 | Clicks (ratchet) on hinges and swivels; ridges in ball sockets for a stiffer hold | **Delivered for testing** |
 
 Slices 39–41 close the gaps found in the [Phase 1 gate review](docs/PHASE1_GATE.md).
 
-Waiting for a place: 12 figure, toy and scale-model features, in order (Ratchet and click joints next). See [docs/TODO.md](docs/TODO.md).
+Waiting for a place: 11 figure, toy and scale-model features, in order (Magnet pockets next). See [docs/TODO.md](docs/TODO.md).
 
 ## Phase 2: Sculpt · Phase 3: Hybrid · Phase 4: Pro
 

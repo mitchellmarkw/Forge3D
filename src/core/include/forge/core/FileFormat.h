@@ -66,7 +66,9 @@ namespace forge::file {
 //      turn, and the number both halves of one hinge share)
 //  30  saved poses ("poses": a name, the part held still, and each joint's angles by
 //      the step that makes the joint)
-inline constexpr int kFormatVersion = 30;
+//  31  clicks on Quick Hinge steps ("clicks", "clickDepth") and ridges in ball
+//      sockets ("ridges", "ridgeHeight")
+inline constexpr int kFormatVersion = 31;
 // The highest sculpt::Brush number a file may hold (Pattern).
 inline constexpr int kLastSculptBrush = 13;
 inline constexpr const char* kExtension = ".f3d";

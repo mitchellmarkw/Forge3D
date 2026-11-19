@@ -5,6 +5,7 @@
 
 #include <QComboBox>
 #include <QDoubleSpinBox>
+#include <QSpinBox>
 #include <QFormLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
@@ -97,6 +98,22 @@ SocketPanel::SocketPanel(QWidget* parent) : QWidget(parent)
                           "force (and a flexible print, or relief cuts). 5–15% suits most."));
     m_gripLabel = new QLabel(tr("Grip:"));
     gripForm->addRow(m_gripLabel, m_grip);
+    m_ridges = new QSpinBox;
+    m_ridges->setRange(0, 24);
+    m_ridges->setSpecialValueText(tr("None"));
+    m_ridges->setKeyboardTracking(false);
+    m_ridges->setToolTip(tr("Ridges left standing inside the cup that press on the ball, for a stiffer hold "
+                            "(they sit between any relief cuts)"));
+    gripForm->addRow(tr("Ridges:"), m_ridges);
+    m_ridgeHeight = new QDoubleSpinBox;
+    m_ridgeHeight->setRange(0.05, 2.0);
+    m_ridgeHeight->setDecimals(2);
+    m_ridgeHeight->setSingleStep(0.05);
+    m_ridgeHeight->setSuffix(tr(" mm"));
+    m_ridgeHeight->setKeyboardTracking(false);
+    m_ridgeHeight->setToolTip(tr("How far the ridges stand in. More than the fit presses on the ball: the more, the "
+                                 "stiffer"));
+    gripForm->addRow(tr("Ridge height:"), m_ridgeHeight);
     ball->addLayout(gripForm);
     layout->addWidget(m_ballBox);
 
@@ -212,8 +229,12 @@ SocketPanel::SocketPanel(QWidget* parent) : QWidget(parent)
         if (const auto f = fits::measured(m_printer->currentIndex() == 0, fitKind()))
             m_fit->setValue(*f);
     });
+    connect(m_ridges, &QSpinBox::valueChanged, this, [this] {
+        m_ridgeHeight->setEnabled(m_ridges->value() > 0);
+        emit changed();
+    });
     for (QDoubleSpinBox* box :
-         {m_ballSize, m_grip, m_pegSize, m_pegDepth, m_turn, m_fit, m_cutWidth, m_cutDepth})
+         {m_ballSize, m_grip, m_pegSize, m_pegDepth, m_turn, m_fit, m_cutWidth, m_cutDepth, m_ridgeHeight})
         connect(box, &QDoubleSpinBox::valueChanged, this, &SocketPanel::changed);
     connect(m_matching, &QPushButton::clicked, this, &SocketPanel::addMatchingRequested);
     connect(m_apply, &QPushButton::clicked, this, &SocketPanel::applyRequested);
@@ -256,6 +277,10 @@ void SocketPanel::setFinish(const SocketFinish& f)
         m_pegSize->setValue(f.size);
         m_hold->setCurrentIndex(f.snap ? 0 : 1);
         m_grip->setValue(f.grip);
+        const QSignalBlocker r1(m_ridges), r2(m_ridgeHeight);
+        m_ridges->setValue(f.ridges);
+        m_ridgeHeight->setValue(f.ridgeHeight);
+        m_ridgeHeight->setEnabled(f.ridges > 0);
         m_shape->setCurrentIndex(int(f.shape));
         m_pegDepth->setValue(f.depth);
         m_turn->setValue(f.turn);
@@ -280,6 +305,8 @@ SocketFinish SocketPanel::finish() const
     f.depth = m_pegDepth->value();
     f.snap = m_hold->currentIndex() == 0;
     f.grip = m_grip->value();
+    f.ridges = f.kind == SocketKind::Ball ? m_ridges->value() : 0;
+    f.ridgeHeight = m_ridgeHeight->value();
     f.shape = PegShape(m_shape->currentIndex());
     f.turn = m_turn->value();
     f.resin = m_printer->currentIndex() == 0;
