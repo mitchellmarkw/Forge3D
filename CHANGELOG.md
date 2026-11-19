@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.57.0 Beta — Slice 48: Split by Mask (2026-11-18)
+
+- **Split by Mask** (Design → Change): select a shape and paint over the part to cut
+  off by dragging on it (the ring shows the brush; **[** and **]** change its size;
+  hold **Ctrl** to rub paint out). **Apply** cuts the shape along the edge of the paint:
+  - **Both pieces** (or just the painted piece, or just the rest), named "… (masked)"
+    and "… (rest)", made as one undo step.
+  - Each cut is closed with a **smooth cap**: a surface stretched across the edge like
+    a membrane. Both pieces get the very same cap, facing opposite ways, so they fit
+    back together exactly. A band painted round a part gives two cuts, each capped.
+  - The cut follows the paint's edge closely: the surface is divided finely near it
+    first, so even a box's big flat faces are cut along the curve.
+  - **Undo Stroke** (or Ctrl+Z) and **Clear** while painting.
+- The cut is a step in the shape's history: double-click it to paint more or rub some
+  out, and both pieces change together (the other piece is hidden while you do).
+  **Remove the cut** gives the whole shape back. The paint moves and grows with the
+  shape when it's scaled.
+- Files with Split by Mask need Forge3D 0.57 or later to open (format 27).
+- 267 unit tests (4 new: which dab wins where they overlap; a box's corner cut off,
+  the two pieces closed and adding up to the whole box; a band round a cylinder, two
+  caps; Split by Mask on the plate: both pieces, changed together, saved, scaled,
+  undone).
+
 ## 0.56.0 Beta — Slice 47: Join Parts (2026-11-18)
 
 - **Join Parts** (Design → Arrange): moves one part so it joins another. Click the

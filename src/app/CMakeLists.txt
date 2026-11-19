@@ -43,6 +43,8 @@ add_executable(Forge3D WIN32
     SocketPanel.cpp
     JoinPanel.h
     JoinPanel.cpp
+    MaskPanel.h
+    MaskPanel.cpp
     SketchPanel.h
     SketchPanel.cpp
     SketchView.h

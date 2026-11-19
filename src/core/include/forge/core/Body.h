@@ -317,6 +317,7 @@ enum class BooleanOp {
     Smooth,       // the whole surface smoothed (mesh engine)
     ExtrudeDown,  // the underside stretched straight down to a plane (planePoint / planeNormal: up)
     Socket,       // a ball or peg socket cut in at a spot (planePoint, facing out: planeNormal)
+    MaskSplit,    // the part cut along the edge of a painted mask: the masked piece or the rest
 };
 
 // What happens to the picked edges of a shape.
@@ -502,6 +503,21 @@ struct SocketFinish {
     bool operator==(const SocketFinish&) const = default;
 };
 
+// Split by Mask: a mask painted on a part with a round brush, as dabs in order (a later
+// dab wins where they overlap: a point is masked if the last dab covering it painted).
+// The part is cut along the mask's edge and each piece closed with a smooth cap.
+struct MaskDab {
+    std::array<double, 3> centre{0.0, 0.0, 0.0};  // the step's coordinates
+    double radius = 2.0;
+    bool erase = false;
+    bool operator==(const MaskDab&) const = default;
+};
+struct MaskSplitFinish {
+    std::vector<MaskDab> dabs;
+    bool masked = true;  // this piece is the masked part (false: the rest)
+    bool operator==(const MaskSplitFinish&) const = default;
+};
+
 // Follow: a groove cut along (or a ridge raised along) a path drawn on the surface.
 // The path is a sketch drawn at a spot on the surface (`origin`, facing `normal`, its X
 // along `xAxis`) and laid over the surface from there: on a flat face it stays as
@@ -591,6 +607,8 @@ struct BooleanSpec {
     std::optional<ThreadFinish> thread{};
     // Socket: what it takes (the spot is planePoint / planeNormal).
     std::optional<SocketFinish> socket{};
+    // Split by Mask: the painted mask, and which piece this is.
+    std::optional<MaskSplitFinish> maskSplit{};
     // Edges: what to do to which edges.
     std::optional<EdgeFinish> edges{};
     // Shell: how thick, and which faces are left open.

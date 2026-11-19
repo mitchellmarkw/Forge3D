@@ -2,6 +2,7 @@
 #include "forge/core/Document.h"
 #include "forge/core/MeshSteps.h"
 #include "forge/core/Remesh.h"
+#include "forge/core/MaskSplit.h"
 #include "forge/core/Socket.h"
 #include "forge/core/Thread.h"
 #include "forge/core/Sculpt.h"
@@ -228,6 +229,15 @@ void Document::validateBoolean(const Body& body, const std::map<ObjectId, Object
             throw std::invalid_argument("A thread goes on exactly one shape");
         if (!body.boolean->thread || !(body.boolean->thread->size > 0) || !(body.boolean->thread->pitch > 0))
             throw std::invalid_argument("A thread needs a size and a pitch");
+    } else if (op == BooleanOp::MaskSplit) {
+        if (ops.size() != 1)
+            throw std::invalid_argument("Split by Mask works on exactly one shape");
+        if (!body.boolean->maskSplit || body.boolean->maskSplit->dabs.empty())
+            throw std::invalid_argument("Split by Mask needs a painted mask");
+        for (const MaskDab& d : body.boolean->maskSplit->dabs)
+            if (!(d.radius > 0.0) || !std::isfinite(d.radius) || !std::isfinite(d.centre[0]) ||
+                !std::isfinite(d.centre[1]) || !std::isfinite(d.centre[2]))
+                throw std::invalid_argument("A mask dab is damaged");
     } else if (op == BooleanOp::Socket) {
         if (ops.size() != 1)
             throw std::invalid_argument("A socket goes in exactly one shape");
@@ -554,7 +564,7 @@ TopoDS_Shape Document::combine(const BooleanSpec& spec) const
     try {
         if (op == BooleanOp::Emboss || op == BooleanOp::Sculpt || op == BooleanOp::Simplify ||
             op == BooleanOp::Thread || op == BooleanOp::Smooth || op == BooleanOp::ExtrudeDown ||
-            op == BooleanOp::Socket)
+            op == BooleanOp::Socket || op == BooleanOp::MaskSplit)
             throw GeometryError(toString(op) + " is worked out by the mesh engine");
         if (op == BooleanOp::Pattern)
             return patternShape(spec);
@@ -677,6 +687,7 @@ TopoDS_Shape Document::combine(const BooleanSpec& spec) const
             case BooleanOp::Smooth:
             case BooleanOp::ExtrudeDown:
             case BooleanOp::Socket:
+            case BooleanOp::MaskSplit:
                 break;  // handled above / by the mesh engine
             }
         }
@@ -793,7 +804,8 @@ TopoDS_Shape Document::previewCombine(const BooleanSpec& spec) const
          spec.op == BooleanOp::Edges || spec.op == BooleanOp::Shell ||
          spec.op == BooleanOp::Follow || spec.op == BooleanOp::Pattern || spec.op == BooleanOp::Sculpt ||
          spec.op == BooleanOp::Simplify || spec.op == BooleanOp::Thread || spec.op == BooleanOp::Smooth ||
-         spec.op == BooleanOp::ExtrudeDown || spec.op == BooleanOp::Socket) &&
+         spec.op == BooleanOp::ExtrudeDown || spec.op == BooleanOp::Socket ||
+         spec.op == BooleanOp::MaskSplit) &&
         spec.operands.size() != 1)
         throw std::invalid_argument(toString(spec.op) + " works on exactly one shape");
     return combine(spec);
@@ -1026,7 +1038,7 @@ bool Document::specUsesMesh(const BooleanSpec& spec) const
 {
     if (spec.op == BooleanOp::Emboss || spec.op == BooleanOp::Sculpt || spec.op == BooleanOp::Simplify ||
         spec.op == BooleanOp::Thread || spec.op == BooleanOp::Smooth || spec.op == BooleanOp::ExtrudeDown ||
-        spec.op == BooleanOp::Socket)
+        spec.op == BooleanOp::Socket || spec.op == BooleanOp::MaskSplit)
         return true;  // letters following a surface, and sculpting, only exist as triangles
     for (ObjectId part : spec.operands)
         if (usesMeshEngine(part))
@@ -1335,6 +1347,16 @@ MeshSolid Document::combineMeshes(const BooleanSpec& spec) const
         const ObjectId part = spec.operands.front();
         const Mesh done = sculpted(sculptStart(part, spec.sculpt->detail), *spec.sculpt);
         return meshkernel::transformed(meshkernel::fromTriangles(done.positions, done.indices), localTransform(part));
+    }
+    case BooleanOp::MaskSplit: {
+        if (!spec.maskSplit)
+            throw GeometryError("Split by Mask has no mask");
+        std::vector<float> pos;
+        std::vector<std::uint32_t> idx;
+        meshkernel::triangles(parts.front(), pos, idx);
+        const mask::Pieces pieces = mask::split(pos, idx, spec.maskSplit->dabs);
+        const Mesh& piece = spec.maskSplit->masked ? pieces.masked : pieces.rest;
+        return meshkernel::fromTriangles(piece.positions, piece.indices);
     }
     case BooleanOp::Socket: {
         if (!spec.socket)

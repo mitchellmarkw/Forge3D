@@ -227,6 +227,7 @@ const char* opName(BooleanOp op)
     case BooleanOp::ExtrudeDown: return "extrudeDown";
     case BooleanOp::Thread: return "thread";
     case BooleanOp::Socket: return "socket";
+    case BooleanOp::MaskSplit: return "maskSplit";
     }
     return "merge";
 }
@@ -315,6 +316,12 @@ json bodyToJson(const Body& b)
                 face["relative"] = t->face.relative;
             j["thread"] = json{{"face", face},   {"size", t->size},         {"pitch", t->pitch},
                                {"fit", t->fit}, {"leftHand", t->leftHand}};
+        }
+        if (const auto& ms = b.boolean->maskSplit) {
+            json dabs = json::array();
+            for (const MaskDab& d : ms->dabs)
+                dabs.push_back(json::array({d.centre[0], d.centre[1], d.centre[2], d.radius, d.erase ? 1 : 0}));
+            j["mask"] = json{{"piece", ms->masked ? "masked" : "rest"}, {"dabs", dabs}};
         }
         if (const auto& so = b.boolean->socket) {
             static const char* shapes[] = {"round", "square", "hexagon", "octagon"};
@@ -519,6 +526,8 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
             spec.op = BooleanOp::ExtrudeDown;
         else if (op == "socket" && version >= 26)
             spec.op = BooleanOp::Socket;
+        else if (op == "maskSplit" && version >= 27)
+            spec.op = BooleanOp::MaskSplit;
         else
             damaged(where + ": unknown combine operation '" + op + "'");
         const auto operands = j.find("operands");
@@ -668,6 +677,29 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
             t.fit = tj->value("fit", 0.2);
             t.leftHand = tj->value("leftHand", false);
             spec.thread = t;
+        }
+        if (spec.op == BooleanOp::MaskSplit) {
+            const auto mj = j.find("mask");
+            if (mj == j.end() || !mj->is_object())
+                damaged(where + ": missing the mask");
+            MaskSplitFinish ms;
+            ms.masked = mj->value("piece", std::string("masked")) != "rest";
+            const auto dj = mj->find("dabs");
+            if (dj == mj->end() || !dj->is_array())
+                damaged(where + ": the mask's dabs are missing");
+            for (const auto& d : *dj) {
+                if (!d.is_array() || d.size() != 5)
+                    damaged(where + ": a mask dab is damaged");
+                for (std::size_t i = 0; i < 5; ++i)
+                    if (!d[i].is_number())
+                        damaged(where + ": a mask dab is damaged");
+                MaskDab dab;
+                dab.centre = {d[0].get<double>(), d[1].get<double>(), d[2].get<double>()};
+                dab.radius = d[3].get<double>();
+                dab.erase = d[4].get<double>() != 0.0;
+                ms.dabs.push_back(dab);
+            }
+            spec.maskSplit = std::move(ms);
         }
         if (spec.op == BooleanOp::Socket) {
             const auto sj = j.find("socket");

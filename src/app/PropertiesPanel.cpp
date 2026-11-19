@@ -378,6 +378,10 @@ void PropertiesPanel::setBody(const Body* body, const QString& context, bool isP
             button->setText(tr("Remove the sculpting"));
             button->setToolTip(tr("Give back the shape as it was before it was sculpted, where it is"));
             break;
+        case BooleanOp::MaskSplit:
+            button->setText(tr("Remove the cut"));
+            button->setToolTip(tr("Give back the whole shape, where it is"));
+            break;
         case BooleanOp::Socket:
             button->setText(tr("Remove the socket"));
             button->setToolTip(tr("Give back the shape without the socket, where it is"));
