@@ -8,6 +8,7 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -1003,6 +1004,18 @@ std::string readWholeFile(const std::filesystem::path& path)
     return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
 }
 
+// The zip entry holding a reference picture's file: "references/front.png".
+std::string referenceEntry(const ReferenceImage& r)
+{
+    std::string suffix;
+    for (char c : r.suffix)
+        if (std::isalnum(static_cast<unsigned char>(c)) && suffix.size() < 5)
+            suffix += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    if (suffix.empty())
+        suffix = "img";
+    return std::string("references/") + reference::key(r.view) + "." + suffix;
+}
+
 }  // namespace
 
 // ---- JSON -----------------------------------------------------------------------
@@ -1012,12 +1025,81 @@ std::string toJson(const Document& doc, const std::string& createdBy)
     json bodies = json::array();
     for (const Body& b : doc.bodies())
         bodies.push_back(bodyToJson(b));
-    const json root{{"format", kFormatName},
+    json root{{"format", kFormatName},
                     {"formatVersion", kFormatVersion},
                     {"createdBy", createdBy},
                     {"units", "mm"},
                     {"bodies", std::move(bodies)}};
+    if (!doc.references().empty()) {
+        json pictures = json::array();
+        for (const ReferenceImage& r : doc.references())
+            pictures.push_back({{"view", reference::key(r.view)},
+                                {"name", r.name},
+                                {"file", referenceEntry(r)},
+                                {"pixels", {r.pixelsWide, r.pixelsHigh}},
+                                {"mmPerPixel", r.mmPerPixel},
+                                {"across", r.across},
+                                {"up", r.up},
+                                {"turn", r.turn},
+                                {"depth", r.depth},
+                                {"opacity", r.opacity},
+                                {"shown", r.shown},
+                                {"active", r.active}});
+        root["references"] = std::move(pictures);
+    }
     return root.dump(2);
+}
+
+std::vector<ReferenceImage> referencesFromJson(const std::string& text,
+                                               const std::function<std::string(const std::string&)>& readEntry)
+{
+    std::vector<ReferenceImage> out;
+    json root;
+    try {
+        root = json::parse(text);
+    } catch (const json::parse_error&) {
+        return out;
+    }
+    const auto list = root.is_object() ? root.find("references") : root.end();
+    if (!root.is_object() || list == root.end() || !list->is_array() || !readEntry)
+        return out;
+    // A picture that can't be read is left out: it isn't part of the model, so it's no
+    // reason to refuse the file.
+    for (const json& j : *list) {
+        try {
+            if (!j.is_object())
+                continue;
+            const auto view = reference::fromKey(j.value("view", std::string()));
+            if (!view || reference::find(out, *view))
+                continue;
+            ReferenceImage r;
+            r.view = *view;
+            r.name = j.value("name", std::string());
+            const std::string file = j.value("file", std::string());
+            if (file.rfind("references/", 0) != 0)
+                continue;
+            const auto dot = file.rfind('.');
+            r.suffix = dot == std::string::npos ? std::string() : file.substr(dot + 1);
+            const json& pixels = j.at("pixels");
+            r.pixelsWide = pixels.at(0).get<int>();
+            r.pixelsHigh = pixels.at(1).get<int>();
+            r.mmPerPixel = j.at("mmPerPixel").get<double>();
+            r.across = j.value("across", 0.0);
+            r.up = j.value("up", 0.0);
+            r.turn = j.value("turn", 0.0);
+            r.depth = j.value("depth", 0.0);
+            r.opacity = std::clamp(j.value("opacity", 0.6), 0.0, 1.0);
+            r.shown = j.value("shown", true);
+            r.active = j.value("active", true);
+            r.data = std::make_shared<const std::string>(readEntry(file));
+            std::vector<ReferenceImage> one{r};
+            reference::validate(one);
+            out.push_back(std::move(r));
+        } catch (const std::exception&) {
+            continue;
+        }
+    }
+    return out;
 }
 
 std::vector<Body> fromJson(const std::string& text, const std::function<std::string(const std::string&)>& readEntry)
@@ -1188,6 +1270,14 @@ void save(const Document& doc, const std::filesystem::path& path, const std::str
                                        static_cast<mz_uint>(MZ_DEFAULT_COMPRESSION));
         }
     }
+    // Reference pictures, as they were read (already squeezed: stored as they are).
+    for (const ReferenceImage& r : doc.references()) {
+        if (!ok)
+            break;
+        const std::string name = referenceEntry(r);
+        ok = mz_zip_writer_add_mem(&zip, name.c_str(), r.data->data(), r.data->size(),
+                                   static_cast<mz_uint>(MZ_NO_COMPRESSION));
+    }
     // The finished results of the slow steps, so opening the file is quick.
     for (const Body& b : doc.bodies()) {
         if (!ok)
@@ -1283,6 +1373,36 @@ std::vector<Body> load(const std::filesystem::path& path)
         mz_zip_reader_end(&zip);
         throw;
     }
+}
+
+std::vector<ReferenceImage> loadReferences(const std::filesystem::path& path)
+{
+    std::string bytes;
+    try {
+        bytes = readWholeFile(path);
+    } catch (const std::exception&) {
+        return {};
+    }
+    mz_zip_archive zip{};
+    if (!mz_zip_reader_init_mem(&zip, bytes.data(), bytes.size(), 0))
+        return {};
+    std::vector<ReferenceImage> out;
+    size_t size = 0;
+    if (void* data = mz_zip_reader_extract_file_to_heap(&zip, kDocumentEntry, &size, 0)) {
+        const std::string jsonText(static_cast<const char*>(data), size);
+        mz_free(data);
+        out = referencesFromJson(jsonText, [&zip](const std::string& name) {
+            size_t entrySize = 0;
+            void* entry = mz_zip_reader_extract_file_to_heap(&zip, name.c_str(), &entrySize, 0);
+            if (!entry)
+                throw FileError("missing " + name);
+            std::string got(static_cast<const char*>(entry), entrySize);
+            mz_free(entry);
+            return got;
+        });
+    }
+    mz_zip_reader_end(&zip);
+    return out;
 }
 
 namespace {

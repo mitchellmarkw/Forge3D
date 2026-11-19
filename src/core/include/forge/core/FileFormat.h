@@ -2,6 +2,7 @@
 #pragma once
 
 #include "forge/core/Body.h"
+#include "forge/core/Reference.h"
 
 #include <filesystem>
 #include <functional>
@@ -58,7 +59,9 @@ namespace forge::file {
 //  25  Smooth and Extrude Down steps
 //  26  Quick Socket steps (operation "socket": a ball or peg socket at a spot)
 //  27  Split by Mask steps (operation "maskSplit": the dabs painted, which piece)
-inline constexpr int kFormatVersion = 27;
+//  28  reference images ("references": one per direction, its size, place, opacity,
+//      shown and active; the picture file kept as it was in "references/<view>.<kind>")
+inline constexpr int kFormatVersion = 28;
 // The highest sculpt::Brush number a file may hold (Pattern).
 inline constexpr int kLastSculptBrush = 13;
 inline constexpr const char* kExtension = ".f3d";
@@ -77,6 +80,13 @@ void save(const Document& doc, const std::filesystem::path& path, const std::str
 
 // Reads a document's bodies. Use Document::replaceAll() to show them.
 std::vector<Body> load(const std::filesystem::path& path);
+
+// The reference images kept in a file (none if it has none). A picture that can't be
+// read is left out, never a reason to refuse the file. Use Document::setReferences().
+std::vector<ReferenceImage> loadReferences(const std::filesystem::path& path);
+// The same from the JSON part; `readEntry` returns a zip entry's bytes.
+std::vector<ReferenceImage> referencesFromJson(const std::string& json,
+                                               const std::function<std::string(const std::string&)>& readEntry);
 
 // Saved results. Steps worked out by the mesh engine (Smooth, Extrude Down, Sculpt,
 // merges of imported meshes...) can take a long while on big meshes, so save() also

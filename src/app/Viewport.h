@@ -13,12 +13,15 @@
 #include <QOpenGLWidget>
 #include <QPointF>
 #include <QColor>
+#include <QImage>
 #include <QSizeF>
 #include <QString>
 #include <QVector3D>
 #include <QVector4D>
 
+#include <array>
 #include <cstdint>
+#include <string>
 #include <memory>
 #include <map>
 #include <set>
@@ -27,6 +30,7 @@
 #include <vector>
 
 class QVariantAnimation;
+class QOpenGLTexture;
 
 class QOpenGLFunctions_3_3_Core;
 
@@ -157,6 +161,19 @@ public:
     // cutOnly: just the shapes a selected-only section cuts (all, if there are none).
     Bounds sceneBounds(bool cutOnly = false) const;
 
+    // Reference pictures, drawn behind the model, each seen from its own side only.
+    // Not shapes: never counted by Fit, never warned about.
+    struct Picture {
+        std::shared_ptr<const std::string> file;  // the picture file (PNG, JPEG...)
+        std::array<QVector3D, 4> corners;          // plate mm: top-left, top-right, bottom-right, bottom-left
+        QVector3D toward;                          // its front faces this way
+        float opacity = 0.6f;
+        bool chosen = false;  // outlined (the one being changed)
+    };
+    void setPictures(std::vector<Picture> pictures);
+    // Reads a picture file the way the view shows it (turned as its camera says).
+    static QImage readPicture(const QByteArray& file);
+
     const view::OrbitCamera& camera() const { return m_camera; }
     std::optional<QPointF> projectToScreen(const QVector3D& point) const;
 
@@ -215,6 +232,7 @@ private:
     void upload(GpuMesh& gpu, const std::shared_ptr<const forge::Mesh>& mesh, bool headroom = false);
     void releaseGL();
     void drawBrushRing(const QMatrix4x4& viewProj);
+    void drawPictures(const QMatrix4x4& viewProj);
     QRectF viewCubeArea() const;
     std::optional<int> viewCubePieceAt(const QPointF& pixel) const;
     // The three buttons under the cube: 0 turn left, 1 home view, 2 turn right.
@@ -242,6 +260,13 @@ private:
     std::optional<BrushRing> m_brushRing;
     QOpenGLVertexArrayObject m_ringVao;
     QOpenGLBuffer m_ringBuffer{QOpenGLBuffer::VertexBuffer};
+
+    // Reference pictures
+    std::vector<Picture> m_pictures;
+    std::map<const std::string*, std::shared_ptr<QOpenGLTexture>> m_pictureTextures;  // by picture file
+    std::unique_ptr<QOpenGLShaderProgram> m_pictureShader;
+    QOpenGLVertexArrayObject m_pictureVao;
+    QOpenGLBuffer m_pictureBuffer{QOpenGLBuffer::VertexBuffer};
 
     // Scene
     std::vector<DisplayItem> m_items;

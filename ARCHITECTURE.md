@@ -1160,3 +1160,31 @@ and sharp across edges.
   look); each dab sets the shade of the points it covers and sends just those runs to
   the graphics card (`Viewport::meshChanged`). Mouse jumps are filled with dabs a
   quarter of the brush apart.
+
+## Reference images (slice 49)
+
+- `Reference.h/.cpp`: `ReferenceImage` (direction, the picture file's bytes as read,
+  shared; its size in pixels; mm per pixel; its middle along the view's right and up;
+  turn; how far behind the plate's middle; opacity; shown; active). `reference::frameOf`
+  gives each direction's right, up and towards-the-eye (the view cube's faces);
+  `corners`, `pointAt`, `hit` (from its own side only), `pick` (active and shown only:
+  inactive pictures are never in the way), `calibrated` (sized from two pixels and a
+  length, the first point kept where it was), `modelLength` (a real length shown at
+  1:N), `placed` (a new picture's size and spot), `validate` (one per direction).
+- The pictures are not bodies: `Document::references()` / `setReferences()` (whole set
+  at once; their own listener), changed through `SetReferencesCommand` (undoable;
+  slider and drag steps merge while the label is the same). So nothing that works on
+  bodies (export, Send to Slicer, printing splits, the custom shape library) ever sees
+  them.
+- File format 28: `"references"` in document.json, and each picture file stored as it
+  was in `references/<view>.<kind>`. `file::load` still returns just the bodies;
+  `file::loadReferences` reads the pictures (a broken one is left out, never a reason
+  to refuse the file).
+- App: `ReferencePanel` (a tool panel: View → Pictures → Reference Images), and
+  `MainWindow::ReferenceMode` (sizing clicks, dragging). `Viewport::setPictures` draws
+  them after the solid shapes, see-through, without writing depth, each only from its
+  own side and fading out as it turns edge-on; textures are kept per picture file (at
+  most 4096 pixels a side) and the chosen picture is outlined. Pictures are read with
+  `Viewport::readPicture` (camera rotation applied) both for their size and for drawing.
+  A click outside the panel that hits no shape but an active picture opens the panel on
+  it; dragging it moves it. **Show Pictures** hides them all (the view only).

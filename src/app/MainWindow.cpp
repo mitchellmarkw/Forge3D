@@ -23,6 +23,7 @@
 #include "Theme.h"
 #include "JoinPanel.h"
 #include "MaskPanel.h"
+#include "ReferencePanel.h"
 #include "SocketPanel.h"
 #include "ThreadPanel.h"
 #include "forge/core/Thread.h"
@@ -81,6 +82,7 @@
 #include <QSignalBlocker>
 #include <QSpinBox>
 #include <QFileDialog>
+#include <QImageReader>
 #include <QFileInfo>
 #include <QDragEnterEvent>
 #include <QDropEvent>
@@ -355,6 +357,19 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
             maskHover(o, d);
         if (m_measureMode.active)
             measureHover(o, d, px);
+        if (m_referenceMode.active && m_referenceMode.picking == 2) {
+            // A line from the first point to the mouse, while picking the second.
+            const ReferenceImage* image = reference::find(m_doc.references(), m_referencePanel->direction());
+            const auto h = image ? reference::hit(*image, {o.x(), o.y(), o.z()}, {d.x(), d.y(), d.z()}) : std::nullopt;
+            const Vec3& a = m_referenceMode.firstAt;
+            const QVector3D from{float(a[0]), float(a[1]), float(a[2])};
+            if (h) {
+                const Vec3 b = reference::pointAt(*image, h->px, h->py);
+                m_viewport->setLabels({{from, QVector3D(float(b[0]), float(b[1]), float(b[2])), tr("2")}});
+            } else {
+                m_viewport->setLabels({{from, from, tr("1")}});
+            }
+        }
     });
     connect(m_viewport, &Viewport::leftPressed, this, &MainWindow::onLeftPressed);
     connect(m_viewport, &Viewport::leftDragged, this, &MainWindow::onLeftDragged);
@@ -466,6 +481,8 @@ void MainWindow::createActions()
             undoMaskStroke();
             return;
         }
+        if (m_referenceMode.active)
+            m_referencePanel->setStatus({}, false);
         const QString label = QString::fromStdString(m_stack.undoLabel());
         m_stack.undo();
         qInfo().noquote() << "Undo:" << label;
@@ -570,6 +587,13 @@ void MainWindow::createActions()
             endJoin();
         else if (m_maskMode.active)
             endMask();
+        else if (m_referenceMode.active && m_referenceMode.picking) {
+            m_referenceMode.picking = 0;
+            m_referencePanel->setPicking(0);
+            m_referencePanel->setStatus(tr("Stopped picking."), false);
+            m_viewport->setLabels({});
+        } else if (m_referenceMode.active)
+            endReferences();
         else if (m_followMode.active)
             endFollow();
         else if (m_patternMode.active)
@@ -1004,6 +1028,21 @@ void MainWindow::createActions()
                                    "isn't changed)"));
     m_sectionAction->setStatusTip(m_sectionAction->toolTip());
 
+    m_referenceAction = new QAction(tr("Reference &Images..."), this);
+    m_referenceAction->setToolTip(tr("Reference Images: put a photo or drawing behind the model for each side, "
+                                     "sized to a length you know, to build to. Never exported or printed."));
+    m_referenceAction->setStatusTip(m_referenceAction->toolTip());
+    connect(m_referenceAction, &QAction::triggered, this, [this] { startReferences(); });
+    m_showPicturesAction = new QAction(tr("Show &Pictures"), this);
+    m_showPicturesAction->setCheckable(true);
+    m_showPicturesAction->setChecked(Preferences().value(QStringLiteral("reference/showAll"), true).toBool());
+    m_showPicturesAction->setToolTip(tr("Show or hide all the reference pictures (they stay in the file)"));
+    m_showPicturesAction->setStatusTip(m_showPicturesAction->toolTip());
+    connect(m_showPicturesAction, &QAction::toggled, this, [this](bool on) {
+        Preferences().setValue(QStringLiteral("reference/showAll"), on);
+        refreshReferences();
+    });
+
     {
         // How shapes are drawn (remembered).
         auto* looks = new QActionGroup(this);
@@ -1229,6 +1268,8 @@ void MainWindow::createToolBar()
         {m_fit, "fit"},
         {m_resetView, "reset-view"},
         {m_sectionAction, "section"},
+        {m_referenceAction, "reference"},
+        {m_showPicturesAction, "reference"},
         {m_plateSizeAction, "plate"},
     };
     for (const auto& [action, name] : pictures)
@@ -1387,6 +1428,8 @@ void MainWindow::createToolBar()
            named(m_resetView, tr("Reset View"))});
     group(viewPage, tr("Look"), {button(m_lookActions[0]), button(m_lookActions[1]), button(m_lookActions[2])});
     group(viewPage, tr("Objects"), {named(m_sectionAction, tr("Section View"))});
+    group(viewPage, tr("Pictures"),
+          {named(m_referenceAction, tr("Reference Images")), named(m_showPicturesAction, tr("Show Pictures"))});
     group(viewPage, tr("Plate"), {named(m_plateSizeAction, tr("Plate Size"))});
     common(viewPage);
 
@@ -1658,6 +1701,45 @@ void MainWindow::createDocks()
     m_maskPanel = new MaskPanel;
     stackLayout->addWidget(m_maskPanel);
     m_maskPanel->hide();
+    m_referencePanel = new ReferencePanel;
+    stackLayout->addWidget(m_referencePanel);
+    m_referencePanel->hide();
+    connect(m_referencePanel, &ReferencePanel::directionChanged, this, [this] {
+        if (m_referenceMode.picking) {
+            m_referenceMode.picking = 0;
+            m_referencePanel->setPicking(0);
+            m_viewport->setLabels({});
+        }
+        m_referencePanel->setStatus({}, false);
+        refreshReferences();
+    });
+    connect(m_referencePanel, &ReferencePanel::addRequested, this, &MainWindow::addReferencePicture);
+    connect(m_referencePanel, &ReferencePanel::removeRequested, this, &MainWindow::removeReferencePicture);
+    connect(m_referencePanel, &ReferencePanel::lookRequested, this, [this] {
+        const auto f = reference::frameOf(m_referencePanel->direction());
+        m_viewport->turnTo(QVector3D(float(f.toward[0]), float(f.toward[1]), float(f.toward[2])));
+    });
+    connect(m_referencePanel, &ReferencePanel::edited, this, &MainWindow::referenceEdited);
+    connect(m_referencePanel, &ReferencePanel::pickRequested, this, [this] {
+        if (m_referenceMode.picking) {
+            m_referenceMode.picking = 0;
+            m_referencePanel->setPicking(0);
+            m_referencePanel->setStatus({}, false);
+            m_viewport->setLabels({});
+            return;
+        }
+        const ReferenceImage* image = reference::find(m_doc.references(), m_referencePanel->direction());
+        if (!image)
+            return;
+        if (!image->shown || !m_showPicturesAction->isChecked()) {
+            m_referencePanel->setStatus(tr("Show the picture first, to click on it."), true);
+            return;
+        }
+        m_referenceMode.picking = 1;
+        m_referencePanel->setPicking(1);
+    });
+    connect(m_referencePanel, &ReferencePanel::doneRequested, this, &MainWindow::endReferences);
+    m_doc.addReferenceListener([this] { refreshReferences(); });
     m_measurePanel = new MeasurePanel;
     stackLayout->addWidget(m_measurePanel);
     m_measurePanel->hide();
@@ -1913,6 +1995,8 @@ void MainWindow::createDocks()
     connect(m_sectionDock, &QDockWidget::visibilityChanged, m_sectionAction, &QAction::setChecked);
     connect(m_sectionDock, &QDockWidget::visibilityChanged, m_sketchOnSection, &QAction::setEnabled);
     m_viewMenu->addAction(m_sectionAction);
+    m_viewMenu->addAction(m_referenceAction);
+    m_viewMenu->addAction(m_showPicturesAction);
     m_viewMenu->addSeparator();
     // Let the user bring closed panels back.
     m_viewMenu->addAction(objectsDock->toggleViewAction());
@@ -2104,6 +2188,10 @@ void MainWindow::onViewportClicked(const QVector3D& origin, const QVector3D& dir
     }
     if (m_maskMode.active)
         return;  // painting is done by pressing and dragging
+    if (m_referenceMode.active) {
+        referenceClick(origin, direction);
+        return;
+    }
     if (m_followMode.active) {
         followClick(origin, direction);
         return;
@@ -2113,6 +2201,8 @@ void MainWindow::onViewportClicked(const QVector3D& origin, const QVector3D& dir
     ray.direction = {direction.x(), direction.y(), direction.z()};
     try {
         const auto hit = pickShown(ray);
+        if (!hit && !modifiers.testFlag(Qt::ControlModifier) && referenceClickedOutside(origin, direction))
+            return;
         if (modifiers.testFlag(Qt::ControlModifier)) {
             if (hit)
                 toggleSelection(hit->id);  // Ctrl+click adds or removes
@@ -2202,6 +2292,12 @@ void MainWindow::onLeftPressed(const QVector3D& origin, const QVector3D& directi
         m_maskMode.lastDab.reset();
         m_maskMode.strokeStarts.push_back(m_maskMode.dabs.size());
         maskAt(origin, direction);
+        return;
+    }
+    if (m_referenceMode.active) {
+        // Pictures can be dragged; shapes stay put.
+        if (!m_referenceMode.picking)
+            grabReference(origin, direction);
         return;
     }
     if (m_splitMode.active) {
@@ -2314,8 +2410,16 @@ void MainWindow::onLeftPressed(const QVector3D& origin, const QVector3D& directi
     ray.origin = {origin.x(), origin.y(), origin.z()};
     ray.direction = {direction.x(), direction.y(), direction.z()};
     const auto hit = pickShown(ray);
-    if (!hit)
+    if (!hit) {
+        // An active reference picture can be dragged like a shape (a plain click opens
+        // its panel, on release).
+        if (grabReference(origin, direction))
+            statusBar()->showMessage(tr("Moving the %1 picture. (Untick Active in Reference Images to click "
+                                        "straight through it.)")
+                                         .arg(tr(reference::title(m_referenceMode.dragged))),
+                                     6000);
         return;  // empty space: the click (on release) clears the selection
+    }
     if (multiSelection() && isSelected(hit->id)) {
         // Grabbed one of several selected shapes: slide them all. (A plain click,
         // without dragging, still selects just that one.)
@@ -2344,6 +2448,11 @@ void MainWindow::onLeftDragged(const QVector3D& origin, const QVector3D& directi
         if (m_maskMode.stroking)
             maskAt(origin, direction);
         maskHover(origin, direction);
+        return;
+    }
+    if (m_referenceMode.active || m_referenceMode.dragging) {
+        if (m_referenceMode.dragging)
+            dragReference(origin, direction);
         return;
     }
     Drag& d = m_dragState;
@@ -2535,6 +2644,10 @@ void MainWindow::onLeftDragged(const QVector3D& origin, const QVector3D& directi
 
 void MainWindow::onLeftReleased(bool wasDrag)
 {
+    if (m_referenceMode.active || m_referenceMode.dragging) {
+        m_referenceMode.dragging = false;
+        return;
+    }
     if (m_maskMode.active) {
         m_maskMode.stroking = false;
         m_maskMode.lastDab.reset();
@@ -4079,7 +4192,7 @@ bool MainWindow::toolOpen() const
     return m_splitMode.active || m_fitMode.active || m_embossMode.active || m_edgesMode.active || m_sketchMode.picking ||
            m_sketchMode.active || m_holeMode.active || m_shellMode.active || m_followMode.active ||
            m_patternMode.active || m_sculptMode.active || m_measureMode.active || m_threadMode.active ||
-           m_socketMode.active || m_joinMode.active || m_maskMode.active;
+           m_socketMode.active || m_joinMode.active || m_maskMode.active || m_referenceMode.active;
 }
 
 void MainWindow::startEmboss(ObjectId target, bool editing)
@@ -5443,6 +5556,7 @@ void MainWindow::newDocument()
     if (!confirmDiscardChanges())
         return;
     m_doc.replaceAll({});
+    m_doc.setReferences({});
     m_stack.clear();
     m_selection.clear();
     m_expanded.clear();
@@ -5467,6 +5581,7 @@ bool MainWindow::openFile(const QString& path)
     try {
         std::vector<Body> bodies = file::load(toPath(path));
         m_doc.replaceAll(std::move(bodies));
+        m_doc.setReferences(file::loadReferences(toPath(path)));
         // The slow steps' results saved with the file: no need to work them out again.
         if (const std::size_t used = file::useSavedResults(m_doc, toPath(path)))
             qInfo().noquote() << "Saved results used:" << used;
@@ -5719,6 +5834,7 @@ bool MainWindow::recoverFrom(const QString& backup)
     try {
         std::vector<Body> bodies = file::load(toPath(backup));
         m_doc.replaceAll(std::move(bodies));
+        m_doc.setReferences(file::loadReferences(toPath(backup)));
         file::useSavedResults(m_doc, toPath(backup));
     } catch (const std::exception& e) {
         qWarning().noquote() << "Recovery failed:" << backup << "-" << e.what();
@@ -9476,6 +9592,308 @@ void MainWindow::endMask()
     statusBar()->clearMessage();
     refreshScene();
     refreshCommandState();
+}
+
+// ---- Reference Images ----------------------------------------------------------------
+
+void MainWindow::startReferences(std::optional<RefView> view)
+{
+    if (toolOpen())
+        return;
+    if (m_dragState.kind != Drag::Kind::None)
+        cancelDrag();
+    m_referenceMode = ReferenceMode{};
+    m_referenceMode.active = true;
+    const auto& images = m_doc.references();
+    if (view)
+        m_referencePanel->setDirection(*view);
+    else if (!reference::find(images, m_referencePanel->direction()) && !images.empty())
+        m_referencePanel->setDirection(images.front().view);
+    m_referencePanel->setPicking(0);
+    m_referencePanel->setStatus({}, false);
+    m_propsDockWidth = m_propsDock->width();
+    m_properties->hide();
+    m_referencePanel->show();
+    if (!m_showPicturesAction->isChecked())
+        m_showPicturesAction->setChecked(true);  // you'd want to see what you're changing
+    statusBar()->showMessage(tr("Reference Images: add a picture for a side, drag it into place, size it from two "
+                                "points. Done or Esc closes the panel; the pictures stay."));
+    refreshReferences();
+    refreshCommandState();
+}
+
+void MainWindow::endReferences()
+{
+    if (!m_referenceMode.active)
+        return;
+    m_referenceMode = ReferenceMode{};
+    m_referencePanel->hide();
+    m_properties->show();
+    QTimer::singleShot(0, this, [this] { resizeDocks({m_propsDock}, {m_propsDockWidth}, Qt::Horizontal); });
+    statusBar()->clearMessage();
+    showLabels();  // any kept measurements, instead of the picking marks
+    refreshReferences();
+    refreshCommandState();
+}
+
+void MainWindow::refreshReferences()
+{
+    const auto& images = m_doc.references();
+    std::vector<Viewport::Picture> pictures;
+    if (m_showPicturesAction && m_showPicturesAction->isChecked())
+        for (const ReferenceImage& r : images) {
+            if (!r.shown)
+                continue;
+            Viewport::Picture p;
+            p.file = r.data;
+            const auto c = reference::corners(r);
+            for (int i = 0; i < 4; ++i)
+                p.corners[std::size_t(i)] = QVector3D(float(c[std::size_t(i)][0]), float(c[std::size_t(i)][1]),
+                                                      float(c[std::size_t(i)][2]));
+            const auto f = reference::frameOf(r.view);
+            p.toward = QVector3D(float(f.toward[0]), float(f.toward[1]), float(f.toward[2]));
+            p.opacity = float(r.opacity);
+            p.chosen = m_referenceMode.active && r.view == m_referencePanel->direction();
+            pictures.push_back(std::move(p));
+        }
+    m_viewport->setPictures(std::move(pictures));
+    if (m_referenceMode.active) {
+        std::vector<RefView> taken;
+        for (const ReferenceImage& r : images)
+            taken.push_back(r.view);
+        m_referencePanel->showPicture(reference::find(images, m_referencePanel->direction()), taken);
+    }
+}
+
+void MainWindow::referenceEdited(const QString& what, bool dragging)
+{
+    auto images = m_doc.references();
+    const auto it = std::find_if(images.begin(), images.end(),
+                                 [this](const ReferenceImage& r) { return r.view == m_referencePanel->direction(); });
+    if (it == images.end())
+        return;
+    ReferenceImage& r = *it;
+    const double width = m_referencePanel->widthMm();
+    if (std::abs(width - r.widthMm()) > 1e-9 && r.pixelsWide > 0)
+        r.mmPerPixel = width / r.pixelsWide;
+    r.across = m_referencePanel->across();
+    r.up = m_referencePanel->up();
+    r.depth = m_referencePanel->behind();
+    r.turn = m_referencePanel->turn();
+    r.opacity = m_referencePanel->opacity();
+    r.shown = m_referencePanel->shown();
+    r.active = m_referencePanel->active();
+    try {
+        m_stack.execute(std::make_unique<SetReferencesCommand>(std::move(images), what.toStdString(), dragging));
+    } catch (const std::exception& e) {
+        m_referencePanel->setStatus(QString::fromUtf8(e.what()), true);
+    }
+}
+
+void MainWindow::addReferencePicture()
+{
+    const RefView view = m_referencePanel->direction();
+    QStringList patterns;
+    for (const QByteArray& format : QImageReader::supportedImageFormats())
+        patterns << QStringLiteral("*.%1").arg(QString::fromLatin1(format).toLower());
+    Preferences prefs;
+    QString folder = prefs.value(QStringLiteral("reference/folder")).toString();
+    if (folder.isEmpty() || !QDir(folder).exists())
+        folder = startFolder();
+    const QString path = QFileDialog::getOpenFileName(
+        this, tr("Choose a picture for the %1 side").arg(tr(reference::title(view))), folder,
+        tr("Pictures (%1);;All files (*)").arg(patterns.join(QLatin1Char(' '))));
+    if (path.isEmpty())
+        return;
+    prefs.setValue(QStringLiteral("reference/folder"), QFileInfo(path).absolutePath());
+
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        QMessageBox::warning(this, tr("Forge3D"), tr("Could not read %1.").arg(QFileInfo(path).fileName()));
+        return;
+    }
+    constexpr qint64 kMostBytes = 64 * 1024 * 1024;
+    if (file.size() > kMostBytes) {
+        QMessageBox::warning(this, tr("Forge3D"),
+                             tr("%1 is over 64 MB. Save it smaller (a few thousand pixels across is plenty) and "
+                                "try again.").arg(QFileInfo(path).fileName()));
+        return;
+    }
+    QByteArray bytes = file.readAll();
+    const QImage image = Viewport::readPicture(bytes);
+    if (image.isNull()) {
+        QMessageBox::warning(this, tr("Forge3D"),
+                             tr("%1 isn't a picture Forge3D can read.").arg(QFileInfo(path).fileName()));
+        return;
+    }
+
+    ReferenceImage r;
+    r.view = view;
+    r.name = QFileInfo(path).fileName().toStdString();
+    r.suffix = QFileInfo(path).suffix().toLower().toStdString();
+    r.data = std::make_shared<const std::string>(bytes.constData(), std::size_t(bytes.size()));
+    r.pixelsWide = image.width();
+    r.pixelsHigh = image.height();
+    auto images = m_doc.references();
+    const auto old = std::find_if(images.begin(), images.end(), [view](const ReferenceImage& i) { return i.view == view; });
+    const bool replacing = old != images.end();
+    if (replacing) {
+        // A new picture for the same side: just as wide, in the same place.
+        r.mmPerPixel = old->widthMm() / r.pixelsWide;
+        r.across = old->across;
+        r.up = old->up;
+        r.depth = old->depth;
+        r.turn = old->turn;
+        r.opacity = old->opacity;
+        r.shown = old->shown;
+        r.active = old->active;
+        *old = r;
+    } else {
+        // A bit bigger than the model (at least 100 mm; 150 on an empty plate), standing behind it.
+        const Bounds box = m_doc.worldBounds();
+        double fit = 150.0, behind = 10.0;
+        if (box.valid) {
+            const auto size = box.size();
+            fit = std::max(100.0, 1.2 * std::max({size[0], size[1], size[2]}));
+            const auto f = reference::frameOf(view);
+            double far = 0.0;  // the farthest the model reaches away from the viewer
+            for (int i = 0; i < 8; ++i) {
+                const Vec3 corner{i & 1 ? box.max[0] : box.min[0], i & 2 ? box.max[1] : box.min[1],
+                                  i & 4 ? box.max[2] : box.min[2]};
+                far = std::max(far, -(corner[0] * f.toward[0] + corner[1] * f.toward[1] + corner[2] * f.toward[2]));
+            }
+            behind = far + 10.0;
+        }
+        images.push_back(reference::placed(r, fit, behind));
+    }
+    try {
+        m_stack.execute(std::make_unique<SetReferencesCommand>(
+            std::move(images), replacing ? "Replace Picture" : "Add Picture"));
+    } catch (const std::exception& e) {
+        m_referencePanel->setStatus(QString::fromUtf8(e.what()), true);
+        return;
+    }
+    m_referencePanel->setStatus(tr("Added. Drag it into place, or size it from two points."), false);
+    const auto f = reference::frameOf(view);
+    m_viewport->turnTo(QVector3D(float(f.toward[0]), float(f.toward[1]), float(f.toward[2])));
+}
+
+void MainWindow::removeReferencePicture()
+{
+    auto images = m_doc.references();
+    const RefView view = m_referencePanel->direction();
+    const auto before = images.size();
+    std::erase_if(images, [view](const ReferenceImage& r) { return r.view == view; });
+    if (images.size() == before)
+        return;
+    m_stack.execute(std::make_unique<SetReferencesCommand>(std::move(images), "Remove Picture"));
+    m_referencePanel->setStatus(tr("Removed (Undo brings it back)."), false);
+}
+
+void MainWindow::referenceClick(const QVector3D& origin, const QVector3D& direction)
+{
+    const Vec3 o{origin.x(), origin.y(), origin.z()}, d{direction.x(), direction.y(), direction.z()};
+    auto& mode = m_referenceMode;
+    if (mode.picking) {
+        // Sizing: points on the chosen picture (even an inactive one: you asked to click on it).
+        const ReferenceImage* image = reference::find(m_doc.references(), m_referencePanel->direction());
+        const auto h = image ? reference::hit(*image, o, d) : std::nullopt;
+        if (!h) {
+            m_referencePanel->setStatus(tr("Click on the picture itself (looking at it from its own side)."), true);
+            return;
+        }
+        if (mode.picking == 1) {
+            mode.first = {h->px, h->py};
+            mode.firstAt = reference::pointAt(*image, h->px, h->py);
+            mode.picking = 2;
+            m_referencePanel->setPicking(2);
+            const QVector3D at(float(mode.firstAt[0]), float(mode.firstAt[1]), float(mode.firstAt[2]));
+            m_viewport->setLabels({{at, at, tr("1")}});
+            return;
+        }
+        try {
+            const double mm = m_referencePanel->calibrationLength();
+            auto images = m_doc.references();
+            for (ReferenceImage& r : images)
+                if (r.view == image->view)
+                    r = reference::calibrated(r, mode.first, {h->px, h->py}, mm);
+            m_stack.execute(std::make_unique<SetReferencesCommand>(std::move(images), "Size Picture"));
+            m_referencePanel->setStatus(tr("Sized: those points are now %1 mm apart.").arg(mm, 0, 'f', 2), false);
+        } catch (const std::exception& e) {
+            m_referencePanel->setStatus(QString::fromUtf8(e.what()), true);
+        }
+        mode.picking = 0;
+        m_referencePanel->setPicking(0);
+        m_viewport->setLabels({});
+        return;
+    }
+    // A click on an active picture chooses it.
+    if (!m_showPicturesAction->isChecked())
+        return;
+    const auto& images = m_doc.references();
+    if (const auto i = reference::pick(images, o, d); i && images[*i].view != m_referencePanel->direction())
+        m_referencePanel->setDirection(images[*i].view);
+}
+
+bool MainWindow::grabReference(const QVector3D& origin, const QVector3D& direction)
+{
+    if (!m_showPicturesAction->isChecked())
+        return false;
+    const auto& images = m_doc.references();
+    reference::Hit where;
+    const auto i = reference::pick(images, {origin.x(), origin.y(), origin.z()},
+                                   {direction.x(), direction.y(), direction.z()}, &where);
+    if (!i)
+        return false;
+    const ReferenceImage& r = images[*i];
+    if (r.view != m_referencePanel->direction())
+        m_referencePanel->setDirection(r.view);
+    m_referenceMode.dragging = true;
+    m_referenceMode.dragged = r.view;
+    m_referenceMode.grabbed = reference::pointAt(r, where.px, where.py);
+    m_referenceMode.startAcross = r.across;
+    m_referenceMode.startUp = r.up;
+    return true;
+}
+
+void MainWindow::dragReference(const QVector3D& origin, const QVector3D& direction)
+{
+    auto images = m_doc.references();
+    const auto it = std::find_if(images.begin(), images.end(),
+                                 [this](const ReferenceImage& r) { return r.view == m_referenceMode.dragged; });
+    if (it == images.end())
+        return;
+    const auto f = reference::frameOf(it->view);
+    const Vec3& g = m_referenceMode.grabbed;
+    const QVector3D normal(float(f.toward[0]), float(f.toward[1]), float(f.toward[2]));
+    const auto at = view::intersectPlane(origin, direction, QVector3D(float(g[0]), float(g[1]), float(g[2])), normal);
+    if (!at)
+        return;
+    const Vec3 shift{at->x() - g[0], at->y() - g[1], at->z() - g[2]};
+    it->across = m_referenceMode.startAcross + shift[0] * f.right[0] + shift[1] * f.right[1] + shift[2] * f.right[2];
+    it->up = m_referenceMode.startUp + shift[0] * f.up[0] + shift[1] * f.up[1] + shift[2] * f.up[2];
+    try {
+        m_stack.execute(std::make_unique<SetReferencesCommand>(std::move(images), "Move Picture", true));
+    } catch (const std::exception& e) {
+        qWarning() << "Picture move refused:" << e.what();
+    }
+}
+
+bool MainWindow::referenceClickedOutside(const QVector3D& origin, const QVector3D& direction)
+{
+    if (!m_showPicturesAction->isChecked() || toolOpen())
+        return false;
+    const auto& images = m_doc.references();
+    const auto i = reference::pick(images, {origin.x(), origin.y(), origin.z()},
+                                   {direction.x(), direction.y(), direction.z()});
+    if (!i)
+        return false;
+    setSelection(kInvalidId);
+    startReferences(images[*i].view);
+    statusBar()->showMessage(tr("You clicked the %1 picture. Untick Active in the panel to click straight through "
+                                "it.").arg(tr(reference::title(images[*i].view))),
+                             10000);
+    return true;
 }
 
 // ---- Join Parts -------------------------------------------------------------------

@@ -45,6 +45,7 @@ add_executable(forge_tests
     test_socket.cpp
     test_join.cpp
     test_mask_split.cpp
+    test_reference.cpp
     bench_sculpt.cpp
     fuzz_files.cpp
     test_undo_random.cpp
