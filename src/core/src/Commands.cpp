@@ -337,6 +337,34 @@ void SeparateCommand::undo(Document& doc)
 
 // ---- MacroCommand ---------------------------------------------------------------
 
+SetReferencesCommand::SetReferencesCommand(std::vector<ReferenceImage> images, std::string label, bool mergeable)
+    : m_after(std::move(images)), m_label(std::move(label)), m_mergeable(mergeable)
+{
+}
+
+void SetReferencesCommand::redo(Document& doc)
+{
+    std::vector<ReferenceImage> before = doc.references();
+    doc.setReferences(m_after);  // throws before changing anything
+    if (!m_before)
+        m_before = std::move(before);
+}
+
+void SetReferencesCommand::undo(Document& doc)
+{
+    if (m_before)
+        doc.setReferences(*m_before);
+}
+
+bool SetReferencesCommand::mergeWith(const Command& next)
+{
+    const auto* other = dynamic_cast<const SetReferencesCommand*>(&next);
+    if (!other || !other->m_mergeable || other->m_label != m_label)
+        return false;
+    m_after = other->m_after;
+    return true;
+}
+
 MacroCommand::MacroCommand(std::string label) : m_label(std::move(label)) {}
 
 void MacroCommand::appendApplied(std::unique_ptr<Command> command)

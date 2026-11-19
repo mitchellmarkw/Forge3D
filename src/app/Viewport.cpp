@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "Viewport.h"
 
+#include <QBuffer>
+#include <QImage>
+#include <QImageReader>
+#include <QOpenGLTexture>
+
 #include "forge/core/Layout.h"
 
 #include <QOpenGLFunctions_3_3_Core>
@@ -122,6 +127,28 @@ out vec4 fragColor;
 void main() { fragColor = vec4(vColor, 1.0); }
 )";
 
+const char* kPictureVertexShader = R"(#version 330 core
+layout(location = 0) in vec3 aPosition;
+layout(location = 1) in vec2 aUv;
+uniform mat4 uMvp;
+out vec2 vUv;
+void main() {
+    vUv = aUv;
+    gl_Position = uMvp * vec4(aPosition, 1.0);
+}
+)";
+
+const char* kPictureFragmentShader = R"(#version 330 core
+in vec2 vUv;
+uniform sampler2D uPicture;
+uniform float uOpacity;
+out vec4 fragColor;
+void main() {
+    vec4 c = texture(uPicture, vUv);
+    fragColor = vec4(c.rgb, c.a * uOpacity);
+}
+)";
+
 // ---- Look -----------------------------------------------------------------------
 
 constexpr float kMinorStep = 10.0f;
@@ -172,6 +199,10 @@ void Viewport::releaseGL()
     m_ringBuffer.destroy();
     m_meshShader.reset();
     m_lineShader.reset();
+    m_pictureTextures.clear();
+    m_pictureShader.reset();
+    m_pictureVao.destroy();
+    m_pictureBuffer.destroy();
     m_glReady = false;
 }
 
@@ -576,6 +607,7 @@ void Viewport::initializeGL()
 
     m_meshShader = buildProgram(kMeshVertexShader, kMeshFragmentShader, "mesh");
     m_lineShader = buildProgram(kLineVertexShader, kLineFragmentShader, "line");
+    m_pictureShader = buildProgram(kPictureVertexShader, kPictureFragmentShader, "picture");
     if (!m_meshShader || !m_lineShader) {
         emit glInfoReady(summary + QStringLiteral(" - shader error, see log"));
         return;
@@ -939,6 +971,9 @@ void Viewport::paintGL()
         }
     };
     drawItems(Pass::Solid);
+    m_meshShader->release();
+    drawPictures(viewProj);
+    m_meshShader->bind();
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     // See-through items: hidden behind solids, but don't hide each other.
@@ -1040,6 +1075,136 @@ void Viewport::setBrushRing(const std::optional<BrushRing>& ring)
 {
     m_brushRing = ring;
     update();
+}
+
+QImage Viewport::readPicture(const QByteArray& file)
+{
+    QByteArray copy = file;  // QBuffer wants something it may write to
+    QBuffer buffer(&copy);
+    buffer.open(QIODevice::ReadOnly);
+    QImageReader reader(&buffer);
+    reader.setAutoTransform(true);  // a phone photo taken sideways shows the right way up
+    return reader.read();
+}
+
+void Viewport::setPictures(std::vector<Picture> pictures)
+{
+    m_pictures = std::move(pictures);
+    update();
+}
+
+void Viewport::drawPictures(const QMatrix4x4& viewProj)
+{
+    if (!m_pictureShader)
+        return;
+    // Let go of pictures no longer shown.
+    for (auto it = m_pictureTextures.begin(); it != m_pictureTextures.end();) {
+        const bool used = std::any_of(m_pictures.begin(), m_pictures.end(),
+                                      [&it](const Picture& p) { return p.file.get() == it->first; });
+        it = used ? std::next(it) : m_pictureTextures.erase(it);
+    }
+    if (m_pictures.empty())
+        return;
+    const QVector3D eye = m_camera.eyePosition();
+    if (!m_pictureVao.isCreated()) {
+        m_pictureVao.create();
+        QOpenGLVertexArrayObject::Binder bind(&m_pictureVao);
+        m_pictureBuffer.create();
+        m_pictureBuffer.bind();
+        m_pictureBuffer.setUsagePattern(QOpenGLBuffer::DynamicDraw);
+        m_pictureBuffer.allocate(int(4 * 5 * sizeof(float)));
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), nullptr);
+        glEnableVertexAttribArray(1);
+        glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), reinterpret_cast<const void*>(3 * sizeof(float)));
+    }
+    // See-through, hidden where the model is in front, not hiding what's drawn after.
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glDepthMask(GL_FALSE);
+    m_pictureShader->bind();
+    m_pictureShader->setUniformValue("uMvp", viewProj);
+    m_pictureShader->setUniformValue("uPicture", 0);
+    std::vector<QVector3D> outlines;
+    for (const Picture& p : m_pictures) {
+        if (!p.file || p.file->empty())
+            continue;
+        // Seen from its own side only (from behind, it would be back to front).
+        if (QVector3D::dotProduct(eye - p.corners[0], p.toward) <= 0.0f)
+            continue;
+        // Fading out as it turns edge-on, where it would only be a confusing sliver.
+        const float facing = -QVector3D::dotProduct(m_camera.forward(), p.toward);
+        const float fade = std::clamp((facing - 0.1f) / 0.25f, 0.0f, 1.0f);
+        if (fade <= 0.0f)
+            continue;
+        auto& texture = m_pictureTextures[p.file.get()];
+        if (!texture) {
+            QImage image = readPicture(QByteArray::fromRawData(p.file->data(), qsizetype(p.file->size())));
+            if (image.isNull()) {  // a file Qt can't read: a plain grey card instead
+                image = QImage(2, 2, QImage::Format_RGBA8888);
+                image.fill(QColor(200, 200, 200));
+            }
+            // Older graphics chips take up to 4096 pixels a side (some 8192).
+            if (image.width() > 4096 || image.height() > 4096)
+                image = image.scaled(4096, 4096, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+            texture = std::make_shared<QOpenGLTexture>(image.convertToFormat(QImage::Format_RGBA8888).mirrored(),
+                                                       QOpenGLTexture::GenerateMipMaps);
+            texture->setMinificationFilter(QOpenGLTexture::LinearMipMapLinear);
+            texture->setMagnificationFilter(QOpenGLTexture::Linear);
+            texture->setWrapMode(QOpenGLTexture::ClampToEdge);
+        }
+        // Texture rows run bottom up (the image was flipped to suit).
+        const float uv[4][2] = {{0, 1}, {1, 1}, {1, 0}, {0, 0}};
+        float vertices[4 * 5];
+        const int order[4] = {0, 1, 3, 2};  // a strip: TL, TR, BL, BR
+        for (int k = 0; k < 4; ++k) {
+            const int i = order[k];
+            vertices[k * 5 + 0] = p.corners[i].x();
+            vertices[k * 5 + 1] = p.corners[i].y();
+            vertices[k * 5 + 2] = p.corners[i].z();
+            vertices[k * 5 + 3] = uv[i][0];
+            vertices[k * 5 + 4] = uv[i][1];
+        }
+        QOpenGLVertexArrayObject::Binder bind(&m_pictureVao);
+        m_pictureBuffer.bind();
+        m_pictureBuffer.write(0, vertices, int(sizeof vertices));
+        m_pictureShader->setUniformValue("uOpacity", std::clamp(p.opacity, 0.0f, 1.0f) * fade);
+        texture->bind(0);
+        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+        texture->release(0);
+        if (p.chosen)
+            for (int i = 0; i < 4; ++i)
+                outlines.insert(outlines.end(), {p.corners[i], p.corners[(i + 1) % 4]});
+    }
+    m_pictureShader->release();
+    glDepthMask(GL_TRUE);
+    glDisable(GL_BLEND);
+
+    if (!outlines.empty()) {
+        // The chosen picture's edge, in the selection blue, over everything.
+        std::vector<float> vertices;
+        for (const QVector3D& v : outlines)
+            vertices.insert(vertices.end(), {v.x(), v.y(), v.z(), 0.17f, 0.47f, 0.82f});
+        QOpenGLVertexArrayObject vao;
+        vao.create();
+        QOpenGLVertexArrayObject::Binder bind(&vao);
+        QOpenGLBuffer buffer(QOpenGLBuffer::VertexBuffer);
+        buffer.create();
+        buffer.bind();
+        buffer.allocate(vertices.data(), int(vertices.size() * sizeof(float)));
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), nullptr);
+        glEnableVertexAttribArray(1);
+        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), reinterpret_cast<const void*>(3 * sizeof(float)));
+        m_lineShader->bind();
+        m_lineShader->setUniformValue("uMvp", viewProj);
+        glDisable(GL_DEPTH_TEST);
+        glDrawArrays(GL_LINES, 0, GLsizei(outlines.size()));
+        glEnable(GL_DEPTH_TEST);
+        m_lineShader->release();
+        buffer.destroy();
+        vao.destroy();
+    }
 }
 
 void Viewport::drawBrushRing(const QMatrix4x4& viewProj)

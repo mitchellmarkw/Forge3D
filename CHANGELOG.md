@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.58.0 Beta — Slice 49: Reference Images (2026-11-18)
+
+- **Reference Images** (View → Pictures, or the View menu): a photo, drawing or model
+  sheet for each side (front, back, top, bottom, left, right), standing behind the
+  model to build to.
+  - **Add Picture…** places it on the plate behind the model, a bit bigger than it,
+    and turns the view to that side. **Replace Picture…** keeps its size and place.
+  - **Size from two points**: type a length you know, click its two ends on the
+    picture, and the picture is sized so they are that far apart. The length can be
+    real with the model's scale (4.5 m at 1:48 is 93.75 mm on the model) or already to
+    scale (91.2 mm, scale 1); mm, cm, m, inches or feet.
+  - **Opacity**, **Show**, and a width, slide, distance behind and turn for each.
+    Drag a picture in the view to move it.
+  - **Active**: an active picture can be clicked (that opens the panel on it) and
+    dragged like a shape. An inactive one is never in the way: clicks go straight
+    through it to the shapes and the plate.
+  - **Show Pictures** hides or shows them all at once.
+  - A picture is seen from its own side only, and fades out as the view turns edge-on.
+- Pictures are kept in the `.f3d` file (as they were, so nothing is lost), with every
+  change undoable, but they are never exported, sent to the slicer or added to the
+  custom shape library. Files with pictures need Forge3D 0.58 or later to open
+  (format 28).
+- 274 unit tests (7 new: each side's picture faces its own view; sizing from two points
+  keeps the first one still; clicks go through inactive and hidden pictures; a new
+  picture's place; one picture per side, undo; saved and opened again, and a broken
+  picture left out).
+
 ## 0.57.0 Beta — Slice 48: Split by Mask (2026-11-18)
 
 - **Split by Mask** (Design → Change): select a shape and paint over the part to cut

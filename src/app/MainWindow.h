@@ -73,6 +73,7 @@ class ThreadPanel;
 class SocketPanel;
 class JoinPanel;
 class MaskPanel;
+class ReferencePanel;
 class SketchPanel;
 class SketchView;
 struct DisplayItem;
@@ -712,6 +713,34 @@ private:
         std::unordered_map<std::uint64_t, std::vector<std::uint32_t>> grid;
     };
     MaskMode m_maskMode;
+
+    // Reference Images
+    QAction* m_referenceAction = nullptr;
+    QAction* m_showPicturesAction = nullptr;  // all pictures on or off (the view only)
+    ReferencePanel* m_referencePanel = nullptr;
+    struct ReferenceMode {
+        bool active = false;
+        int picking = 0;  // sizing from two points: 0 no, 1 first point, 2 second
+        std::array<double, 2> first{0, 0};  // the first point's pixel
+        Vec3 firstAt{0, 0, 0};              // and where it is, plate mm
+        bool dragging = false;
+        RefView dragged = RefView::Front;
+        Vec3 grabbed{0, 0, 0};  // where the picture was grabbed, plate mm
+        double startAcross = 0, startUp = 0;
+    };
+    ReferenceMode m_referenceMode;
+    void startReferences(std::optional<RefView> view = std::nullopt);
+    void endReferences();
+    // Pictures to the view, and the chosen one to the panel.
+    void refreshReferences();
+    void referenceEdited(const QString& what, bool dragging);
+    void addReferencePicture();
+    void removeReferencePicture();
+    void referenceClick(const QVector3D& origin, const QVector3D& direction);
+    bool grabReference(const QVector3D& origin, const QVector3D& direction);
+    void dragReference(const QVector3D& origin, const QVector3D& direction);
+    // A picture under a click outside the panel (active ones only): opens the panel on it.
+    bool referenceClickedOutside(const QVector3D& origin, const QVector3D& direction);
     void startMask(ObjectId target, bool editing);
     std::optional<emboss::SurfacePoint> maskHit(const QVector3D& origin, const QVector3D& direction) const;
     void maskAt(const QVector3D& origin, const QVector3D& direction);

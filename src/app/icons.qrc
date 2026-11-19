@@ -14,6 +14,7 @@
     <file alias="fit.svg">icons/fit.svg</file>
     <file alias="reset-view.svg">icons/reset-view.svg</file>
     <file alias="section.svg">icons/section.svg</file>
+    <file alias="reference.svg">icons/reference.svg</file>
     <file alias="plate.svg">icons/plate.svg</file>
     <file alias="split-fit.svg">icons/split-fit.svg</file>
     <file alias="align.svg">icons/align.svg</file>

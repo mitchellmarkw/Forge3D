@@ -2,6 +2,7 @@
 #pragma once
 
 #include "forge/core/Body.h"
+#include "forge/core/Reference.h"
 
 #include <cstddef>
 #include <memory>
@@ -40,7 +41,7 @@ public:
 };
 
 // Merge ids in use (keep unique).
-enum MergeIds : int { kMergeSetPlacement = 1 };
+enum MergeIds : int { kMergeSetPlacement = 1, kMergeReferences = 2 };
 
 // ---- Concrete commands ----------------------------------------------------------
 
@@ -222,6 +223,25 @@ private:
     ObjectId m_above = kInvalidId;
     Body m_step;
     std::vector<Body> m_tools;  // their placements as they were
+};
+
+// Changes the reference images (all of them at once: they're few, and their picture
+// files are shared, not copied). `mergeable`: a drag or slider, where every step joins
+// the one before into one undo step (only while the label is the same).
+class SetReferencesCommand final : public Command {
+public:
+    SetReferencesCommand(std::vector<ReferenceImage> images, std::string label, bool mergeable = false);
+    std::string label() const override { return m_label; }
+    void redo(Document& doc) override;
+    void undo(Document& doc) override;
+    int mergeId() const override { return m_mergeable ? kMergeReferences : -1; }
+    bool mergeWith(const Command& next) override;
+
+private:
+    std::vector<ReferenceImage> m_after;
+    std::optional<std::vector<ReferenceImage>> m_before;
+    std::string m_label;
+    bool m_mergeable;
 };
 
 class MacroCommand final : public Command {

@@ -4,6 +4,7 @@
 #include "forge/core/Body.h"
 #include "forge/core/Mesh.h"
 #include "forge/core/MeshKernel.h"
+#include "forge/core/Reference.h"
 #include "forge/core/Transform.h"
 
 #include <TopoDS_Shape.hxx>
@@ -193,6 +194,16 @@ public:
     // every change.
     std::shared_ptr<const Mesh> previewWords(const BooleanSpec& spec) const;
 
+    // ---- Reference images ----
+    // Pictures to build to (see Reference.h). Not part of the model: nothing exported
+    // or printed has them. Changed as a whole (one picture per direction).
+    const std::vector<ReferenceImage>& references() const { return m_references; }
+    // Throws std::invalid_argument (reference::validate) and changes nothing on a problem.
+    void setReferences(std::vector<ReferenceImage> images);
+    // Called after each setReferences.
+    int addReferenceListener(std::function<void()> listener);
+    void removeReferenceListener(int handle);
+
     // ---- Change notification ----
     int addListener(Listener listener);
     void removeListener(int handle);
@@ -235,6 +246,8 @@ private:
 
     std::map<int, Listener> m_listeners;
     int m_nextListener = 1;
+    std::vector<ReferenceImage> m_references;
+    std::map<int, std::function<void()>> m_referenceListeners;
 };
 
 // Validates a primitive's parameters; throws std::invalid_argument if not buildable.

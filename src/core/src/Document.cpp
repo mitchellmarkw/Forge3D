@@ -1611,6 +1611,28 @@ Bounds Document::worldBounds() const
 
 // ---- Change notification ----------------------------------------------------------
 
+void Document::setReferences(std::vector<ReferenceImage> images)
+{
+    reference::validate(images);
+    m_references = std::move(images);
+    // A copy: a listener may add or remove listeners.
+    const auto listeners = m_referenceListeners;
+    for (const auto& [handle, listener] : listeners)
+        listener();
+}
+
+int Document::addReferenceListener(std::function<void()> listener)
+{
+    const int handle = m_nextListener++;
+    m_referenceListeners.emplace(handle, std::move(listener));
+    return handle;
+}
+
+void Document::removeReferenceListener(int handle)
+{
+    m_referenceListeners.erase(handle);
+}
+
 int Document::addListener(Listener listener)
 {
     const int handle = m_nextListener++;
