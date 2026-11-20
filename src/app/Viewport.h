@@ -50,6 +50,8 @@ struct DisplayItem {
     // A tool's helper (a cutting plane, its arrow): not a shape, so never warned about
     // as too big or off the plate, and not counted by Fit.
     bool helper = false;
+    // Counted by Fit all the same (the figure guide).
+    bool fitted = false;
     // Painting a mask: the mesh's shade drawn as two plain colours, evenly lit (no
     // shadows to mistake for the mask).
     bool maskColours = false;

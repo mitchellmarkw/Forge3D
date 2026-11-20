@@ -26,6 +26,7 @@
 #include "HingePanel.h"
 #include "PosePanel.h"
 #include "PrintCheckPanel.h"
+#include "MannequinPanel.h"
 #include "MaskPanel.h"
 #include "ReferencePanel.h"
 #include "ScaleCalculator.h"
@@ -628,6 +629,8 @@ void MainWindow::createActions()
             m_viewport->setLabels({});
         } else if (m_referenceMode.active)
             endReferences();
+        else if (m_mannequinOpen)
+            endMannequin();
         else if (m_followMode.active)
             endFollow();
         else if (m_patternMode.active)
@@ -1091,6 +1094,12 @@ void MainWindow::createActions()
                                      "sized to a length you know, to build to. Never exported or printed."));
     m_referenceAction->setStatusTip(m_referenceAction->toolTip());
     connect(m_referenceAction, &QAction::triggered, this, [this] { startReferences(); });
+    m_mannequinAction = new QAction(tr("&Figure Guide..."), this);
+    m_mannequinAction->setToolTip(tr("Figure Guide: a see-through mannequin to build a figure to, at a figure "
+                                     "line's height and in proportion (heads tall), posed how you like. Never "
+                                     "printed."));
+    m_mannequinAction->setStatusTip(m_mannequinAction->toolTip());
+    connect(m_mannequinAction, &QAction::triggered, this, &MainWindow::startMannequin);
     m_showPicturesAction = new QAction(tr("Show &Pictures"), this);
     m_showPicturesAction->setCheckable(true);
     m_showPicturesAction->setChecked(Preferences().value(QStringLiteral("reference/showAll"), true).toBool());
@@ -1355,6 +1364,7 @@ void MainWindow::createToolBar()
         {m_resetView, "reset-view"},
         {m_sectionAction, "section"},
         {m_referenceAction, "reference"},
+        {m_mannequinAction, "mannequin"},
         {m_showPicturesAction, "reference"},
         {m_plateSizeAction, "plate"},
     };
@@ -1516,7 +1526,8 @@ void MainWindow::createToolBar()
     group(viewPage, tr("Look"), {button(m_lookActions[0]), button(m_lookActions[1]), button(m_lookActions[2])});
     group(viewPage, tr("Objects"), {named(m_sectionAction, tr("Section View"))});
     group(viewPage, tr("Pictures"),
-          {named(m_referenceAction, tr("Reference Images")), named(m_showPicturesAction, tr("Show Pictures"))});
+          {named(m_referenceAction, tr("Reference Images")), named(m_showPicturesAction, tr("Show Pictures")),
+           named(m_mannequinAction, tr("Figure Guide"))});
     group(viewPage, tr("Plate"), {named(m_plateSizeAction, tr("Plate Size"))});
     common(viewPage);
 
@@ -1901,6 +1912,38 @@ void MainWindow::createDocks()
     m_referencePanel = new ReferencePanel;
     stackLayout->addWidget(m_referencePanel);
     m_referencePanel->hide();
+    m_mannequinPanel = new MannequinPanel;
+    stackLayout->addWidget(m_mannequinPanel);
+    m_mannequinPanel->hide();
+    connect(m_mannequinPanel, &MannequinPanel::addRequested, this, [this] {
+        Mannequin m = m_mannequinPanel->fresh();
+        // Beside what's on the plate, so it doesn't stand inside the model.
+        const Bounds all = m_doc.worldBounds();
+        if (all.valid)
+            m.x = all.max[0] + 0.25 * m.height;
+        if (run(std::make_unique<SetMannequinCommand>(m, "Add Figure Guide"))) {
+            refreshScene();
+            m_viewport->fitView();  // it's usually taller than the model: show all of it
+        }
+    });
+    connect(m_mannequinPanel, &MannequinPanel::removeRequested, this,
+            [this] { run(std::make_unique<SetMannequinCommand>(std::nullopt, "Remove Figure Guide")); });
+    connect(m_mannequinPanel, &MannequinPanel::changed, this, [this](const Mannequin& m, const QString& label) {
+        try {
+            m_stack.execute(std::make_unique<SetMannequinCommand>(m, label.toStdString(), /*mergeable=*/true));
+            m_mannequinPanel->setStatus({}, false);
+        } catch (const std::exception& e) {
+            m_mannequinPanel->setStatus(QString::fromUtf8(e.what()), true);
+        }
+    });
+    connect(m_mannequinPanel, &MannequinPanel::doneRequested, this, &MainWindow::endMannequin);
+    m_doc.addMannequinListener([this] {
+        const auto& m = m_doc.mannequin();
+        m_mannequinMesh = m && m->shown ? std::make_shared<const Mesh>(mannequin::mesh(*m)) : nullptr;
+        if (m_mannequinOpen)
+            m_mannequinPanel->setMannequin(m);
+        scheduleSceneRefresh();
+    });
     connect(m_referencePanel, &ReferencePanel::directionChanged, this, [this] {
         if (m_referenceMode.picking) {
             m_referenceMode.picking = 0;
@@ -2257,6 +2300,7 @@ void MainWindow::createDocks()
     connect(m_sectionDock, &QDockWidget::visibilityChanged, m_sketchOnSection, &QAction::setEnabled);
     m_viewMenu->addAction(m_sectionAction);
     m_viewMenu->addAction(m_referenceAction);
+    m_viewMenu->addAction(m_mannequinAction);
     m_viewMenu->addAction(m_showPicturesAction);
     m_viewMenu->addSeparator();
     // Let the user bring closed panels back.
@@ -3443,6 +3487,7 @@ constexpr std::uint64_t kMeasurePickedItem = ~std::uint64_t{0} - 7;
 constexpr std::uint64_t kMeasureHoverItem = ~std::uint64_t{0} - 8;
 constexpr std::uint64_t kMeasureLineItem = ~std::uint64_t{0} - 9;
 constexpr std::uint64_t kMeasureCentreItem = ~std::uint64_t{0} - 10;
+constexpr std::uint64_t kMannequinItem = ~std::uint64_t{0} - 20;
 
 // Thin six-sided tubes along lines: how picked edges are drawn.
 std::shared_ptr<const Mesh> tubes(const std::vector<const std::vector<Vec3>*>& lines, float radius)
@@ -4474,7 +4519,7 @@ bool MainWindow::toolOpen() const
            m_sketchMode.active || m_holeMode.active || m_shellMode.active || m_followMode.active ||
            m_patternMode.active || m_sculptMode.active || m_measureMode.active || m_threadMode.active ||
            m_socketMode.active || m_joinMode.active || m_maskMode.active || m_referenceMode.active ||
-           m_hingeMode.active || m_poseMode.active || m_printCheckMode.active;
+           m_hingeMode.active || m_poseMode.active || m_printCheckMode.active || m_mannequinOpen;
 }
 
 void MainWindow::startEmboss(ObjectId target, bool editing)
@@ -5840,6 +5885,7 @@ void MainWindow::newDocument()
     m_doc.replaceAll({});
     m_doc.setReferences({});
     m_doc.setPoses({});
+    m_doc.setMannequin(std::nullopt);
     m_stack.clear();
     m_selection.clear();
     m_expanded.clear();
@@ -5866,6 +5912,7 @@ bool MainWindow::openFile(const QString& path)
         m_doc.replaceAll(std::move(bodies));
         m_doc.setReferences(file::loadReferences(toPath(path)));
         m_doc.setPoses(file::loadPoses(toPath(path)));
+        m_doc.setMannequin(file::loadMannequin(toPath(path)));
         // The slow steps' results saved with the file: no need to work them out again.
         if (const std::size_t used = file::useSavedResults(m_doc, toPath(path)))
             qInfo().noquote() << "Saved results used:" << used;
@@ -6120,6 +6167,7 @@ bool MainWindow::recoverFrom(const QString& backup)
         m_doc.replaceAll(std::move(bodies));
         m_doc.setReferences(file::loadReferences(toPath(backup)));
         m_doc.setPoses(file::loadPoses(toPath(backup)));
+        m_doc.setMannequin(file::loadMannequin(toPath(backup)));
         file::useSavedResults(m_doc, toPath(backup));
     } catch (const std::exception& e) {
         qWarning().noquote() << "Recovery failed:" << backup << "-" << e.what();
@@ -6851,7 +6899,7 @@ void MainWindow::refreshScene()
 {
     std::erase_if(m_selection, [this](ObjectId id) { return !m_doc.find(id); });
     if (m_emptyHint)
-        m_emptyHint->setVisible(m_doc.empty());
+        m_emptyHint->setVisible(m_doc.empty() && !m_mannequinMesh);
 
     std::vector<DisplayItem> items;
     std::size_t triangles = 0;
@@ -7070,6 +7118,17 @@ void MainWindow::refreshScene()
             }
             triangles += item.mesh->triangleCount();
             items.push_back(std::move(item));
+        }
+        // The figure guide: see-through, never picked or counted.
+        if (m_mannequinMesh) {
+            DisplayItem guide;
+            guide.id = kMannequinItem;
+            guide.mesh = m_mannequinMesh;
+            guide.color = QVector3D(0.62f, 0.52f, 0.90f);
+            guide.alpha = 0.45f;
+            guide.helper = true;
+            guide.fitted = true;
+            items.push_back(guide);
         }
         // Pose Test: where parts overlap, bright red, seen through the parts.
         if (m_poseMode.active && m_poseMode.hitMesh) {
@@ -11902,6 +11961,37 @@ void MainWindow::rescaleDesign()
         QMessageBox::warning(this, tr("Rescale Design"),
                              tr("The design couldn't be rescaled:\n%1").arg(QString::fromUtf8(e.what())));
     }
+}
+
+// ---- Figure guide ---------------------------------------------------------------------
+
+void MainWindow::startMannequin()
+{
+    if (toolOpen())
+        return;
+    if (m_dragState.kind != Drag::Kind::None)
+        cancelDrag();
+    m_mannequinOpen = true;
+    m_mannequinPanel->setMannequin(m_doc.mannequin());
+    m_mannequinPanel->setStatus({}, false);
+    m_propsDockWidth = m_propsDock->width();
+    m_properties->hide();
+    m_mannequinPanel->show();
+    statusBar()->showMessage(tr("Figure Guide: set its size and proportions, then pose it. Done or Esc closes the "
+                                "panel; the guide stays."));
+    refreshCommandState();
+}
+
+void MainWindow::endMannequin()
+{
+    if (!m_mannequinOpen)
+        return;
+    m_mannequinOpen = false;
+    m_mannequinPanel->hide();
+    m_properties->show();
+    QTimer::singleShot(0, this, [this] { resizeDocks({m_propsDock}, {m_propsDockWidth}, Qt::Horizontal); });
+    statusBar()->clearMessage();
+    refreshCommandState();
 }
 
 }  // namespace forge::app

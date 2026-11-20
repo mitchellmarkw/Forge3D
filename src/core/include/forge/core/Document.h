@@ -6,6 +6,7 @@
 #include "forge/core/MeshKernel.h"
 #include "forge/core/Pose.h"
 #include "forge/core/Reference.h"
+#include "forge/core/Mannequin.h"
 #include "forge/core/Transform.h"
 
 #include <TopoDS_Shape.hxx>
@@ -213,6 +214,13 @@ public:
     const std::vector<SavedPose>& poses() const { return m_poses; }
     void setPoses(std::vector<SavedPose> poses);
     int addPoseListener(std::function<void()> listener);
+
+    // ---- Figure guide ----
+    // The posable mannequin to build to (see Mannequin.h), or none. Not part of the
+    // model. Throws std::invalid_argument (mannequin::validate) and changes nothing.
+    const std::optional<Mannequin>& mannequin() const { return m_mannequin; }
+    void setMannequin(std::optional<Mannequin> m);
+    int addMannequinListener(std::function<void()> listener);
     void removePoseListener(int handle);
 
     // ---- Change notification ----
@@ -261,6 +269,8 @@ private:
     std::map<int, std::function<void()>> m_referenceListeners;
     std::vector<SavedPose> m_poses;
     std::map<int, std::function<void()>> m_poseListeners;
+    std::optional<Mannequin> m_mannequin;
+    std::map<int, std::function<void()>> m_mannequinListeners;
 };
 
 // Validates a primitive's parameters; throws std::invalid_argument if not buildable.

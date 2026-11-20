@@ -3,11 +3,13 @@
 
 #include "forge/core/Body.h"
 #include "forge/core/Pose.h"
+#include "forge/core/Mannequin.h"
 #include "forge/core/Reference.h"
 
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -70,7 +72,9 @@ namespace forge::file {
 //      sockets ("ridges", "ridgeHeight")
 //  32  magnet pockets (a socket's kind "magnet", and "cover": the skin over it)
 //      (0.65 adds "hardware": true on joint parts; older versions ignore it)
-inline constexpr int kFormatVersion = 32;
+//  33  the figure guide ("mannequin": height, heads, place, turn, shown, and each
+//      joint's angles by name)
+inline constexpr int kFormatVersion = 33;
 // The highest sculpt::Brush number a file may hold (Pattern).
 inline constexpr int kLastSculptBrush = 13;
 inline constexpr const char* kExtension = ".f3d";
@@ -93,6 +97,10 @@ std::vector<Body> load(const std::filesystem::path& path);
 // The poses saved in a file (none if it has none); a broken one is left out.
 std::vector<SavedPose> loadPoses(const std::filesystem::path& path);
 std::vector<SavedPose> posesFromJson(const std::string& json);
+
+// The figure guide kept in a file, if any (a broken one is left out).
+std::optional<Mannequin> loadMannequin(const std::filesystem::path& path);
+std::optional<Mannequin> mannequinFromJson(const std::string& json);
 
 // The reference images kept in a file (none if it has none). A picture that can't be
 // read is left out, never a reason to refuse the file. Use Document::setReferences().

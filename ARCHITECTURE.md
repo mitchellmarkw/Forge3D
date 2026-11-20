@@ -1321,3 +1321,20 @@ and sharp across edges.
   `scaledTree` with the anchor taken into its own frame (a top-level hardware body
   moved whole). `jointCount` counts hardware bodies and joint steps. The app anchors
   at the middle of the footprint at its bottom and applies one `EditBodiesCommand`.
+
+## Figure Guide (slice 57)
+
+- `Mannequin` (Mannequin.h): height, heads, place, turn, shown, and two angles for each
+  of ten joints (`MJoint`). `mannequin::landmarks` and `mesh` work out the skeleton
+  from the height in heads (head H = height / heads; the rest R = height − H; joint
+  heights as shares of R) and pose it by forward kinematics: root → waist → neck and
+  shoulders → elbows; root → hips → knees. The figure faces −Y, its left at +X. A
+  second pass lifts or lowers the root so the lowest foot (an ellipsoid turned with the
+  shin) rests on the plate. Drawn as ellipsoids and rounded rods.
+- `Document::mannequin` / `setMannequin` (validated) / `addMannequinListener`;
+  `SetMannequinCommand` merges runs with the same label (`kMergeMannequin`).
+- File format 33: `"mannequin"` in document.json; `file::loadMannequin` /
+  `mannequinFromJson` (a broken one is left out).
+- App: `MannequinPanel` (a tool panel like Reference Images); the mesh is rebuilt on
+  each change and drawn as a see-through helper item that Fit still counts
+  (`DisplayItem::fitted`).

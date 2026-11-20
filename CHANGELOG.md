@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.66.0 Beta — Slice 57: Figure Guide (2026-11-19)
+
+- **Figure Guide** (View tab, Pictures; and the View menu): a see-through mannequin on
+  the plate to build a figure to, like a 3D reference image. Never printed or exported.
+  - **Figure size**: a figure line's height (3.75, 5, 6, 7 or 12 inches) or any height
+    typed in mm.
+  - **Proportions**: Stylised (6 heads), Realistic (7.5), Heroic (8), Fashion (9) or
+    any number of heads; the panel says how tall a head is.
+  - **Where it stands**: X, Y and a turn. A new guide stands beside the model, and the
+    view moves to show all of it.
+  - **Pose**: ready poses (Standing, A-pose, T-pose, Walking, Action), then any joint:
+    neck (nod, turn), waist (bend, twist), shoulders and hips (forward, out), elbows
+    and knees (bend). It stays standing on the plate as the legs bend.
+  - Show or hide it, or remove it. Every change can be undone (a run of changes to one
+    setting is one step). Kept in the file: files saved now need Forge3D 0.66 or
+    later to open (format 33).
+- 308 unit tests (3 new: proportions from heads; posing, standing on the plate, turning
+  and ranges; undo, merging and the file).
+
 ## 0.65.0 Beta — Slice 56: Rescale Design, keeping joint sizes (2026-11-19)
 
 - **Tools → Rescale Design**: move a design to another scale.

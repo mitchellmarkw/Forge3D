@@ -1684,6 +1684,23 @@ void Document::setPoses(std::vector<SavedPose> poses)
         listener();
 }
 
+void Document::setMannequin(std::optional<Mannequin> m)
+{
+    if (m)
+        mannequin::validate(*m);
+    m_mannequin = std::move(m);
+    const auto listeners = m_mannequinListeners;
+    for (const auto& [handle, listener] : listeners)
+        listener();
+}
+
+int Document::addMannequinListener(std::function<void()> listener)
+{
+    const int handle = m_nextListener++;
+    m_mannequinListeners.emplace(handle, std::move(listener));
+    return handle;
+}
+
 int Document::addPoseListener(std::function<void()> listener)
 {
     const int handle = m_nextListener++;

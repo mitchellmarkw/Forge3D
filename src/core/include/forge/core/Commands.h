@@ -3,6 +3,7 @@
 
 #include "forge/core/Body.h"
 #include "forge/core/Pose.h"
+#include "forge/core/Mannequin.h"
 #include "forge/core/Reference.h"
 
 #include <cstddef>
@@ -42,7 +43,7 @@ public:
 };
 
 // Merge ids in use (keep unique).
-enum MergeIds : int { kMergeSetPlacement = 1, kMergeReferences = 2 };
+enum MergeIds : int { kMergeSetPlacement = 1, kMergeReferences = 2, kMergeMannequin = 3 };
 
 // ---- Concrete commands ----------------------------------------------------------
 
@@ -257,6 +258,24 @@ private:
     std::vector<SavedPose> m_after;
     std::optional<std::vector<SavedPose>> m_before;
     std::string m_label;
+};
+
+// Adds, changes or removes the figure guide. Mergeable: a run of changes with the same
+// label (dragging a spin box) is one undo step.
+class SetMannequinCommand final : public Command {
+public:
+    SetMannequinCommand(std::optional<Mannequin> m, std::string label, bool mergeable = false);
+    std::string label() const override { return m_label; }
+    void redo(Document& doc) override;
+    void undo(Document& doc) override;
+    int mergeId() const override { return m_mergeable ? kMergeMannequin : -1; }
+    bool mergeWith(const Command& next) override;
+
+private:
+    std::optional<Mannequin> m_after;
+    std::optional<std::optional<Mannequin>> m_before;
+    std::string m_label;
+    bool m_mergeable;
 };
 
 class MacroCommand final : public Command {
