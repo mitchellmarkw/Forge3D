@@ -1349,6 +1349,7 @@ void MainWindow::createMenus()
             QDesktopServices::openUrl(QUrl::fromLocalFile(QFileInfo(path).absolutePath()));
     });
     help->addAction(tr("&Quick Start Guide"), this, &MainWindow::showQuickStart);
+    help->addAction(tr("&Figure, Toy and Kit Tools"), this, &MainWindow::showFigureTools);
     help->addAction(tr("Take the &Tour"), this, &MainWindow::startTour);
     help->addAction(tr("Check for &Updates..."), this, [this] { checkForUpdates(false); });
     m_checkAtStart = help->addAction(tr("Check for Updates at &Start"));
@@ -8157,6 +8158,26 @@ void MainWindow::showQuickStart()
     m_quickStart->show();
     m_quickStart->raise();
     m_quickStart->activateWindow();
+}
+
+void MainWindow::showFigureTools()
+{
+    if (!m_figureTools) {
+        m_figureTools = new QDialog(this);
+        m_figureTools->setWindowTitle(tr("Figure, Toy and Kit Tools - Forge3D"));
+        auto* layout = new QVBoxLayout(m_figureTools);
+        auto* browser = new QTextBrowser;
+        browser->setOpenExternalLinks(true);
+        browser->setSource(QUrl(QStringLiteral("qrc:/help/figure-tools.html")));
+        layout->addWidget(browser);
+        auto* buttons = new QDialogButtonBox(QDialogButtonBox::Close);
+        connect(buttons, &QDialogButtonBox::rejected, m_figureTools, &QDialog::close);
+        layout->addWidget(buttons);
+        m_figureTools->resize(760, std::min(820, height() - 40));
+    }
+    m_figureTools->show();
+    m_figureTools->raise();
+    m_figureTools->activateWindow();
 }
 
 QWidget* MainWindow::ribbonButtonFor(QAction* action, int tab) const
