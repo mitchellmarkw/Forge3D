@@ -212,6 +212,25 @@ void scaleInto(const Document& doc, ObjectId id, const Vec3& factors, const Vec3
         out.push_back(std::move(next));
         return;
     }
+    if (body->boolean->op == BooleanOp::Hollow && body->boolean->hollow) {
+        // The holes move with the shape; evenly scaled, the walls and holes grow too
+        // (unless kept: the holes take the plugs, which are joint parts).
+        Body next = *body;
+        HollowFinish& h = *next.boolean->hollow;
+        for (DrainHole& d : h.holes) {
+            for (std::size_t k = 0; k < 3; ++k)
+                d.point[k] = factors[k] * (d.point[k] - anchor[k]) + anchor[k];
+            Vec3 n{d.normal[0] / factors[0], d.normal[1] / factors[1], d.normal[2] / factors[2]};
+            const double len = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+            d.normal = {n[0] / len, n[1] / len, n[2] / len};
+        }
+        if (even(factors) && !o.keepWalls)
+            h.thickness *= factors[0];
+        if (even(factors) && !keepJoints)
+            h.holeSize *= factors[0];
+        out.push_back(std::move(next));
+        return;
+    }
     if (body->boolean->op == BooleanOp::Shell && body->boolean->shell) {
         // The open faces' picks move with the shape; evenly scaled, the walls grow too.
         Body next = *body;

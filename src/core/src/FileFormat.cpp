@@ -2,6 +2,7 @@
 #include "forge/core/FileFormat.h"
 
 #include "forge/core/Document.h"
+#include "forge/core/Hollow.h"
 #include "forge/core/MeshKernel.h"
 
 #include <miniz.h>
@@ -230,6 +231,7 @@ const char* opName(BooleanOp op)
     case BooleanOp::Socket: return "socket";
     case BooleanOp::Hinge: return "hinge";
     case BooleanOp::MaskSplit: return "maskSplit";
+    case BooleanOp::Hollow: return "hollow";
     }
     return "merge";
 }
@@ -378,6 +380,12 @@ json bodyToJson(const Body& b)
             j["simplify"] = json{{"keep", sf->keep}};
         if (const auto& sm = b.boolean->smooth)
             j["smooth"] = json{{"strength", sm->strength}};
+        if (const auto& ho = b.boolean->hollow) {
+            json holes = json::array();
+            for (const DrainHole& h : ho->holes)
+                holes.push_back({{"point", h.point}, {"normal", h.normal}});
+            j["hollow"] = json{{"thickness", ho->thickness}, {"holeSize", ho->holeSize}, {"holes", std::move(holes)}};
+        }
         if (const auto& p = b.boolean->pattern) {
             static const char* kinds[] = {"row", "grid", "circle"};
             j["pattern"] = json{{"kind", kinds[int(p->kind)]}, {"feature", p->feature},  {"dir1", p->dir1},
@@ -567,6 +575,8 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
             spec.op = BooleanOp::MaskSplit;
         else if (op == "hinge" && version >= 29)
             spec.op = BooleanOp::Hinge;
+        else if (op == "hollow" && version >= 34)
+            spec.op = BooleanOp::Hollow;
         else
             damaged(where + ": unknown combine operation '" + op + "'");
         const auto operands = j.find("operands");
@@ -793,6 +803,35 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
             h.clicks = hj->value("clicks", 0);
             h.clickDepth = hj->value("clickDepth", h.clickDepth);
             spec.hinge = h;
+        }
+        if (spec.op == BooleanOp::Hollow) {
+            const auto hj = j.find("hollow");
+            if (hj == j.end() || !hj->is_object())
+                damaged(where + ": missing the hollowing's settings");
+            HollowFinish ho;
+            ho.thickness = number(*hj, "thickness", where);
+            ho.holeSize = hj->value("holeSize", ho.holeSize);
+            if (const auto list = hj->find("holes"); list != hj->end() && list->is_array())
+                for (const json& h : *list) {
+                    DrainHole d;
+                    try {
+                        const json& p = h.at("point");
+                        const json& n = h.at("normal");
+                        for (std::size_t k = 0; k < 3; ++k) {
+                            d.point[k] = p.at(k).get<double>();
+                            d.normal[k] = n.at(k).get<double>();
+                        }
+                    } catch (const std::exception&) {
+                        damaged(where + ": a drain hole's spot is broken");
+                    }
+                    ho.holes.push_back(d);
+                }
+            try {
+                hollow::check(ho);
+            } catch (const std::exception& e) {
+                damaged(where + ": " + e.what());
+            }
+            spec.hollow = std::move(ho);
         }
         if (spec.op == BooleanOp::Smooth) {
             const auto sj = j.find("smooth");

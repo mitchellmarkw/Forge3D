@@ -54,6 +54,7 @@ add_executable(forge_tests
     test_print_check.cpp
     test_rescale.cpp
     test_mannequin.cpp
+    test_hollow.cpp
     bench_sculpt.cpp
     fuzz_files.cpp
     test_undo_random.cpp

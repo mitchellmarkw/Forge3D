@@ -34,6 +34,7 @@ add_library(forge_core STATIC
     src/Tolerance.cpp
     src/PrintCheck.cpp
     src/Mannequin.cpp
+    src/Hollow.cpp
     src/Body.cpp
     src/CommandStack.cpp
     src/Commands.cpp

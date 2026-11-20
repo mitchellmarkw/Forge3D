@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.67.0 Beta — Slice 58: Hollow with drain holes (2026-11-19)
+
+- **Hollow** (Features tab, beside Shell): for resin printing, takes the inside out of
+  the selected shape, leaving walls of a set thickness (2 mm to start). Unlike Shell it
+  works on **any** shape: sculpts, imported meshes, everything.
+  - **Drain holes**: click the shape where each goes, or **Place Them for Me** (two at
+    the lowest points as it sits, apart from each other). They show as red rods until
+    Apply. **Remove Last** and **Clear**; hole size 3 mm to start.
+  - **Make plugs to close the holes**: a short peg per hole, beside the model, the
+    hole's size less your resin peg fit (from the tolerance test), as long as the wall
+    is thick. They're joint parts (Rescale keeps their size).
+  - A step in the history ("2 mm walls, 2 drain holes Ø3"): double-click it to change
+    the walls or the holes; Remove the hollowing gives the solid back.
+  - Parts nowhere thicker than two walls stay solid. Accurate to about a third of the
+    wall thickness; a big part takes a few seconds.
+  - Rescale Design keeps the walls (Keep wall thickness) and the holes (Keep joint
+    sizes) if asked.
+- Files saved now need Forge3D 0.67 or later to open (format 34).
+- 312 unit tests (4 new: a box's walls and a drain hole; a sphere, and a slab too thin
+  to hollow; holes placed low, plugs and checks; saving and rescaling).
+
 ## 0.66.0 Beta — Slice 57: Figure Guide (2026-11-19)
 
 - **Figure Guide** (View tab, Pictures; and the View menu): a see-through mannequin on

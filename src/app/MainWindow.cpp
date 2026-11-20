@@ -27,6 +27,9 @@
 #include "PosePanel.h"
 #include "PrintCheckPanel.h"
 #include "MannequinPanel.h"
+#include "HollowPanel.h"
+#include "Fits.h"
+#include "forge/core/Hollow.h"
 #include "MaskPanel.h"
 #include "ReferencePanel.h"
 #include "ScaleCalculator.h"
@@ -608,6 +611,8 @@ void MainWindow::createActions()
             m_socketPanel->setOtherPart(other ? QString::fromStdString(other->name) : QString(), false);
         } else if (m_socketMode.active)
             endSocket();
+        else if (m_hollowMode.active)
+            endHollow();
         else if (m_hingeMode.active && m_hingeMode.pickingOther) {
             m_hingeMode.pickingOther = false;
             const Body* other = m_doc.find(m_hingeMode.other);
@@ -975,6 +980,18 @@ void MainWindow::createActions()
             return;
         }
         startPattern(history::tip(m_doc, id), false);
+    });
+    m_hollowAction = new QAction(tr("Hollow"), this);
+    m_hollowAction->setToolTip(tr("Hollow: for resin printing, take the inside out of the selected shape (any shape, "
+                                  "sculpts too), leaving walls of a set thickness, with drain holes and plugs"));
+    m_hollowAction->setStatusTip(m_hollowAction->toolTip());
+    connect(m_hollowAction, &QAction::triggered, this, [this] {
+        const ObjectId id = selectedOne();
+        if (id == kInvalidId || m_selection.size() != 1 || !m_doc.isTopLevel(id)) {
+            statusBar()->showMessage(tr("Hollow: select one shape on the plate first."), 6000);
+            return;
+        }
+        startHollow(history::tip(m_doc, id), false);
     });
     m_shellAction = new QAction(tr("Shell"), this);
     m_shellAction->setToolTip(tr("Shell: hollow the selected shape out to walls of a set thickness, leaving the "
@@ -1365,6 +1382,7 @@ void MainWindow::createToolBar()
         {m_sectionAction, "section"},
         {m_referenceAction, "reference"},
         {m_mannequinAction, "mannequin"},
+        {m_hollowAction, "hollow"},
         {m_showPicturesAction, "reference"},
         {m_plateSizeAction, "plate"},
     };
@@ -1510,7 +1528,8 @@ void MainWindow::createToolBar()
     Page features = page(tr("Features"), tr("Holes, threads, sockets, shells, grooves, patterns and edges"));
     group(features, tr("Holes and Joints"), {button(m_holeAction), button(m_threadAction), button(m_socketAction), button(m_hingeAction),
                                        button(m_poseAction)});
-    group(features, tr("Surface"), {button(m_shellAction), button(m_followAction), button(m_edgesAction)});
+    group(features, tr("Surface"),
+          {button(m_shellAction), button(m_hollowAction), button(m_followAction), button(m_edgesAction)});
     group(features, tr("Repeat"), {button(m_patternAction)});
     common(features);
 
@@ -2050,6 +2069,43 @@ void MainWindow::createDocks()
     connect(m_threadPanel, &ThreadPanel::changed, this, [this] { m_threadTimer->start(); });
     connect(m_threadPanel, &ThreadPanel::applyRequested, this, &MainWindow::applyThread);
     connect(m_threadPanel, &ThreadPanel::cancelRequested, this, &MainWindow::endThread);
+    m_hollowPanel = new HollowPanel;
+    stackLayout->addWidget(m_hollowPanel);
+    m_hollowPanel->hide();
+    connect(m_hollowPanel, &HollowPanel::changed, this, &MainWindow::updateHollowPreview);
+    connect(m_hollowPanel, &HollowPanel::placeRequested, this, [this] {
+        auto& mode = m_hollowMode;
+        if (!mode.active)
+            return;
+        try {
+            const Body* step = m_doc.find(mode.target);
+            const ObjectId part = mode.editing && step && step->isBoolean() ? step->boolean->operands.front()
+                                                                            : mode.target;
+            Mesh plate = *m_doc.mesh(part);
+            const Transform t = m_doc.worldTransform(part);
+            for (std::size_t i = 0; i < plate.vertexCount(); ++i) {
+                const Vec3 p = t.apply(Vec3{plate.positions[3 * i], plate.positions[3 * i + 1], plate.positions[3 * i + 2]});
+                for (int k = 0; k < 3; ++k)
+                    plate.positions[3 * i + std::size_t(k)] = float(p[std::size_t(k)]);
+            }
+            mode.holes = hollow::lowSpots(plate, m_hollowPanel->holeSize(), 2);
+        } catch (const std::exception& e) {
+            m_hollowPanel->setStatus(QString::fromUtf8(e.what()), true);
+            return;
+        }
+        updateHollowPreview();
+    });
+    connect(m_hollowPanel, &HollowPanel::removeLastRequested, this, [this] {
+        if (!m_hollowMode.holes.empty())
+            m_hollowMode.holes.pop_back();
+        updateHollowPreview();
+    });
+    connect(m_hollowPanel, &HollowPanel::clearRequested, this, [this] {
+        m_hollowMode.holes.clear();
+        updateHollowPreview();
+    });
+    connect(m_hollowPanel, &HollowPanel::applyRequested, this, &MainWindow::applyHollow);
+    connect(m_hollowPanel, &HollowPanel::cancelRequested, this, &MainWindow::endHollow);
     m_socketTimer = new QTimer(this);
     m_socketTimer->setSingleShot(true);
     m_socketTimer->setInterval(250);
@@ -2487,6 +2543,10 @@ void MainWindow::onViewportClicked(const QVector3D& origin, const QVector3D& dir
         socketClick(origin, direction);
         return;
     }
+    if (m_hollowMode.active) {
+        hollowClick(origin, direction);
+        return;
+    }
     if (m_hingeMode.active) {
         hingeClick(origin, direction);
         return;
@@ -2631,7 +2691,7 @@ void MainWindow::onLeftPressed(const QVector3D& origin, const QVector3D& directi
     }
     if (m_embossMode.active || m_edgesMode.active || m_holeMode.active || m_shellMode.active || m_followMode.active ||
         m_patternMode.active || m_threadMode.active || m_socketMode.active || m_joinMode.active ||
-        m_maskMode.active)
+        m_maskMode.active || m_hollowMode.active)
         return;  // shapes stay put while the tool is open
 
     if (handle.valid() && multiSelection()) {
@@ -4519,7 +4579,8 @@ bool MainWindow::toolOpen() const
            m_sketchMode.active || m_holeMode.active || m_shellMode.active || m_followMode.active ||
            m_patternMode.active || m_sculptMode.active || m_measureMode.active || m_threadMode.active ||
            m_socketMode.active || m_joinMode.active || m_maskMode.active || m_referenceMode.active ||
-           m_hingeMode.active || m_poseMode.active || m_printCheckMode.active || m_mannequinOpen;
+           m_hingeMode.active || m_poseMode.active || m_printCheckMode.active || m_mannequinOpen ||
+           m_hollowMode.active;
 }
 
 void MainWindow::startEmboss(ObjectId target, bool editing)
@@ -6921,6 +6982,8 @@ void MainWindow::refreshScene()
             endThread();
         if (m_socketMode.active && !m_doc.find(m_socketMode.target))
             endSocket();
+        if (m_hollowMode.active && !m_doc.find(m_hollowMode.target))
+            endHollow();
         if (m_hingeMode.active && !m_doc.find(m_hingeMode.target))
             endHinge();
         if (m_maskMode.active && !m_doc.find(m_maskMode.target))
@@ -7118,6 +7181,16 @@ void MainWindow::refreshScene()
             }
             triangles += item.mesh->triangleCount();
             items.push_back(std::move(item));
+        }
+        // Hollow: where the drain holes go, red, seen through the shape.
+        if (m_hollowMode.active && m_hollowMode.cut) {
+            DisplayItem cut;
+            cut.id = kEdgesPickedItem;
+            cut.mesh = m_hollowMode.cut;
+            cut.color = QVector3D(0.9f, 0.15f, 0.1f);
+            cut.ghost = true;
+            cut.helper = true;
+            items.push_back(cut);
         }
         // The figure guide: see-through, never picked or counted.
         if (m_mannequinMesh) {
@@ -7352,6 +7425,7 @@ void MainWindow::refreshScene()
                                !toolOpen());
     m_holeAction->setEnabled(m_selection.size() == 1 && allTopLevel && !rolled && !toolOpen());
     m_shellAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
+    m_hollowAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_threadAction->setEnabled(m_shellAction->isEnabled());
     m_socketAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_hingeAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
@@ -7519,6 +7593,7 @@ void MainWindow::editStep(ObjectId id)
     case BooleanOp::Shell: startShell(id, true); break;
     case BooleanOp::Thread: startThread(id, true); break;
     case BooleanOp::Socket: startSocket(id, true); break;
+    case BooleanOp::Hollow: startHollow(id, true); break;
     case BooleanOp::Hinge: startHinge(id, true); break;
     case BooleanOp::MaskSplit: startMask(id, true); break;
     case BooleanOp::Follow: startFollow(id, true); break;
@@ -7701,6 +7776,7 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
                                                   op == BooleanOp::Emboss || op == BooleanOp::Sculpt ||
                                                   op == BooleanOp::Thread || op == BooleanOp::Socket ||
                                                   op == BooleanOp::Hinge || op == BooleanOp::MaskSplit ||
+                                                  op == BooleanOp::Hollow ||
                                                   (op == BooleanOp::Split && m_doc.isTopLevel(id))));
         if (!opens) {
             // Nothing to open: show or hide what's inside, as a list does.
@@ -11992,6 +12068,193 @@ void MainWindow::endMannequin()
     QTimer::singleShot(0, this, [this] { resizeDocks({m_propsDock}, {m_propsDockWidth}, Qt::Horizontal); });
     statusBar()->clearMessage();
     refreshCommandState();
+}
+
+// ---- Hollow ---------------------------------------------------------------------------
+
+void MainWindow::startHollow(ObjectId target, bool editing)
+{
+    const Body* body = m_doc.find(target);
+    if (!body || toolOpen())
+        return;
+    if (m_dragState.kind != Drag::Kind::None)
+        cancelDrag();
+    HollowMode mode;
+    mode.active = true;
+    mode.editing = editing;
+    mode.target = target;
+    HollowFinish finish;
+    if (editing) {
+        try {
+            finish = hollowInPlate(m_doc, target);
+        } catch (const std::exception& e) {
+            QMessageBox::information(this, tr("Forge3D"), QString::fromUtf8(e.what()));
+            return;
+        }
+        mode.holes = finish.holes;
+    }
+    m_hollowMode = std::move(mode);
+    const QString name = QString::fromStdString(body->name);
+    m_hollowPanel->start(editing ? tr("Change the hollowing of '%1'").arg(name) : tr("Hollow '%1'").arg(name), editing,
+                         finish.thickness, finish.holeSize);
+    m_propsDockWidth = m_propsDock->width();
+    m_properties->hide();
+    m_hollowPanel->show();
+    statusBar()->showMessage(tr("Hollow: click the shape where each drain hole goes (or Place Them for Me), then "
+                                "Apply. Esc cancels."));
+    updateHollowPreview();
+    refreshCommandState();
+}
+
+void MainWindow::endHollow()
+{
+    if (!m_hollowMode.active)
+        return;
+    m_hollowMode = HollowMode{};
+    m_hollowPanel->hide();
+    m_properties->show();
+    QTimer::singleShot(0, this, [this] { resizeDocks({m_propsDock}, {m_propsDockWidth}, Qt::Horizontal); });
+    statusBar()->clearMessage();
+    refreshScene();
+    refreshCommandState();
+}
+
+void MainWindow::hollowClick(const QVector3D& origin, const QVector3D& direction)
+{
+    auto& mode = m_hollowMode;
+    const QVector3D d = direction.normalized();
+    std::optional<emboss::SurfacePoint> spot;
+    try {
+        // The way out averaged over the hole's size, so a bumpy surface gives a steady one.
+        spot = surfaceUnder(m_doc, mode.target, {origin.x(), origin.y(), origin.z()}, {d.x(), d.y(), d.z()},
+                            std::max(0.25, m_hollowPanel->holeSize() / 2.0));
+    } catch (const std::exception& e) {
+        m_hollowPanel->setStatus(QString::fromUtf8(e.what()), true);
+        return;
+    }
+    if (!spot) {
+        statusBar()->showMessage(tr("Hollow: click on the shape itself."), 4000);
+        return;
+    }
+    if (mode.holes.size() >= 20) {
+        m_hollowPanel->setStatus(tr("That's as many holes as there can be (20)."), true);
+        return;
+    }
+    DrainHole h;
+    h.point = spot->point;
+    h.normal = spot->normal;
+    mode.holes.push_back(h);
+    updateHollowPreview();
+}
+
+void MainWindow::updateHollowPreview()
+{
+    auto& mode = m_hollowMode;
+    if (!mode.active)
+        return;
+    std::vector<Mesh> cutters;
+    for (const DrainHole& h : mode.holes)
+        cutters.push_back(hollow::holeCutter(h, m_hollowPanel->holeSize(), m_hollowPanel->thickness()));
+    mode.cut = cutters.empty() ? nullptr : together(cutters);
+    m_hollowPanel->setHoleCount(int(mode.holes.size()));
+    m_hollowPanel->setStatus(mode.holes.empty() ? QString()
+                                                : tr("The red rods are the drain holes. Apply hollows it (a few "
+                                                     "seconds on a big shape); Section View shows the inside "
+                                                     "afterwards."),
+                             false);
+    m_hollowPanel->setApplyEnabled(true);
+    refreshScene();
+}
+
+void MainWindow::applyHollow()
+{
+    auto& mode = m_hollowMode;
+    if (!mode.active)
+        return;
+    HollowFinish f;
+    f.thickness = m_hollowPanel->thickness();
+    f.holeSize = m_hollowPanel->holeSize();
+    f.holes = mode.holes;
+    const bool plugs = m_hollowPanel->plugs() && !f.holes.empty();
+    const ObjectId target = mode.target;
+    std::optional<Body> result;
+    try {
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        struct RestoreCursor {
+            ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
+        } restore;
+        hollow::check(f);
+        if (mode.editing) {
+            result = withHollow(m_doc, target, f);
+            m_doc.previewMesh(*result->boolean);
+        } else {
+            Body r;
+            r.id = m_doc.allocateId();
+            r.name = m_doc.uniqueName("Hollowed");
+            r.boolean = hollowSpec(m_doc, target, f);
+            m_doc.previewMesh(*r.boolean);  // worked out (and kept) before anything changes
+            result = std::move(r);
+        }
+    } catch (const std::exception& e) {
+        m_hollowPanel->setStatus(tr("It couldn't be hollowed: %1").arg(QString::fromUtf8(e.what())), true);
+        return;
+    }
+    if (mode.editing) {
+        const Body* now = m_doc.find(target);
+        if (!now)
+            return endHollow();
+        const Body before = *now;
+        endHollow();
+        run(std::make_unique<EditBodyCommand>(before, *result, "Change hollowing"));
+        setSelection(history::objectOf(m_doc, target));
+        return;
+    }
+    const ObjectId id = result->id;
+    // Plugs stand beside the model, one per hole.
+    std::vector<Body> plugBodies;
+    if (plugs) {
+        const Bounds box = m_doc.worldBounds(target);
+        const PrimitiveSpec spec = hollow::plug(f, fits::starting(true, tolerance::Kind::Peg));
+        const double r = std::get<CylinderSpec>(spec).radiusX;
+        double x = box.max[0] + 5.0 + r;
+        for (std::size_t i = 0; i < f.holes.size(); ++i) {
+            Body p;
+            p.id = m_doc.allocateId();
+            p.spec = spec;
+            p.hardware = true;
+            p.placement.x = x;
+            p.placement.y = box.min[1] + r;
+            x += 2 * r + 3.0;
+            plugBodies.push_back(std::move(p));
+        }
+    }
+    endHollow();
+    try {
+        m_stack.beginMacro("Hollow");
+        if (!m_doc.isTopLevel(target))
+            m_stack.execute(std::make_unique<InsertStepCommand>(std::move(*result), m_doc.parentOf(target)));
+        else
+            m_stack.execute(std::make_unique<CombineCommand>(std::move(*result)));
+        for (Body& p : plugBodies) {
+            p.name = m_doc.uniqueName("Plug");
+            m_stack.execute(std::make_unique<AddBodyCommand>(std::move(p)));
+        }
+        m_stack.endMacro();
+    } catch (const std::exception& e) {
+        m_stack.abortMacro();
+        QMessageBox::warning(this, tr("Forge3D"), tr("It couldn't be hollowed:\n%1").arg(QString::fromUtf8(e.what())));
+        refreshScene();
+        return;
+    }
+    refreshScene();
+    refreshCommandState();
+    setSelection(m_doc.isTopLevel(id) ? id : history::objectOf(m_doc, target));
+    statusBar()->showMessage(f.holes.empty() ? tr("Hollowed, with no drain holes: resin will stay trapped inside. "
+                                                  "Double-click it in Objects to add some.")
+                             : plugs ? tr("Hollowed, with %1 drain holes and a plug for each (beside the model).")
+                                           .arg(f.holes.size())
+                                     : tr("Hollowed, with %1 drain holes.").arg(f.holes.size()),
+                             10000);
 }
 
 }  // namespace forge::app
