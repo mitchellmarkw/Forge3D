@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.69.1 Beta — Straight lines for stamps and panel lines (2026-11-20)
+
+- **Shift** keeps a line **level** and **Ctrl** keeps it **upright**:
+  - Panel Lines: hold it as you click the next point; the piece from the last point
+    stays level with it (the same height all the way), or goes straight up or down
+    from it as seen from where you're looking.
+  - Stamp: hold it while dragging a row.
+  - Either way the line stays in one flat plane and follows the surface across it, so
+    on a round shape a level line runs round it like a hoop.
+
 ## 0.69.0 Beta — Slice 60: Panel lines (2026-11-20)
 
 - **Panel Lines** (Features tab, Surface group): click points along the selected

@@ -1392,3 +1392,12 @@ and sharp across edges.
   batch; a closed line has a piece back to its start.
 - App: `PanelLinePanel`, `PanelLineMode` (finished lines, the clicked points of the line
   being drawn and the surface pieces between them, re-laid when the width changes).
+
+## Straight lines (0.69.1)
+
+- `MainWindow::straightPlane`: Shift gives the level plane through the line's last
+  point (normal +Z); Ctrl the upright one across the view (normal up × the view's level
+  direction). `onSurfaceInPlane` moves a point into the plane, then back onto the
+  surface along its normal's part lying in the plane, so the point stays in it.
+- Panel Lines keep each piece's plane (`PanelLineMode::planes`) to lay it again when the
+  width changes; Stamp rows use the plane through the row's start.

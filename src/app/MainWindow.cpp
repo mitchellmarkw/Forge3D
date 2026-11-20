@@ -2113,7 +2113,7 @@ void MainWindow::createDocks()
         // laid again between its clicks.
         auto& mode = m_panelLineMode;
         for (std::size_t i = 0; i < mode.pieces.size(); ++i)
-            mode.pieces[i] = panelPiece(mode.anchors[i], mode.anchors[i + 1]);
+            mode.pieces[i] = panelPiece(mode.anchors[i], mode.anchors[i + 1], mode.planes[i]);
         updatePanelLinePreview();
     });
     connect(m_panelLinePanel, &PanelLinePanel::endLineRequested, this, [this] { endPanelLine(false); });
@@ -2122,8 +2122,10 @@ void MainWindow::createDocks()
         auto& mode = m_panelLineMode;
         if (!mode.anchors.empty())
             mode.anchors.pop_back();
-        if (!mode.pieces.empty())
+        if (!mode.pieces.empty()) {
             mode.pieces.pop_back();
+            mode.planes.pop_back();
+        }
         updatePanelLinePreview();
     });
     connect(m_panelLinePanel, &PanelLinePanel::removeLineRequested, this, [this] {
@@ -2131,6 +2133,7 @@ void MainWindow::createDocks()
         if (!mode.anchors.empty()) {
             mode.anchors.clear();
             mode.pieces.clear();
+            mode.planes.clear();
         } else if (!mode.lines.empty()) {
             mode.lines.pop_back();
         }
@@ -2140,6 +2143,7 @@ void MainWindow::createDocks()
         m_panelLineMode.lines.clear();
         m_panelLineMode.anchors.clear();
         m_panelLineMode.pieces.clear();
+        m_panelLineMode.planes.clear();
         updatePanelLinePreview();
     });
     connect(m_panelLinePanel, &PanelLinePanel::applyRequested, this, &MainWindow::applyPanelLines);
@@ -2649,7 +2653,7 @@ void MainWindow::onViewportClicked(const QVector3D& origin, const QVector3D& dir
         return;
     }
     if (m_panelLineMode.active) {
-        panelLineClick(origin, direction);
+        panelLineClick(origin, direction, modifiers);
         return;
     }
     if (m_hingeMode.active) {
@@ -2948,7 +2952,7 @@ void MainWindow::onLeftDragged(const QVector3D& origin, const QVector3D& directi
         return;
     }
     if (m_stampMode.active) {
-        stampDrag(origin, direction);
+        stampDrag(origin, direction, modifiers);
         return;
     }
     Drag& d = m_dragState;
@@ -12541,14 +12545,25 @@ void MainWindow::stampClick(const QVector3D& origin, const QVector3D& direction)
     updateStampPreview();
 }
 
-void MainWindow::stampDrag(const QVector3D& origin, const QVector3D& direction)
+void MainWindow::stampDrag(const QVector3D& origin, const QVector3D& direction, Qt::KeyboardModifiers modifiers)
 {
     auto& mode = m_stampMode;
     if (!mode.rowStart)
         return;
-    const auto end = stampSpotAt(origin, direction);
+    auto end = stampSpotAt(origin, direction);
     if (!end)
         return;
+    const double radius = std::max(0.1, m_stampPanel->settings().size / 2.0);
+    const auto plane = straightPlane(mode.rowStart->point, modifiers, direction);
+    if (plane) {
+        // Shift: a level row; Ctrl: an upright one.
+        const auto q = onSurfaceInPlane(mode.target, {end->point[0], end->point[1], end->point[2]},
+                                        {end->normal[0], end->normal[1], end->normal[2]}, *plane, radius);
+        if (!q)
+            return;
+        end->point = q->point;
+        end->normal = q->normal;
+    }
     const StampSpot& a = *mode.rowStart;
     const StampFinish f = m_stampPanel->settings();
     const Vec3 pa{a.point[0], a.point[1], a.point[2]}, pb{end->point[0], end->point[1], end->point[2]};
@@ -12563,12 +12578,23 @@ void MainWindow::stampDrag(const QVector3D& origin, const QVector3D& direction)
     mode.row.clear();
     const double lift = 4.0 * f.size + 5.0;
     for (const Vec3& p : stamp::rowPoints(pa, pb, f.spacing)) {
-        // Each one dropped onto the surface from just outside it.
-        const QVector3D from(float(p[0] + n[0] * lift), float(p[1] + n[1] * lift), float(p[2] + n[2] * lift));
-        const QVector3D down(float(-n[0]), float(-n[1]), float(-n[2]));
-        if (auto s = stampSpotAt(from, down)) {
-            s->along = along;
-            mode.row.push_back(*s);
+        if (plane) {
+            // Kept in the straight row's plane.
+            if (const auto q = onSurfaceInPlane(mode.target, p, n, *plane, radius)) {
+                StampSpot s;
+                s.point = q->point;
+                s.normal = q->normal;
+                s.along = along;
+                mode.row.push_back(s);
+            }
+        } else {
+            // Each one dropped onto the surface from just outside it.
+            const QVector3D from(float(p[0] + n[0] * lift), float(p[1] + n[1] * lift), float(p[2] + n[2] * lift));
+            const QVector3D down(float(-n[0]), float(-n[1]), float(-n[2]));
+            if (auto s = stampSpotAt(from, down)) {
+                s->along = along;
+                mode.row.push_back(*s);
+            }
         }
         if (mode.spots.size() + mode.row.size() >= 2000)
             break;
@@ -12758,7 +12784,8 @@ std::optional<PanelPoint> MainWindow::panelPointAt(const QVector3D& origin, cons
     return p;
 }
 
-std::vector<PanelPoint> MainWindow::panelPiece(const PanelPoint& a, const PanelPoint& b) const
+std::vector<PanelPoint> MainWindow::panelPiece(const PanelPoint& a, const PanelPoint& b,
+                                               const std::optional<StraightPlane>& plane) const
 {
     const Vec3 pa{a.point[0], a.point[1], a.point[2]}, pb{b.point[0], b.point[1], b.point[2]};
     Vec3 n{a.normal[0] + b.normal[0], a.normal[1] + b.normal[1], a.normal[2] + b.normal[2]};
@@ -12773,6 +12800,12 @@ std::vector<PanelPoint> MainWindow::panelPiece(const PanelPoint& a, const PanelP
         if (i + 1 == points.size()) {
             out.push_back(b);  // ends exactly where it was clicked
             break;
+        }
+        if (plane) {
+            // Kept in the straight line's plane.
+            if (const auto q = onSurfaceInPlane(m_panelLineMode.target, p, n, *plane, std::max(0.05, width / 2.0)))
+                out.push_back({q->point, q->normal});
+            continue;
         }
         // Dropped onto the surface from just outside it.
         const QVector3D from(float(p[0] + n[0] * lift), float(p[1] + n[1] * lift), float(p[2] + n[2] * lift));
@@ -12818,19 +12851,34 @@ void MainWindow::endPanelLine(bool closing)
     }
     mode.anchors.clear();
     mode.pieces.clear();
+    mode.planes.clear();
     updatePanelLinePreview();
 }
 
-void MainWindow::panelLineClick(const QVector3D& origin, const QVector3D& direction)
+void MainWindow::panelLineClick(const QVector3D& origin, const QVector3D& direction, Qt::KeyboardModifiers modifiers)
 {
     auto& mode = m_panelLineMode;
-    const auto p = panelPointAt(origin, direction);
+    auto p = panelPointAt(origin, direction);
     if (!p) {
         statusBar()->showMessage(tr("Panel Lines: click on the shape itself."), 4000);
         return;
     }
-    if (!mode.anchors.empty())
-        mode.pieces.push_back(panelPiece(mode.anchors.back(), *p));
+    if (!mode.anchors.empty()) {
+        const auto plane = straightPlane(mode.anchors.back().point, modifiers, direction);
+        if (plane) {
+            // Shift: level with the last point; Ctrl: straight up or down from it.
+            const auto q = onSurfaceInPlane(mode.target, {p->point[0], p->point[1], p->point[2]},
+                                            {p->normal[0], p->normal[1], p->normal[2]}, *plane,
+                                            std::max(0.05, m_panelLinePanel->settings().width / 2.0));
+            if (!q) {
+                statusBar()->showMessage(tr("Panel Lines: that's not on the shape, kept straight."), 4000);
+                return;
+            }
+            p = PanelPoint{q->point, q->normal};
+        }
+        mode.pieces.push_back(panelPiece(mode.anchors.back(), *p, plane));
+        mode.planes.push_back(plane);
+    }
     mode.anchors.push_back(*p);
     updatePanelLinePreview();
 }
@@ -12899,6 +12947,55 @@ void MainWindow::applyPanelLines()
         setSelection(topLevel ? id : history::objectOf(m_doc, target));
     } catch (const std::exception& e) {
         m_panelLinePanel->setStatus(tr("The lines couldn't be cut: %1").arg(QString::fromUtf8(e.what())), true);
+    }
+}
+
+// ---- Straight lines (Shift: level, Ctrl: upright) -------------------------------------
+
+std::optional<MainWindow::StraightPlane> MainWindow::straightPlane(const std::array<double, 3>& from,
+                                                                   Qt::KeyboardModifiers modifiers,
+                                                                   const QVector3D& direction) const
+{
+    StraightPlane plane;
+    plane.point = {from[0], from[1], from[2]};
+    if (modifiers.testFlag(Qt::ShiftModifier)) {
+        plane.normal = {0, 0, 1};  // level: the same height all the way
+        return plane;
+    }
+    if (modifiers.testFlag(Qt::ControlModifier)) {
+        // Upright: the up-and-down plane facing the way you're looking.
+        Vec3 look{direction.x(), direction.y(), 0.0};
+        const double l = std::sqrt(look[0] * look[0] + look[1] * look[1]);
+        look = l > 1e-6 ? Vec3{look[0] / l, look[1] / l, 0.0} : Vec3{0.0, 1.0, 0.0};
+        plane.normal = {-look[1], look[0], 0.0};  // up × look: across the view
+        return plane;
+    }
+    return std::nullopt;
+}
+
+std::optional<emboss::SurfacePoint> MainWindow::onSurfaceInPlane(ObjectId target, const Vec3& q, const Vec3& n,
+                                                                 const StraightPlane& plane, double radius) const
+{
+    const Vec3& pn = plane.normal;
+    const auto dot = [](const Vec3& a, const Vec3& b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; };
+    // Into the plane...
+    const double off = dot({q[0] - plane.point[0], q[1] - plane.point[1], q[2] - plane.point[2]}, pn);
+    const Vec3 t{q[0] - pn[0] * off, q[1] - pn[1] * off, q[2] - pn[2] * off};
+    // ...then onto the surface along the way out, as it lies in the plane.
+    const double along = dot(n, pn);
+    Vec3 d{n[0] - pn[0] * along, n[1] - pn[1] * along, n[2] - pn[2] * along};
+    const double dl = std::sqrt(dot(d, d));
+    if (dl < 1e-6)
+        return std::nullopt;  // the surface faces along the plane here: nowhere in it to land
+    d = {d[0] / dl, d[1] / dl, d[2] / dl};
+    // From just outside: as far as the point was moved, and a little more (not so far
+    // that it lands on some other part of the shape in front).
+    const double lift = std::abs(off) + 2.0 + 4.0 * radius;
+    try {
+        return surfaceUnder(m_doc, target, {t[0] + d[0] * lift, t[1] + d[1] * lift, t[2] + d[2] * lift},
+                            {-d[0], -d[1], -d[2]}, radius);
+    } catch (const std::exception&) {
+        return std::nullopt;
     }
 }
 
