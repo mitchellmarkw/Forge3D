@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.64.1 Beta — Simplify by a number of triangles (2026-11-19)
+
+- **Simplify** (Sculpt tab) was already there; its Properties now also take a number
+  of **Triangles** to aim for, alongside Keep (%), and show how big an STL file it
+  would make, then and before. Keep can now go down to 0.1 %, for very heavy sculpts.
+- The to-do item "Simplify a mesh" is done by this.
+
 ## 0.64.0 Beta — Slice 55: Print Check (2026-11-19)
 
 - **Print Check** (the Check group, next to Measure, on every tab): colours every part
