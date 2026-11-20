@@ -148,8 +148,8 @@ PropertiesPanel::PropertiesPanel(QWidget* parent) : QWidget(parent)
     });
     general->addRow(m_throughAll);
     m_keep = new QDoubleSpinBox;
-    m_keep->setRange(1.0, 100.0);
-    m_keep->setDecimals(0);
+    m_keep->setRange(0.1, 100.0);
+    m_keep->setDecimals(1);
     m_keep->setSingleStep(5.0);
     m_keep->setSuffix(tr(" % of the triangles"));
     m_keep->setKeyboardTracking(false);  // simplifying a big mesh takes a moment: once, when done typing
@@ -162,6 +162,24 @@ PropertiesPanel::PropertiesPanel(QWidget* parent) : QWidget(parent)
     m_keepRow = m_keep;
     m_keepLabel = new QLabel(tr("Keep:"));
     general->addRow(m_keepLabel, m_keep);
+    m_keepCount = new QSpinBox;
+    m_keepCount->setRange(100, 100);
+    m_keepCount->setSingleStep(1000);
+    m_keepCount->setGroupSeparatorShown(true);
+    m_keepCount->setKeyboardTracking(false);
+    m_keepCount->setToolTip(tr("The same, as a number of triangles to aim for (it ends up close to this)"));
+    connect(m_keepCount, &QSpinBox::valueChanged, this, [this](int count) {
+        if (m_body && m_simplifyFrom > 0)
+            emit simplifyKeepRequested(m_body->id, std::clamp(double(count) / double(m_simplifyFrom), 0.001, 1.0));
+    });
+    m_keepCountLabel = new QLabel(tr("Triangles:"));
+    general->addRow(m_keepCountLabel, m_keepCount);
+    m_keepSize = new QLabel;
+    m_keepSize->setWordWrap(true);
+    general->addRow(m_keepSize);
+    m_keepCount->hide();
+    m_keepCountLabel->hide();
+    m_keepSize->hide();
     m_strength = new QSpinBox;
     m_strength->setRange(1, 10);
     m_strength->setKeyboardTracking(false);  // smoothing takes a moment: once, when done typing
@@ -318,6 +336,8 @@ void PropertiesPanel::setBody(const Body* body, const QString& context, bool isP
     const bool simplify = body->isBoolean() && body->boolean->op == BooleanOp::Simplify && body->boolean->simplify;
     m_keepRow->setVisible(simplify && !isPart);
     m_keepLabel->setVisible(simplify && !isPart);
+    if (!simplify)
+        setSimplifyCounts(0, 0);
     const bool smooth = body->isBoolean() && body->boolean->op == BooleanOp::Smooth && body->boolean->smooth;
     m_strength->setVisible(smooth && !isPart);
     m_strengthLabel->setVisible(smooth && !isPart);
@@ -580,6 +600,28 @@ void PropertiesPanel::commitPlacement()
     p.rotationZ = m_rotZ->value();
     if (!(p == m_body->placement))
         emit placementRequested(m_body->id, p);
+}
+
+void PropertiesPanel::setSimplifyCounts(std::size_t from, std::size_t now)
+{
+    m_simplifyFrom = from;
+    const bool shown = from > 0 && !m_keepRow->isHidden();
+    m_keepCount->setVisible(shown);
+    m_keepCountLabel->setVisible(shown);
+    m_keepSize->setVisible(shown);
+    if (!shown)
+        return;
+    {
+        const QSignalBlocker block(m_keepCount);
+        m_keepCount->setRange(int(std::min<std::size_t>(100, from)), int(std::min<std::size_t>(from, 2'000'000'000)));
+        m_keepCount->setValue(int(std::min<std::size_t>(now, 2'000'000'000)));
+    }
+    // A binary STL: 84 bytes, then 50 a triangle.
+    const auto megabytes = [](std::size_t tris) {
+        const double mb = (84.0 + 50.0 * double(tris)) / (1024.0 * 1024.0);
+        return QString::number(mb, 'f', mb < 10.0 ? 1 : 0);
+    };
+    m_keepSize->setText(tr("As an STL file: about %1 MB (was %2 MB).").arg(megabytes(now), megabytes(from)));
 }
 
 }  // namespace forge::app

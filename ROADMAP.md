@@ -81,11 +81,12 @@ Gate to Phase 2: a new user prints a customised part within 10 minutes.
 | 52 | Tolerance test print: holes, cups and pin holes at stepped fits; the best becomes the starting fit | Done (0.61.0) |
 | 53 | Clicks (ratchet) on hinges and swivels; ridges in ball sockets for a stiffer hold | Done (0.62.0) |
 | 54 | Magnet pockets: standard sizes, open or under a skin, a matching pocket in the part it holds | Done (0.63.0) |
-| 55 | Print Check: thin walls and overhangs coloured on the parts, with how much of each | **Delivered for testing** |
+| 55 | Print Check: thin walls and overhangs coloured on the parts, with how much of each | Done (0.64.0) |
+| — | Simplify by a number of triangles, with the STL file size | **Delivered for testing** (0.64.1) |
 
 Slices 39–41 close the gaps found in the [Phase 1 gate review](docs/PHASE1_GATE.md).
 
-Waiting for a place: 9 figure, toy and scale-model features, in order (Simplify a mesh next). See [docs/TODO.md](docs/TODO.md).
+Waiting for a place: 8 figure, toy and scale-model features, in order (Rescale, keeping joint sizes next). See [docs/TODO.md](docs/TODO.md).
 
 ## Phase 2: Sculpt · Phase 3: Hybrid · Phase 4: Pro
 

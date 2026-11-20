@@ -41,6 +41,8 @@ public:
     // "Round" (cylinder, sphere, cone, torus, tube): the X / Y radii change together.
     void setKeepRound(bool on);
     bool keepRound() const;
+    // Simplify: how many triangles it started with and has now (0, 0: not known).
+    void setSimplifyCounts(std::size_t from, std::size_t now);
 
 signals:
     void renameRequested(ObjectId id, const QString& name);
@@ -87,6 +89,10 @@ private:
     QWidget* m_keepRow = nullptr;
     QWidget* m_keepLabel = nullptr;
     QDoubleSpinBox* m_keep = nullptr;
+    QSpinBox* m_keepCount = nullptr;  // the same, as a number of triangles
+    QLabel* m_keepCountLabel = nullptr;
+    QLabel* m_keepSize = nullptr;     // what that means for an STL file
+    std::size_t m_simplifyFrom = 0;
     QLabel* m_strengthLabel = nullptr;
     QSpinBox* m_strength = nullptr;
     QWidget* m_textGroup = nullptr;  // the words of a Text shape

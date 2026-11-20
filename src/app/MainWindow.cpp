@@ -7227,6 +7227,15 @@ void MainWindow::refreshScene()
                       .arg(QString::fromStdString(m_doc.find(m_selection.front())->name));
     }
     m_properties->setBody(selected, context, selected && !m_doc.isTopLevel(selected->id));
+    if (selected && selected->isBoolean() && selected->boolean->op == BooleanOp::Simplify &&
+        selected->boolean->operands.size() == 1) {
+        try {
+            m_properties->setSimplifyCounts(m_doc.mesh(selected->boolean->operands.front())->triangleCount(),
+                                            m_doc.mesh(selected->id)->triangleCount());
+        } catch (const std::exception&) {
+            m_properties->setSimplifyCounts(0, 0);
+        }
+    }
     refreshObjectList();
 
     const auto count = static_cast<int>(m_doc.topLevelIds().size());
