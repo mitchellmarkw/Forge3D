@@ -1448,3 +1448,12 @@ and sharp across edges.
   change through a callback to the document); copy as tab-separated cells, CSV with a
   byte-order mark, PDF through `QTextDocument::print` on a `QPdfWriter` (Qt GUI only, no
   print-support module).
+
+## Tidy-up towards 1.0 (slice 64)
+
+- Help: `help/figure-tools.html` (in `help.qrc`), shown by `MainWindow::showFigureTools`
+  in a `QTextBrowser` dialog like the Quick Start, from Help → Figure, Toy and Kit Tools.
+- `tests/test_heavy.cpp`: hidden `[.heavy]` timings on a 1.3-million-triangle bumpy ball
+  (Print Check measuring and colouring, Hollow, a row of Stamps, Panel Lines, the shown
+  mesh). Not run by CTest; run `forge_tests "[.heavy]" -s` to see them.
+- `docs/release-notes/v0.73.0.md`: the notes the publish step needs for v0.73.0.

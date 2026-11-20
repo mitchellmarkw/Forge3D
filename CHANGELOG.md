@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.73.0 Beta — Slice 64: Tidy-up towards 1.0 (2026-11-20)
+
+- **Help → Figure, Toy and Kit Tools**: a new guide to every tool added since 0.47
+  (Figure Guide, Reference Images, Scale Calculator, Quick Socket, Quick Hinge,
+  Tolerance Test Print, Pose Test, Stamp, Panel Lines, Print Check, Hollow, Simplify,
+  Split by Mask, Rescale Design, Kit Layout, Parts List): what each does and where it
+  is. The Quick Start points to it.
+- The help pages are readable in the dark theme (their text was dark on dark).
+- Release notes for 0.73 (docs/release-notes/v0.73.0.md), ready to publish: everything
+  new since 0.47.
+- Speed checked on a heavy sculpt (1.3 million triangles): Print Check, Hollow, Stamp
+  and Panel Lines each finish in a few seconds. The timings are a hidden test
+  (`forge_tests "[.heavy]"`), so they don't slow the normal run.
+- No change to the file format.
+
 ## 0.72.0 Beta — Slice 63: Parts list (2026-11-20)
 
 - **Tools → Parts List**: a table of the selected shapes (or everything on the plate):

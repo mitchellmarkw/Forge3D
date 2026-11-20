@@ -325,6 +325,8 @@ private:
     void refreshCommandState();
     void showAbout();
     void showQuickStart();
+    void showFigureTools();
+    QDialog* m_figureTools = nullptr;
     // quietly: at start (a note in the status bar if there's a newer one, nothing
     // otherwise); else from the Help menu, with a message either way.
     void checkForUpdates(bool quietly);
