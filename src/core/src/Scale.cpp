@@ -3,6 +3,7 @@
 
 #include "forge/core/Document.h"
 
+#include <algorithm>
 #include <cmath>
 #include <type_traits>
 
@@ -209,6 +210,19 @@ void scaleInto(const Document& doc, ObjectId id, const Vec3& factors, const Vec3
             if (even(factors))
                 d.radius *= factors[0];
         }
+        out.push_back(std::move(next));
+        return;
+    }
+    if (body->boolean->op == BooleanOp::Posed && body->boolean->posed) {
+        // The skeleton moves and stretches with the figure; evenly scaled, the bends
+        // spread further too.
+        Body next = *body;
+        PosedFinish& po = *next.boolean->posed;
+        for (auto& p : po.points)
+            for (std::size_t k = 0; k < 3; ++k)
+                p[k] = factors[k] * (p[k] - anchor[k]) + anchor[k];
+        if (even(factors))
+            po.blend = std::clamp(po.blend * factors[0], 0.1, 200.0);
         out.push_back(std::move(next));
         return;
     }

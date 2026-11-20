@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.74.0 Beta — Slice 65: Pose Figure (2026-11-20)
+
+- **Pose Figure** (Sculpt tab): bend a figure sculpted in one piece, or an imported one, at its joints, the
+  surface following smoothly.
+  - **1. Fit the Skeleton**: a skeleton is placed in the figure for you (arms out or down, legs, feet); drag its
+    balls onto the joints. "Move both sides together" mirrors the other side; Place It Again starts over;
+    "Bends spread" sets how far a bend reaches either side of a joint.
+  - **2. Pose**: choose a ready pose (the Figure Guide's: Standing, A-pose, T-pose, Walking, Action, or the guide's
+    own pose), type a joint's angles, or drag a ball and the joint above it turns to follow. Neck, waist, shoulders,
+    elbows, wrists, hips, knees and ankles.
+  - Feet flat on the ground (on by default) and Keep it standing on the plate (bent legs bring it down).
+  - Elbows and knees keep their thickness as they bend.
+  - A step in the history ("Posed"): double-click it to change the pose, or sculpt on from the posed figure.
+    Rescale Design moves and grows the skeleton with the figure.
+- Help → Figure, Toy and Kit Tools has a Pose Figure section.
+- **File format 38**: files with a Pose Figure step need this version to open.
+
 ## 0.73.0 Beta — Slice 64: Tidy-up towards 1.0 (2026-11-20)
 
 - **Help → Figure, Toy and Kit Tools**: a new guide to every tool added since 0.47

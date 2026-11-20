@@ -323,6 +323,7 @@ enum class BooleanOp {
     Stamp,        // small details stamped on: rivets, bolts, vents... raised or sunk (see `stamp`;
                   // a second operand, if any, is the shape used as the stamp)
     PanelLines,   // thin grooves cut along lines drawn on the surface (see `panelLines`)
+    Posed,        // a figure bent at its joints by a simple skeleton inside it (see `posed`)
 };
 
 // What happens to the picked edges of a shape.
@@ -677,6 +678,22 @@ struct PatternFinish {
 std::string toString(BooleanOp op);
 
 // A body made by combining other bodies (its parts, or "operands").
+// A Posed step: one figure (a sculpt, or an imported mesh) bent at its joints, the
+// surface following (see rig::). `points` are the skeleton's points where they sit in
+// the figure as it was made (the step's coordinates, rig::Point order; the figure stands
+// up +Z and faces -Y); `angles` the pose (rig::Joint order, degrees; the figure guide's
+// angles, 0 standing straight).
+inline constexpr int kRigPointCount = 19;
+inline constexpr int kRigJointCount = 14;
+struct PosedFinish {
+    std::array<std::array<double, 3>, kRigPointCount> points{};
+    std::array<std::array<double, 2>, kRigJointCount> angles{};
+    double blend = 4.0;     // mm: how far a bend spreads either side of a joint
+    bool feetFlat = true;   // the feet keep their angle to the ground (ankle angles unused)
+    bool onGround = true;   // moved up or down so it stands where it stood
+    bool operator==(const PosedFinish&) const = default;
+};
+
 //   Merge:     everything in any part.
 //   Subtract:  the first part, minus all the others.
 //   Intersect: only what every part shares.
@@ -729,6 +746,8 @@ struct BooleanSpec {
     std::optional<StampFinish> stamp{};
     // Panel lines: the groove and the lines.
     std::optional<PanelLineFinish> panelLines{};
+    // Posed: the skeleton and the pose.
+    std::optional<PosedFinish> posed{};
     // Edges: what to do to which edges.
     std::optional<EdgeFinish> edges{};
     // Shell: how thick, and which faces are left open.

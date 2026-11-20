@@ -5,6 +5,7 @@
 #include "forge/core/Hollow.h"
 #include "forge/core/Stamp.h"
 #include "forge/core/PanelLines.h"
+#include "forge/core/Rig.h"
 #include "forge/core/MeshKernel.h"
 
 #include <miniz.h>
@@ -236,6 +237,7 @@ const char* opName(BooleanOp op)
     case BooleanOp::Hollow: return "hollow";
     case BooleanOp::Stamp: return "stamp";
     case BooleanOp::PanelLines: return "panelLines";
+    case BooleanOp::Posed: return "posed";
     }
     return "merge";
 }
@@ -407,6 +409,18 @@ json bodyToJson(const Body& b)
             j["stamp"] = json{{"kind", stamp::key(st->kind)}, {"size", st->size},   {"height", st->height},
                               {"sunk", st->sunk},              {"spin", st->spin},   {"spacing", st->spacing},
                               {"spots", std::move(spots)}};
+        }
+        if (const auto& po = b.boolean->posed) {
+            json points = json::object();
+            for (int i = 0; i < kRigPointCount; ++i)
+                points[rig::key(rig::Point(i))] = po->points[std::size_t(i)];
+            json angles = json::object();
+            for (int i = 0; i < kRigJointCount; ++i) {
+                const auto& a = po->angles[std::size_t(i)];
+                angles[rig::key(rig::Joint(i))] = rig::angleCount(rig::Joint(i)) == 1 ? json::array({a[0]}) : json(a);
+            }
+            j["posed"] = json{{"points", std::move(points)}, {"angles", std::move(angles)}, {"blend", po->blend},
+                              {"feetFlat", po->feetFlat},    {"onGround", po->onGround}};
         }
         if (const auto& ho = b.boolean->hollow) {
             json holes = json::array();
@@ -609,6 +623,8 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
             spec.op = BooleanOp::Stamp;
         else if (op == "panelLines" && version >= 36)
             spec.op = BooleanOp::PanelLines;
+        else if (op == "posed" && version >= 38)
+            spec.op = BooleanOp::Posed;
         else
             damaged(where + ": unknown combine operation '" + op + "'");
         const auto operands = j.find("operands");
@@ -910,6 +926,39 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
                 damaged(where + ": " + e.what());
             }
             spec.stamp = std::move(st);
+        }
+        if (spec.op == BooleanOp::Posed) {
+            const auto pj = j.find("posed");
+            if (pj == j.end() || !pj->is_object())
+                damaged(where + ": missing the figure's skeleton");
+            PosedFinish po;
+            try {
+                const json& points = pj->at("points");
+                for (int i = 0; i < kRigPointCount; ++i) {
+                    const json& p = points.at(rig::key(rig::Point(i)));
+                    for (std::size_t k = 0; k < 3; ++k)
+                        po.points[std::size_t(i)][k] = p.at(k).get<double>();
+                }
+                const json& angles = pj->at("angles");
+                for (int i = 0; i < kRigJointCount; ++i) {
+                    const auto a = angles.find(rig::key(rig::Joint(i)));
+                    if (a == angles.end() || !a->is_array())
+                        continue;  // straight
+                    for (std::size_t k = 0; k < std::min<std::size_t>(2, a->size()); ++k)
+                        po.angles[std::size_t(i)][k] = a->at(k).get<double>();
+                }
+            } catch (const std::exception&) {
+                damaged(where + ": the figure's skeleton is broken");
+            }
+            po.blend = pj->value("blend", po.blend);
+            po.feetFlat = pj->value("feetFlat", po.feetFlat);
+            po.onGround = pj->value("onGround", po.onGround);
+            try {
+                rig::check(po);
+            } catch (const std::exception& e) {
+                damaged(where + ": " + e.what());
+            }
+            spec.posed = std::move(po);
         }
         if (spec.op == BooleanOp::Hollow) {
             const auto hj = j.find("hollow");
