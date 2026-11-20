@@ -3,6 +3,7 @@
 
 #include "forge/core/Document.h"
 #include "forge/core/Hollow.h"
+#include "forge/core/Stamp.h"
 #include "forge/core/MeshKernel.h"
 
 #include <miniz.h>
@@ -232,6 +233,7 @@ const char* opName(BooleanOp op)
     case BooleanOp::Hinge: return "hinge";
     case BooleanOp::MaskSplit: return "maskSplit";
     case BooleanOp::Hollow: return "hollow";
+    case BooleanOp::Stamp: return "stamp";
     }
     return "merge";
 }
@@ -380,6 +382,14 @@ json bodyToJson(const Body& b)
             j["simplify"] = json{{"keep", sf->keep}};
         if (const auto& sm = b.boolean->smooth)
             j["smooth"] = json{{"strength", sm->strength}};
+        if (const auto& st = b.boolean->stamp) {
+            json spots = json::array();
+            for (const StampSpot& sp : st->spots)
+                spots.push_back({{"point", sp.point}, {"normal", sp.normal}, {"along", sp.along}});
+            j["stamp"] = json{{"kind", stamp::key(st->kind)}, {"size", st->size},   {"height", st->height},
+                              {"sunk", st->sunk},              {"spin", st->spin},   {"spacing", st->spacing},
+                              {"spots", std::move(spots)}};
+        }
         if (const auto& ho = b.boolean->hollow) {
             json holes = json::array();
             for (const DrainHole& h : ho->holes)
@@ -577,6 +587,8 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
             spec.op = BooleanOp::Hinge;
         else if (op == "hollow" && version >= 34)
             spec.op = BooleanOp::Hollow;
+        else if (op == "stamp" && version >= 35)
+            spec.op = BooleanOp::Stamp;
         else
             damaged(where + ": unknown combine operation '" + op + "'");
         const auto operands = j.find("operands");
@@ -803,6 +815,41 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
             h.clicks = hj->value("clicks", 0);
             h.clickDepth = hj->value("clickDepth", h.clickDepth);
             spec.hinge = h;
+        }
+        if (spec.op == BooleanOp::Stamp) {
+            const auto sj = j.find("stamp");
+            if (sj == j.end() || !sj->is_object())
+                damaged(where + ": missing the stamp's settings");
+            StampFinish st;
+            const auto kind = stamp::fromKey(sj->value("kind", std::string()));
+            if (!kind)
+                damaged(where + ": an unknown kind of stamp");
+            st.kind = *kind;
+            st.size = number(*sj, "size", where);
+            st.height = number(*sj, "height", where);
+            st.sunk = sj->value("sunk", false);
+            st.spin = sj->value("spin", 0.0);
+            st.spacing = sj->value("spacing", st.spacing);
+            if (const auto list = sj->find("spots"); list != sj->end() && list->is_array())
+                for (const json& sp : *list) {
+                    StampSpot d;
+                    try {
+                        for (std::size_t k = 0; k < 3; ++k) {
+                            d.point[k] = sp.at("point").at(k).get<double>();
+                            d.normal[k] = sp.at("normal").at(k).get<double>();
+                            d.along[k] = sp.at("along").at(k).get<double>();
+                        }
+                    } catch (const std::exception&) {
+                        damaged(where + ": a stamp's spot is broken");
+                    }
+                    st.spots.push_back(d);
+                }
+            try {
+                stamp::check(st);
+            } catch (const std::exception& e) {
+                damaged(where + ": " + e.what());
+            }
+            spec.stamp = std::move(st);
         }
         if (spec.op == BooleanOp::Hollow) {
             const auto hj = j.find("hollow");

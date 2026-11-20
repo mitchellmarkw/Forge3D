@@ -75,7 +75,8 @@ namespace forge::file {
 //  33  the figure guide ("mannequin": height, heads, place, turn, shown, and each
 //      joint's angles by name)
 //  34  Hollow steps (operation "hollow": wall thickness, drain hole size and spots)
-inline constexpr int kFormatVersion = 34;
+//  35  Stamp steps (operation "stamp": kind, size, height, sunk, spin, spacing, spots)
+inline constexpr int kFormatVersion = 35;
 // The highest sculpt::Brush number a file may hold (Pattern).
 inline constexpr int kLastSculptBrush = 13;
 inline constexpr const char* kExtension = ".f3d";

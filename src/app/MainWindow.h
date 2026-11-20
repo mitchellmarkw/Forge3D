@@ -78,6 +78,7 @@ class PosePanel;
 class PrintCheckPanel;
 class MannequinPanel;
 class HollowPanel;
+class StampPanel;
 class JoinPanel;
 class MaskPanel;
 class ReferencePanel;
@@ -828,6 +829,32 @@ private:
     void hollowClick(const QVector3D& origin, const QVector3D& direction);
     void updateHollowPreview();
     void applyHollow();
+
+    // Surface stamps: rivets, bolts, vents, scales, stitches... clicked or dragged in rows
+    QAction* m_stampAction = nullptr;
+    StampPanel* m_stampPanel = nullptr;
+    struct StampMode {
+        bool active = false;
+        bool editing = false;
+        ObjectId target = kInvalidId;      // the part to stamp, or the Stamp step being changed
+        std::vector<StampSpot> spots;      // plate coordinates
+        std::vector<std::size_t> groups;   // where each click or row starts in `spots` (Remove Last)
+        std::optional<StampSpot> rowStart;  // dragging a row from here
+        std::vector<StampSpot> row;         // the row being dragged
+        std::optional<MeshSolid> custom;    // a custom stamp's shape (any size; fitted when stamped)
+        QString customName;
+        std::shared_ptr<const Mesh> shown;  // the stamps, plate coordinates
+    };
+    StampMode m_stampMode;
+    QStringList stampLibrary() const;
+    void startStamp(ObjectId target, bool editing);
+    void endStamp();
+    std::optional<StampSpot> stampSpotAt(const QVector3D& origin, const QVector3D& direction) const;
+    void stampClick(const QVector3D& origin, const QVector3D& direction);
+    void stampDrag(const QVector3D& origin, const QVector3D& direction);
+    void loadStampShape();
+    void updateStampPreview();
+    void applyStamp();
     void addMatchingPart();
 
     // Pose Test

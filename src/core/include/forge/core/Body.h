@@ -320,6 +320,8 @@ enum class BooleanOp {
     Hinge,        // one half of a hinge or swivel at a spot (planePoint, facing out: planeNormal)
     MaskSplit,    // the part cut along the edge of a painted mask: the masked piece or the rest
     Hollow,       // hollowed for resin printing, with drain holes (mesh engine; see `hollow`)
+    Stamp,        // small details stamped on: rivets, bolts, vents... raised or sunk (see `stamp`;
+                  // a second operand, if any, is the shape used as the stamp)
 };
 
 // What happens to the picked edges of a shape.
@@ -574,6 +576,27 @@ struct HollowFinish {
     bool operator==(const HollowFinish&) const = default;
 };
 
+// A Stamp step: small details stamped onto (raised) or into (sunk) the surface, each at a
+// spot on it. Spots are in the step's coordinates: a point on the surface, the way out,
+// and a direction along the surface (the stamp's own X: a row's direction).
+enum class StampKind { Rivet, HexBolt, Screw, Stud, Vent, Scale, Stitch, Custom };
+struct StampSpot {
+    std::array<double, 3> point{0.0, 0.0, 0.0};
+    std::array<double, 3> normal{0.0, 0.0, 1.0};
+    std::array<double, 3> along{1.0, 0.0, 0.0};
+    bool operator==(const StampSpot&) const = default;
+};
+struct StampFinish {
+    StampKind kind = StampKind::Rivet;  // Custom: the step's second operand is the stamp
+    double size = 3.0;     // across, mm (the widest way)
+    double height = 1.0;   // how far it stands out (or goes in), mm
+    bool sunk = false;     // cut in instead of standing out
+    double spin = 0.0;     // degrees about the way out, from `along`
+    double spacing = 5.0;  // between stamps in a row, mm (middle to middle)
+    std::vector<StampSpot> spots;
+    bool operator==(const StampFinish&) const = default;
+};
+
 struct MaskSplitFinish {
     std::vector<MaskDab> dabs;
     bool masked = true;  // this piece is the masked part (false: the rest)
@@ -675,6 +698,8 @@ struct BooleanSpec {
     std::optional<MaskSplitFinish> maskSplit{};
     // Hollow: wall thickness and drain holes.
     std::optional<HollowFinish> hollow{};
+    // Stamp: what, how big, and where.
+    std::optional<StampFinish> stamp{};
     // Edges: what to do to which edges.
     std::optional<EdgeFinish> edges{};
     // Shell: how thick, and which faces are left open.

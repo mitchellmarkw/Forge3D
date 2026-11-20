@@ -28,6 +28,8 @@
 #include "PrintCheckPanel.h"
 #include "MannequinPanel.h"
 #include "HollowPanel.h"
+#include "StampPanel.h"
+#include "forge/core/Stamp.h"
 #include "Fits.h"
 #include "forge/core/Hollow.h"
 #include "MaskPanel.h"
@@ -613,6 +615,8 @@ void MainWindow::createActions()
             endSocket();
         else if (m_hollowMode.active)
             endHollow();
+        else if (m_stampMode.active)
+            endStamp();
         else if (m_hingeMode.active && m_hingeMode.pickingOther) {
             m_hingeMode.pickingOther = false;
             const Body* other = m_doc.find(m_hingeMode.other);
@@ -980,6 +984,19 @@ void MainWindow::createActions()
             return;
         }
         startPattern(history::tip(m_doc, id), false);
+    });
+    m_stampAction = new QAction(tr("Stamp"), this);
+    m_stampAction->setToolTip(tr("Stamp: small details on the selected shape's surface (rivets, bolts, screws, "
+                                 "vents, scales, stitches, or your own custom shapes), raised or cut in; click "
+                                 "for one, drag for a row"));
+    m_stampAction->setStatusTip(m_stampAction->toolTip());
+    connect(m_stampAction, &QAction::triggered, this, [this] {
+        const ObjectId id = selectedOne();
+        if (id == kInvalidId || m_selection.size() != 1 || !m_doc.isTopLevel(id)) {
+            statusBar()->showMessage(tr("Stamp: select one shape on the plate first."), 6000);
+            return;
+        }
+        startStamp(history::tip(m_doc, id), false);
     });
     m_hollowAction = new QAction(tr("Hollow"), this);
     m_hollowAction->setToolTip(tr("Hollow: for resin printing, take the inside out of the selected shape (any shape, "
@@ -1383,6 +1400,7 @@ void MainWindow::createToolBar()
         {m_referenceAction, "reference"},
         {m_mannequinAction, "mannequin"},
         {m_hollowAction, "hollow"},
+        {m_stampAction, "stamp"},
         {m_showPicturesAction, "reference"},
         {m_plateSizeAction, "plate"},
     };
@@ -1529,7 +1547,8 @@ void MainWindow::createToolBar()
     group(features, tr("Holes and Joints"), {button(m_holeAction), button(m_threadAction), button(m_socketAction), button(m_hingeAction),
                                        button(m_poseAction)});
     group(features, tr("Surface"),
-          {button(m_shellAction), button(m_hollowAction), button(m_followAction), button(m_edgesAction)});
+          {button(m_shellAction), button(m_hollowAction), button(m_followAction), button(m_stampAction),
+           button(m_edgesAction)});
     group(features, tr("Repeat"), {button(m_patternAction)});
     common(features);
 
@@ -2069,6 +2088,28 @@ void MainWindow::createDocks()
     connect(m_threadPanel, &ThreadPanel::changed, this, [this] { m_threadTimer->start(); });
     connect(m_threadPanel, &ThreadPanel::applyRequested, this, &MainWindow::applyThread);
     connect(m_threadPanel, &ThreadPanel::cancelRequested, this, &MainWindow::endThread);
+    m_stampPanel = new StampPanel;
+    stackLayout->addWidget(m_stampPanel);
+    m_stampPanel->hide();
+    connect(m_stampPanel, &StampPanel::changed, this, &MainWindow::updateStampPreview);
+    connect(m_stampPanel, &StampPanel::kindChanged, this, &MainWindow::loadStampShape);
+    connect(m_stampPanel, &StampPanel::removeLastRequested, this, [this] {
+        auto& mode = m_stampMode;
+        if (!mode.groups.empty()) {
+            mode.spots.resize(mode.groups.back());
+            mode.groups.pop_back();
+        } else if (!mode.spots.empty()) {
+            mode.spots.pop_back();  // changing a step: one at a time
+        }
+        updateStampPreview();
+    });
+    connect(m_stampPanel, &StampPanel::clearRequested, this, [this] {
+        m_stampMode.spots.clear();
+        m_stampMode.groups.clear();
+        updateStampPreview();
+    });
+    connect(m_stampPanel, &StampPanel::applyRequested, this, &MainWindow::applyStamp);
+    connect(m_stampPanel, &StampPanel::cancelRequested, this, &MainWindow::endStamp);
     m_hollowPanel = new HollowPanel;
     stackLayout->addWidget(m_hollowPanel);
     m_hollowPanel->hide();
@@ -2547,6 +2588,10 @@ void MainWindow::onViewportClicked(const QVector3D& origin, const QVector3D& dir
         hollowClick(origin, direction);
         return;
     }
+    if (m_stampMode.active) {
+        stampClick(origin, direction);
+        return;
+    }
     if (m_hingeMode.active) {
         hingeClick(origin, direction);
         return;
@@ -2669,6 +2714,12 @@ void MainWindow::onLeftPressed(const QVector3D& origin, const QVector3D& directi
     }
     if (m_poseMode.active) {
         poseGrab(origin, direction);  // a part on a joint turns as it's dragged
+        return;
+    }
+    if (m_stampMode.active) {
+        // Dragging from the shape stamps a row.
+        m_stampMode.rowStart = stampSpotAt(origin, direction);
+        m_stampMode.row.clear();
         return;
     }
     if (m_referenceMode.active) {
@@ -2834,6 +2885,10 @@ void MainWindow::onLeftDragged(const QVector3D& origin, const QVector3D& directi
     }
     if (m_poseMode.active) {
         poseDrag(origin, direction);
+        return;
+    }
+    if (m_stampMode.active) {
+        stampDrag(origin, direction);
         return;
     }
     Drag& d = m_dragState;
@@ -3025,6 +3080,17 @@ void MainWindow::onLeftDragged(const QVector3D& origin, const QVector3D& directi
 
 void MainWindow::onLeftReleased(bool wasDrag)
 {
+    if (m_stampMode.active) {
+        auto& mode = m_stampMode;
+        if (wasDrag && !mode.row.empty()) {
+            mode.groups.push_back(mode.spots.size());
+            mode.spots.insert(mode.spots.end(), mode.row.begin(), mode.row.end());
+        }
+        mode.rowStart.reset();
+        mode.row.clear();
+        updateStampPreview();
+        return;
+    }
     if (m_poseMode.active) {
         m_poseMode.dragging = false;
         return;
@@ -4580,7 +4646,7 @@ bool MainWindow::toolOpen() const
            m_patternMode.active || m_sculptMode.active || m_measureMode.active || m_threadMode.active ||
            m_socketMode.active || m_joinMode.active || m_maskMode.active || m_referenceMode.active ||
            m_hingeMode.active || m_poseMode.active || m_printCheckMode.active || m_mannequinOpen ||
-           m_hollowMode.active;
+           m_hollowMode.active || m_stampMode.active;
 }
 
 void MainWindow::startEmboss(ObjectId target, bool editing)
@@ -6984,6 +7050,8 @@ void MainWindow::refreshScene()
             endSocket();
         if (m_hollowMode.active && !m_doc.find(m_hollowMode.target))
             endHollow();
+        if (m_stampMode.active && !m_doc.find(m_stampMode.target))
+            endStamp();
         if (m_hingeMode.active && !m_doc.find(m_hingeMode.target))
             endHinge();
         if (m_maskMode.active && !m_doc.find(m_maskMode.target))
@@ -7181,6 +7249,17 @@ void MainWindow::refreshScene()
             }
             triangles += item.mesh->triangleCount();
             items.push_back(std::move(item));
+        }
+        // Stamps placed so far: gold standing out, red cut in (seen through the shape).
+        if (m_stampMode.active && m_stampMode.shown) {
+            DisplayItem marks;
+            marks.id = kEdgesPickedItem;
+            marks.mesh = m_stampMode.shown;
+            const bool sunk = m_stampPanel->settings().sunk;
+            marks.color = sunk ? QVector3D(0.9f, 0.15f, 0.1f) : QVector3D(0.9f, 0.68f, 0.18f);
+            marks.ghost = sunk;
+            marks.helper = true;
+            items.push_back(marks);
         }
         // Hollow: where the drain holes go, red, seen through the shape.
         if (m_hollowMode.active && m_hollowMode.cut) {
@@ -7426,6 +7505,7 @@ void MainWindow::refreshScene()
     m_holeAction->setEnabled(m_selection.size() == 1 && allTopLevel && !rolled && !toolOpen());
     m_shellAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_hollowAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
+    m_stampAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_threadAction->setEnabled(m_shellAction->isEnabled());
     m_socketAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_hingeAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
@@ -7594,6 +7674,7 @@ void MainWindow::editStep(ObjectId id)
     case BooleanOp::Thread: startThread(id, true); break;
     case BooleanOp::Socket: startSocket(id, true); break;
     case BooleanOp::Hollow: startHollow(id, true); break;
+    case BooleanOp::Stamp: startStamp(id, true); break;
     case BooleanOp::Hinge: startHinge(id, true); break;
     case BooleanOp::MaskSplit: startMask(id, true); break;
     case BooleanOp::Follow: startFollow(id, true); break;
@@ -7776,7 +7857,7 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
                                                   op == BooleanOp::Emboss || op == BooleanOp::Sculpt ||
                                                   op == BooleanOp::Thread || op == BooleanOp::Socket ||
                                                   op == BooleanOp::Hinge || op == BooleanOp::MaskSplit ||
-                                                  op == BooleanOp::Hollow ||
+                                                  op == BooleanOp::Hollow || op == BooleanOp::Stamp ||
                                                   (op == BooleanOp::Split && m_doc.isTopLevel(id))));
         if (!opens) {
             // Nothing to open: show or hide what's inside, as a list does.
@@ -12255,6 +12336,283 @@ void MainWindow::applyHollow()
                                            .arg(f.holes.size())
                                      : tr("Hollowed, with %1 drain holes.").arg(f.holes.size()),
                              10000);
+}
+
+// ---- Surface stamps ---------------------------------------------------------------------
+
+QStringList MainWindow::stampLibrary() const
+{
+    QStringList names;
+    for (const auto& e : library::list(toPath(customShapesFolder())))
+        names << QString::fromStdString(e.name);
+    return names;
+}
+
+void MainWindow::startStamp(ObjectId target, bool editing)
+{
+    const Body* body = m_doc.find(target);
+    if (!body || toolOpen())
+        return;
+    if (m_dragState.kind != Drag::Kind::None)
+        cancelDrag();
+    StampMode mode;
+    mode.active = true;
+    mode.editing = editing;
+    mode.target = target;
+    StampFinish finish;
+    if (editing) {
+        try {
+            finish = stampInPlate(m_doc, target);
+        } catch (const std::exception& e) {
+            QMessageBox::information(this, tr("Forge3D"), QString::fromUtf8(e.what()));
+            return;
+        }
+        mode.spots = finish.spots;
+        const auto& ops = body->boolean->operands;
+        if (finish.kind == StampKind::Custom && ops.size() > 1) {
+            try {
+                mode.custom = meshkernel::transformed(m_doc.meshSolid(ops[1]), m_doc.worldTransform(ops[1]));
+                mode.customName = QString::fromStdString(m_doc.find(ops[1])->name);
+            } catch (const std::exception&) {
+            }
+        }
+    }
+    m_stampMode = std::move(mode);
+    const QString name = QString::fromStdString(body->name);
+    m_stampPanel->start(editing ? tr("Change the stamps on '%1'").arg(name) : tr("Stamp '%1'").arg(name),
+                        stampLibrary(), editing ? &finish : nullptr, m_stampMode.customName);
+    m_propsDockWidth = m_propsDock->width();
+    m_properties->hide();
+    m_stampPanel->show();
+    if (!editing)
+        loadStampShape();
+    statusBar()->showMessage(tr("Stamp: click the shape for one stamp, drag across it for a row, then Apply. Esc "
+                                "cancels."));
+    updateStampPreview();
+    refreshCommandState();
+}
+
+void MainWindow::endStamp()
+{
+    if (!m_stampMode.active)
+        return;
+    m_stampMode = StampMode{};
+    m_stampPanel->hide();
+    m_properties->show();
+    QTimer::singleShot(0, this, [this] { resizeDocks({m_propsDock}, {m_propsDockWidth}, Qt::Horizontal); });
+    statusBar()->clearMessage();
+    refreshScene();
+    refreshCommandState();
+}
+
+void MainWindow::loadStampShape()
+{
+    auto& mode = m_stampMode;
+    if (!mode.active || mode.editing)
+        return;
+    mode.custom.reset();
+    mode.customName.clear();
+    const int index = m_stampPanel->customIndex();
+    if (index < 0)
+        return;
+    const auto entries = library::list(toPath(customShapesFolder()));
+    if (index >= int(entries.size()))
+        return;
+    try {
+        // Built in a scratch document, to see its shape before it's added.
+        Document scratch;
+        CommandStack stack(scratch);
+        const auto ids = library::add(stack, scratch, entries[std::size_t(index)].file);
+        std::vector<MeshSolid> pieces;
+        for (ObjectId id : ids)
+            pieces.push_back(meshkernel::transformed(scratch.meshSolid(id), scratch.worldTransform(id)));
+        mode.custom = meshkernel::together(pieces);
+        mode.customName = QString::fromStdString(entries[std::size_t(index)].name);
+    } catch (const std::exception& e) {
+        m_stampPanel->setStatus(tr("That custom shape couldn't be used: %1").arg(QString::fromUtf8(e.what())), true);
+    }
+}
+
+std::optional<StampSpot> MainWindow::stampSpotAt(const QVector3D& origin, const QVector3D& direction) const
+{
+    const QVector3D d = direction.normalized();
+    std::optional<emboss::SurfacePoint> hit;
+    try {
+        hit = surfaceUnder(m_doc, m_stampMode.target, {origin.x(), origin.y(), origin.z()}, {d.x(), d.y(), d.z()},
+                           std::max(0.1, m_stampPanel->settings().size / 2.0));
+    } catch (const std::exception&) {
+        return std::nullopt;
+    }
+    if (!hit)
+        return std::nullopt;
+    StampSpot s;
+    s.point = hit->point;
+    s.normal = hit->normal;
+    // Along: the plate's X, as it lies on the surface (or Y where the surface faces X).
+    s.along = std::abs(hit->normal[0]) > 0.9 ? std::array<double, 3>{0, 1, 0} : std::array<double, 3>{1, 0, 0};
+    return s;
+}
+
+void MainWindow::stampClick(const QVector3D& origin, const QVector3D& direction)
+{
+    auto& mode = m_stampMode;
+    const auto spot = stampSpotAt(origin, direction);
+    if (!spot) {
+        statusBar()->showMessage(tr("Stamp: click on the shape itself."), 4000);
+        return;
+    }
+    mode.groups.push_back(mode.spots.size());
+    mode.spots.push_back(*spot);
+    updateStampPreview();
+}
+
+void MainWindow::stampDrag(const QVector3D& origin, const QVector3D& direction)
+{
+    auto& mode = m_stampMode;
+    if (!mode.rowStart)
+        return;
+    const auto end = stampSpotAt(origin, direction);
+    if (!end)
+        return;
+    const StampSpot& a = *mode.rowStart;
+    const StampFinish f = m_stampPanel->settings();
+    const Vec3 pa{a.point[0], a.point[1], a.point[2]}, pb{end->point[0], end->point[1], end->point[2]};
+    Vec3 along{pb[0] - pa[0], pb[1] - pa[1], pb[2] - pa[2]};
+    const double length = std::sqrt(along[0] * along[0] + along[1] * along[1] + along[2] * along[2]);
+    if (length < 1e-6)
+        return;
+    along = {along[0] / length, along[1] / length, along[2] / length};
+    Vec3 n{a.normal[0] + end->normal[0], a.normal[1] + end->normal[1], a.normal[2] + end->normal[2]};
+    const double nl = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+    n = nl > 1e-9 ? Vec3{n[0] / nl, n[1] / nl, n[2] / nl} : Vec3{a.normal[0], a.normal[1], a.normal[2]};
+    mode.row.clear();
+    const double lift = 4.0 * f.size + 5.0;
+    for (const Vec3& p : stamp::rowPoints(pa, pb, f.spacing)) {
+        // Each one dropped onto the surface from just outside it.
+        const QVector3D from(float(p[0] + n[0] * lift), float(p[1] + n[1] * lift), float(p[2] + n[2] * lift));
+        const QVector3D down(float(-n[0]), float(-n[1]), float(-n[2]));
+        if (auto s = stampSpotAt(from, down)) {
+            s->along = along;
+            mode.row.push_back(*s);
+        }
+        if (mode.spots.size() + mode.row.size() >= 2000)
+            break;
+    }
+    updateStampPreview();
+}
+
+void MainWindow::updateStampPreview()
+{
+    auto& mode = m_stampMode;
+    if (!mode.active)
+        return;
+    StampFinish f = m_stampPanel->settings();
+    f.spots = mode.spots;
+    f.spots.insert(f.spots.end(), mode.row.begin(), mode.row.end());
+    m_stampPanel->setCount(int(f.spots.size()));
+    mode.shown.reset();
+    if (f.kind == StampKind::Custom && !mode.custom) {
+        m_stampPanel->setStatus(tr("Pick a stamp."), true);
+        refreshScene();
+        return;
+    }
+    if (!f.spots.empty()) {
+        try {
+            mode.shown = std::make_shared<const Mesh>(
+                meshkernel::displayMesh(stamp::placed(f, mode.custom ? &*mode.custom : nullptr)));
+            m_stampPanel->setStatus({}, false);
+        } catch (const std::exception& e) {
+            m_stampPanel->setStatus(QString::fromUtf8(e.what()), true);
+        }
+    }
+    refreshScene();
+}
+
+void MainWindow::applyStamp()
+{
+    auto& mode = m_stampMode;
+    if (!mode.active || mode.spots.empty())
+        return;
+    StampFinish f = m_stampPanel->settings();
+    f.spots = mode.spots;
+    const ObjectId target = mode.target;
+    const QString customName = mode.customName;
+    const int customIndex = m_stampPanel->customIndex();
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    struct RestoreCursor {
+        ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
+    } restore;
+    if (mode.editing) {
+        try {
+            const Body after = withStamp(m_doc, target, f);
+            m_doc.previewMesh(*after.boolean);
+            const Body before = *m_doc.find(target);
+            endStamp();
+            run(std::make_unique<EditBodyCommand>(before, after, "Change stamps"));
+            setSelection(history::objectOf(m_doc, target));
+        } catch (const std::exception& e) {
+            m_stampPanel->setStatus(tr("It couldn't be stamped: %1").arg(QString::fromUtf8(e.what())), true);
+        }
+        return;
+    }
+    if (f.kind != StampKind::Custom) {
+        try {
+            Body r;
+            r.id = m_doc.allocateId();
+            r.name = m_doc.uniqueName("Stamped");
+            r.boolean = stampSpec(m_doc, target, f);
+            m_doc.previewMesh(*r.boolean);  // worked out (and kept) before anything changes
+            const ObjectId id = r.id;
+            endStamp();
+            const bool topLevel = m_doc.isTopLevel(target);
+            if (topLevel)
+                run(std::make_unique<CombineCommand>(std::move(r)));
+            else
+                run(std::make_unique<InsertStepCommand>(std::move(r), m_doc.parentOf(target)));
+            setSelection(topLevel ? id : history::objectOf(m_doc, target));
+        } catch (const std::exception& e) {
+            m_stampPanel->setStatus(tr("It couldn't be stamped: %1").arg(QString::fromUtf8(e.what())), true);
+        }
+        return;
+    }
+    // A custom shape: added from the library, then taken into the step as its stamp.
+    const auto entries = library::list(toPath(customShapesFolder()));
+    if (customIndex < 0 || customIndex >= int(entries.size()))
+        return;
+    endStamp();
+    try {
+        m_stack.beginMacro("Stamp " + customName.toStdString());
+        std::vector<ObjectId> ids = library::add(m_stack, m_doc, entries[std::size_t(customIndex)].file);
+        ObjectId shape = ids.empty() ? kInvalidId : ids.front();
+        if (ids.size() > 1) {
+            Body group;
+            group.id = m_doc.allocateId();
+            group.name = customName.toStdString();
+            group.boolean = BooleanSpec{};
+            group.boolean->op = BooleanOp::Group;
+            group.boolean->operands = ids;
+            shape = group.id;
+            m_stack.execute(std::make_unique<CombineCommand>(std::move(group)));
+        }
+        Body r;
+        r.id = m_doc.allocateId();
+        r.name = m_doc.uniqueName("Stamped");
+        r.boolean = stampSpec(m_doc, target, f, shape);
+        const ObjectId id = r.id;
+        const bool topLevel = m_doc.isTopLevel(target);
+        if (topLevel)
+            m_stack.execute(std::make_unique<CombineCommand>(std::move(r)));
+        else
+            m_stack.execute(std::make_unique<InsertStepCommand>(std::move(r), m_doc.parentOf(target)));
+        m_stack.endMacro();
+        refreshScene();
+        refreshCommandState();
+        setSelection(topLevel ? id : history::objectOf(m_doc, target));
+    } catch (const std::exception& e) {
+        m_stack.abortMacro();
+        QMessageBox::warning(this, tr("Forge3D"), tr("It couldn't be stamped:\n%1").arg(QString::fromUtf8(e.what())));
+        refreshScene();
+    }
 }
 
 }  // namespace forge::app

@@ -428,6 +428,7 @@ std::string toString(BooleanOp op)
     case BooleanOp::Hinge: return "Hinge";
     case BooleanOp::MaskSplit: return "Split by Mask";
     case BooleanOp::Hollow: return "Hollow";
+    case BooleanOp::Stamp: return "Stamp";
     }
     return "Combine";
 }
