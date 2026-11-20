@@ -24,6 +24,9 @@ struct Settings {
     bool numbers = true;   // a numbered tag by each part (and the parts renamed "1 Hand"...)
     double numberHeight = 3.0;
     bool join = true;      // the parts and frame merged into one shape
+    // The tree's name, raised on a tag under the frame (and the kit named after it).
+    std::string name;
+    bool includeName = true;
 };
 
 // Throws std::invalid_argument (in plain words) if the settings can't make a kit.

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.71.1 Beta — Kit Layout: the tree's name (2026-11-20)
+
+- **Kit Layout** has a **Tree Name** box and an **Include Name** tick box: the name is
+  raised on a tag hanging under the frame's bottom bar, centred, as on a model kit's
+  tree (made smaller if it would be wider than the frame). The joined kit is named
+  after it. Both are remembered.
+
 ## 0.71.0 Beta — Slice 62: Kit layout (sprue) (2026-11-20)
 
 - **Tools → Kit Layout**: lays small parts (hands, accessories, weapons) out in rows on

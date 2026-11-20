@@ -1430,3 +1430,10 @@ and sharp across edges.
   frame added as a mesh body (`hinge::pieceBody`), and optionally a Merge of the frame
   and parts.
 - `EditBodyCommand` / `EditBodiesCommand` now apply the name as well.
+
+## Kit name tag (0.71.1)
+
+- `kit::Settings::name` / `includeName`: the words are made with `emboss::letters`
+  (raised 0.6 mm) on a big flat plate first to measure them, shrunk to fit the frame's
+  width if need be (2 mm letters at least), then laid on a 1.2 mm tag under the bottom
+  bar, overlapping it 0.2 mm, and merged with the frame.

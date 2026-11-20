@@ -86,6 +86,18 @@ TEST_CASE("Kit: parts in rows on a frame, gated and numbered", "[kit]")
     stack.undo();
     CHECK(doc.isTopLevel(ids[0]));
 
+    // The tree's name on a tag under the frame; the kit named after it.
+    s.name = "Hero Hands";
+    const kit::Plan named = kit::plan(doc, ids, s);
+    CHECK(named.area.min[1] < p.area.min[1] - 3.0);  // the tag hangs under the frame
+    const double plainFrame = meshkernel::volume(meshkernel::fromTriangles(p.frame.positions, p.frame.indices));
+    CHECK(meshkernel::volume(meshkernel::fromTriangles(named.frame.positions, named.frame.indices)) > plainFrame + 10.0);
+    const ObjectId heroes = kit::make(stack, doc, ids, s);
+    CHECK(doc.find(heroes)->name == "Hero Hands");
+    stack.undo();
+    s.includeName = false;
+    CHECK(kit::plan(doc, ids, s).area.min[1] == p.area.min[1]);
+
     kit::Settings bad;
     bad.gate = 5.0;
     CHECK_THROWS_AS(kit::check(bad), std::invalid_argument);
