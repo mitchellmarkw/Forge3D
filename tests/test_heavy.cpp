@@ -9,10 +9,14 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <map>
 #include <numbers>
+#include <utility>
+#include <vector>
 
 using namespace forge;
 
