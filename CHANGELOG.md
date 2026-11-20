@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.63.0 Beta — Slice 54: Magnet pockets (2026-11-19)
+
+- **Quick Socket → Socket for: A magnet**: a round pocket for a magnet, for swappable
+  heads, hands and accessories.
+  - Standard sizes to pick (6×2, 5×1, 5×2, 4×2, 3×1, 3×2, 8×3, 10×2 mm) or **Other
+    size**. The pocket is the magnet plus the fit, deep enough for the magnet to sit
+    flush.
+  - **Hidden under a skin**: a closed pocket under a thin skin (0.6 mm to start), for
+    dropping the magnet in during a pause in the print.
+  - **A matching pocket in the part it holds**: pick the part against the face (a head
+    on a neck) and it gets its own pocket, lined up, in the same undo step. A reminder
+    about the poles comes after.
+  - **Add a Stand-in Magnet** adds a magnet-sized cylinder to see it in place.
+  - The fit starts from the peg fit recorded with the tolerance test. No relief cuts.
+- Pose Test lists magnets as joints that hold a part on without turning.
+- Files with magnet pockets need Forge3D 0.63 or later to open (format 32).
+- 297 unit tests (3 new: an open pocket's size; a buried pocket's skin left whole; the
+  matching pocket found on the part against the face, Pose Test's joint, and the file).
+
 ## 0.62.0 Beta — Slice 53: Clicks and ridges (2026-11-19)
 
 - **Clicks** (a ratchet) in Quick Hinge: **Clicks a turn** and **Click depth**.

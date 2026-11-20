@@ -2,6 +2,7 @@
 #include "forge/core/Socket.h"
 
 #include "forge/core/Document.h"
+#include "forge/core/Emboss.h"
 #include "forge/core/MeshKernel.h"
 
 #include <algorithm>
@@ -267,6 +268,8 @@ void check(const SocketFinish& f)
         throw std::invalid_argument("The fit must be between 0 and 5 mm.");
     if (f.kind == SocketKind::Peg && (!(f.depth > 0.0) || f.depth > 1000.0))
         throw std::invalid_argument("The peg needs a length (how far it goes in).");
+    if (f.kind == SocketKind::Magnet && (!(f.depth > 0.0) || f.depth > 100.0))
+        throw std::invalid_argument("The magnet needs a thickness.");
     if (f.kind == SocketKind::Ball && f.snap && (!(f.grip >= 0.0) || f.grip > 50.0))
         throw std::invalid_argument("The grip must be between 0% and 50%.");
     if (f.reliefCuts < 0 || f.reliefCuts > 12)
@@ -275,6 +278,12 @@ void check(const SocketFinish& f)
         throw std::invalid_argument("The relief cuts need a width, less than the socket's size.");
     if (!(f.reliefDepth >= 0.0) || !std::isfinite(f.turn))
         throw std::invalid_argument("The relief cuts' depth can't be less than 0.");
+    if (f.kind == SocketKind::Magnet) {
+        if (f.size < 0.5)
+            throw std::invalid_argument("The magnet must be at least 0.5 mm across.");
+        if (!(f.cover >= 0.0) || f.cover > 5.0)
+            throw std::invalid_argument("The skin over a magnet can be up to 5 mm.");
+    }
     if (f.ridges < 0 || f.ridges > 24)
         throw std::invalid_argument("A ball socket can have up to 24 ridges.");
     if (f.kind == SocketKind::Ball && f.ridges > 0) {
@@ -319,6 +328,14 @@ std::vector<Mesh> cutters(const SocketFinish& f, const Vec3& point, const Vec3& 
         else  // above the opening, so a curved surface doesn't leave a lip over it
             cuts.push_back(prism(frame, roundSides(seat.opening / 2.0),
                                  seat.opening / 2.0 / std::cos(kPi / roundSides(seat.opening / 2.0)), 0.0, -out, 0.0));
+    } else if (f.kind == SocketKind::Magnet) {
+        // Round, the magnet's thickness plus the fit deep: flush with the surface, or
+        // under a skin (a closed pocket).
+        const double half = f.size / 2.0 + f.fit;
+        const int n = roundSides(half);
+        cuts.push_back(prism(frame, n, half / std::cos(kPi / n), 0.0, f.cover > 0.0 ? f.cover : -out,
+                             f.cover + f.depth + f.fit));
+        return cuts;  // no relief cuts: nothing snaps in
     } else {
         const int sides = sidesOf(f.shape);
         const double half = f.size / 2.0 + f.fit;  // across the flats (or the radius), with room
@@ -345,6 +362,9 @@ std::string describe(const SocketFinish& f)
     std::string text;
     if (f.kind == SocketKind::Ball)
         text = "Ball socket \xC3\x98" + num(f.size) + (f.snap ? " (snap-in)" : " (open)");
+    else if (f.kind == SocketKind::Magnet)
+        return "Magnet pocket \xC3\x98" + num(f.size) + " \xC3\x97 " + num(f.depth) +
+               (f.cover > 0.0 ? ", under " + num(f.cover) + " mm" : std::string());
     else
         text = std::string(shapeName(f.shape)) + " peg socket " +
                (f.shape == PegShape::Round ? "\xC3\x98" : "") + num(f.size) + " \xC3\x97 " + num(f.depth);
@@ -360,6 +380,8 @@ PrimitiveSpec matchingPart(const SocketFinish& f)
     check(f);
     if (f.kind == SocketKind::Ball)
         return SphereSpec(f.size / 2.0);
+    if (f.kind == SocketKind::Magnet)  // a stand-in, to see it in place
+        return CylinderSpec(f.size / 2.0, f.depth);
     const int sides = sidesOf(f.shape);
     if (sides == 0)
         return CylinderSpec(f.size / 2.0, f.depth);
@@ -388,6 +410,8 @@ std::string matchingName(const SocketFinish& f)
 {
     if (f.kind == SocketKind::Ball)
         return "Ball \xC3\x98" + num(f.size);
+    if (f.kind == SocketKind::Magnet)
+        return "Magnet \xC3\x98" + num(f.size) + " \xC3\x97 " + num(f.depth);
     return std::string(shapeName(f.shape)) + " peg " + (f.shape == PegShape::Round ? "\xC3\x98" : "") + num(f.size) +
            " \xC3\x97 " + num(f.depth);
 }
@@ -452,6 +476,27 @@ Body withSocket(const Document& doc, ObjectId result, const emboss::SurfacePoint
     next.boolean->planeNormal = unitOf(toLocal.applyDirection(where.normal));
     next.boolean->socket = finish;
     return next;
+}
+
+std::optional<emboss::SurfacePoint> facingSpot(const Document& doc, ObjectId other, const emboss::SurfacePoint& spot,
+                                               double within)
+{
+    const Vec3& n = spot.normal;
+    const double l = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+    if (!(l > 1e-12))
+        return std::nullopt;
+    const Vec3 u{n[0] / l, n[1] / l, n[2] / l};
+    // From just inside this part, straight out: the first of the other's surface met.
+    const Vec3 from{spot.point[0] - u[0] * 0.5, spot.point[1] - u[1] * 0.5, spot.point[2] - u[2] * 0.5};
+    const auto hit = surfaceUnder(doc, other, from, u, 0.0);
+    if (!hit)
+        return std::nullopt;
+    const Vec3 d{hit->point[0] - spot.point[0], hit->point[1] - spot.point[1], hit->point[2] - spot.point[2]};
+    if (std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]) > within)
+        return std::nullopt;
+    if (hit->normal[0] * u[0] + hit->normal[1] * u[1] + hit->normal[2] * u[2] > -0.5)
+        return std::nullopt;  // not a face turned back towards this one
+    return hit;
 }
 
 }  // namespace forge

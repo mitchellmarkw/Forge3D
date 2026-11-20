@@ -788,6 +788,8 @@ private:
         std::optional<emboss::SurfacePoint> spot;  // the opening (plate coordinates)
         std::shared_ptr<const Mesh> preview;      // the result as it would be (result coordinates)
         std::shared_ptr<const Mesh> cut;          // a big shape: just what's cut away (plate coordinates)
+        ObjectId other = kInvalidId;  // a magnet's matching pocket goes in this part (on the plate)
+        bool pickingOther = false;
     };
     SocketMode m_socketMode;
     void startSocket(ObjectId target, bool editing);

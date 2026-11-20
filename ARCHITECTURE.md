@@ -1279,3 +1279,14 @@ and sharp across edges.
 - `pose::Joint::clicks` and `nearestClick`: Pose Test snaps such joints to their
   clicks, and `range` steps by clicks. File format 31.
 
+## Magnet pockets (slice 54)
+
+- `SocketKind::Magnet` (size: the magnet's diameter, depth: its thickness) and
+  `SocketFinish::cover` (a skin over it; 0 open). `socket::cutters` cuts a round prism
+  from outside the surface (or from `cover` down) to `cover + depth + fit`; no relief
+  cuts. `matchingPart` gives a stand-in cylinder; `facingSpot` finds the matching
+  pocket's spot on another part: its surface straight out from the spot, within 3 mm,
+  facing back. The app cuts both pockets in one macro.
+- Pose Test: a magnet is a `Fixed` joint; the held part is found just outside the face.
+- File format 32 (`"kind": "magnet"`, `"cover"`).
+

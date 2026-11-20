@@ -594,7 +594,11 @@ void MainWindow::createActions()
             endShell();
         else if (m_threadMode.active)
             endThread();
-        else if (m_socketMode.active)
+        else if (m_socketMode.active && m_socketMode.pickingOther) {
+            m_socketMode.pickingOther = false;
+            const Body* other = m_doc.find(m_socketMode.other);
+            m_socketPanel->setOtherPart(other ? QString::fromStdString(other->name) : QString(), false);
+        } else if (m_socketMode.active)
             endSocket();
         else if (m_hingeMode.active && m_hingeMode.pickingOther) {
             m_hingeMode.pickingOther = false;
@@ -1986,6 +1990,13 @@ void MainWindow::createDocks()
     connect(m_socketPanel, &SocketPanel::applyRequested, this, &MainWindow::applySocket);
     connect(m_socketPanel, &SocketPanel::cancelRequested, this, &MainWindow::endSocket);
     connect(m_socketPanel, &SocketPanel::addMatchingRequested, this, &MainWindow::addMatchingPart);
+    connect(m_socketPanel, &SocketPanel::pickOtherRequested, this, [this] {
+        if (!m_socketMode.active)
+            return;
+        m_socketMode.pickingOther = true;
+        m_socketPanel->setOtherPart({}, true);
+        statusBar()->showMessage(tr("Click the part against this face. Esc stops."), 6000);
+    });
     m_hingeTimer = new QTimer(this);
     m_hingeTimer->setSingleShot(true);
     m_hingeTimer->setInterval(250);
@@ -9351,8 +9362,10 @@ SocketFinish rememberedSocket()
 {
     const Preferences p;
     SocketFinish f;
-    f.kind = p.value(QStringLiteral("socket/kind")).toString() == QStringLiteral("peg") ? SocketKind::Peg
-                                                                                        : SocketKind::Ball;
+    const QString kind = p.value(QStringLiteral("socket/kind")).toString();
+    f.kind = kind == QStringLiteral("peg")      ? SocketKind::Peg
+             : kind == QStringLiteral("magnet") ? SocketKind::Magnet
+                                                : SocketKind::Ball;
     f.size = p.value(QStringLiteral("socket/size"), f.size).toDouble();
     f.depth = p.value(QStringLiteral("socket/depth"), f.depth).toDouble();
     f.resin = p.value(QStringLiteral("socket/printer"), QStringLiteral("resin")).toString() != QStringLiteral("fdm");
@@ -9364,6 +9377,7 @@ SocketFinish rememberedSocket()
     f.ridges = std::clamp(p.value(QStringLiteral("socket/ridges"), 0).toInt(), 0, 24);
     f.ridgeHeight = p.value(QStringLiteral("socket/ridgeHeight"), f.ridgeHeight).toDouble();
     f.reliefWidth = p.value(QStringLiteral("socket/reliefWidth"), f.reliefWidth).toDouble();
+    f.cover = f.kind == SocketKind::Magnet ? p.value(QStringLiteral("socket/cover"), 0.0).toDouble() : 0.0;
     try {
         socket::check(f);
     } catch (const std::exception&) {
@@ -9375,7 +9389,10 @@ SocketFinish rememberedSocket()
 void rememberSocket(const SocketFinish& f)
 {
     Preferences p;
-    p.setValue(QStringLiteral("socket/kind"), f.kind == SocketKind::Peg ? QStringLiteral("peg") : QStringLiteral("ball"));
+    p.setValue(QStringLiteral("socket/kind"), f.kind == SocketKind::Peg      ? QStringLiteral("peg")
+                                              : f.kind == SocketKind::Magnet ? QStringLiteral("magnet")
+                                                                             : QStringLiteral("ball"));
+    p.setValue(QStringLiteral("socket/cover"), f.cover);
     p.setValue(QStringLiteral("socket/size"), f.size);
     p.setValue(QStringLiteral("socket/depth"), f.depth);
     p.setValue(QStringLiteral("socket/printer"), f.resin ? QStringLiteral("resin") : QStringLiteral("fdm"));
@@ -9469,6 +9486,22 @@ void MainWindow::startSocket(ObjectId target, bool editing)
 void MainWindow::socketClick(const QVector3D& origin, const QVector3D& direction)
 {
     const QVector3D d = direction.normalized();
+    if (m_socketMode.pickingOther) {
+        Ray ray;
+        ray.origin = {origin.x(), origin.y(), origin.z()};
+        ray.direction = {d.x(), d.y(), d.z()};
+        const auto hit = pickShown(ray);
+        const ObjectId self = history::objectOf(m_doc, m_socketMode.target);
+        if (!hit || history::objectOf(m_doc, hit->id) == self) {
+            statusBar()->showMessage(tr("Click the other part (the one against this face)."), 5000);
+            return;
+        }
+        m_socketMode.other = history::objectOf(m_doc, hit->id);
+        m_socketMode.pickingOther = false;
+        m_socketPanel->setOtherPart(QString::fromStdString(m_doc.find(m_socketMode.other)->name), false);
+        m_socketTimer->start(0);
+        return;
+    }
     std::optional<emboss::SurfacePoint> spot;
     try {
         // The facing averaged over about the socket's size, so a bumpy surface gives a
@@ -9526,6 +9559,20 @@ void MainWindow::updateSocketPreview()
                 m_socketPanel->setStatus(tr("This is how it will look."), false);
             }
             ok = true;
+            if (m_socketPanel->matchingPocket()) {
+                // The matching pocket needs the other part, against this face.
+                if (m_socketMode.other == kInvalidId || !m_doc.find(m_socketMode.other)) {
+                    m_socketPanel->setStatus(tr("Pick the part this magnet holds (or untick the matching pocket)."),
+                                             false);
+                    ok = false;
+                } else if (!facingSpot(m_doc, history::tip(m_doc, m_socketMode.other), *m_socketMode.spot)) {
+                    m_socketPanel->setStatus(tr("%1 isn't against this face (within 3 mm), so there's nowhere to "
+                                                "line its pocket up. Join it on first.")
+                                                 .arg(QString::fromStdString(m_doc.find(m_socketMode.other)->name)),
+                                             true);
+                    ok = false;
+                }
+            }
         } else {
             m_socketPanel->setStatus({}, false);
         }
@@ -9574,7 +9621,52 @@ void MainWindow::applySocket()
     result.name = m_doc.uniqueName("Socketed");
     result.boolean = *spec;
     const ObjectId id = result.id;
+    // A magnet's matching pocket, in the part against the face.
+    std::optional<Body> matching;
+    if (m_socketPanel->matchingPocket() && m_socketMode.other != kInvalidId) {
+        try {
+            const ObjectId otherTip = history::tip(m_doc, m_socketMode.other);
+            const auto facing = facingSpot(m_doc, otherTip, *m_socketMode.spot);
+            if (!facing)
+                throw std::invalid_argument("The other part isn't against this face.");
+            Body pocket;
+            pocket.id = m_doc.allocateId();
+            pocket.name = m_doc.uniqueName("Socketed");
+            pocket.boolean = socketSpec(m_doc, otherTip, *facing, *spec->socket);
+            m_doc.previewMesh(*pocket.boolean);
+            matching = std::move(pocket);
+        } catch (const std::exception& e) {
+            QMessageBox::warning(this, tr("Forge3D"),
+                                 tr("The matching pocket could not be cut:\n%1").arg(QString::fromUtf8(e.what())));
+            return;
+        }
+    }
     endSocket();
+    if (matching) {
+        try {
+            m_stack.beginMacro("Magnet pockets");
+            if (!m_doc.isTopLevel(target))
+                m_stack.execute(std::make_unique<InsertStepCommand>(std::move(result), m_doc.parentOf(target)));
+            else
+                m_stack.execute(std::make_unique<CombineCommand>(std::move(result)));
+            matching->name = m_doc.uniqueName("Socketed");  // after the first is named
+            m_stack.execute(std::make_unique<CombineCommand>(std::move(*matching)));
+            m_stack.endMacro();
+        } catch (const std::exception& e) {
+            m_stack.abortMacro();
+            QMessageBox::warning(this, tr("Forge3D"),
+                                 tr("The pockets could not be cut:\n%1").arg(QString::fromUtf8(e.what())));
+            refreshScene();
+            return;
+        }
+        refreshScene();
+        refreshCommandState();
+        setSelection(history::objectOf(m_doc, target));
+        statusBar()->showMessage(tr("Both pockets cut. Mind the magnets' poles: one pocket's magnet goes in turned "
+                                    "over, so they pull together."),
+                                 10000);
+        return;
+    }
     if (!m_doc.isTopLevel(target)) {
         // Rolled back: the step goes in at the bar.
         const ObjectId object = history::objectOf(m_doc, target);

@@ -53,6 +53,11 @@ BooleanSpec socketSpec(const Document& doc, ObjectId target, const emboss::Surfa
                        const SocketFinish& finish);
 // Where a Socket step's opening is, in plate coordinates.
 emboss::SurfacePoint socketSpot(const Document& doc, ObjectId result);
+// Where a matching pocket goes on `other`, a part against the face at `spot`: its
+// surface straight out from the spot (within `within` mm), facing back. Nothing if
+// it isn't there.
+std::optional<emboss::SurfacePoint> facingSpot(const Document& doc, ObjectId other, const emboss::SurfacePoint& spot,
+                                               double within = 3.0);
 // The Socket step with new settings and / or a new spot (plate coordinates).
 Body withSocket(const Document& doc, ObjectId result, const emboss::SurfacePoint& where, const SocketFinish& finish);
 

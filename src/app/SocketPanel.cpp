@@ -3,6 +3,7 @@
 
 #include "Fits.h"
 
+#include <QCheckBox>
 #include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QSpinBox>
@@ -69,7 +70,9 @@ SocketPanel::SocketPanel(QWidget* parent) : QWidget(parent)
     m_kind = new QComboBox;
     m_kind->addItem(tr("A ball (ball joint)"));
     m_kind->addItem(tr("A peg"));
-    m_kind->setToolTip(tr("What goes in the socket"));
+    m_kind->addItem(tr("A magnet"));
+    m_kind->setToolTip(tr("What goes in the socket. A magnet: a round pocket it sits in, for swappable heads, "
+                          "hands and accessories"));
     layout->addWidget(labelled(tr("Socket for:"), m_kind));
 
     // A ball: its size, and how it's held.
@@ -116,6 +119,49 @@ SocketPanel::SocketPanel(QWidget* parent) : QWidget(parent)
     gripForm->addRow(tr("Ridge height:"), m_ridgeHeight);
     ball->addLayout(gripForm);
     layout->addWidget(m_ballBox);
+
+    // A magnet: its size, open or under a skin, and a matching pocket in the part it holds.
+    m_magnetBox = new QWidget;
+    auto* mag = new QVBoxLayout(m_magnetBox);
+    mag->setContentsMargins(0, 0, 0, 0);
+    m_magnetSize = new QComboBox;
+    for (const char* size : {"6 \u00D7 2 mm", "5 \u00D7 1 mm", "5 \u00D7 2 mm", "4 \u00D7 2 mm", "3 \u00D7 1 mm", "3 \u00D7 2 mm",
+                             "8 \u00D7 3 mm", "10 \u00D7 2 mm"})
+        m_magnetSize->addItem(QString::fromUtf8(size));
+    m_magnetSize->addItem(tr("Other size"));
+    m_magnetSize->setToolTip(tr("A round magnet's diameter \u00D7 thickness"));
+    mag->addWidget(labelled(tr("Magnet:"), m_magnetSize));
+    auto* magForm = new QFormLayout;
+    m_magnetDiameter = millimetres(0.5, 100.0, 0.5);
+    m_magnetDiameter->setToolTip(tr("The magnet's diameter (the pocket is bigger by the fit)"));
+    magForm->addRow(tr("Diameter:"), m_magnetDiameter);
+    m_magnetThickness = millimetres(0.2, 100.0, 0.5);
+    m_magnetThickness->setToolTip(tr("The magnet's thickness (the pocket is deeper by the fit, so it sits flush)"));
+    magForm->addRow(tr("Thickness:"), m_magnetThickness);
+    mag->addLayout(magForm);
+    m_buried = new QCheckBox(tr("Hidden under a skin"));
+    m_buried->setToolTip(tr("Leave a thin skin over the magnet: pause the print at that layer and drop the magnet "
+                            "in (filament printers). Unticked: an open pocket, the magnet flush with the surface, "
+                            "glued in."));
+    mag->addWidget(m_buried);
+    auto* coverForm = new QFormLayout;
+    m_cover = millimetres(0.1, 5.0, 0.1);
+    m_cover->setToolTip(tr("How thick the skin over the magnet is (thinner holds harder)"));
+    coverForm->addRow(tr("Skin:"), m_cover);
+    mag->addLayout(coverForm);
+    m_matchingPocket = new QCheckBox(tr("A matching pocket in the part it holds"));
+    m_matchingPocket->setToolTip(tr("The part that sits against this face (a head on a neck) gets a pocket too, "
+                                    "lined up with this one"));
+    mag->addWidget(m_matchingPocket);
+    auto* pickRow = new QHBoxLayout;
+    m_pickOther = new QPushButton(tr("Pick the Other Part"));
+    m_pickOther->setToolTip(tr("Then click the part against this face"));
+    m_otherName = new QLabel;
+    m_otherName->setWordWrap(true);
+    pickRow->addWidget(m_pickOther);
+    pickRow->addWidget(m_otherName, 1);
+    mag->addLayout(pickRow);
+    layout->addWidget(m_magnetBox);
 
     // A peg: its shape, size and length.
     m_pegBox = new QWidget;
@@ -185,7 +231,8 @@ SocketPanel::SocketPanel(QWidget* parent) : QWidget(parent)
         m_cuts->addItem(QString::number(kCutCounts[i]));
     m_cuts->setToolTip(tr("Strain relief: slots from the opening down through the socket's side, so it can "
                           "open a little as the ball or peg goes in, instead of cracking"));
-    layout->addWidget(labelled(tr("Relief cuts:"), m_cuts));
+    m_cutsRow = labelled(tr("Relief cuts:"), m_cuts);
+    layout->addWidget(m_cutsRow);
     m_cutBox = new QWidget;
     auto* cutForm = new QFormLayout(m_cutBox);
     cutForm->setContentsMargins(0, 0, 0, 0);
@@ -229,6 +276,24 @@ SocketPanel::SocketPanel(QWidget* parent) : QWidget(parent)
         if (const auto f = fits::measured(m_printer->currentIndex() == 0, fitKind()))
             m_fit->setValue(*f);
     });
+    connect(m_magnetSize, &QComboBox::currentIndexChanged, this, [this](int index) {
+        static const double sizes[][2] = {{6, 2}, {5, 1}, {5, 2}, {4, 2}, {3, 1}, {3, 2}, {8, 3}, {10, 2}};
+        if (index >= 0 && index < int(std::size(sizes))) {
+            const QSignalBlocker a(m_magnetDiameter), b(m_magnetThickness);
+            m_magnetDiameter->setValue(sizes[index][0]);
+            m_magnetThickness->setValue(sizes[index][1]);
+        }
+        showKind();
+        emit changed();
+    });
+    for (QDoubleSpinBox* box : {m_magnetDiameter, m_magnetThickness, m_cover})
+        connect(box, &QDoubleSpinBox::valueChanged, this, &SocketPanel::changed);
+    for (QCheckBox* box : {m_buried, m_matchingPocket})
+        connect(box, &QCheckBox::toggled, this, [this] {
+            showKind();
+            emit changed();
+        });
+    connect(m_pickOther, &QPushButton::clicked, this, &SocketPanel::pickOtherRequested);
     connect(m_ridges, &QSpinBox::valueChanged, this, [this] {
         m_ridgeHeight->setEnabled(m_ridges->value() > 0);
         emit changed();
@@ -245,8 +310,17 @@ SocketPanel::SocketPanel(QWidget* parent) : QWidget(parent)
 void SocketPanel::showKind()
 {
     const bool isBall = m_kind->currentIndex() == 0;
+    const bool isMagnet = m_kind->currentIndex() == 2;
     m_ballBox->setVisible(isBall);
-    m_pegBox->setVisible(!isBall);
+    m_pegBox->setVisible(!isBall && !isMagnet);
+    m_magnetBox->setVisible(isMagnet);
+    m_cutsRow->setVisible(!isMagnet);
+    const bool other = m_magnetSize->currentIndex() == m_magnetSize->count() - 1;
+    m_magnetDiameter->setEnabled(other);
+    m_magnetThickness->setEnabled(other);
+    m_cover->setEnabled(m_buried->isChecked());
+    m_pickOther->setVisible(m_matchingPocket->isChecked() && m_matchingPocket->isEnabled());
+    m_otherName->setVisible(m_pickOther->isVisible());
     const bool snap = m_hold->currentIndex() == 0;
     m_gripLabel->setVisible(snap);
     m_grip->setVisible(snap);
@@ -254,8 +328,9 @@ void SocketPanel::showKind()
     m_pegSize->setToolTip(m_shape->currentIndex() == 0
                               ? tr("The peg's diameter, as it's made (the socket is made bigger by the fit)")
                               : tr("The peg's width from one flat side to the opposite one, as it's made"));
-    m_cutBox->setVisible(m_cuts->currentIndex() > 0);
-    m_matching->setText(isBall ? tr("Add the Matching Ball") : tr("Add the Matching Peg"));
+    m_cutBox->setVisible(!isMagnet && m_cuts->currentIndex() > 0);
+    m_matching->setText(isBall ? tr("Add the Matching Ball") : isMagnet ? tr("Add a Stand-in Magnet")
+                                                                        : tr("Add the Matching Peg"));
     m_matching->setToolTip(isBall ? tr("Adds a ball this socket takes, at its true size, beside the shapes")
                                   : tr("Adds a peg this socket takes, at its true size, beside the shapes"));
 }
@@ -264,6 +339,8 @@ void SocketPanel::start(const QString& title, bool editing)
 {
     m_title->setText(title);
     m_apply->setToolTip(editing ? tr("Change the socket") : tr("Cut the socket"));
+    m_matchingPocket->setEnabled(!editing);  // each pocket is changed on its own
+    setOtherPart({}, false);
     setPlaced(editing);
 }
 
@@ -272,7 +349,24 @@ void SocketPanel::setFinish(const SocketFinish& f)
     {
         const QSignalBlocker b0(m_kind), b1(m_hold), b2(m_shape), b3(m_cuts), b4(m_printer), b5(m_ballSize),
             b6(m_grip), b7(m_pegSize), b8(m_pegDepth), b9(m_turn), b10(m_fit), b11(m_cutWidth), b12(m_cutDepth);
-        m_kind->setCurrentIndex(f.kind == SocketKind::Ball ? 0 : 1);
+        m_kind->setCurrentIndex(f.kind == SocketKind::Ball ? 0 : f.kind == SocketKind::Magnet ? 2 : 1);
+        const QSignalBlocker m1(m_magnetSize), m2(m_magnetDiameter), m3(m_magnetThickness), m4(m_buried), m5(m_cover);
+        if (f.kind == SocketKind::Magnet) {
+            static const double sizes[][2] = {{6, 2}, {5, 1}, {5, 2}, {4, 2}, {3, 1}, {3, 2}, {8, 3}, {10, 2}};
+            int preset = m_magnetSize->count() - 1;
+            for (int i = 0; i < int(std::size(sizes)); ++i)
+                if (std::abs(sizes[i][0] - f.size) < 1e-9 && std::abs(sizes[i][1] - f.depth) < 1e-9)
+                    preset = i;
+            m_magnetSize->setCurrentIndex(preset);
+            m_magnetDiameter->setValue(f.size);
+            m_magnetThickness->setValue(f.depth);
+        } else if (m_magnetDiameter->value() <= 0.5) {
+            m_magnetSize->setCurrentIndex(0);
+            m_magnetDiameter->setValue(6.0);
+            m_magnetThickness->setValue(2.0);
+        }
+        m_buried->setChecked(f.cover > 0.0);
+        m_cover->setValue(f.cover > 0.0 ? f.cover : 0.6);
         m_ballSize->setValue(f.size);
         m_pegSize->setValue(f.size);
         m_hold->setCurrentIndex(f.snap ? 0 : 1);
@@ -300,9 +394,13 @@ void SocketPanel::setFinish(const SocketFinish& f)
 SocketFinish SocketPanel::finish() const
 {
     SocketFinish f;
-    f.kind = m_kind->currentIndex() == 0 ? SocketKind::Ball : SocketKind::Peg;
-    f.size = f.kind == SocketKind::Ball ? m_ballSize->value() : m_pegSize->value();
-    f.depth = m_pegDepth->value();
+    f.kind = m_kind->currentIndex() == 0 ? SocketKind::Ball : m_kind->currentIndex() == 2 ? SocketKind::Magnet
+                                                                                       : SocketKind::Peg;
+    f.size = f.kind == SocketKind::Ball ? m_ballSize->value()
+             : f.kind == SocketKind::Magnet ? m_magnetDiameter->value()
+                                            : m_pegSize->value();
+    f.depth = f.kind == SocketKind::Magnet ? m_magnetThickness->value() : m_pegDepth->value();
+    f.cover = f.kind == SocketKind::Magnet && m_buried->isChecked() ? m_cover->value() : 0.0;
     f.snap = m_hold->currentIndex() == 0;
     f.grip = m_grip->value();
     f.ridges = f.kind == SocketKind::Ball ? m_ridges->value() : 0;
@@ -311,10 +409,23 @@ SocketFinish SocketPanel::finish() const
     f.turn = m_turn->value();
     f.resin = m_printer->currentIndex() == 0;
     f.fit = m_fit->value();
-    f.reliefCuts = kCutCounts[std::size_t(std::max(0, m_cuts->currentIndex()))];
+    f.reliefCuts = f.kind == SocketKind::Magnet ? 0 : kCutCounts[std::size_t(std::max(0, m_cuts->currentIndex()))];
     f.reliefWidth = m_cutWidth->value();
     f.reliefDepth = m_cutDepth->value();
     return f;
+}
+
+bool SocketPanel::matchingPocket() const
+{
+    return m_kind->currentIndex() == 2 && m_matchingPocket->isEnabled() && m_matchingPocket->isChecked();
+}
+
+void SocketPanel::setOtherPart(const QString& name, bool picking)
+{
+    m_pickOther->setText(picking ? tr("Picking...") : tr("Pick the Other Part"));
+    m_otherName->setText(picking          ? tr("<i>Click the part against this face.</i>")
+                         : name.isEmpty() ? tr("<i>None picked yet.</i>")
+                                          : tr("<b>%1</b>").arg(name.toHtmlEscaped()));
 }
 
 void SocketPanel::setPlaced(bool placed)

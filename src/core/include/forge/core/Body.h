@@ -484,7 +484,8 @@ struct ThreadFinish {
 
 // A Quick Socket: a hole cut into the surface at a spot (the step's planePoint, facing
 // out along planeNormal), sized to take a ball or a peg once printed. Sizes in mm.
-enum class SocketKind { Ball, Peg };
+// Magnet: a round pocket the magnet sits in (size: its diameter, depth: its thickness).
+enum class SocketKind { Ball, Peg, Magnet };
 enum class PegShape { Round, Square, Hexagon, Octagon };
 struct SocketFinish {
     SocketKind kind = SocketKind::Ball;
@@ -505,6 +506,9 @@ struct SocketFinish {
     // a stiffer hold. 0: none.
     int ridges = 0;
     double ridgeHeight = 0.2;  // how far they stand in (more than the fit, to grip)
+    // Magnet: a skin left over it (0: an open pocket, the magnet flush with the surface;
+    // more: buried, dropped in during a pause in the print).
+    double cover = 0.0;
     bool operator==(const SocketFinish&) const = default;
 };
 
