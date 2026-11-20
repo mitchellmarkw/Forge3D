@@ -28,6 +28,7 @@
 #include "PrintCheckPanel.h"
 #include "MannequinPanel.h"
 #include "HollowPanel.h"
+#include "PoseFigurePanel.h"
 #include "StampPanel.h"
 #include "PanelLinePanel.h"
 #include "forge/core/PanelLines.h"
@@ -156,6 +157,7 @@
 #include <array>
 #include <exception>
 #include <filesystem>
+#include <limits>
 #include <numbers>
 #include <variant>
 
@@ -620,6 +622,8 @@ void MainWindow::createActions()
             endSocket();
         else if (m_hollowMode.active)
             endHollow();
+        else if (m_poseFigureMode.active)
+            endPoseFigure();
         else if (m_stampMode.active)
             endStamp();
         else if (m_panelLineMode.active)
@@ -1016,6 +1020,18 @@ void MainWindow::createActions()
             return;
         }
         startStamp(history::tip(m_doc, id), false);
+    });
+    m_poseFigureAction = new QAction(tr("Pose Figure"), this);
+    m_poseFigureAction->setToolTip(tr("Pose Figure: put a simple skeleton in a figure sculpted in one piece (or an "
+                                      "imported one) and bend it at its joints, the surface following"));
+    m_poseFigureAction->setStatusTip(m_poseFigureAction->toolTip());
+    connect(m_poseFigureAction, &QAction::triggered, this, [this] {
+        const ObjectId id = selectedOne();
+        if (id == kInvalidId || m_selection.size() != 1 || !m_doc.isTopLevel(id)) {
+            statusBar()->showMessage(tr("Pose Figure: select one figure on the plate first."), 6000);
+            return;
+        }
+        startPoseFigure(history::tip(m_doc, id), false);
     });
     m_hollowAction = new QAction(tr("Hollow"), this);
     m_hollowAction->setToolTip(tr("Hollow: for resin printing, take the inside out of the selected shape (any shape, "
@@ -1426,6 +1442,7 @@ void MainWindow::createToolBar()
         {m_referenceAction, "reference"},
         {m_mannequinAction, "mannequin"},
         {m_hollowAction, "hollow"},
+        {m_poseFigureAction, "pose-figure"},
         {m_stampAction, "stamp"},
         {m_panelLineAction, "panel-lines"},
         {m_showPicturesAction, "reference"},
@@ -1581,7 +1598,7 @@ void MainWindow::createToolBar()
 
     Page sculpt = page(tr("Sculpt"), tr("Sculpting brushes"));
     group(sculpt, tr("Brushes"), {button(m_sculptAction)});
-    group(sculpt, tr("Whole Shape"), {button(m_smoothAction), button(m_simplifyAction)});
+    group(sculpt, tr("Whole Shape"), {button(m_smoothAction), button(m_simplifyAction), button(m_poseFigureAction)});
     common(sculpt);
 
     Page viewPage = page(tr("View"), tr("Turn, slide and zoom the view; look inside; the build plate"));
@@ -2180,6 +2197,60 @@ void MainWindow::createDocks()
     });
     connect(m_stampPanel, &StampPanel::applyRequested, this, &MainWindow::applyStamp);
     connect(m_stampPanel, &StampPanel::cancelRequested, this, &MainWindow::endStamp);
+    m_poseFigurePanel = new PoseFigurePanel;
+    stackLayout->addWidget(m_poseFigurePanel);
+    m_poseFigurePanel->hide();
+    connect(m_poseFigurePanel, &PoseFigurePanel::stageChanged, this, [this](bool) { updatePoseFigurePreview(); });
+    connect(m_poseFigurePanel, &PoseFigurePanel::fitAgainRequested, this, [this] {
+        auto& mode = m_poseFigureMode;
+        if (!mode.active)
+            return;
+        mode.finish.points = mode.fitted.points;
+        mode.finish.blend = mode.fitted.blend;
+        if (!mode.posedYet)
+            mode.finish.angles = rig::restAngles(mode.finish.points);
+        updatePoseFigurePreview();
+    });
+    connect(m_poseFigurePanel, &PoseFigurePanel::optionsChanged, this, [this] {
+        auto& mode = m_poseFigureMode;
+        if (!mode.active)
+            return;
+        mode.finish.blend = m_poseFigurePanel->blend();
+        mode.finish.feetFlat = m_poseFigurePanel->feetFlat();
+        mode.finish.onGround = m_poseFigurePanel->onGround();
+        updatePoseFigurePreview();
+    });
+    connect(m_poseFigurePanel, &PoseFigurePanel::presetChosen, this, [this](int index) {
+        auto& mode = m_poseFigureMode;
+        if (!mode.active)
+            return;
+        const rig::Angles rest = rig::restAngles(mode.finish.points);
+        if (index == PoseFigurePanel::kAsMade) {
+            mode.finish.angles = rest;
+            mode.posedYet = false;
+        } else if (index <= mannequin::kPosePresetCount) {
+            mode.finish.angles = rig::fromMannequin(mannequin::preset(mannequin::PosePreset(index - 1)));
+            mode.posedYet = true;
+        } else if (m_doc.mannequin()) {
+            mode.finish.angles = rig::fromMannequin(m_doc.mannequin()->pose);
+            mode.posedYet = true;
+        }
+        // Feet flat: the ankles keep the angle they were made at.
+        for (rig::Joint j : {rig::Joint::LeftAnkle, rig::Joint::RightAnkle})
+            mode.finish.angles[std::size_t(j)] = rest[std::size_t(j)];
+        updatePoseFigurePreview();
+    });
+    connect(m_poseFigurePanel, &PoseFigurePanel::angleChanged, this, [this](int joint, int which, double degrees) {
+        auto& mode = m_poseFigureMode;
+        if (!mode.active || joint < 0 || joint >= kRigJointCount)
+            return;
+        mode.finish.angles[std::size_t(joint)][std::size_t(which)] = degrees;
+        mode.posedYet = true;
+        updatePoseFigurePreview();
+    });
+    connect(m_poseFigurePanel, &PoseFigurePanel::jointChosen, this, [this] { updatePoseFigurePreview(); });
+    connect(m_poseFigurePanel, &PoseFigurePanel::applyRequested, this, &MainWindow::applyPoseFigure);
+    connect(m_poseFigurePanel, &PoseFigurePanel::cancelRequested, this, &MainWindow::endPoseFigure);
     m_hollowPanel = new HollowPanel;
     stackLayout->addWidget(m_hollowPanel);
     m_hollowPanel->hide();
@@ -2684,6 +2755,8 @@ void MainWindow::onViewportClicked(const QVector3D& origin, const QVector3D& dir
         poseClick(origin, direction);
         return;
     }
+    if (m_poseFigureMode.active)
+        return;  // balls are picked by pressing on them
     if (m_followMode.active) {
         followClick(origin, direction);
         return;
@@ -2790,6 +2863,10 @@ void MainWindow::onLeftPressed(const QVector3D& origin, const QVector3D& directi
         poseGrab(origin, direction);  // a part on a joint turns as it's dragged
         return;
     }
+    if (m_poseFigureMode.active) {
+        poseFigureGrab(origin, direction);  // a ball of the skeleton
+        return;
+    }
     if (m_stampMode.active) {
         // Dragging from the shape stamps a row.
         m_stampMode.rowStart = stampSpotAt(origin, direction);
@@ -2816,7 +2893,7 @@ void MainWindow::onLeftPressed(const QVector3D& origin, const QVector3D& directi
     }
     if (m_embossMode.active || m_edgesMode.active || m_holeMode.active || m_shellMode.active || m_followMode.active ||
         m_patternMode.active || m_threadMode.active || m_socketMode.active || m_joinMode.active ||
-        m_maskMode.active || m_hollowMode.active || m_panelLineMode.active)
+        m_maskMode.active || m_hollowMode.active || m_panelLineMode.active || m_poseFigureMode.active)
         return;  // shapes stay put while the tool is open
 
     if (handle.valid() && multiSelection()) {
@@ -2959,6 +3036,10 @@ void MainWindow::onLeftDragged(const QVector3D& origin, const QVector3D& directi
     }
     if (m_poseMode.active) {
         poseDrag(origin, direction);
+        return;
+    }
+    if (m_poseFigureMode.active) {
+        poseFigureDrag(origin, direction);
         return;
     }
     if (m_stampMode.active) {
@@ -3167,6 +3248,10 @@ void MainWindow::onLeftReleased(bool wasDrag)
     }
     if (m_poseMode.active) {
         m_poseMode.dragging = false;
+        return;
+    }
+    if (m_poseFigureMode.active) {
+        poseFigureRelease();
         return;
     }
     if (m_referenceMode.active || m_referenceMode.dragging) {
@@ -4720,7 +4805,7 @@ bool MainWindow::toolOpen() const
            m_patternMode.active || m_sculptMode.active || m_measureMode.active || m_threadMode.active ||
            m_socketMode.active || m_joinMode.active || m_maskMode.active || m_referenceMode.active ||
            m_hingeMode.active || m_poseMode.active || m_printCheckMode.active || m_mannequinOpen ||
-           m_hollowMode.active || m_stampMode.active || m_panelLineMode.active;
+           m_hollowMode.active || m_stampMode.active || m_panelLineMode.active || m_poseFigureMode.active;
 }
 
 void MainWindow::startEmboss(ObjectId target, bool editing)
@@ -7124,6 +7209,8 @@ void MainWindow::refreshScene()
             endSocket();
         if (m_hollowMode.active && !m_doc.find(m_hollowMode.target))
             endHollow();
+        if (m_poseFigureMode.active && !m_doc.find(m_poseFigureMode.target))
+            endPoseFigure();
         if (m_stampMode.active && !m_doc.find(m_stampMode.target))
             endStamp();
         if (m_panelLineMode.active && !m_doc.find(m_panelLineMode.target))
@@ -7222,6 +7309,24 @@ void MainWindow::refreshScene()
                     cut.ghost = true;
                     cut.helper = true;
                     items.push_back(cut);
+                }
+            }
+            if (m_poseFigureMode.active && id == history::objectOf(m_doc, m_poseFigureMode.target)) {
+                // Fitting: the figure as made, see-through; posing: as posed.
+                const bool posing = m_poseFigurePanel->posing() && m_poseFigureMode.posed;
+                item.mesh = posing ? m_poseFigureMode.posed : m_poseFigureMode.rest;
+                item.model = toQMatrix(m_poseFigureMode.frame);
+                if (!posing)
+                    item.alpha = 0.45f;
+                if (m_poseFigureMode.skeleton) {
+                    DisplayItem bones;
+                    bones.id = kEdgesPickedItem;
+                    bones.mesh = m_poseFigureMode.skeleton;
+                    bones.model = item.model;
+                    bones.color = QVector3D(1.0f, 0.55f, 0.1f);
+                    bones.ghost = true;
+                    bones.helper = true;
+                    items.push_back(bones);
                 }
             }
             if (m_hingeMode.active && id == history::objectOf(m_doc, m_hingeMode.target)) {
@@ -7591,6 +7696,7 @@ void MainWindow::refreshScene()
     m_holeAction->setEnabled(m_selection.size() == 1 && allTopLevel && !rolled && !toolOpen());
     m_shellAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_hollowAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
+    m_poseFigureAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_stampAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_panelLineAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_threadAction->setEnabled(m_shellAction->isEnabled());
@@ -7761,6 +7867,7 @@ void MainWindow::editStep(ObjectId id)
     case BooleanOp::Thread: startThread(id, true); break;
     case BooleanOp::Socket: startSocket(id, true); break;
     case BooleanOp::Hollow: startHollow(id, true); break;
+    case BooleanOp::Posed: startPoseFigure(id, true); break;
     case BooleanOp::Stamp: startStamp(id, true); break;
     case BooleanOp::PanelLines: startPanelLines(id, true); break;
     case BooleanOp::Hinge: startHinge(id, true); break;
@@ -7946,7 +8053,7 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
                                                   op == BooleanOp::Thread || op == BooleanOp::Socket ||
                                                   op == BooleanOp::Hinge || op == BooleanOp::MaskSplit ||
                                                   op == BooleanOp::Hollow || op == BooleanOp::Stamp ||
-                                                  op == BooleanOp::PanelLines ||
+                                                  op == BooleanOp::PanelLines || op == BooleanOp::Posed ||
                                                   (op == BooleanOp::Split && m_doc.isTopLevel(id))));
         if (!opens) {
             // Nothing to open: show or hide what's inside, as a list does.
@@ -12448,6 +12555,367 @@ void MainWindow::applyHollow()
                              : plugs ? tr("Hollowed, with %1 drain holes and a plug for each (beside the model).")
                                            .arg(f.holes.size())
                                      : tr("Hollowed, with %1 drain holes.").arg(f.holes.size()),
+                             10000);
+}
+
+// ---- Pose Figure ------------------------------------------------------------------------
+
+namespace {
+
+// The joint a ball bends when it's dragged: the one at the start of the bone it ends
+// (none for the hips, waist and shoulders).
+std::optional<rig::Joint> jointBending(rig::Point p)
+{
+    using P = rig::Point;
+    using J = rig::Joint;
+    switch (p) {
+    case P::Neck: return J::Waist;
+    case P::Head: return J::Neck;
+    case P::LeftElbow: return J::LeftShoulder;
+    case P::RightElbow: return J::RightShoulder;
+    case P::LeftWrist: return J::LeftElbow;
+    case P::RightWrist: return J::RightElbow;
+    case P::LeftHand: return J::LeftWrist;
+    case P::RightHand: return J::RightWrist;
+    case P::LeftKnee: return J::LeftHip;
+    case P::RightKnee: return J::RightHip;
+    case P::LeftAnkle: return J::LeftKnee;
+    case P::RightAnkle: return J::RightKnee;
+    case P::LeftToe: return J::LeftAnkle;
+    case P::RightToe: return J::RightAnkle;
+    default: return std::nullopt;
+    }
+}
+
+// The ball the joint's bone ends at.
+rig::Point endOf(rig::Joint j)
+{
+    for (int p = 0; p < kRigPointCount; ++p)
+        if (jointBending(rig::Point(p)) == j)
+            return rig::Point(p);
+    return rig::Point::Waist;
+}
+
+double ballRadius(const rig::Points& points)
+{
+    return std::max(0.3, 0.015 * rig::height(points));
+}
+
+}  // namespace
+
+void MainWindow::startPoseFigure(ObjectId target, bool editing)
+{
+    const Body* body = m_doc.find(target);
+    if (!body || toolOpen())
+        return;
+    if (m_dragState.kind != Drag::Kind::None)
+        cancelDrag();
+    PoseFigureMode mode;
+    mode.active = true;
+    mode.editing = editing;
+    mode.target = target;
+    try {
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        struct RestoreCursor {
+            ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
+        } restore;
+        if (editing && (!body->boolean || !body->boolean->posed))
+            throw std::invalid_argument("That isn't a Pose Figure step.");
+        const ObjectId figure = editing ? body->boolean->operands.front() : target;
+        mode.frame = editing ? m_doc.worldTransform(target) : rigFrame(m_doc, target);
+        // The figure as made, in the step's coordinates.
+        auto rest = std::make_shared<Mesh>(*m_doc.mesh(figure));
+        const Transform t = m_doc.localTransform(figure);
+        for (std::size_t i = 0; i + 2 < rest->positions.size(); i += 3) {
+            const Vec3 p = t.apply(Vec3{rest->positions[i], rest->positions[i + 1], rest->positions[i + 2]});
+            for (std::size_t k = 0; k < 3; ++k)
+                rest->positions[i + k] = float(p[k]);
+        }
+        for (std::size_t i = 0; i + 2 < rest->normals.size(); i += 3) {
+            const Vec3 n = t.applyDirection(Vec3{rest->normals[i], rest->normals[i + 1], rest->normals[i + 2]});
+            for (std::size_t k = 0; k < 3; ++k)
+                rest->normals[i + k] = float(n[k]);
+        }
+        if (rest->empty())
+            throw std::invalid_argument("There's no surface to pose.");
+        mode.fitted = rig::fit(*rest);
+        mode.finish = editing ? *body->boolean->posed : mode.fitted;
+        mode.posedYet = editing && mode.finish.angles != rig::restAngles(mode.finish.points);
+        mode.rest = std::move(rest);
+    } catch (const std::exception& e) {
+        QMessageBox::information(this, tr("Forge3D"),
+                                 tr("This shape can't be posed:\n%1").arg(QString::fromUtf8(e.what())));
+        return;
+    }
+    m_poseFigureMode = std::move(mode);
+    const QString name = QString::fromStdString(body->name);
+    m_poseFigurePanel->start(editing ? tr("Change the pose of '%1'").arg(name) : tr("Pose '%1'").arg(name), editing,
+                             m_poseFigureMode.finish, m_doc.mannequin().has_value());
+    m_propsDockWidth = m_propsDock->width();
+    m_properties->hide();
+    m_poseFigurePanel->show();
+    statusBar()->showMessage(editing ? tr("Pose Figure: drag a ball to bend the joint above it, or choose a pose. "
+                                          "Apply when it's right; Esc cancels.")
+                                     : tr("Pose Figure: drag the skeleton's balls onto the figure's joints, then "
+                                          "click 2. Pose. Esc cancels."));
+    updatePoseFigurePreview();
+    refreshCommandState();
+}
+
+void MainWindow::endPoseFigure()
+{
+    if (!m_poseFigureMode.active)
+        return;
+    m_poseFigureMode = PoseFigureMode{};
+    m_poseFigurePanel->hide();
+    m_properties->show();
+    QTimer::singleShot(0, this, [this] { resizeDocks({m_propsDock}, {m_propsDockWidth}, Qt::Horizontal); });
+    statusBar()->clearMessage();
+    refreshScene();
+    refreshCommandState();
+}
+
+void MainWindow::updatePoseFigurePreview()
+{
+    auto& mode = m_poseFigureMode;
+    if (!mode.active)
+        return;
+    const bool posing = m_poseFigurePanel->posing();
+    int highlight = mode.picked;
+    try {
+        rig::check(mode.finish);
+        if (posing) {
+            if (!mode.skin || !mode.skin->sameWeights(mode.finish)) {
+                QApplication::setOverrideCursor(Qt::WaitCursor);
+                struct RestoreCursor {
+                    ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
+                } restore;
+                mode.skin = std::make_shared<rig::Skin>(*mode.rest, mode.finish);
+            }
+            auto posed = mode.skin->posed(mode.finish);
+            mode.shown = posed.points;
+            mode.posed = std::make_shared<const Mesh>(std::move(posed.mesh));
+            if (highlight < 0)
+                highlight = int(rig::pivot(rig::Joint(m_poseFigurePanel->joint())));
+        } else {
+            mode.shown = mode.finish.points;
+        }
+        m_poseFigurePanel->setStatus({}, false);
+    } catch (const std::exception& e) {
+        mode.shown = mode.finish.points;
+        mode.posed.reset();
+        m_poseFigurePanel->setStatus(QString::fromUtf8(e.what()), true);
+    }
+    mode.skeleton = std::make_shared<const Mesh>(rig::skeletonMesh(mode.shown, ballRadius(mode.shown), highlight));
+    m_poseFigurePanel->setFinish(mode.finish);
+    refreshScene();
+}
+
+bool MainWindow::poseFigureGrab(const QVector3D& origin, const QVector3D& direction)
+{
+    auto& mode = m_poseFigureMode;
+    const QVector3D d = direction.normalized();
+    // The ball nearest the eye under the mouse (a little room around each).
+    const double reach = 2.0 * ballRadius(mode.shown);
+    int best = -1;
+    double bestT = std::numeric_limits<double>::max();
+    for (int i = 0; i < kRigPointCount; ++i) {
+        const Vec3 p = mode.frame.apply(mode.shown[std::size_t(i)]);
+        const QVector3D c{float(p[0]), float(p[1]), float(p[2])};
+        const float t = QVector3D::dotProduct(c - origin, d);
+        if (t < 0)
+            continue;
+        const float miss = (origin + t * d - c).length();
+        if (miss <= reach && t < bestT) {
+            bestT = t;
+            best = i;
+        }
+    }
+    if (best < 0)
+        return false;
+    const auto point = rig::Point(best);
+    if (m_poseFigurePanel->posing()) {
+        const auto joint = jointBending(point);
+        if (!joint) {
+            statusBar()->showMessage(tr("Pose Figure: the %1 doesn't bend anything; drag a ball further along "
+                                        "(an elbow, a hand, a knee, a foot, the head).")
+                                         .arg(tr(rig::title(point)).toLower()),
+                                     6000);
+            return false;
+        }
+        if (mode.finish.feetFlat && (*joint == rig::Joint::LeftAnkle || *joint == rig::Joint::RightAnkle)) {
+            statusBar()->showMessage(tr("Pose Figure: the feet stay flat on the ground (untick it to point them)."),
+                                     6000);
+            return false;
+        }
+        m_poseFigurePanel->setJoint(int(*joint));
+    }
+    mode.picked = best;
+    const Vec3 at = mode.frame.apply(mode.shown[std::size_t(best)]);
+    mode.dragPlanePoint = at;
+    mode.dragPlaneNormal = {-d.x(), -d.y(), -d.z()};
+    updatePoseFigurePreview();
+    return true;
+}
+
+void MainWindow::poseFigureDrag(const QVector3D& origin, const QVector3D& direction)
+{
+    auto& mode = m_poseFigureMode;
+    if (mode.picked < 0)
+        return;
+    const QVector3D p(float(mode.dragPlanePoint[0]), float(mode.dragPlanePoint[1]), float(mode.dragPlanePoint[2]));
+    const QVector3D n(float(mode.dragPlaneNormal[0]), float(mode.dragPlaneNormal[1]), float(mode.dragPlaneNormal[2]));
+    const auto hit = view::intersectPlane(origin, direction, p, n);
+    if (!hit)
+        return;
+    const Vec3 target = mode.frame.inverse().apply(Vec3{hit->x(), hit->y(), hit->z()});
+    const auto point = rig::Point(mode.picked);
+    if (!m_poseFigurePanel->posing()) {
+        // Fitting: the ball goes where the mouse is (and its partner the same way, mirrored).
+        const Vec3 old = mode.finish.points[std::size_t(mode.picked)];
+        mode.finish.points[std::size_t(mode.picked)] = target;
+        const rig::Point other = rig::mirrored(point);
+        if (m_poseFigurePanel->mirror() && other != point) {
+            const double middle = mode.finish.points[std::size_t(rig::Point::Waist)][0];
+            mode.finish.points[std::size_t(other)] = {2 * middle - target[0], target[1], target[2]};
+        }
+        try {
+            rig::check(mode.finish);
+        } catch (const std::exception&) {
+            mode.finish.points[std::size_t(mode.picked)] = old;  // not on top of another
+            return;
+        }
+        if (!mode.posedYet)
+            mode.finish.angles = rig::restAngles(mode.finish.points);
+        updatePoseFigurePreview();
+        return;
+    }
+    // Posing: the joint above the ball turns so the ball follows the mouse.
+    const auto joint = jointBending(point);
+    if (!joint)
+        return;
+    const std::size_t j = std::size_t(*joint);
+    const rig::Point pivot = rig::pivot(*joint);
+    const rig::Point end = endOf(*joint);
+    const int dofs = rig::angleCount(*joint);
+    std::array<double, 2> lo{}, hi{};
+    for (int k = 0; k < dofs; ++k) {
+        const auto r = rig::angleRange(*joint, k);
+        const double now = mode.finish.angles[j][std::size_t(k)];
+        lo[std::size_t(k)] = std::min(r[0], now);
+        hi[std::size_t(k)] = std::max(r[1], now);
+    }
+    PosedFinish trial = mode.finish;
+    trial.onGround = false;  // directions only: where it stands doesn't matter
+    // How far off the ball's bone points from the mouse (the shift onto the ground is the
+    // same for every point, so the shown pivot works).
+    const Vec3 shownPivot = mode.shown[std::size_t(pivot)];
+    const Vec3 want{target[0] - shownPivot[0], target[1] - shownPivot[1], target[2] - shownPivot[2]};
+    const double wantLen = std::sqrt(want[0] * want[0] + want[1] * want[1] + want[2] * want[2]);
+    if (wantLen < 1e-6)
+        return;
+    const auto cost = [&](const std::array<double, 2>& a) {
+        trial.angles[j] = a;
+        const rig::Moves m = rig::moves(trial);
+        const Vec3& b0 = m.points[std::size_t(pivot)];
+        const Vec3& b1 = m.points[std::size_t(end)];
+        const Vec3 bone{b1[0] - b0[0], b1[1] - b0[1], b1[2] - b0[2]};
+        const double len = std::sqrt(bone[0] * bone[0] + bone[1] * bone[1] + bone[2] * bone[2]);
+        if (len < 1e-9)
+            return 2.0;
+        return 1.0 - (bone[0] * want[0] + bone[1] * want[1] + bone[2] * want[2]) / (len * wantLen);
+    };
+    // A simple search: steps either way on each angle, halving when nothing helps.
+    std::array<double, 2> best = mode.finish.angles[j];
+    double bestCost = cost(best);
+    for (double step = 16.0; step > 0.05;) {
+        bool better = false;
+        for (int k = 0; k < dofs; ++k)
+            for (double sign : {-1.0, 1.0}) {
+                std::array<double, 2> a = best;
+                a[std::size_t(k)] = std::clamp(a[std::size_t(k)] + sign * step, lo[std::size_t(k)], hi[std::size_t(k)]);
+                const double c = cost(a);
+                if (c < bestCost - 1e-12) {
+                    best = a;
+                    bestCost = c;
+                    better = true;
+                }
+            }
+        if (!better)
+            step /= 2;
+    }
+    for (int k = 0; k < dofs; ++k)
+        best[std::size_t(k)] = std::round(best[std::size_t(k)] * 10.0) / 10.0;
+    mode.finish.angles[j] = best;
+    mode.posedYet = true;
+    updatePoseFigurePreview();
+}
+
+void MainWindow::poseFigureRelease()
+{
+    auto& mode = m_poseFigureMode;
+    if (mode.picked < 0)
+        return;
+    mode.picked = -1;
+    updatePoseFigurePreview();
+}
+
+void MainWindow::applyPoseFigure()
+{
+    auto& mode = m_poseFigureMode;
+    if (!mode.active)
+        return;
+    const PosedFinish f = mode.finish;
+    const ObjectId target = mode.target;
+    std::optional<Body> result;
+    try {
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        struct RestoreCursor {
+            ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
+        } restore;
+        rig::check(f);
+        if (mode.editing) {
+            result = withPosed(m_doc, target, f);
+            m_doc.previewMesh(*result->boolean);
+        } else {
+            Body r;
+            r.id = m_doc.allocateId();
+            r.name = m_doc.uniqueName("Posed");
+            r.boolean = posedSpec(m_doc, target, f);
+            m_doc.previewMesh(*r.boolean);  // worked out (and kept) before anything changes
+            result = std::move(r);
+        }
+    } catch (const std::exception& e) {
+        m_poseFigurePanel->setStatus(tr("It couldn't be posed: %1").arg(QString::fromUtf8(e.what())), true);
+        return;
+    }
+    if (mode.editing) {
+        const Body* now = m_doc.find(target);
+        if (!now)
+            return endPoseFigure();
+        const Body before = *now;
+        endPoseFigure();
+        run(std::make_unique<EditBodyCommand>(before, *result, "Change pose"));
+        setSelection(history::objectOf(m_doc, target));
+        return;
+    }
+    const ObjectId id = result->id;
+    endPoseFigure();
+    try {
+        if (!m_doc.isTopLevel(target))
+            m_stack.execute(std::make_unique<InsertStepCommand>(std::move(*result), m_doc.parentOf(target)));
+        else
+            m_stack.execute(std::make_unique<CombineCommand>(std::move(*result)));
+    } catch (const std::exception& e) {
+        QMessageBox::warning(this, tr("Forge3D"), tr("It couldn't be posed:\n%1").arg(QString::fromUtf8(e.what())));
+        refreshScene();
+        return;
+    }
+    refreshScene();
+    refreshCommandState();
+    setSelection(m_doc.isTopLevel(id) ? id : history::objectOf(m_doc, target));
+    statusBar()->showMessage(tr("Posed. Double-click the step in Objects to change the pose; sculpting goes on "
+                                "from the posed figure."),
                              10000);
 }
 

@@ -11,6 +11,7 @@
 #include "forge/core/Edges.h"
 #include "forge/core/Shell.h"
 #include "forge/core/Hollow.h"
+#include "forge/core/Rig.h"
 #include "forge/core/Stamp.h"
 #include "forge/core/PanelLines.h"
 #include "forge/core/Follow.h"
@@ -282,6 +283,12 @@ void Document::validateBoolean(const Body& body, const std::map<ObjectId, Object
         if (!body.boolean->hollow)
             throw std::invalid_argument("Hollow needs a wall thickness");
         hollow::check(*body.boolean->hollow);
+    } else if (op == BooleanOp::Posed) {
+        if (ops.size() != 1)
+            throw std::invalid_argument("Pose Figure works on exactly one shape");
+        if (!body.boolean->posed)
+            throw std::invalid_argument("Pose Figure needs a skeleton");
+        rig::check(*body.boolean->posed);
     } else if (op == BooleanOp::Smooth) {
         if (ops.size() != 1)
             throw std::invalid_argument("Smooth works on exactly one shape");
@@ -609,7 +616,8 @@ TopoDS_Shape Document::combine(const BooleanSpec& spec) const
         if (op == BooleanOp::Emboss || op == BooleanOp::Sculpt || op == BooleanOp::Simplify ||
             op == BooleanOp::Thread || op == BooleanOp::Smooth || op == BooleanOp::ExtrudeDown ||
             op == BooleanOp::Socket || op == BooleanOp::Hinge || op == BooleanOp::MaskSplit ||
-            op == BooleanOp::Hollow || op == BooleanOp::Stamp || op == BooleanOp::PanelLines)
+            op == BooleanOp::Hollow || op == BooleanOp::Stamp || op == BooleanOp::PanelLines ||
+            op == BooleanOp::Posed)
             throw GeometryError(toString(op) + " is worked out by the mesh engine");
         if (op == BooleanOp::Pattern)
             return patternShape(spec);
@@ -737,6 +745,7 @@ TopoDS_Shape Document::combine(const BooleanSpec& spec) const
             case BooleanOp::Hollow:
             case BooleanOp::Stamp:
             case BooleanOp::PanelLines:
+            case BooleanOp::Posed:
                 break;  // handled above / by the mesh engine
             }
         }
@@ -854,7 +863,8 @@ TopoDS_Shape Document::previewCombine(const BooleanSpec& spec) const
          spec.op == BooleanOp::Follow || spec.op == BooleanOp::Pattern || spec.op == BooleanOp::Sculpt ||
          spec.op == BooleanOp::Simplify || spec.op == BooleanOp::Thread || spec.op == BooleanOp::Smooth ||
          spec.op == BooleanOp::ExtrudeDown || spec.op == BooleanOp::Socket || spec.op == BooleanOp::Hinge ||
-         spec.op == BooleanOp::MaskSplit || spec.op == BooleanOp::Hollow || spec.op == BooleanOp::PanelLines) &&
+         spec.op == BooleanOp::MaskSplit || spec.op == BooleanOp::Hollow || spec.op == BooleanOp::PanelLines ||
+         spec.op == BooleanOp::Posed) &&
         spec.operands.size() != 1)
         throw std::invalid_argument(toString(spec.op) + " works on exactly one shape");
     return combine(spec);
@@ -929,6 +939,7 @@ BooleanSpec Document::passThrough(const BooleanSpec& spec)
     pass.hollow.reset();
     pass.stamp.reset();
     pass.panelLines.reset();
+    pass.posed.reset();
     switch (spec.op) {
     case BooleanOp::Merge:
     case BooleanOp::Intersect:
@@ -1091,7 +1102,8 @@ bool Document::specUsesMesh(const BooleanSpec& spec) const
     if (spec.op == BooleanOp::Emboss || spec.op == BooleanOp::Sculpt || spec.op == BooleanOp::Simplify ||
         spec.op == BooleanOp::Thread || spec.op == BooleanOp::Smooth || spec.op == BooleanOp::ExtrudeDown ||
         spec.op == BooleanOp::Socket || spec.op == BooleanOp::Hinge || spec.op == BooleanOp::MaskSplit ||
-        spec.op == BooleanOp::Hollow || spec.op == BooleanOp::Stamp || spec.op == BooleanOp::PanelLines)
+        spec.op == BooleanOp::Hollow || spec.op == BooleanOp::Stamp || spec.op == BooleanOp::PanelLines ||
+        spec.op == BooleanOp::Posed)
         return true;  // letters following a surface, and sculpting, only exist as triangles
     for (ObjectId part : spec.operands)
         if (usesMeshEngine(part))
@@ -1427,6 +1439,11 @@ MeshSolid Document::combineMeshes(const BooleanSpec& spec) const
         if (!spec.hollow)
             throw GeometryError("Hollow has no settings");
         return hollow::apply(parts.front(), *spec.hollow);
+    }
+    case BooleanOp::Posed: {
+        if (!spec.posed)
+            throw GeometryError("Pose Figure has no skeleton");
+        return rig::apply(parts.front(), *spec.posed);
     }
     case BooleanOp::Socket: {
         if (!spec.socket)

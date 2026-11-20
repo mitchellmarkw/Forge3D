@@ -1457,3 +1457,24 @@ and sharp across edges.
   (Print Check measuring and colouring, Hollow, a row of Stamps, Panel Lines, the shown
   mesh). Not run by CTest; run `forge_tests "[.heavy]" -s` to see them.
 - `docs/release-notes/v0.73.0.md`: the notes the publish step needs for v0.73.0.
+
+## Pose Figure (slice 65)
+
+- Core `Rig.h` / `Rig.cpp` (namespace `rig`): a 19-point skeleton (`rig::Point`) and 14 joints (`rig::Joint`: the
+  figure guide's 10 in its order, then wrists and ankles), 15 bones. `BooleanOp::Posed` with `PosedFinish` (points
+  in the step's coordinates, absolute angles in the figure guide's convention, blend, feetFlat, onGround); a mesh
+  engine step, file format 38 (operation "posed").
+- Angles are absolute (0 = standing straight), so the guide's presets work on any figure. Each joint's rest turn is
+  measured from the points; `restAngles` gives the angles it was made in, and a per-joint correction
+  (`local(rest)^-1 * restTurn`) carries what the angles can't say (a twist, a lean), so the made angles move
+  nothing exactly.
+- `rig::fit`: torso from 7.5-head proportions of the mesh's height, centred on the waist's surface; arms out if
+  something reaches past the shoulder above mid-thigh (else down); feet from the lowest surface each side; elbows,
+  wrists, knees and shoulders centred across the limb.
+- `rig::Skin`: weights per vertex to the nearest bones (distance to each bone's segments; smoothstep falloff over
+  `blend` from the nearest, top four kept), worked out once (multithreaded); `posed()` blends dual quaternions.
+  About 0.1 s for weights and 0.02 s per pose on 650 thousand points.
+- App: `PoseFigurePanel` (stages Fit / Pose), `MainWindow::PoseFigureMode` (rest mesh in step coordinates, the
+  skin, the posed preview, the skeleton drawn ghosted on top). Dragging a ball: fitting moves it in the view plane
+  (mirrored about the waist's X); posing searches the joint above it for the angles that point its bone at the
+  mouse (`rig::moves`, a halving pattern search within the joint's range).

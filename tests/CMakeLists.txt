@@ -55,6 +55,7 @@ add_executable(forge_tests
     test_rescale.cpp
     test_mannequin.cpp
     test_hollow.cpp
+    test_rig.cpp
     test_stamp.cpp
     test_panel_lines.cpp
     test_kit.cpp

@@ -430,6 +430,7 @@ std::string toString(BooleanOp op)
     case BooleanOp::Hollow: return "Hollow";
     case BooleanOp::Stamp: return "Stamp";
     case BooleanOp::PanelLines: return "Panel Lines";
+    case BooleanOp::Posed: return "Pose Figure";
     }
     return "Combine";
 }

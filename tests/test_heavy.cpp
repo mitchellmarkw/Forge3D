@@ -5,6 +5,7 @@
 #include "forge/core/MeshKernel.h"
 #include "forge/core/PanelLines.h"
 #include "forge/core/PrintCheck.h"
+#include "forge/core/Rig.h"
 #include "forge/core/Stamp.h"
 
 #include <catch2/catch_test_macros.hpp>
@@ -117,4 +118,15 @@ TEST_CASE("Heavy mesh timings", "[.heavy]")
     start = std::chrono::steady_clock::now();
     meshkernel::displayMesh(solid);
     WARN("Making the shown mesh: " << since(start) << " s");
+
+    start = std::chrono::steady_clock::now();
+    PosedFinish pf = rig::fit(ball);
+    WARN("Pose Figure, fitting: " << since(start) << " s");
+    start = std::chrono::steady_clock::now();
+    const rig::Skin skin(ball, pf);
+    WARN("Pose Figure, weights: " << since(start) << " s");
+    pf.angles[std::size_t(rig::Joint::Waist)][0] += 30;
+    start = std::chrono::steady_clock::now();
+    const auto bent = skin.posed(pf);
+    WARN("Pose Figure, one pose: " << since(start) << " s, " << bent.mesh.triangleCount() << " triangles");
 }

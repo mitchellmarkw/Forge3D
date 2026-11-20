@@ -10,6 +10,7 @@
 #include "forge/core/Emboss.h"
 #include "forge/core/Join.h"
 #include "forge/core/Measure.h"
+#include "forge/core/Rig.h"
 #include "forge/core/Sculpt.h"
 #include "forge/core/Sketch.h"
 #include "forge/core/Split.h"
@@ -78,6 +79,7 @@ class PosePanel;
 class PrintCheckPanel;
 class MannequinPanel;
 class HollowPanel;
+class PoseFigurePanel;
 class StampPanel;
 class PanelLinePanel;
 class JoinPanel;
@@ -834,6 +836,35 @@ private:
     void hollowClick(const QVector3D& origin, const QVector3D& direction);
     void updateHollowPreview();
     void applyHollow();
+
+    // Pose Figure: bones in one sculpted figure, to bend it at its joints
+    QAction* m_poseFigureAction = nullptr;
+    PoseFigurePanel* m_poseFigurePanel = nullptr;
+    struct PoseFigureMode {
+        bool active = false;
+        bool editing = false;
+        ObjectId target = kInvalidId;  // the figure, or the Pose Figure step being changed
+        Transform frame;               // the step's coordinates -> plate
+        std::shared_ptr<const Mesh> rest;    // the figure as made, step coordinates
+        std::shared_ptr<rig::Skin> skin;     // its weights (made when first posed)
+        PosedFinish finish;                  // step coordinates
+        PosedFinish fitted;                  // as first placed (Place It Again)
+        bool posedYet = false;               // a pose chosen: fitting keeps it
+        std::shared_ptr<const Mesh> posed;   // step coordinates
+        rig::Points shown{};                 // the skeleton's points as drawn, step coordinates
+        std::shared_ptr<const Mesh> skeleton;
+        int picked = -1;                     // the ball being dragged (rig::Point), or -1
+        Vec3 dragPlanePoint{};               // plate coordinates
+        Vec3 dragPlaneNormal{};
+    };
+    PoseFigureMode m_poseFigureMode;
+    void startPoseFigure(ObjectId target, bool editing);
+    void endPoseFigure();
+    bool poseFigureGrab(const QVector3D& origin, const QVector3D& direction);
+    void poseFigureDrag(const QVector3D& origin, const QVector3D& direction);
+    void poseFigureRelease();
+    void updatePoseFigurePreview();
+    void applyPoseFigure();
 
     // Surface stamps: rivets, bolts, vents, scales, stitches... clicked or dragged in rows
     QAction* m_stampAction = nullptr;
