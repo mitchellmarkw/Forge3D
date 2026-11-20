@@ -30,6 +30,27 @@ PrimitiveSpec scaledSpec(const PrimitiveSpec& spec, const Vec3& factors);
 // positions (and Split planes) do. Returns the new state of every body that
 // changes; nothing is applied. Throws NotScalable as above (uneven factors and a
 // part turned at an odd angle).
-std::vector<Body> scaledTree(const Document& doc, ObjectId id, const Vec3& factors, const Vec3& anchor);
+//
+// With options (even factors only; a stretch ignores them):
+//   keepJoints: joint parts (Body::hardware) keep their size and move with the design
+//     (by their own origin: the middle of a peg's or ball's base); socket, magnet,
+//     hinge and thread steps keep their sizes, their spots moving with the shape.
+//   keepWalls: Shell steps keep their wall thickness.
+struct ScaleOptions {
+    bool keepJoints = false;
+    bool keepWalls = false;
+};
+std::vector<Body> scaledTree(const Document& doc, ObjectId id, const Vec3& factors, const Vec3& anchor,
+                             const ScaleOptions& options = {});
+
+// Rescales everything in `ids` (top-level bodies) evenly by `factor` about `anchor` (a
+// point on the plate), as one design: the parts grow or shrink and spread apart or
+// come together. Returns the new state of every body that changes.
+std::vector<Body> rescaledDesign(const Document& doc, const std::vector<ObjectId>& ids, double factor,
+                                 const Vec3& anchor, const ScaleOptions& options);
+
+// How many joint parts (Body::hardware, at any depth) and joint steps (socket, magnet,
+// hinge and thread steps) `ids` hold: what "keep joint sizes" would keep.
+int jointCount(const Document& doc, const std::vector<ObjectId>& ids);
 
 }  // namespace forge

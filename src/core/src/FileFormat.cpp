@@ -242,6 +242,8 @@ json bodyToJson(const Body& b)
         std::snprintf(hex, sizeof hex, "#%06X", unsigned(*b.colour & 0xFFFFFFu));
         j["colour"] = hex;
     }
+    if (b.hardware)
+        j["hardware"] = true;
     if (b.isBoolean()) {
         j["type"] = "combine";
         j["operation"] = opName(b.boolean->op);
@@ -505,6 +507,7 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
             damaged(where + ": colour is not like #RRGGBB");
         b.colour = std::uint32_t(std::stoul(hex.substr(1), nullptr, 16));
     }
+    b.hardware = j.value("hardware", false);
 
     const auto placement = j.find("placement");
     if (placement == j.end() || !placement->is_object())
@@ -1264,6 +1267,7 @@ std::string resultKey(const Document& doc, ObjectId id)
         json j = bodyToJson(*doc.find(part));
         j.erase("name");  // renaming doesn't change the shape
         j.erase("colour");
+        j.erase("hardware");  // nor does marking it a joint part
         if (part == id)
             j.erase("placement");  // nor does moving the whole thing
         text += "|" + j.dump();

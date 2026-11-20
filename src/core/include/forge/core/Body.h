@@ -698,6 +698,10 @@ struct Body {
     // A colour chosen for this shape, 0xRRGGBB. None: a combined shape takes its first
     // part's colour; anything else one from the default palette (see Document::colourOf).
     std::optional<std::uint32_t> colour;
+    // A joint part (a ball, a peg, a hinge pin or tab, a split peg or its hole, a
+    // stand-in magnet): Rescale with "keep joint sizes" moves it with the design but
+    // leaves its size alone.
+    bool hardware = false;
 
     bool isBoolean() const { return boolean.has_value(); }
     bool isOff() const { return boolean.has_value() && (suppressed || rolledBack); }

@@ -57,6 +57,8 @@ signals:
     void editEdgesRequested();
     // Subtract: tools go right through ("through all").
     void throughAllRequested(ObjectId id, bool on);
+    // A joint part: keeps its size when the design is rescaled.
+    void hardwareRequested(ObjectId id, bool on);
     // Simplify: the share of triangles to keep (0.01..1).
     void simplifyKeepRequested(ObjectId id, double keep);
     // Smooth: how strongly (1..10).
@@ -86,6 +88,7 @@ private:
     QWidget* m_editEmbossButton = nullptr;
     QWidget* m_editEdgesButton = nullptr;
     QCheckBox* m_throughAll = nullptr;
+    QCheckBox* m_hardware = nullptr;
     QWidget* m_keepRow = nullptr;
     QWidget* m_keepLabel = nullptr;
     QDoubleSpinBox* m_keep = nullptr;

@@ -29,6 +29,7 @@
 #include "MaskPanel.h"
 #include "ReferencePanel.h"
 #include "ScaleCalculator.h"
+#include "RescaleDialog.h"
 #include "ToleranceDialog.h"
 #include "SocketPanel.h"
 #include "ThreadPanel.h"
@@ -1268,6 +1269,10 @@ void MainWindow::createMenus()
     });
     toleranceTest->setStatusTip(tr("Print holes, cups and pin holes at stepped fits once, and use the fit that worked "
                                    "best from then on"));
+    tools->addSeparator();
+    QAction* rescale = tools->addAction(tr("&Rescale Design..."), this, &MainWindow::rescaleDesign);
+    rescale->setStatusTip(tr("Move the design to another scale (1:12 to 1:18, say), keeping the joints at their real "
+                             "sizes"));
 
     QMenu* help = menuBar()->addMenu(tr("&Help"));
     help->addAction(tr("Open &log folder"), this, [] {
@@ -2174,6 +2179,14 @@ void MainWindow::createDocks()
         Body after = *body;
         after.boolean->throughAll = on;
         run(std::make_unique<EditBodyCommand>(*body, after, on ? "Through all" : "Not through all"));
+    });
+    connect(m_properties, &PropertiesPanel::hardwareRequested, this, [this](ObjectId id, bool on) {
+        const Body* body = m_doc.find(id);
+        if (!body || body->hardware == on)
+            return;
+        Body after = *body;
+        after.hardware = on;
+        run(std::make_unique<EditBodyCommand>(*body, after, on ? "Mark as joint part" : "Not a joint part"));
     });
     connect(m_properties, &PropertiesPanel::keepRoundChanged, this, [this](bool on) { m_keepRound = on; });
     connect(m_properties, &PropertiesPanel::smoothStrengthRequested, this, [this](ObjectId id, int strength) {
@@ -9729,6 +9742,7 @@ void MainWindow::addMatchingPart()
     Body body;
     try {
         body.spec = socket::matchingPart(f);
+        body.hardware = true;  // keeps its size when the design is rescaled
     } catch (const std::exception& e) {
         m_socketPanel->setStatus(QString::fromUtf8(e.what()), true);
         return;
@@ -10413,8 +10427,10 @@ std::vector<Body> MainWindow::hingePieceBodies(const HingeFinish& f, const embos
 {
     const auto span = hingePinSpan(f, spot, forkPart);
     std::vector<Body> out;
-    for (const hinge::Piece& piece : hinge::pieces(f, spot.point, spot.normal, withTab, span))
+    for (const hinge::Piece& piece : hinge::pieces(f, spot.point, spot.normal, withTab, span)) {
         out.push_back(hinge::pieceBody(piece.mesh, piece.name));
+        out.back().hardware = true;  // a tab, link or pin: keeps its size when the design is rescaled
+    }
     return out;
 }
 
@@ -11805,9 +11821,87 @@ void MainWindow::colourPrintCheck()
         html = lines.join(QStringLiteral("<br>"));
     if (measuring > 0 && settings.thin)
         html += (html.isEmpty() ? QString() : QStringLiteral("<br><br>")) +
-                tr("<i>Measuring wall thickness (%n part(s) to go)...</i>", nullptr, measuring);
+                (measuring == 1 ? tr("<i>Measuring wall thickness (1 part to go)...</i>")
+                                : tr("<i>Measuring wall thickness (%1 parts to go)...</i>").arg(measuring));
     m_printCheckPanel->setResult(html);
     refreshScene();
+}
+
+// ---- Rescale Design -----------------------------------------------------------------
+
+void MainWindow::rescaleDesign()
+{
+    if (toolOpen()) {
+        statusBar()->showMessage(tr("Close the open tool first."), 5000);
+        return;
+    }
+    if (m_dragState.kind != Drag::Kind::None)
+        cancelDrag();
+    const std::vector<ObjectId> all = m_doc.topLevelIds();
+    if (all.empty()) {
+        statusBar()->showMessage(tr("Rescale Design: there's nothing on the plate."), 5000);
+        return;
+    }
+    std::vector<ObjectId> picked;
+    for (ObjectId id : m_selection)
+        if (m_doc.isTopLevel(id))
+            picked.push_back(id);
+    const auto boxOf = [this](const std::vector<ObjectId>& ids) {
+        Bounds b;
+        for (ObjectId id : ids) {
+            try {
+                const Bounds w = m_doc.worldBounds(id);
+                if (w.valid) {
+                    b.expand(w.min[0], w.min[1], w.min[2]);
+                    b.expand(w.max[0], w.max[1], w.max[2]);
+                }
+            } catch (const std::exception&) {
+            }
+        }
+        return b;
+    };
+    const auto choiceOf = [&](const std::vector<ObjectId>& ids) {
+        RescaleDialog::Choice c;
+        const Bounds b = boxOf(ids);
+        c.height = b.valid ? double(b.max[2] - b.min[2]) : 0.0;
+        c.joints = jointCount(m_doc, ids);
+        c.shapes = int(ids.size());
+        return c;
+    };
+    RescaleDialog dialog(choiceOf(all), choiceOf(picked), this);
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+    const std::vector<ObjectId>& ids = dialog.selectedOnly() ? picked : all;
+    const Bounds box = boxOf(ids);
+    if (!box.valid)
+        return;
+    // About the middle of its footprint, at its bottom: what stands on the plate stays there.
+    const auto c = box.center();
+    const Vec3 anchor{c[0], c[1], box.min[2]};
+    ScaleOptions options;
+    options.keepJoints = dialog.keepJoints();
+    options.keepWalls = dialog.keepWalls();
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    try {
+        std::vector<Body> after = rescaledDesign(m_doc, ids, dialog.factor(), anchor, options);
+        std::vector<Body> before;
+        before.reserve(after.size());
+        for (const Body& b : after)
+            before.push_back(*m_doc.find(b.id));
+        const std::string label = "Rescale " + dialog.describe().toStdString();
+        const bool done = run(std::make_unique<EditBodiesCommand>(std::move(before), std::move(after), label));
+        QApplication::restoreOverrideCursor();
+        if (done) {
+            const Bounds now = boxOf(ids);
+            statusBar()->showMessage(tr("Rescaled %1: now %2 mm tall.")
+                                         .arg(dialog.describe(), QString::number(now.max[2] - now.min[2], 'f', 1)),
+                                     8000);
+        }
+    } catch (const std::exception& e) {
+        QApplication::restoreOverrideCursor();
+        QMessageBox::warning(this, tr("Rescale Design"),
+                             tr("The design couldn't be rescaled:\n%1").arg(QString::fromUtf8(e.what())));
+    }
 }
 
 }  // namespace forge::app

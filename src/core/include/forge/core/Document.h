@@ -94,6 +94,8 @@ public:
     void rename(ObjectId id, const std::string& name);
     // Sets (or clears) the colour chosen for a body. The shape is not rebuilt.
     void setColour(ObjectId id, std::optional<std::uint32_t> colour);
+    // Marks a joint part (Body::hardware). Doesn't change its shape.
+    void setHardware(ObjectId id, bool hardware);
     // The colour a body shows in, 0xRRGGBB: its own, else (a combined shape) its first
     // part's, else one of the default colours, picked by its id.
     std::uint32_t colourOf(ObjectId id) const;

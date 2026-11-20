@@ -186,6 +186,7 @@ void EditBodyCommand::apply(Document& doc, const Body& state)
             doc.setBoolean(state.id, *state.boolean);
         doc.setStepState(state.id, state.suppressed, state.rolledBack);
         doc.setPlacement(state.id, state.placement);
+        doc.setHardware(state.id, state.hardware);
     } catch (...) {
         doc.setSpec(state.id, oldSpec);  // leave the document as it was
         if (oldBoolean)

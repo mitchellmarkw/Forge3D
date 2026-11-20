@@ -69,6 +69,7 @@ namespace forge::file {
 //  31  clicks on Quick Hinge steps ("clicks", "clickDepth") and ridges in ball
 //      sockets ("ridges", "ridgeHeight")
 //  32  magnet pockets (a socket's kind "magnet", and "cover": the skin over it)
+//      (0.65 adds "hardware": true on joint parts; older versions ignore it)
 inline constexpr int kFormatVersion = 32;
 // The highest sculpt::Brush number a file may hold (Pattern).
 inline constexpr int kLastSculptBrush = 13;

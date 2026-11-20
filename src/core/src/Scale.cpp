@@ -42,15 +42,33 @@ Vec3 mul(const Vec3& f, const Vec3& v)
 }
 
 void scaleInto(const Document& doc, ObjectId id, const Vec3& factors, const Vec3& anchor, bool moveSelf,
-               std::vector<Body>& out);
+               std::vector<Body>& out, const ScaleOptions& o);
+
+// A joint part kept at its size: moved so its own origin goes where the scaling takes it.
+// `local`: its transform in the parent frame being scaled.
+Body movedRigidly(const Body& body, const Transform& local, const Vec3& factors, const Vec3& anchor)
+{
+    const Vec3 q = local.apply(Vec3{0, 0, 0});
+    Body next = body;
+    for (std::size_t k = 0; k < 3; ++k) {
+        const double d = factors[k] * (q[k] - anchor[k]) + anchor[k] - q[k];
+        (k == 0 ? next.placement.x : k == 1 ? next.placement.y : next.placement.z) += d;
+    }
+    return next;
+}
 
 // Body `id` lives in a parent frame that is being scaled by `factors` about
 // `anchor` (parent coordinates). Updates its spec / placement (or, for a result,
 // its parts) so its geometry follows.
-void scaleChild(const Document& doc, ObjectId id, const Vec3& factors, const Vec3& anchor, std::vector<Body>& out)
+void scaleChild(const Document& doc, ObjectId id, const Vec3& factors, const Vec3& anchor, std::vector<Body>& out,
+                const ScaleOptions& o)
 {
     const Body* body = doc.find(id);
     const Transform local = doc.localTransform(id);
+    if (o.keepJoints && body->hardware && even(factors)) {
+        out.push_back(movedRigidly(*body, local, factors, anchor));
+        return;
+    }
     Vec3 bodyFactors = factors;  // the same factors, along the body's own axes
     if (!even(factors) && !bodyFactorsFor(local, factors, bodyFactors))
         throw NotScalable("'" + body->name + "' is turned at an angle, so this shape can only be scaled evenly "
@@ -58,7 +76,7 @@ void scaleChild(const Document& doc, ObjectId id, const Vec3& factors, const Vec
 
     if (body->isBoolean()) {
         // Its placement stays; scale its contents about the same point, seen from inside it.
-        scaleInto(doc, id, bodyFactors, local.inverse().apply(anchor), /*moveSelf=*/false, out);
+        scaleInto(doc, id, bodyFactors, local.inverse().apply(anchor), /*moveSelf=*/false, out, o);
         return;
     }
     // A primitive: new sizes, and a position that keeps it in step with the stretch.
@@ -76,18 +94,19 @@ void scaleChild(const Document& doc, ObjectId id, const Vec3& factors, const Vec
 }
 
 void scaleInto(const Document& doc, ObjectId id, const Vec3& factors, const Vec3& anchor, bool moveSelf,
-               std::vector<Body>& out)
+               std::vector<Body>& out, const ScaleOptions& o)
 {
+    const bool keepJoints = o.keepJoints && even(factors);
     const Body* body = doc.find(id);
     if (!body)
         throw std::out_of_range("No body with id " + std::to_string(id));
     if (!body->isBoolean()) {
         if (moveSelf)
-            scaleChild(doc, id, factors, anchor, out);
+            scaleChild(doc, id, factors, anchor, out, o);
         return;
     }
     for (ObjectId part : body->boolean->operands)
-        scaleChild(doc, part, factors, anchor, out);
+        scaleChild(doc, part, factors, anchor, out, o);
     if (body->boolean->op == BooleanOp::Edges && body->boolean->edges) {
         // The picks move with the shape; evenly scaled, the rounding grows with it.
         Body next = *body;
@@ -173,7 +192,7 @@ void scaleInto(const Document& doc, ObjectId id, const Vec3& factors, const Vec3
         t.face.point = {factors[0] * (t.face.point[0] - anchor[0]) + anchor[0],
                         factors[1] * (t.face.point[1] - anchor[1]) + anchor[1],
                         factors[2] * (t.face.point[2] - anchor[2]) + anchor[2]};
-        if (even(factors)) {
+        if (even(factors) && !keepJoints) {
             t.size *= factors[0];
             t.pitch *= factors[0];
         }
@@ -200,7 +219,7 @@ void scaleInto(const Document& doc, ObjectId id, const Vec3& factors, const Vec3
             r.point = {factors[0] * (r.point[0] - anchor[0]) + anchor[0],
                        factors[1] * (r.point[1] - anchor[1]) + anchor[1],
                        factors[2] * (r.point[2] - anchor[2]) + anchor[2]};
-        if (even(factors))
+        if (even(factors) && !(o.keepWalls))
             next.boolean->shell->thickness *= factors[0];
         out.push_back(std::move(next));
         return;
@@ -219,7 +238,7 @@ void scaleInto(const Document& doc, ObjectId id, const Vec3& factors, const Vec3
             next.boolean->picture->width *= factors[0];
             next.boolean->picture->depth *= factors[0];
         }
-        if (next.boolean->socket && even(factors)) {
+        if (next.boolean->socket && even(factors) && !keepJoints) {
             // Scaled evenly, the socket grows with the shape (so does its ball, scaled with
             // it); the fit for printing stays as it is.
             SocketFinish& sf = *next.boolean->socket;
@@ -228,7 +247,7 @@ void scaleInto(const Document& doc, ObjectId id, const Vec3& factors, const Vec3
             if (sf.reliefDepth > 0.0)
                 sf.reliefDepth *= factors[0];
         }
-        if (next.boolean->hinge && even(factors)) {
+        if (next.boolean->hinge && even(factors) && !keepJoints) {
             // Scaled evenly, the joint grows with the shape; a filament pin or a rod
             // doesn't (it's bought, not printed), nor does the fit for printing.
             HingeFinish& h = *next.boolean->hinge;
@@ -350,7 +369,8 @@ PrimitiveSpec scaledSpec(const PrimitiveSpec& spec, const Vec3& f)
         spec);
 }
 
-std::vector<Body> scaledTree(const Document& doc, ObjectId id, const Vec3& factors, const Vec3& anchor)
+std::vector<Body> scaledTree(const Document& doc, ObjectId id, const Vec3& factors, const Vec3& anchor,
+                             const ScaleOptions& options)
 {
     for (double v : factors)
         if (!(v > 0.0) || !std::isfinite(v))
@@ -360,7 +380,10 @@ std::vector<Body> scaledTree(const Document& doc, ObjectId id, const Vec3& facto
     if (!body)
         throw std::out_of_range("No body with id " + std::to_string(id));
     if (body->isBoolean()) {
-        scaleInto(doc, id, factors, anchor, false, out);
+        scaleInto(doc, id, factors, anchor, false, out, options);
+    } else if (options.keepJoints && body->hardware && even(factors)) {
+        const Transform t = placementTransform(body->placement, pivotOf(body->spec));
+        out.push_back(movedRigidly(*body, t, factors, t.apply(anchor)));
     } else {
         // A primitive on its own: scale it in its own frame (placement adjusted).
         Body next = *body;
@@ -378,6 +401,65 @@ std::vector<Body> scaledTree(const Document& doc, ObjectId id, const Vec3& facto
         out.push_back(std::move(next));
     }
     return out;
+}
+
+namespace {
+
+void countJoints(const Document& doc, ObjectId id, int& n)
+{
+    const Body* b = doc.find(id);
+    if (!b)
+        return;
+    if (b->hardware) {
+        ++n;
+        return;
+    }
+    if (!b->isBoolean())
+        return;
+    const BooleanSpec& s = *b->boolean;
+    if ((s.op == BooleanOp::Socket && s.socket) || (s.op == BooleanOp::Hinge && s.hinge) ||
+        (s.op == BooleanOp::Thread && s.thread))
+        ++n;
+    for (ObjectId part : s.operands)
+        countJoints(doc, part, n);
+}
+
+}  // namespace
+
+std::vector<Body> rescaledDesign(const Document& doc, const std::vector<ObjectId>& ids, double factor,
+                                 const Vec3& anchor, const ScaleOptions& options)
+{
+    if (!(factor > 0.0) || !std::isfinite(factor))
+        throw std::invalid_argument("The new scale must be bigger than nothing");
+    std::vector<Body> out;
+    const Vec3 f{factor, factor, factor};
+    for (ObjectId id : ids) {
+        const Body* body = doc.find(id);
+        if (!body)
+            throw std::out_of_range("No body with id " + std::to_string(id));
+        const Transform world = doc.worldTransform(id);
+        if (options.keepJoints && body->hardware) {
+            // Moved whole, by its own origin.
+            const Vec3 q = world.apply(Vec3{0, 0, 0});
+            Body next = *body;
+            next.placement.x += factor * (q[0] - anchor[0]) + anchor[0] - q[0];
+            next.placement.y += factor * (q[1] - anchor[1]) + anchor[1] - q[1];
+            next.placement.z += factor * (q[2] - anchor[2]) + anchor[2] - q[2];
+            out.push_back(std::move(next));
+            continue;
+        }
+        auto changed = scaledTree(doc, id, f, world.inverse().apply(anchor), options);
+        out.insert(out.end(), std::make_move_iterator(changed.begin()), std::make_move_iterator(changed.end()));
+    }
+    return out;
+}
+
+int jointCount(const Document& doc, const std::vector<ObjectId>& ids)
+{
+    int n = 0;
+    for (ObjectId id : ids)
+        countJoints(doc, id, n);
+    return n;
 }
 
 }  // namespace forge

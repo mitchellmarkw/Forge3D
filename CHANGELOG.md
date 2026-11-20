@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.65.0 Beta — Slice 56: Rescale Design, keeping joint sizes (2026-11-19)
+
+- **Tools → Rescale Design**: move a design to another scale.
+  - Everything on the plate, or just the selected shapes.
+  - **From one scale to another** (1:12 to 1:18, say), **to a new height**, or **by a
+    percentage**. The parts grow or shrink together about the middle of their
+    footprint, so what stands on the plate stays there. One undo step.
+  - **Keep joint sizes**: joint parts move with the design but keep their size, and
+    the joints cut into the shapes keep theirs (their spots move with the shape):
+    ball and peg sockets, magnet pockets, Quick Hinge hinges and swivels, threads. The
+    dialog says how many it found, and warns to check they still fit when shrinking.
+  - **Keep wall thickness**: shapes hollowed with Shell keep their walls.
+- **Joint parts**: a new tick box in Properties, **Joint part (keeps its size when
+  rescaled)**, for any ball, peg or pin you make yourself. Already ticked for the
+  balls, pegs and stand-in magnets from Quick Socket, Quick Hinge's tab, link and pin
+  pieces, and Split's pegs, key holes and loose pins (made from now on).
+  Saved in the file; older versions ignore it.
+- 305 unit tests (4 new: a design shrinking together; a joint part kept and moved; a
+  peg inside a combined shape and a socket step kept; Shell walls kept, and the joint
+  part saved and undone).
+
 ## 0.64.1 Beta — Simplify by a number of triangles (2026-11-19)
 
 - **Simplify** (Sculpt tab) was already there; its Properties now also take a number
