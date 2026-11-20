@@ -1416,3 +1416,17 @@ and sharp across edges.
   the same mask, so they match.
 - `maskSplitSpec` / `splitByMask` take a key fit (negative: none); `withMask` can change
   the keys on both pieces.
+
+## Kit layout (slice 62)
+
+- `kit::plan`: parts sorted biggest first (depth, then width), packed into shelf rows
+  about √(total area) × 1.1 wide; rows stacked with a bar under each and one over the
+  last, side bars, and `gap` (grown to fit the number tags) all round. Each part's gate
+  runs from the nearer bar (mid-height) to the part's point scoring lowest on distance
+  to that bar plus half its height off the bar (a few thousand of its points sampled),
+  0.4 mm into it. Tags (1 mm plates) with `tolerance::digits` numbers sit beside each
+  gate in the gap. Everything is merged into one closed mesh.
+- `kit::make`: one macro: an `EditBodiesCommand` moving (and renaming) the parts, the
+  frame added as a mesh body (`hinge::pieceBody`), and optionally a Merge of the frame
+  and parts.
+- `EditBodyCommand` / `EditBodiesCommand` now apply the name as well.

@@ -38,6 +38,8 @@
 #include "ReferencePanel.h"
 #include "ScaleCalculator.h"
 #include "RescaleDialog.h"
+#include "KitDialog.h"
+#include "forge/core/Kit.h"
 #include "ToleranceDialog.h"
 #include "SocketPanel.h"
 #include "ThreadPanel.h"
@@ -1332,6 +1334,8 @@ void MainWindow::createMenus()
     QAction* rescale = tools->addAction(tr("&Rescale Design..."), this, &MainWindow::rescaleDesign);
     rescale->setStatusTip(tr("Move the design to another scale (1:12 to 1:18, say), keeping the joints at their real "
                              "sizes"));
+    QAction* kitLayout = tools->addAction(tr("&Kit Layout..."), this, &MainWindow::makeKit);
+    kitLayout->setStatusTip(tr("Lay small parts out on a frame like a model kit's sprue, gated and numbered"));
 
     QMenu* help = menuBar()->addMenu(tr("&Help"));
     help->addAction(tr("Open &log folder"), this, [] {
@@ -13000,6 +13004,45 @@ std::optional<emboss::SurfacePoint> MainWindow::onSurfaceInPlane(ObjectId target
                             {-d[0], -d[1], -d[2]}, radius);
     } catch (const std::exception&) {
         return std::nullopt;
+    }
+}
+
+// ---- Kit layout ---------------------------------------------------------------------------
+
+void MainWindow::makeKit()
+{
+    if (toolOpen()) {
+        statusBar()->showMessage(tr("Close the open tool first."), 5000);
+        return;
+    }
+    if (m_dragState.kind != Drag::Kind::None)
+        cancelDrag();
+    const std::vector<ObjectId> all = m_doc.topLevelIds();
+    if (all.empty()) {
+        statusBar()->showMessage(tr("Kit Layout: there's nothing on the plate."), 5000);
+        return;
+    }
+    std::vector<ObjectId> picked;
+    for (ObjectId id : m_selection)
+        if (m_doc.isTopLevel(id))
+            picked.push_back(id);
+    KitDialog dialog(int(picked.size()), int(all.size()), this);
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+    const std::vector<ObjectId>& ids = dialog.selectedOnly() ? picked : all;
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    try {
+        const ObjectId made = kit::make(m_stack, m_doc, ids, dialog.settings());
+        QApplication::restoreOverrideCursor();
+        refreshScene();
+        refreshCommandState();
+        setSelection(made);
+        m_viewport->fitView();
+        statusBar()->showMessage(tr("Made a kit of %1 parts.").arg(ids.size()), 8000);
+    } catch (const std::exception& e) {
+        QApplication::restoreOverrideCursor();
+        QMessageBox::warning(this, tr("Kit Layout"), tr("The kit couldn't be made:\n%1").arg(QString::fromUtf8(e.what())));
+        refreshScene();
     }
 }
 

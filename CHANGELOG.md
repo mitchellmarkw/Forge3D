@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.71.0 Beta — Slice 62: Kit layout (sprue) (2026-11-20)
+
+- **Tools → Kit Layout**: lays small parts (hands, accessories, weapons) out in rows on
+  a frame like a model kit's sprue.
+  - The selected shapes, or everything on the plate.
+  - Biggest parts first, in rows about as wide as the kit is deep, with a bar between
+    rows and round the outside; a **gap** (4 mm to start) keeps parts clear of the bars
+    and each other.
+  - Each part joined to the nearer bar by a thin round **gate** (0.8 mm) at its lowest
+    nearest point, reaching a little into it.
+  - **Number the parts**: a raised number on a tag beside each gate, and the part
+    renamed to match ("1 Hand").
+  - **Join** the parts and frame into one shape ("Kit"; the parts stay in its history,
+    and Separate into parts takes it apart), or keep the frame as its own shape.
+  - One undo step; the settings are remembered.
+- Changing a shape's whole state back and forth (Undo of edits like this one) now puts
+  its name back too.
+- 321 unit tests (1 new: parts laid out clear of each other inside the frame, numbered,
+  joined and undone).
+
 ## 0.70.0 Beta — Slice 61: Split for painting (alignment keys) (2026-11-20)
 
 - **Split by Mask** (Design tab) can add **alignment keys** on each cut, so pieces split

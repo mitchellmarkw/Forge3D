@@ -729,6 +729,7 @@ private:
     ToleranceDialog* m_toleranceDialog = nullptr;  // Tools → Tolerance Test Print
     void addToleranceTest(const tolerance::Settings& settings);
     void rescaleDesign();
+    void makeKit();
 
     // Reference Images
     QAction* m_referenceAction = nullptr;
