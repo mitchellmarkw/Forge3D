@@ -1338,3 +1338,23 @@ and sharp across edges.
 - App: `MannequinPanel` (a tool panel like Reference Images); the mesh is rebuilt on
   each change and drawn as a see-through helper item that Fit still counts
   (`DisplayItem::fitted`).
+
+## Hollow (slice 58)
+
+- `BooleanOp::Hollow` with `HollowFinish` (thickness, hole size, `DrainHole`s: point and
+  outward normal in step coordinates; file format 34, `"hollow"`). A mesh-engine step.
+- `hollow::hollowed`: voxels of `cellFor` (a third of the wall, grown to keep under 16
+  million): inside found by a ray up each column (triangles binned by column), then an
+  exact squared Euclidean distance transform (Felzenszwalb–Huttenlocher, three 1D passes,
+  over the cores) to the nearest outside cell; distance to the surface ≈ that − half a
+  cell. The cavity is `meshkernel::levelSet` (Manifold `LevelSet`) of the trilinear field
+  at the wall thickness, sampled coarser than the grid (it's never seen), subtracted
+  from the part. Not deep enough anywhere: the part is returned as it was.
+- `holeCutter`: a 24-sided rod from 1 mm outside the spot to 1.5 × the wall + 1 mm in.
+  `lowSpots`: triangle middles, lowest first (then most downward), at least four hole
+  sizes apart. `plug`: a cylinder, hole radius less the fit, wall-thick.
+- `hollowSpec` / `hollowInPlate` / `withHollow` move the hole spots between plate and
+  step coordinates (like Socket). Scale moves the spots; `keepWalls` keeps the thickness,
+  `keepJoints` the hole size.
+- App: `HollowPanel`, `HollowMode` (holes in plate coordinates, red cutters shown); plugs
+  added with the step in one macro, as hardware bodies.

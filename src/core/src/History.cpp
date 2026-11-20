@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "forge/core/MaskSplit.h"
 #include "forge/core/Hinge.h"
+#include "forge/core/Hollow.h"
 #include "forge/core/Socket.h"
 #include "forge/core/Thread.h"
 #include "forge/core/History.h"
@@ -233,6 +234,7 @@ std::string describe(const Document& doc, ObjectId id)
     case BooleanOp::Socket: return spec.socket ? socket::describe(*spec.socket) : std::string();
     case BooleanOp::Hinge: return spec.hinge ? hinge::describe(*spec.hinge) : std::string();
     case BooleanOp::MaskSplit: return spec.maskSplit ? mask::describe(*spec.maskSplit) : std::string();
+    case BooleanOp::Hollow: return spec.hollow ? hollow::describe(*spec.hollow) : std::string();
     case BooleanOp::Simplify: {
         if (!spec.simplify)
             return {};

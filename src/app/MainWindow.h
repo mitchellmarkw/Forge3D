@@ -77,6 +77,7 @@ class HingePanel;
 class PosePanel;
 class PrintCheckPanel;
 class MannequinPanel;
+class HollowPanel;
 class JoinPanel;
 class MaskPanel;
 class ReferencePanel;
@@ -810,6 +811,23 @@ private:
     void updateSocketPreview();
     void applySocket();
     void endSocket();
+
+    // Hollow (for resin): walls, drain holes and plugs
+    QAction* m_hollowAction = nullptr;
+    HollowPanel* m_hollowPanel = nullptr;
+    struct HollowMode {
+        bool active = false;
+        bool editing = false;
+        ObjectId target = kInvalidId;    // the part to hollow, or the Hollow step being changed
+        std::vector<DrainHole> holes;    // plate coordinates
+        std::shared_ptr<const Mesh> cut;  // the holes' cutters, plate coordinates (shown red)
+    };
+    HollowMode m_hollowMode;
+    void startHollow(ObjectId target, bool editing);
+    void endHollow();
+    void hollowClick(const QVector3D& origin, const QVector3D& direction);
+    void updateHollowPreview();
+    void applyHollow();
     void addMatchingPart();
 
     // Pose Test

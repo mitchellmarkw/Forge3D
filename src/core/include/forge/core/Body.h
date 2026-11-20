@@ -319,6 +319,7 @@ enum class BooleanOp {
     Socket,       // a ball or peg socket cut in at a spot (planePoint, facing out: planeNormal)
     Hinge,        // one half of a hinge or swivel at a spot (planePoint, facing out: planeNormal)
     MaskSplit,    // the part cut along the edge of a painted mask: the masked piece or the rest
+    Hollow,       // hollowed for resin printing, with drain holes (mesh engine; see `hollow`)
 };
 
 // What happens to the picked edges of a shape.
@@ -558,6 +559,21 @@ struct MaskDab {
     bool erase = false;
     bool operator==(const MaskDab&) const = default;
 };
+// A Hollow step: the part hollowed out to walls `thickness` thick (any shape, sculpts
+// and imported meshes too), with round drain holes through the wall so resin can run
+// out. Hole spots are in the step's coordinates: a point on the outside and the way out.
+struct DrainHole {
+    std::array<double, 3> point{0.0, 0.0, 0.0};
+    std::array<double, 3> normal{0.0, 0.0, -1.0};
+    bool operator==(const DrainHole&) const = default;
+};
+struct HollowFinish {
+    double thickness = 2.0;
+    double holeSize = 3.0;  // the drain holes' diameter
+    std::vector<DrainHole> holes;
+    bool operator==(const HollowFinish&) const = default;
+};
+
 struct MaskSplitFinish {
     std::vector<MaskDab> dabs;
     bool masked = true;  // this piece is the masked part (false: the rest)
@@ -657,6 +673,8 @@ struct BooleanSpec {
     std::optional<HingeFinish> hinge{};
     // Split by Mask: the painted mask, and which piece this is.
     std::optional<MaskSplitFinish> maskSplit{};
+    // Hollow: wall thickness and drain holes.
+    std::optional<HollowFinish> hollow{};
     // Edges: what to do to which edges.
     std::optional<EdgeFinish> edges{};
     // Shell: how thick, and which faces are left open.

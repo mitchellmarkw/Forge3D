@@ -60,6 +60,8 @@ add_executable(Forge3D WIN32
     RescaleDialog.cpp
     MannequinPanel.h
     MannequinPanel.cpp
+    HollowPanel.h
+    HollowPanel.cpp
     ScaleCalculator.cpp
     HingePanel.cpp
     ReferencePanel.cpp

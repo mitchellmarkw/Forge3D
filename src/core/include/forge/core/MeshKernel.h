@@ -9,6 +9,7 @@
 #include "forge/core/Mesh.h"
 #include "forge/core/Transform.h"
 
+#include <functional>
 #include <memory>
 #include <stdexcept>
 #include <vector>
@@ -43,6 +44,9 @@ MeshSolid mirrored(const MeshSolid& solid, const Vec3& point, const Vec3& normal
 MeshSolid together(const std::vector<MeshSolid>& solids);
 
 bool isEmpty(const MeshSolid& solid);
+// The closed surface where `field` equals `level` (field higher inside), sampled every
+// `edge` mm within `box`. Empty if the field never gets above the level.
+MeshSolid levelSet(const std::function<double(const Vec3&)>& field, const Bounds& box, double edge, double level);
 double volume(const MeshSolid& solid);
 std::size_t triangleCount(const MeshSolid& solid);
 // Bounds after moving by t.

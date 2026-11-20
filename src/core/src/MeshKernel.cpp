@@ -147,6 +147,15 @@ MeshSolid together(const std::vector<MeshSolid>& solids)
     return fromTriangles(positions, indices);
 }
 
+MeshSolid levelSet(const std::function<double(const Vec3&)>& field, const Bounds& box, double edge, double level)
+{
+    const manifold::Box bounds(manifold::vec3(box.min[0], box.min[1], box.min[2]),
+                               manifold::vec3(box.max[0], box.max[1], box.max[2]));
+    return checked(manifold::Manifold::LevelSet(
+                       [&field](manifold::vec3 p) { return field(Vec3{p.x, p.y, p.z}); }, bounds, edge, level),
+                   "Hollowing");
+}
+
 bool isEmpty(const MeshSolid& solid)
 {
     return unwrap(solid).IsEmpty();

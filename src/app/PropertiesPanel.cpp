@@ -416,6 +416,10 @@ void PropertiesPanel::setBody(const Body* body, const QString& context, bool isP
             button->setText(tr("Remove the cut"));
             button->setToolTip(tr("Give back the whole shape, where it is"));
             break;
+        case BooleanOp::Hollow:
+            button->setText(tr("Remove the hollowing"));
+            button->setToolTip(tr("Give back the shape solid, where it is"));
+            break;
         case BooleanOp::Socket:
             button->setText(tr("Remove the socket"));
             button->setToolTip(tr("Give back the shape without the socket, where it is"));

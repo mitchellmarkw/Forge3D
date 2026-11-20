@@ -10,6 +10,7 @@
 
 #include "forge/core/Edges.h"
 #include "forge/core/Shell.h"
+#include "forge/core/Hollow.h"
 #include "forge/core/Follow.h"
 #include "forge/core/Pattern.h"
 #include "forge/core/Emboss.h"
@@ -259,6 +260,12 @@ void Document::validateBoolean(const Body& body, const std::map<ObjectId, Object
         const auto& n = body.boolean->planeNormal;
         if (!(std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]) > 1e-9))
             throw std::invalid_argument("A hinge needs a direction");
+    } else if (op == BooleanOp::Hollow) {
+        if (ops.size() != 1)
+            throw std::invalid_argument("Hollow works on exactly one shape");
+        if (!body.boolean->hollow)
+            throw std::invalid_argument("Hollow needs a wall thickness");
+        hollow::check(*body.boolean->hollow);
     } else if (op == BooleanOp::Smooth) {
         if (ops.size() != 1)
             throw std::invalid_argument("Smooth works on exactly one shape");
@@ -585,7 +592,8 @@ TopoDS_Shape Document::combine(const BooleanSpec& spec) const
     try {
         if (op == BooleanOp::Emboss || op == BooleanOp::Sculpt || op == BooleanOp::Simplify ||
             op == BooleanOp::Thread || op == BooleanOp::Smooth || op == BooleanOp::ExtrudeDown ||
-            op == BooleanOp::Socket || op == BooleanOp::Hinge || op == BooleanOp::MaskSplit)
+            op == BooleanOp::Socket || op == BooleanOp::Hinge || op == BooleanOp::MaskSplit ||
+            op == BooleanOp::Hollow)
             throw GeometryError(toString(op) + " is worked out by the mesh engine");
         if (op == BooleanOp::Pattern)
             return patternShape(spec);
@@ -710,6 +718,7 @@ TopoDS_Shape Document::combine(const BooleanSpec& spec) const
             case BooleanOp::Socket:
             case BooleanOp::Hinge:
             case BooleanOp::MaskSplit:
+            case BooleanOp::Hollow:
                 break;  // handled above / by the mesh engine
             }
         }
@@ -827,7 +836,7 @@ TopoDS_Shape Document::previewCombine(const BooleanSpec& spec) const
          spec.op == BooleanOp::Follow || spec.op == BooleanOp::Pattern || spec.op == BooleanOp::Sculpt ||
          spec.op == BooleanOp::Simplify || spec.op == BooleanOp::Thread || spec.op == BooleanOp::Smooth ||
          spec.op == BooleanOp::ExtrudeDown || spec.op == BooleanOp::Socket || spec.op == BooleanOp::Hinge ||
-         spec.op == BooleanOp::MaskSplit) &&
+         spec.op == BooleanOp::MaskSplit || spec.op == BooleanOp::Hollow) &&
         spec.operands.size() != 1)
         throw std::invalid_argument(toString(spec.op) + " works on exactly one shape");
     return combine(spec);
@@ -899,6 +908,7 @@ BooleanSpec Document::passThrough(const BooleanSpec& spec)
     pass.simplify.reset();
     pass.smooth.reset();
     pass.thread.reset();
+    pass.hollow.reset();
     switch (spec.op) {
     case BooleanOp::Merge:
     case BooleanOp::Intersect:
@@ -1060,7 +1070,8 @@ bool Document::specUsesMesh(const BooleanSpec& spec) const
 {
     if (spec.op == BooleanOp::Emboss || spec.op == BooleanOp::Sculpt || spec.op == BooleanOp::Simplify ||
         spec.op == BooleanOp::Thread || spec.op == BooleanOp::Smooth || spec.op == BooleanOp::ExtrudeDown ||
-        spec.op == BooleanOp::Socket || spec.op == BooleanOp::Hinge || spec.op == BooleanOp::MaskSplit)
+        spec.op == BooleanOp::Socket || spec.op == BooleanOp::Hinge || spec.op == BooleanOp::MaskSplit ||
+        spec.op == BooleanOp::Hollow)
         return true;  // letters following a surface, and sculpting, only exist as triangles
     for (ObjectId part : spec.operands)
         if (usesMeshEngine(part))
@@ -1379,6 +1390,11 @@ MeshSolid Document::combineMeshes(const BooleanSpec& spec) const
         const mask::Pieces pieces = mask::split(pos, idx, spec.maskSplit->dabs);
         const Mesh& piece = spec.maskSplit->masked ? pieces.masked : pieces.rest;
         return meshkernel::fromTriangles(piece.positions, piece.indices);
+    }
+    case BooleanOp::Hollow: {
+        if (!spec.hollow)
+            throw GeometryError("Hollow has no settings");
+        return hollow::apply(parts.front(), *spec.hollow);
     }
     case BooleanOp::Socket: {
         if (!spec.socket)

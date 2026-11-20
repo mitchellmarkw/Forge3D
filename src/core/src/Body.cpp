@@ -427,6 +427,7 @@ std::string toString(BooleanOp op)
     case BooleanOp::Socket: return "Socket";
     case BooleanOp::Hinge: return "Hinge";
     case BooleanOp::MaskSplit: return "Split by Mask";
+    case BooleanOp::Hollow: return "Hollow";
     }
     return "Combine";
 }
