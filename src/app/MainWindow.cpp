@@ -39,6 +39,7 @@
 #include "ScaleCalculator.h"
 #include "RescaleDialog.h"
 #include "KitDialog.h"
+#include "PartsListDialog.h"
 #include "forge/core/Kit.h"
 #include "ToleranceDialog.h"
 #include "SocketPanel.h"
@@ -1336,6 +1337,10 @@ void MainWindow::createMenus()
                              "sizes"));
     QAction* kitLayout = tools->addAction(tr("&Kit Layout..."), this, &MainWindow::makeKit);
     kitLayout->setStatusTip(tr("Lay small parts out on a frame like a model kit's sprue, gated and numbered"));
+    tools->addSeparator();
+    QAction* partsList = tools->addAction(tr("&Parts List..."), this, &MainWindow::showPartsList);
+    partsList->setStatusTip(tr("Every part's size, volume, print weight and material cost, as a table to save or "
+                               "print"));
 
     QMenu* help = menuBar()->addMenu(tr("&Help"));
     help->addAction(tr("Open &log folder"), this, [] {
@@ -13044,6 +13049,26 @@ void MainWindow::makeKit()
         QMessageBox::warning(this, tr("Kit Layout"), tr("The kit couldn't be made:\n%1").arg(QString::fromUtf8(e.what())));
         refreshScene();
     }
+}
+
+// ---- Parts list ---------------------------------------------------------------------------
+
+void MainWindow::showPartsList()
+{
+    if (m_doc.topLevelIds().empty()) {
+        statusBar()->showMessage(tr("Parts List: there's nothing on the plate."), 5000);
+        return;
+    }
+    // The selected shapes, or everything.
+    std::vector<ObjectId> ids;
+    for (ObjectId id : m_selection)
+        if (m_doc.isTopLevel(id))
+            ids.push_back(id);
+    if (ids.empty())
+        ids = m_doc.topLevelIds();
+    const QString title = m_filePath.isEmpty() ? tr("Untitled") : QFileInfo(m_filePath).completeBaseName();
+    PartsListDialog dialog(title, [this, ids](const parts::Settings& s) { return parts::rows(m_doc, ids, s); }, this);
+    dialog.exec();
 }
 
 }  // namespace forge::app

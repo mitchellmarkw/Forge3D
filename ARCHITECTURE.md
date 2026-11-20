@@ -1437,3 +1437,14 @@ and sharp across edges.
   (raised 0.6 mm) on a big flat plate first to measure them, shrunk to fit the frame's
   width if need be (2 mm letters at least), then laid on a 1.2 mm tag under the bottom
   bar, overlapping it 0.2 mm, and merged with the frame.
+
+## Parts list (slice 63)
+
+- `parts::rows`: per top-level shape (and, if asked, the operands of a Merge or Group
+  under it at depth 1) its world-box size, `meshkernel::volume` of its solid, weight =
+  volume (cm³) × density × fill × (1 + waste), cost = weight × price per kg. `total`
+  sums the depth-0 rows. `csv` (quoted where needed) and `html` (escaped) render it.
+- App: `PartsListDialog` (material presets from `parts::materials`, recomputed on every
+  change through a callback to the document); copy as tab-separated cells, CSV with a
+  byte-order mark, PDF through `QTextDocument::print` on a `QPdfWriter` (Qt GUI only, no
+  print-support module).

@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.72.0 Beta — Slice 63: Parts list (2026-11-20)
+
+- **Tools → Parts List**: a table of the selected shapes (or everything on the plate):
+  each part's **size**, **volume**, estimated **print weight** and **material cost**,
+  and the totals.
+  - **Material**: PLA, PETG, ABS, ASA, TPU, standard, ABS-like or tough resin (each
+    fills in its density and how solid it prints), or your own **density**, **fill**
+    (100 % for resin; about 40 % for filament at 20 % infill, walls included), **extra
+    for supports** (10 %), and **price** per kg with your currency sign.
+  - **List the parts inside joined shapes**: a kit's or merged shape's parts under it
+    (the total counts each shape once).
+  - **Copy** (pastes into a spreadsheet as cells), **Save as Spreadsheet** (CSV), or
+    **Save as PDF** to print or send.
+  - The settings are remembered.
+- 322 unit tests (1 new: sizes, volumes, weights and costs; filament fill; a joined
+  shape's parts; the CSV and the page).
+- That's the last of the figure, toy and scale-model features asked for.
+
 ## 0.71.1 Beta — Kit Layout: the tree's name (2026-11-20)
 
 - **Kit Layout** has a **Tree Name** box and an **Include Name** tick box: the name is

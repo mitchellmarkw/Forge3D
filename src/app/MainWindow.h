@@ -730,6 +730,7 @@ private:
     void addToleranceTest(const tolerance::Settings& settings);
     void rescaleDesign();
     void makeKit();
+    void showPartsList();
 
     // Reference Images
     QAction* m_referenceAction = nullptr;
