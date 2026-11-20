@@ -37,6 +37,7 @@ add_library(forge_core STATIC
     src/Hollow.cpp
     src/Stamp.cpp
     src/PanelLines.cpp
+    src/Kit.cpp
     src/Body.cpp
     src/CommandStack.cpp
     src/Commands.cpp
