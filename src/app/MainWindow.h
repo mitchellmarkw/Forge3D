@@ -16,6 +16,7 @@
 #include "forge/core/Transform.h"
 #include "forge/core/Scale.h"
 #include "forge/core/Tolerance.h"
+#include "forge/core/PrintCheck.h"
 #include "forge/view/Gizmo.h"
 
 #include "SketchPanel.h"
@@ -74,6 +75,7 @@ class ThreadPanel;
 class SocketPanel;
 class HingePanel;
 class PosePanel;
+class PrintCheckPanel;
 class JoinPanel;
 class MaskPanel;
 class ReferencePanel;
@@ -839,6 +841,28 @@ private:
     void poseDrag(const QVector3D& origin, const QVector3D& direction);
     std::vector<pose::PosedPart> posedParts() const;
     void refreshSavedPoses();
+
+    // Print Check: thin walls and overhangs, shown as colours on every part.
+    QAction* m_printCheckAction = nullptr;
+    PrintCheckPanel* m_printCheckPanel = nullptr;
+    struct PrintCheckMode {
+        bool active = false;
+        struct Part {
+            std::shared_ptr<const Mesh> mesh;                 // what was measured
+            std::shared_ptr<const std::vector<float>> thick;  // printcheck::faceThickness of it
+            std::shared_ptr<const Mesh> shown;                // coloured, for the view
+            printcheck::Report report;
+        };
+        std::map<ObjectId, Part> parts;
+        int generation = 0;  // the model's version: late answers are dropped
+        int measuring = 0;   // parts being measured
+    };
+    PrintCheckMode m_printCheckMode;
+    void startPrintCheck();
+    void endPrintCheck();
+    // Measures the parts that changed (in the background), then colours them all.
+    void updatePrintCheck();
+    void colourPrintCheck();
 
     // Quick Hinge
     QAction* m_hingeAction = nullptr;

@@ -55,6 +55,10 @@ struct DisplayItem {
     bool maskColours = false;
     QVector3D unmasked{1.0f, 0.82f, 0.10f};
     QVector3D masked{0.08f, 0.08f, 0.10f};
+    // Print Check: the shade drawn as three plain colours (0 = unmasked, 0.5 = overhang,
+    // 1 = masked), evenly lit. The mesh gives each triangle its own corners.
+    bool checkColours = false;
+    QVector3D overhang{0.16f, 0.47f, 1.0f};
 };
 
 // The 3D view: draws the build plate and the scene, and handles navigation.

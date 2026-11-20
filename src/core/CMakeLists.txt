@@ -32,6 +32,7 @@ add_library(forge_core STATIC
     src/Hinge.cpp
     src/Pose.cpp
     src/Tolerance.cpp
+    src/PrintCheck.cpp
     src/Body.cpp
     src/CommandStack.cpp
     src/Commands.cpp
