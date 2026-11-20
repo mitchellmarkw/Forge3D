@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.69.0 Beta — Slice 60: Panel lines (2026-11-20)
+
+- **Panel Lines** (Features tab, Surface group): click points along the selected
+  shape's surface to cut a thin groove that follows it, for armour plates, vehicle
+  panels and scale models. Works on any shape (sculpts and imported meshes too).
+  - Between clicks the line keeps to the surface, round curves and over edges.
+  - **End Line** starts another; **Close Loop** joins it back to its first point (round
+    a panel). **Undo Point**, **Remove Line** and **Clear**.
+  - **Groove shape**: V (sharp, like a scribed line), Square or Round; **Width**
+    (0.6 mm to start) and **Depth** (0.5 mm); remembered.
+  - The grooves show red, seen through the shape, until Apply.
+  - A step in the history ("3 panel lines, V 0.6 × 0.5 mm"): double-click to add lines
+    or change the groove; Remove the panel lines gives the shape back. Rescale Design
+    moves the lines and, evenly scaled, grows the groove.
+- Files saved now need Forge3D 0.69 or later to open (format 36).
+- 319 unit tests (3 new: each groove shape's size; a corner, a closed loop and a groove
+  round a ball; saving and checks).
+
 ## 0.68.0 Beta — Slice 59: Surface stamps (2026-11-20)
 
 - **Stamp** (Features tab, Surface group): small details on the selected shape's

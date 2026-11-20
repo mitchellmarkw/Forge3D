@@ -4,15 +4,7 @@ Ideas waiting for a place on the [roadmap](../ROADMAP.md), in the order to build
 (agreed 2026-11-19: joints and fit first, then print checks, scale, detailing, workflow).
 Each has what's wanted, then notes on how it could fit Forge3D.
 
-## 1. Panel-line cutter
-
-Draw a line on the surface and cut a groove of a set width and depth (for armour
-plates, vehicle panels, scale models).
-
-Notes: a path on the surface (as Follow draws one) swept with a small V or square
-profile and cut away.
-
-## 2. Split for painting
+## 1. Split for painting
 
 Cut along a colour boundary into pieces easier to paint, then glued back.
 
@@ -21,7 +13,7 @@ Cut along a colour boundary into pieces easier to paint, then glued back.
 
 Notes: Split by Mask plus the split pegs from Split for Printing.
 
-## 3. Kit layout (sprue tree)
+## 2. Kit layout (sprue tree)
 
 Lay out small parts (hands, accessories) on a frame like a model kit, joined by thin
 gates, numbered.
@@ -29,7 +21,7 @@ gates, numbered.
 Notes: an extension of Lay Out: a frame round the parts, gates to the nearest part
 edges, embossed numbers.
 
-## 4. Parts list
+## 3. Parts list
 
 For every part: name, size, volume, and the estimated print weight and filament or
 resin cost; printed or saved as a table (for planning, quoting, or a kit's

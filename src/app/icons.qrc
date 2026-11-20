@@ -68,6 +68,7 @@
     <file alias="mannequin.svg">icons/mannequin.svg</file>
     <file alias="hollow.svg">icons/hollow.svg</file>
     <file alias="stamp.svg">icons/stamp.svg</file>
+    <file alias="panel-lines.svg">icons/panel-lines.svg</file>
     <file alias="thread.svg">icons/thread.svg</file>
     <file alias="socket.svg">icons/socket.svg</file>
     <file alias="hinge.svg">icons/hinge.svg</file>
