@@ -25,6 +25,7 @@
 #include "JoinPanel.h"
 #include "HingePanel.h"
 #include "PosePanel.h"
+#include "PrintCheckPanel.h"
 #include "MaskPanel.h"
 #include "ReferencePanel.h"
 #include "ScaleCalculator.h"
@@ -413,6 +414,11 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
             m_measureMode.hover.reset();
             QTimer::singleShot(0, this, &MainWindow::showMeasurements);
         }
+        if (m_printCheckMode.active)  // an undo while checking: check the parts again
+            QTimer::singleShot(0, this, [this] {
+                if (m_printCheckMode.active)
+                    updatePrintCheck();
+            });
         scheduleSceneRefresh();
     });
     m_stack.setListener([this] { refreshCommandState(); });
@@ -608,6 +614,8 @@ void MainWindow::createActions()
             endHinge();
         else if (m_poseMode.active)
             endPose();
+        else if (m_printCheckMode.active)
+            endPrintCheck();
         else if (m_joinMode.active)
             endJoin();
         else if (m_maskMode.active)
@@ -780,6 +788,12 @@ void MainWindow::createActions()
     m_measureAction->setToolTip(tr("Measure: click faces, edges, corners or points to see sizes, distances and "
                                    "angles"));
     connect(m_measureAction, &QAction::triggered, this, &MainWindow::startMeasure);
+    m_printCheckAction = new QAction(tr("Print Check"), this);
+    m_printCheckAction->setToolTip(tr("Print Check: colour the places that are too thin to print well, and the "
+                                      "faces that hang over the air the way the parts sit (they'll need "
+                                      "supports). Nothing is changed."));
+    m_printCheckAction->setStatusTip(m_printCheckAction->toolTip());
+    connect(m_printCheckAction, &QAction::triggered, this, &MainWindow::startPrintCheck);
     m_simplifyAction = new QAction(tr("Simplify"), this);
     m_simplifyAction->setToolTip(tr("Simplify: fewer triangles for the selected shape, keeping its look (for big "
                                     "imported or sculpted meshes). Set how many to keep in Properties."));
@@ -1320,6 +1334,7 @@ void MainWindow::createToolBar()
         {m_smoothAction, "smooth"},
         {m_extrudeDownAction, "extrude-down"},
         {m_measureAction, "measure"},
+        {m_printCheckAction, "print-check"},
         {m_threadAction, "thread"},
         {m_socketAction, "socket"},
         {m_hingeAction, "hinge"},
@@ -1427,7 +1442,7 @@ void MainWindow::createToolBar()
 
     // Check and Undo are on every tab.
     const auto common = [&](Page& p) {
-        group(p, tr("Check"), {button(m_measureAction)});
+        group(p, tr("Check"), {button(m_measureAction), button(m_printCheckAction)});
         group(p, tr("Undo"), {shortButton(m_undo, tr("Undo")), shortButton(m_redo, tr("Redo"))});
         p.row->addStretch(1);
     };
@@ -1768,6 +1783,11 @@ void MainWindow::createDocks()
     m_posePanel = new PosePanel;
     stackLayout->addWidget(m_posePanel);
     m_posePanel->hide();
+    m_printCheckPanel = new PrintCheckPanel;
+    stackLayout->addWidget(m_printCheckPanel);
+    m_printCheckPanel->hide();
+    connect(m_printCheckPanel, &PrintCheckPanel::settingsChanged, this, &MainWindow::colourPrintCheck);
+    connect(m_printCheckPanel, &PrintCheckPanel::doneRequested, this, &MainWindow::endPrintCheck);
     m_poseTimer = new QTimer(this);
     m_poseTimer->setSingleShot(true);
     m_poseTimer->setInterval(200);
@@ -4441,7 +4461,7 @@ bool MainWindow::toolOpen() const
            m_sketchMode.active || m_holeMode.active || m_shellMode.active || m_followMode.active ||
            m_patternMode.active || m_sculptMode.active || m_measureMode.active || m_threadMode.active ||
            m_socketMode.active || m_joinMode.active || m_maskMode.active || m_referenceMode.active ||
-           m_hingeMode.active || m_poseMode.active;
+           m_hingeMode.active || m_poseMode.active || m_printCheckMode.active;
 }
 
 void MainWindow::startEmboss(ObjectId target, bool editing)
@@ -7011,6 +7031,21 @@ void MainWindow::refreshScene()
                 if (m_poseMode.hitParts.count(id))
                     item.color = 0.45f * item.color + 0.55f * QVector3D(0.95f, 0.25f, 0.2f);
             }
+            // Print Check: the part coloured by what was found (once it has been measured).
+            if (m_printCheckMode.active) {
+                const auto c = m_printCheckMode.parts.find(id);
+                if (c != m_printCheckMode.parts.end() && c->second.shown && c->second.mesh == item.mesh) {
+                    item.mesh = c->second.shown;
+                    item.checkColours = true;
+                    const auto v = [](const QColor& q) {
+                        return QVector3D(float(q.redF()), float(q.greenF()), float(q.blueF()));
+                    };
+                    item.unmasked = v(PrintCheckPanel::okColour());
+                    item.overhang = v(PrintCheckPanel::overhangColour());
+                    item.masked = v(PrintCheckPanel::thinColour());
+                    item.selected = false;
+                }
+            }
             // Painting a mask (Split by Mask, or sculpting's Mask brush): plain, strong colours.
             if (m_sculptMode.active && id == m_sculptMode.object && m_sculptPanel->brush() == int(sculpt::Brush::Mask))
                 item.maskColours = true;
@@ -7202,7 +7237,7 @@ void MainWindow::refreshScene()
     const bool allTopLevel = std::all_of(m_selection.begin(), m_selection.end(),
                                          [this](ObjectId id) { return m_doc.isTopLevel(id); });
     m_delete->setEnabled(anySelected && allTopLevel);
-    m_deselect->setEnabled(anySelected);
+    m_deselect->setEnabled(anySelected || toolOpen() || (m_layFlat && m_layFlat->isChecked()));  // Esc also closes a tool
     // A rolled-back object takes new steps only at its bar (Edges, Emboss): roll it
     // forward before combining, mirroring or splitting it.
     const bool rolled = rolledBackSelected();
@@ -7240,6 +7275,7 @@ void MainWindow::refreshScene()
     m_socketAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_hingeAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_poseAction->setEnabled(!toolOpen() && !m_doc.topLevelIds().empty());
+    m_printCheckAction->setEnabled(!toolOpen() && !m_doc.topLevelIds().empty());
     m_followAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_patternAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_clear->setEnabled(!m_doc.empty());
@@ -11638,6 +11674,131 @@ void MainWindow::endPattern()
     statusBar()->clearMessage();
     refreshScene();
     refreshCommandState();
+}
+
+// ---- Print Check ------------------------------------------------------------------
+
+void MainWindow::startPrintCheck()
+{
+    if (toolOpen() || m_doc.topLevelIds().empty())
+        return;
+    if (m_dragState.kind != Drag::Kind::None)
+        cancelDrag();
+    m_printCheckMode = PrintCheckMode{};
+    m_printCheckMode.active = true;
+    m_propsDockWidth = m_propsDock->width();
+    m_properties->hide();
+    m_printCheckPanel->show();
+    m_printCheckPanel->setStatus({}, false);
+    updatePrintCheck();
+    statusBar()->showMessage(tr("Print Check: red is too thin, blue needs supports. Done or Esc closes it."));
+    refreshCommandState();
+}
+
+void MainWindow::endPrintCheck()
+{
+    if (!m_printCheckMode.active)
+        return;
+    m_printCheckMode = PrintCheckMode{};
+    m_printCheckPanel->hide();
+    m_properties->show();
+    QTimer::singleShot(0, this, [this] { resizeDocks({m_propsDock}, {m_propsDockWidth}, Qt::Horizontal); });
+    statusBar()->clearMessage();
+    refreshScene();
+    refreshCommandState();
+}
+
+void MainWindow::updatePrintCheck()
+{
+    auto& mode = m_printCheckMode;
+    if (!mode.active)
+        return;
+    const auto ids = m_doc.topLevelIds();
+    std::erase_if(mode.parts, [&](const auto& p) { return std::find(ids.begin(), ids.end(), p.first) == ids.end(); });
+    QPointer<MainWindow> self(this);
+    for (ObjectId id : ids) {
+        std::shared_ptr<const Mesh> mesh;
+        try {
+            mesh = m_doc.mesh(id);
+        } catch (const std::exception&) {
+            mode.parts.erase(id);  // a part that can't be built isn't checked
+            continue;
+        }
+        auto& part = mode.parts[id];
+        if (part.mesh == mesh && part.thick)
+            continue;
+        if (part.mesh == mesh)
+            continue;  // already being measured
+        part = PrintCheckMode::Part{};
+        part.mesh = mesh;
+        QThreadPool::globalInstance()->start([self, id, mesh] {
+            std::shared_ptr<const std::vector<float>> thick;
+            try {
+                thick = std::make_shared<const std::vector<float>>(printcheck::faceThickness(*mesh));
+            } catch (const std::exception& e) {
+                qWarning() << "Measuring wall thickness failed:" << e.what();
+                thick = std::make_shared<const std::vector<float>>();
+            }
+            QMetaObject::invokeMethod(
+                qApp,
+                [self, id, mesh, thick] {
+                    if (!self || !self->m_printCheckMode.active)
+                        return;
+                    const auto p = self->m_printCheckMode.parts.find(id);
+                    if (p == self->m_printCheckMode.parts.end() || p->second.mesh != mesh)
+                        return;  // the part has changed since
+                    p->second.thick = thick;
+                    self->colourPrintCheck();
+                },
+                Qt::QueuedConnection);
+        });
+    }
+    colourPrintCheck();
+}
+
+void MainWindow::colourPrintCheck()
+{
+    auto& mode = m_printCheckMode;
+    if (!mode.active)
+        return;
+    const printcheck::Settings settings = m_printCheckPanel->settings();
+    const auto area = [](double mm2) { return QString::number(mm2, 'f', mm2 < 10.0 ? 1 : 0); };
+    QStringList lines;
+    int measuring = 0;
+    for (auto& [id, part] : mode.parts) {
+        const Body* body = m_doc.find(id);
+        if (!body || !part.mesh)
+            continue;
+        if (!part.thick)
+            ++measuring;
+        static const std::vector<float> none;
+        auto shown = std::make_shared<Mesh>();
+        part.report = printcheck::classify(*part.mesh, part.thick ? *part.thick : none, m_doc.worldTransform(id),
+                                           settings, shown.get());
+        part.shown = std::move(shown);
+        const auto& r = part.report;
+        QStringList found;
+        if (settings.thin && r.thinArea > 0.0)
+            found << tr("<span style=\"color:#d02018\">too thin</span> over %1 mm² (thinnest %2 mm)")
+                         .arg(area(r.thinArea), QString::number(r.thinnest, 'f', 2));
+        if (settings.overhangs && r.overhangArea > 0.0)
+            found << tr("<span style=\"color:#2060e0\">needs supports</span> under %1 mm²").arg(area(r.overhangArea));
+        if (!found.isEmpty())
+            lines << tr("<b>%1</b>: %2").arg(QString::fromStdString(body->name).toHtmlEscaped(),
+                                             found.join(QStringLiteral("; ")));
+    }
+    QString html;
+    if (!settings.thin && !settings.overhangs)
+        html = tr("Tick Thin walls or Overhangs to check for them.");
+    else if (lines.isEmpty())
+        html = measuring > 0 ? QString() : tr("Nothing found: every part looks ready to print this way up.");
+    else
+        html = lines.join(QStringLiteral("<br>"));
+    if (measuring > 0 && settings.thin)
+        html += (html.isEmpty() ? QString() : QStringLiteral("<br><br>")) +
+                tr("<i>Measuring wall thickness (%n part(s) to go)...</i>", nullptr, measuring);
+    m_printCheckPanel->setResult(html);
+    refreshScene();
 }
 
 }  // namespace forge::app

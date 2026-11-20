@@ -4,19 +4,7 @@ Ideas waiting for a place on the [roadmap](../ROADMAP.md), in the order to build
 (agreed 2026-11-19: joints and fit first, then print checks, scale, detailing, workflow).
 Each has what's wanted, then notes on how it could fit Forge3D.
 
-## 1. Thin-wall and overhang check
-
-Find print problems before printing.
-
-1. Shade the model where walls are thinner than a set thickness (0.8 mm, say): fingers,
-   capes, weapon tips.
-2. Shade faces that overhang past a set angle (45 degrees) when printed the way it
-   sits on the plate, so they'll need supports.
-
-Notes: a view mode like See-Through, using the mesh's shade (as the mask does).
-Thickness: a ray inward from each point, against the same mesh.
-
-## 2. Simplify a mesh
+## 1. Simplify a mesh
 
 Bring a heavy sculpt down to a target size (number of triangles, or a percentage)
 while keeping its shape, for lighter exports and a quicker app.
@@ -24,7 +12,7 @@ while keeping its shape, for lighter exports and a quicker app.
 Notes: a mesh step (edge collapse with an error measure that keeps sharp edges and the
 silhouette), undoable and changeable like Smooth.
 
-## 3. Rescale, keeping joint sizes
+## 2. Rescale, keeping joint sizes
 
 Move a design to another scale (1:12 to 1:18, say) where the shapes scale but the
 hardware doesn't.
@@ -36,7 +24,7 @@ hardware doesn't.
 Notes: the joint steps keep their placement but not their size when scaled
 (`Scale.cpp` today scales them all).
 
-## 4. Proportion guide (mannequin)
+## 3. Proportion guide (mannequin)
 
 A simple posable stick figure to build to, like a 3D reference image.
 
@@ -46,7 +34,7 @@ A simple posable stick figure to build to, like a 3D reference image.
 
 Notes: kept beside the reference images (not a body), drawn as simple shapes.
 
-## 5. Hollow with drain holes
+## 4. Hollow with drain holes
 
 For resin printing: Shell plus drain and vent holes.
 
@@ -57,7 +45,7 @@ For resin printing: Shell plus drain and vent holes.
 Notes: an option on Shell (holes through both walls), and plugs from Quick Socket's
 peg cutters.
 
-## 6. Surface stamps
+## 5. Surface stamps
 
 Small details stamped onto a surface: rivets, bolts, panel vents, scales, stitching,
 fabric seams.
@@ -68,7 +56,7 @@ fabric seams.
 Notes: each stamp a small mesh merged onto the surface (raised) or cut in (sunk),
 placed on the surface like Emboss.
 
-## 7. Panel-line cutter
+## 6. Panel-line cutter
 
 Draw a line on the surface and cut a groove of a set width and depth (for armour
 plates, vehicle panels, scale models).
@@ -76,7 +64,7 @@ plates, vehicle panels, scale models).
 Notes: a path on the surface (as Follow draws one) swept with a small V or square
 profile and cut away.
 
-## 8. Split for painting
+## 7. Split for painting
 
 Cut along a colour boundary into pieces easier to paint, then glued back.
 
@@ -85,7 +73,7 @@ Cut along a colour boundary into pieces easier to paint, then glued back.
 
 Notes: Split by Mask plus the split pegs from Split for Printing.
 
-## 9. Kit layout (sprue tree)
+## 8. Kit layout (sprue tree)
 
 Lay out small parts (hands, accessories) on a frame like a model kit, joined by thin
 gates, numbered.
@@ -93,7 +81,7 @@ gates, numbered.
 Notes: an extension of Lay Out: a frame round the parts, gates to the nearest part
 edges, embossed numbers.
 
-## 10. Parts list
+## 9. Parts list
 
 For every part: name, size, volume, and the estimated print weight and filament or
 resin cost; printed or saved as a table (for planning, quoting, or a kit's

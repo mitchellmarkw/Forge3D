@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.64.0 Beta — Slice 55: Print Check (2026-11-19)
+
+- **Print Check** (the Check group, next to Measure, on every tab): colours every part
+  on the plate by what may not print well, the way it sits now. Nothing is changed.
+  - **Thin walls** (red): places thinner than a set thickness (0.8 mm to start, up to
+    5 mm), measured straight in from each face to the other side: fingers, cape edges,
+    weapon tips.
+  - **Overhangs** (blue): faces that lean out past a set angle from upright (45° to
+    start), so they'll need supports. Faces resting on the part's bottom don't count.
+  - Each can be turned off; the settings are remembered.
+  - The panel lists each part with a problem: how much of it is too thin (and the
+    thinnest place) and how much needs supports. Big meshes are measured in the
+    background, on every core; overhangs show at once.
+  - Done or Esc closes it. To try another way up, turn the part and check again.
+- Esc now closes an open tool even when nothing is selected.
+- 301 unit tests (4 new: a thin slab; a hollow box's walls; overhangs on and off the
+  plate, tipped and at two angles; two thousand parts measured over the cores).
+
 ## 0.63.0 Beta — Slice 54: Magnet pockets (2026-11-19)
 
 - **Quick Socket → Socket for: A magnet**: a round pocket for a magnet, for swappable

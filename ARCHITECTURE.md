@@ -1290,3 +1290,19 @@ and sharp across edges.
 - Pose Test: a magnet is a `Fixed` joint; the held part is found just outside the face.
 - File format 32 (`"kind": "magnet"`, `"cover"`).
 
+## Print Check (slice 55)
+
+- `printcheck::faceThickness`: per triangle, a ray from its middle straight in (against
+  its outward normal, following the vertex normals if the winding disagrees) to the
+  nearest other triangle, up to `kMaxWall` (5 mm), so changing the setting doesn't
+  measure again. The triangles go in a uniform grid (about two triangles across a cell,
+  at most about four million cells) walked cell by cell (Amanatides–Woo); big meshes
+  are split over `std::thread`s.
+- `printcheck::classify`: thin (thickness under the setting) and overhang (the normal,
+  placed on the plate, below −sin(angle); faces whose corners all lie within 0.05 mm of
+  the part's bottom rest on the plate). Builds the shown mesh with each triangle's own
+  corners and `Mesh::shade` 0 / 0.5 / 1, and the areas.
+- App: `PrintCheckMode` keeps each part's measured mesh and thickness (measured on
+  `QThreadPool`, dropped if the part changed since); the settings only re-classify.
+  `DisplayItem::checkColours` draws the shade as three flat colours (`uMaskOn` 2 and
+  `uOverhang` in the mesh shader).

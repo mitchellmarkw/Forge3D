@@ -75,6 +75,7 @@ uniform float uWire;      // 1: drawing triangle edges (no lighting)
 uniform float uMaskOn;    // 1: painting a mask: two plain colours, evenly lit
 uniform vec3 uUnmasked;
 uniform vec3 uMasked;
+uniform vec3 uOverhang;   // uMaskOn 2 (Print Check): a third colour, for shade 0.5
 out vec4 fragColor;
 void main() {
     if (uClipOn > 0.5 && dot(uClip.xyz, vWorldPos) > uClip.w) discard;
@@ -100,6 +101,8 @@ void main() {
         // Mostly flat light, so a shadow never looks like mask (just enough to see the form).
         float s = clamp(vShade, 0.0, 1.0);
         vec3 paint = mix(uUnmasked, uMasked, s);
+        if (uMaskOn > 1.5)
+            paint = s > 0.75 ? uMasked : (s > 0.25 ? uOverhang : uUnmasked);
         float light = 0.80 + 0.12 * diffuse + 0.08 * max(dot(n, toEye), 0.0);
         fragColor = vec4(paint * light, uAlpha);
         return;
@@ -951,7 +954,11 @@ void Viewport::paintGL()
                 m_meshShader->setUniformValue("uClipOn", m_sectionIds.count(item.id) ? 1.0f : 0.0f);
             m_meshShader->setUniformValue("uNormalMatrix", modelView.normalMatrix());
             m_meshShader->setUniformValue("uColor", item.color);
-            m_meshShader->setUniformValue("uMaskOn", item.maskColours && pass != Pass::Ghost ? 1.0f : 0.0f);
+            m_meshShader->setUniformValue("uMaskOn", pass == Pass::Ghost ? 0.0f
+                                                     : item.checkColours ? 2.0f
+                                                     : item.maskColours  ? 1.0f
+                                                                         : 0.0f);
+            m_meshShader->setUniformValue("uOverhang", item.overhang);
             m_meshShader->setUniformValue("uUnmasked", item.unmasked);
             m_meshShader->setUniformValue("uMasked", item.masked);
             {

@@ -51,6 +51,7 @@ add_executable(forge_tests
     test_tolerance.cpp
     test_clicks.cpp
     test_magnet.cpp
+    test_print_check.cpp
     bench_sculpt.cpp
     fuzz_files.cpp
     test_undo_random.cpp

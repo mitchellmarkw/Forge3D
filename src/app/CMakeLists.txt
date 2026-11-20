@@ -54,6 +54,8 @@ add_executable(Forge3D WIN32
     ToleranceDialog.h
     ToleranceDialog.cpp
     PosePanel.cpp
+    PrintCheckPanel.h
+    PrintCheckPanel.cpp
     ScaleCalculator.cpp
     HingePanel.cpp
     ReferencePanel.cpp
