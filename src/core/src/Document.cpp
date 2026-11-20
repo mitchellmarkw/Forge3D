@@ -11,6 +11,7 @@
 #include "forge/core/Edges.h"
 #include "forge/core/Shell.h"
 #include "forge/core/Hollow.h"
+#include "forge/core/Stamp.h"
 #include "forge/core/Follow.h"
 #include "forge/core/Pattern.h"
 #include "forge/core/Emboss.h"
@@ -260,6 +261,14 @@ void Document::validateBoolean(const Body& body, const std::map<ObjectId, Object
         const auto& n = body.boolean->planeNormal;
         if (!(std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]) > 1e-9))
             throw std::invalid_argument("A hinge needs a direction");
+    } else if (op == BooleanOp::Stamp) {
+        if (!body.boolean->stamp)
+            throw std::invalid_argument("Stamp needs its settings");
+        const bool custom = body.boolean->stamp->kind == StampKind::Custom;
+        if (ops.size() != (custom ? 2u : 1u))
+            throw std::invalid_argument(custom ? "A custom stamp needs the shape and its stamp"
+                                               : "Stamp works on exactly one shape");
+        stamp::check(*body.boolean->stamp);
     } else if (op == BooleanOp::Hollow) {
         if (ops.size() != 1)
             throw std::invalid_argument("Hollow works on exactly one shape");
@@ -593,7 +602,7 @@ TopoDS_Shape Document::combine(const BooleanSpec& spec) const
         if (op == BooleanOp::Emboss || op == BooleanOp::Sculpt || op == BooleanOp::Simplify ||
             op == BooleanOp::Thread || op == BooleanOp::Smooth || op == BooleanOp::ExtrudeDown ||
             op == BooleanOp::Socket || op == BooleanOp::Hinge || op == BooleanOp::MaskSplit ||
-            op == BooleanOp::Hollow)
+            op == BooleanOp::Hollow || op == BooleanOp::Stamp)
             throw GeometryError(toString(op) + " is worked out by the mesh engine");
         if (op == BooleanOp::Pattern)
             return patternShape(spec);
@@ -719,6 +728,7 @@ TopoDS_Shape Document::combine(const BooleanSpec& spec) const
             case BooleanOp::Hinge:
             case BooleanOp::MaskSplit:
             case BooleanOp::Hollow:
+            case BooleanOp::Stamp:
                 break;  // handled above / by the mesh engine
             }
         }
@@ -909,6 +919,7 @@ BooleanSpec Document::passThrough(const BooleanSpec& spec)
     pass.smooth.reset();
     pass.thread.reset();
     pass.hollow.reset();
+    pass.stamp.reset();
     switch (spec.op) {
     case BooleanOp::Merge:
     case BooleanOp::Intersect:
@@ -1071,7 +1082,7 @@ bool Document::specUsesMesh(const BooleanSpec& spec) const
     if (spec.op == BooleanOp::Emboss || spec.op == BooleanOp::Sculpt || spec.op == BooleanOp::Simplify ||
         spec.op == BooleanOp::Thread || spec.op == BooleanOp::Smooth || spec.op == BooleanOp::ExtrudeDown ||
         spec.op == BooleanOp::Socket || spec.op == BooleanOp::Hinge || spec.op == BooleanOp::MaskSplit ||
-        spec.op == BooleanOp::Hollow)
+        spec.op == BooleanOp::Hollow || spec.op == BooleanOp::Stamp)
         return true;  // letters following a surface, and sculpting, only exist as triangles
     for (ObjectId part : spec.operands)
         if (usesMeshEngine(part))
@@ -1390,6 +1401,11 @@ MeshSolid Document::combineMeshes(const BooleanSpec& spec) const
         const mask::Pieces pieces = mask::split(pos, idx, spec.maskSplit->dabs);
         const Mesh& piece = spec.maskSplit->masked ? pieces.masked : pieces.rest;
         return meshkernel::fromTriangles(piece.positions, piece.indices);
+    }
+    case BooleanOp::Stamp: {
+        if (!spec.stamp)
+            throw GeometryError("Stamp has no settings");
+        return stamp::apply(parts.front(), *spec.stamp, parts.size() > 1 ? &parts[1] : nullptr);
     }
     case BooleanOp::Hollow: {
         if (!spec.hollow)

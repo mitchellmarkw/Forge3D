@@ -212,6 +212,29 @@ void scaleInto(const Document& doc, ObjectId id, const Vec3& factors, const Vec3
         out.push_back(std::move(next));
         return;
     }
+    if (body->boolean->op == BooleanOp::Stamp && body->boolean->stamp) {
+        // The stamps move with the shape; evenly scaled, they grow too (a custom stamp's
+        // shape is fitted to the stamp's size, however big it is).
+        Body next = *body;
+        StampFinish& st = *next.boolean->stamp;
+        for (StampSpot& d : st.spots) {
+            for (std::size_t k = 0; k < 3; ++k)
+                d.point[k] = factors[k] * (d.point[k] - anchor[k]) + anchor[k];
+            Vec3 n{d.normal[0] / factors[0], d.normal[1] / factors[1], d.normal[2] / factors[2]};
+            const double len = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+            d.normal = {n[0] / len, n[1] / len, n[2] / len};
+            Vec3 a{d.along[0] * factors[0], d.along[1] * factors[1], d.along[2] * factors[2]};
+            const double la = std::sqrt(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]);
+            d.along = {a[0] / la, a[1] / la, a[2] / la};
+        }
+        if (even(factors)) {
+            st.size *= factors[0];
+            st.height *= factors[0];
+            st.spacing *= factors[0];
+        }
+        out.push_back(std::move(next));
+        return;
+    }
     if (body->boolean->op == BooleanOp::Hollow && body->boolean->hollow) {
         // The holes move with the shape; evenly scaled, the walls and holes grow too
         // (unless kept: the holes take the plugs, which are joint parts).

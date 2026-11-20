@@ -2,6 +2,7 @@
 #include "forge/core/MaskSplit.h"
 #include "forge/core/Hinge.h"
 #include "forge/core/Hollow.h"
+#include "forge/core/Stamp.h"
 #include "forge/core/Socket.h"
 #include "forge/core/Thread.h"
 #include "forge/core/History.h"
@@ -235,6 +236,12 @@ std::string describe(const Document& doc, ObjectId id)
     case BooleanOp::Hinge: return spec.hinge ? hinge::describe(*spec.hinge) : std::string();
     case BooleanOp::MaskSplit: return spec.maskSplit ? mask::describe(*spec.maskSplit) : std::string();
     case BooleanOp::Hollow: return spec.hollow ? hollow::describe(*spec.hollow) : std::string();
+    case BooleanOp::Stamp: {
+        if (!spec.stamp)
+            return {};
+        const Body* custom = spec.operands.size() > 1 ? doc.find(spec.operands[1]) : nullptr;
+        return stamp::describe(*spec.stamp, custom ? custom->name : std::string());
+    }
     case BooleanOp::Simplify: {
         if (!spec.simplify)
             return {};

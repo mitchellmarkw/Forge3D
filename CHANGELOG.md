@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.68.0 Beta — Slice 59: Surface stamps (2026-11-20)
+
+- **Stamp** (Features tab, Surface group): small details on the selected shape's
+  surface, any shape (sculpts and imported meshes too).
+  - **Stamps**: Rivet, Hex bolt, Screw (slotted), Stud, Vent (three slots), Scale,
+    Stitch, and **your own custom shapes** (the ones saved with Add → Custom Shapes,
+    fitted to the size and height).
+  - **Raised** (standing out) or **Sunk** (cut in). Size, Height (each kind starts at
+    its usual height), Turn, and Row spacing.
+  - **Click** the shape for one stamp; **drag** across it for a row, spaced evenly so
+    the last lands where you let go, each one set onto the surface and lined up along
+    the row (stitches turned 30° look sewn). Remove Last takes away the last click or
+    row; Clear takes them all.
+  - Gold previews show raised stamps, red ones sunk stamps, until Apply.
+  - Each stamp has a stem the other way, so it meets a curved surface without a gap.
+  - A step in the history ("12 rivets Ø3, raised"): double-click to add more, move
+    them, or change the size; Remove the stamps gives the shape back.
+- Files saved now need Forge3D 0.68 or later to open (format 35).
+- 316 unit tests (4 new: every kind's shape and size; rivets raised and sunk; rows,
+  turning and a custom shape; saving and checks).
+
 ## 0.67.0 Beta — Slice 58: Hollow with drain holes (2026-11-19)
 
 - **Hollow** (Features tab, beside Shell): for resin printing, takes the inside out of

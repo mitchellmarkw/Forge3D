@@ -1358,3 +1358,21 @@ and sharp across edges.
   `keepJoints` the hole size.
 - App: `HollowPanel`, `HollowMode` (holes in plate coordinates, red cutters shown); plugs
   added with the step in one macro, as hardware bodies.
+
+## Surface stamps (slice 59)
+
+- `BooleanOp::Stamp` with `StampFinish` (kind, size, height, sunk, spin, spacing, and
+  `StampSpot`s: point, normal and `along`, in step coordinates; file format 35,
+  `"stamp"`). A mesh-engine step. `StampKind::Custom` takes a second operand: the shape
+  used as the stamp (a custom shape from the library, added and taken into the step).
+- `stamp::shape`: built-in stamps made in mm on the origin facing +Z (revolved domes,
+  prisms, stadium slots; the screw's slot subtracted), each with a stem
+  max(0.4 × size, 0.5 mm) the other way; sunk is the same mirrored in Z. A custom shape
+  is fitted by its bounds to size × size × height and sunk 15 % into the surface.
+- `stamp::frame`: origin on the point, Z the normal, X `along` made square to it, then
+  turned by spin. `apply`: raised merges the part with every placed stamp (one batch);
+  sunk subtracts them. `rowPoints` spreads points evenly so the last lands on the end.
+- App: `StampPanel`, `StampMode` (spots in plate coordinates, `groups` for Remove Last).
+  A press records the row start, a drag rebuilds the row (each point dropped onto the
+  surface along the averaged normal), a release keeps it; a click adds one.
+- Scale moves the spots and, evenly scaled, grows the size, height and spacing.
