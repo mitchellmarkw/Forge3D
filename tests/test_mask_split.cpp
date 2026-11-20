@@ -185,3 +185,49 @@ TEST_CASE("Mask: Split by Mask on the plate; changed, saved, scaled", "[mask]")
     CHECK(doc.isTopLevel(box));
     CHECK(!doc.find(made[0]));
 }
+
+TEST_CASE("Mask: alignment keys on the cut, so the pieces go back one way", "[mask]")
+{
+    Document doc;
+    CommandStack stack(doc);
+    // An arm: the hand end (the top 10 mm) painted off.
+    const ObjectId arm = add(stack, doc, CylinderSpec{6, 40});
+    std::vector<MaskDab> dabs;
+    for (int i = 0; i <= 10; ++i)
+        dabs.push_back({{0, 0, 40.0 - i}, 9.0, false});
+    const double whole = volumeOf(doc, arm);
+
+    std::vector<float> pos;
+    std::vector<std::uint32_t> idx;
+    meshkernel::triangles(doc.meshSolid(arm), pos, idx);
+    const mask::Pieces p = mask::split(pos, idx, dabs);
+    REQUIRE(p.keySpots.size() == 1);
+    const mask::KeySpot& s = p.keySpots.front();
+    CHECK(s.normal[2] < -0.9);  // out of the masked (top) piece, down into the rest
+    CHECK(s.room > 4.0);
+    const double size = mask::keySize(s.room);
+    REQUIRE(size > 0.0);
+    CHECK(mask::keySize(1.0) == 0.0);  // too small a cap for a key
+
+    // The peg on the masked piece reaches into the rest; the rest's hole is a little bigger.
+    const auto made = splitByMask(stack, doc, arm, dabs, SplitKeep::Both, 0.1);
+    REQUIRE(made.size() == 2);
+    CHECK(history::describe(doc, made[0]) == "the masked part (11 dabs, keyed)");
+    const double masked = volumeOf(doc, made[0]), rest = volumeOf(doc, made[1]);
+    const double length = mask::keyLength(size);
+    const double area = 0.5 * 1.5 * size * 1.2 * size;  // the key's triangle
+    const double bigger = 0.5 * 1.5 * (size + 0.2) * 1.2 * (size + 0.2);
+    const double plainMasked = meshkernel::volume(meshkernel::fromTriangles(p.masked.positions, p.masked.indices));
+    CHECK_THAT(masked - plainMasked, WithinRel(area * length, 0.05));
+    CHECK_THAT(whole - plainMasked - rest, WithinRel(bigger * (length + 0.1), 0.05));
+    CHECK(doc.worldBounds(made[0]).min[2] < s.point[2] - length + 0.01);
+
+    // Saved and read back with its keys; turned off through withMask.
+    Document reread;
+    reread.replaceAll(file::fromJson(file::toJson(doc, "test")));
+    CHECK(reread.find(made[1])->boolean->maskSplit == doc.find(made[1])->boolean->maskSplit);
+    const auto plain = withMask(doc, made[0], maskDabs(doc, made[0]), -1.0);
+    REQUIRE(plain.size() == 2);
+    CHECK_FALSE(plain[0].boolean->maskSplit->keys);
+    CHECK_FALSE(plain[1].boolean->maskSplit->keys);
+}

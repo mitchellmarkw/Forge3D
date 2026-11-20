@@ -1409,6 +1409,8 @@ MeshSolid Document::combineMeshes(const BooleanSpec& spec) const
         meshkernel::triangles(parts.front(), pos, idx);
         const mask::Pieces pieces = mask::split(pos, idx, spec.maskSplit->dabs);
         const Mesh& piece = spec.maskSplit->masked ? pieces.masked : pieces.rest;
+        if (spec.maskSplit->keys)
+            return mask::keyed(piece, pieces.keySpots, spec.maskSplit->masked, spec.maskSplit->keyFit);
         return meshkernel::fromTriangles(piece.positions, piece.indices);
     }
     case BooleanOp::PanelLines: {

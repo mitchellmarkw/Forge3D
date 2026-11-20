@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.70.0 Beta — Slice 61: Split for painting (alignment keys) (2026-11-20)
+
+- **Split by Mask** (Design tab) can add **alignment keys** on each cut, so pieces split
+  off for painting glue back only one way:
+  - A three-sided peg (its point aims one way, so it can't go in turned) stands on the
+    painted piece's cut, half sunk in; the rest gets the matching hole, bigger by the
+    **Key fit** all round (0.1 mm to start: resin; about 0.2 mm for filament).
+  - Each key is sized to its cut (a third of the way to the edge, at most 3 mm, reaching
+    1.5 times that into the other piece); cuts too small for one are left plain.
+  - On by default and remembered. Changing the mask later (double-click either piece)
+    can turn the keys on or off, or change the fit; both pieces change together.
+  - The history says so: "the masked part (24 dabs, keyed)".
+- Files saved now need Forge3D 0.70 or later to open (format 37).
+- 320 unit tests (1 new: an arm's hand end cut off with a key: where it goes, the peg
+  and the hole's sizes, saving, and turning the keys off).
+
 ## 0.69.1 Beta — Straight lines for stamps and panel lines (2026-11-20)
 
 - **Shift** keeps a line **level** and **Ctrl** keeps it **upright**:

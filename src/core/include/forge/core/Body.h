@@ -623,6 +623,10 @@ struct PanelLineFinish {
 struct MaskSplitFinish {
     std::vector<MaskDab> dabs;
     bool masked = true;  // this piece is the masked part (false: the rest)
+    // Alignment keys on each cut, so the pieces only go back together one way: a
+    // three-sided peg on the masked piece, a hole `keyFit` bigger all round in the rest.
+    bool keys = false;
+    double keyFit = 0.1;
     bool operator==(const MaskSplitFinish&) const = default;
 };
 

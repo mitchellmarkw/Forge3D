@@ -3,6 +3,7 @@
 
 #include <QColorDialog>
 #include <QComboBox>
+#include <QCheckBox>
 #include <QDoubleSpinBox>
 #include <QFormLayout>
 #include <QGridLayout>
@@ -74,6 +75,41 @@ MaskPanel::MaskPanel(QWidget* parent) : QWidget(parent)
     m_keep->setToolTip(tr("Both: two shapes, the painted piece and the rest"));
     keepColumn->addWidget(m_keep);
     layout->addWidget(m_keepBox);
+
+    // Alignment keys, so painted pieces glue back only one way.
+    m_keys = new QCheckBox(tr("Alignment keys on the cut"));
+    m_keys->setToolTip(tr("A three-sided peg on the painted piece and a matching hole in the rest, on each cut, so "
+                          "the pieces only go back together one way (for painting apart and gluing). Cuts too "
+                          "small for one are left plain."));
+    layout->addWidget(m_keys);
+    auto* fitRow = new QFormLayout;
+    m_keyFit = new QDoubleSpinBox;
+    m_keyFit->setRange(0.0, 1.0);
+    m_keyFit->setDecimals(2);
+    m_keyFit->setSingleStep(0.05);
+    m_keyFit->setSuffix(tr(" mm"));
+    m_keyFit->setToolTip(tr("How much bigger the hole is than the peg, all round: 0.1 mm for resin, 0.2 for "
+                            "filament"));
+    fitRow->addRow(tr("Key fit:"), m_keyFit);
+    layout->addLayout(fitRow);
+    {
+        const QSettings prefs(QSettings::NativeFormat, QSettings::UserScope, QStringLiteral("Forge3D"),
+                              QStringLiteral("Forge3D"));
+        m_keys->setChecked(prefs.value(QStringLiteral("mask/keys"), true).toBool());
+        m_keyFit->setValue(prefs.value(QStringLiteral("mask/keyFit"), 0.1).toDouble());
+    }
+    m_keyFit->setEnabled(m_keys->isChecked());
+    const auto rememberKeys = [this] {
+        m_keyFit->setEnabled(m_keys->isChecked());
+        if (m_keys->property("editing").toBool())
+            return;
+        QSettings prefs(QSettings::NativeFormat, QSettings::UserScope, QStringLiteral("Forge3D"),
+                        QStringLiteral("Forge3D"));
+        prefs.setValue(QStringLiteral("mask/keys"), m_keys->isChecked());
+        prefs.setValue(QStringLiteral("mask/keyFit"), m_keyFit->value());
+    };
+    connect(m_keys, &QCheckBox::toggled, this, rememberKeys);
+    connect(m_keyFit, &QDoubleSpinBox::valueChanged, this, rememberKeys);
 
     auto* edit = new QHBoxLayout;
     m_undo = new QPushButton(tr("Undo Stroke"));
@@ -177,9 +213,17 @@ void MaskPanel::saveColours()
     emit coloursChanged();
 }
 
-void MaskPanel::start(const QString& title, bool editing)
+void MaskPanel::start(const QString& title, bool editing, double keyFit)
 {
     m_title->setText(title);
+    m_keys->setProperty("editing", editing);
+    if (editing) {
+        const QSignalBlocker a(m_keys), b(m_keyFit);
+        m_keys->setChecked(keyFit >= 0.0);
+        if (keyFit >= 0.0)
+            m_keyFit->setValue(keyFit);
+        m_keyFit->setEnabled(m_keys->isChecked());
+    }
     m_keepBox->setVisible(!editing);  // a step being changed keeps the pieces it has
     m_apply->setToolTip(editing ? tr("Cut along the changed mask") : tr("Cut the shape along the mask"));
     setStatus({}, false);
@@ -221,6 +265,11 @@ void MaskPanel::setStatus(const QString& text, bool problem)
 void MaskPanel::setApplyEnabled(bool on)
 {
     m_apply->setEnabled(on);
+}
+
+double MaskPanel::keyFit() const
+{
+    return m_keys->isChecked() ? m_keyFit->value() : -1.0;
 }
 
 }  // namespace forge::app

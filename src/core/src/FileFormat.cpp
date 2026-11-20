@@ -332,6 +332,8 @@ json bodyToJson(const Body& b)
             for (const MaskDab& d : ms->dabs)
                 dabs.push_back(json::array({d.centre[0], d.centre[1], d.centre[2], d.radius, d.erase ? 1 : 0}));
             j["mask"] = json{{"piece", ms->masked ? "masked" : "rest"}, {"dabs", dabs}};
+            if (ms->keys)
+                j["mask"]["keyFit"] = ms->keyFit;  // alignment keys on the cuts
         }
         if (const auto& so = b.boolean->socket) {
             static const char* shapes[] = {"round", "square", "hexagon", "octagon"};
@@ -777,6 +779,10 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
                 dab.radius = d[3].get<double>();
                 dab.erase = d[4].get<double>() != 0.0;
                 ms.dabs.push_back(dab);
+            }
+            if (const auto kf = mj->find("keyFit"); kf != mj->end() && kf->is_number()) {
+                ms.keys = true;
+                ms.keyFit = std::clamp(kf->get<double>(), 0.0, 1.0);
             }
             spec.maskSplit = std::move(ms);
         }

@@ -6,6 +6,7 @@
 #include <QColor>
 #include <QWidget>
 
+class QCheckBox;
 class QComboBox;
 class QDoubleSpinBox;
 class QLabel;
@@ -21,7 +22,10 @@ class MaskPanel : public QWidget {
 public:
     explicit MaskPanel(QWidget* parent = nullptr);
 
-    void start(const QString& title, bool editing);
+    // `keyFit`: the step's keys when changing one (negative: none).
+    void start(const QString& title, bool editing, double keyFit = -1.0);
+    // The alignment keys' fit, or negative for no keys.
+    double keyFit() const;
     double brushSize() const;  // the brush's radius, mm
     void setBrushSize(double radius);
     SplitKeep keep() const;
@@ -46,6 +50,8 @@ private:
     QDoubleSpinBox* m_size = nullptr;
     QWidget* m_keepBox = nullptr;
     QComboBox* m_keep = nullptr;
+    QCheckBox* m_keys = nullptr;
+    QDoubleSpinBox* m_keyFit = nullptr;
     QPushButton* m_undo = nullptr;
     QPushButton* m_clear = nullptr;
     QLabel* m_strokes = nullptr;
