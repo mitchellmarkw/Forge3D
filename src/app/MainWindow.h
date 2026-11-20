@@ -79,6 +79,7 @@ class PrintCheckPanel;
 class MannequinPanel;
 class HollowPanel;
 class StampPanel;
+class PanelLinePanel;
 class JoinPanel;
 class MaskPanel;
 class ReferencePanel;
@@ -855,6 +856,30 @@ private:
     void loadStampShape();
     void updateStampPreview();
     void applyStamp();
+
+    // Panel lines: grooves along lines clicked on the surface
+    QAction* m_panelLineAction = nullptr;
+    PanelLinePanel* m_panelLinePanel = nullptr;
+    struct PanelLineMode {
+        bool active = false;
+        bool editing = false;
+        ObjectId target = kInvalidId;
+        std::vector<PanelLine> lines;                  // finished, plate coordinates
+        std::vector<PanelPoint> anchors;               // the line being drawn: the points clicked
+        std::vector<std::vector<PanelPoint>> pieces;   // and the surface between each and the next
+        std::shared_ptr<const Mesh> shown;             // the grooves, plate coordinates (red)
+    };
+    PanelLineMode m_panelLineMode;
+    void startPanelLines(ObjectId target, bool editing);
+    void endPanelLines();
+    void panelLineClick(const QVector3D& origin, const QVector3D& direction);
+    std::optional<PanelPoint> panelPointAt(const QVector3D& origin, const QVector3D& direction) const;
+    // The surface from a to b, as points close together (not a; ending on b).
+    std::vector<PanelPoint> panelPiece(const PanelPoint& a, const PanelPoint& b) const;
+    PanelLine currentPanelLine(bool closing) const;
+    void endPanelLine(bool closing);
+    void updatePanelLinePreview();
+    void applyPanelLines();
     void addMatchingPart();
 
     // Pose Test

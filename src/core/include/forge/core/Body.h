@@ -322,6 +322,7 @@ enum class BooleanOp {
     Hollow,       // hollowed for resin printing, with drain holes (mesh engine; see `hollow`)
     Stamp,        // small details stamped on: rivets, bolts, vents... raised or sunk (see `stamp`;
                   // a second operand, if any, is the shape used as the stamp)
+    PanelLines,   // thin grooves cut along lines drawn on the surface (see `panelLines`)
 };
 
 // What happens to the picked edges of a shape.
@@ -597,6 +598,28 @@ struct StampFinish {
     bool operator==(const StampFinish&) const = default;
 };
 
+// Panel lines: thin grooves cut along lines drawn on the surface (armour plates,
+// vehicle panels). Each line is a run of points on the surface (close together, so it
+// follows the surface), each with the way out; in the step's coordinates.
+enum class GrooveProfile { V, Square, Round };
+struct PanelPoint {
+    std::array<double, 3> point{0.0, 0.0, 0.0};
+    std::array<double, 3> normal{0.0, 0.0, 1.0};
+    bool operator==(const PanelPoint&) const = default;
+};
+struct PanelLine {
+    std::vector<PanelPoint> points;
+    bool closed = false;  // back round to the first point
+    bool operator==(const PanelLine&) const = default;
+};
+struct PanelLineFinish {
+    GrooveProfile profile = GrooveProfile::V;
+    double width = 0.6;  // across the top, mm
+    double depth = 0.5;  // mm
+    std::vector<PanelLine> lines;
+    bool operator==(const PanelLineFinish&) const = default;
+};
+
 struct MaskSplitFinish {
     std::vector<MaskDab> dabs;
     bool masked = true;  // this piece is the masked part (false: the rest)
@@ -700,6 +723,8 @@ struct BooleanSpec {
     std::optional<HollowFinish> hollow{};
     // Stamp: what, how big, and where.
     std::optional<StampFinish> stamp{};
+    // Panel lines: the groove and the lines.
+    std::optional<PanelLineFinish> panelLines{};
     // Edges: what to do to which edges.
     std::optional<EdgeFinish> edges{};
     // Shell: how thick, and which faces are left open.

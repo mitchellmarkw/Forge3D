@@ -64,6 +64,8 @@ add_executable(Forge3D WIN32
     HollowPanel.cpp
     StampPanel.h
     StampPanel.cpp
+    PanelLinePanel.h
+    PanelLinePanel.cpp
     ScaleCalculator.cpp
     HingePanel.cpp
     ReferencePanel.cpp

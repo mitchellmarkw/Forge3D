@@ -4,6 +4,7 @@
 #include "forge/core/Document.h"
 #include "forge/core/Hollow.h"
 #include "forge/core/Stamp.h"
+#include "forge/core/PanelLines.h"
 #include "forge/core/MeshKernel.h"
 
 #include <miniz.h>
@@ -234,6 +235,7 @@ const char* opName(BooleanOp op)
     case BooleanOp::MaskSplit: return "maskSplit";
     case BooleanOp::Hollow: return "hollow";
     case BooleanOp::Stamp: return "stamp";
+    case BooleanOp::PanelLines: return "panelLines";
     }
     return "merge";
 }
@@ -382,6 +384,20 @@ json bodyToJson(const Body& b)
             j["simplify"] = json{{"keep", sf->keep}};
         if (const auto& sm = b.boolean->smooth)
             j["smooth"] = json{{"strength", sm->strength}};
+        if (const auto& pl = b.boolean->panelLines) {
+            json lines = json::array();
+            for (const PanelLine& l : pl->lines) {
+                json points = json::array();
+                for (const PanelPoint& p : l.points)
+                    points.push_back(json::array({p.point[0], p.point[1], p.point[2], p.normal[0], p.normal[1],
+                                                  p.normal[2]}));
+                lines.push_back({{"closed", l.closed}, {"points", std::move(points)}});
+            }
+            j["panelLines"] = json{{"profile", panel::key(pl->profile)},
+                                   {"width", pl->width},
+                                   {"depth", pl->depth},
+                                   {"lines", std::move(lines)}};
+        }
         if (const auto& st = b.boolean->stamp) {
             json spots = json::array();
             for (const StampSpot& sp : st->spots)
@@ -589,6 +605,8 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
             spec.op = BooleanOp::Hollow;
         else if (op == "stamp" && version >= 35)
             spec.op = BooleanOp::Stamp;
+        else if (op == "panelLines" && version >= 36)
+            spec.op = BooleanOp::PanelLines;
         else
             damaged(where + ": unknown combine operation '" + op + "'");
         const auto operands = j.find("operands");
@@ -815,6 +833,42 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
             h.clicks = hj->value("clicks", 0);
             h.clickDepth = hj->value("clickDepth", h.clickDepth);
             spec.hinge = h;
+        }
+        if (spec.op == BooleanOp::PanelLines) {
+            const auto pj = j.find("panelLines");
+            if (pj == j.end() || !pj->is_object())
+                damaged(where + ": missing the panel lines");
+            PanelLineFinish pl;
+            const auto profile = panel::fromKey(pj->value("profile", std::string()));
+            if (!profile)
+                damaged(where + ": an unknown groove shape");
+            pl.profile = *profile;
+            pl.width = number(*pj, "width", where);
+            pl.depth = number(*pj, "depth", where);
+            if (const auto list = pj->find("lines"); list != pj->end() && list->is_array())
+                for (const json& lj : *list) {
+                    PanelLine line;
+                    try {
+                        line.closed = lj.value("closed", false);
+                        for (const json& p : lj.at("points")) {
+                            PanelPoint q;
+                            for (std::size_t k = 0; k < 3; ++k) {
+                                q.point[k] = p.at(k).get<double>();
+                                q.normal[k] = p.at(k + 3).get<double>();
+                            }
+                            line.points.push_back(q);
+                        }
+                    } catch (const std::exception&) {
+                        damaged(where + ": a panel line is broken");
+                    }
+                    pl.lines.push_back(std::move(line));
+                }
+            try {
+                panel::check(pl);
+            } catch (const std::exception& e) {
+                damaged(where + ": " + e.what());
+            }
+            spec.panelLines = std::move(pl);
         }
         if (spec.op == BooleanOp::Stamp) {
             const auto sj = j.find("stamp");

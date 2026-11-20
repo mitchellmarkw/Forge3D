@@ -29,6 +29,8 @@
 #include "MannequinPanel.h"
 #include "HollowPanel.h"
 #include "StampPanel.h"
+#include "PanelLinePanel.h"
+#include "forge/core/PanelLines.h"
 #include "forge/core/Stamp.h"
 #include "Fits.h"
 #include "forge/core/Hollow.h"
@@ -617,6 +619,8 @@ void MainWindow::createActions()
             endHollow();
         else if (m_stampMode.active)
             endStamp();
+        else if (m_panelLineMode.active)
+            endPanelLines();
         else if (m_hingeMode.active && m_hingeMode.pickingOther) {
             m_hingeMode.pickingOther = false;
             const Body* other = m_doc.find(m_hingeMode.other);
@@ -984,6 +988,18 @@ void MainWindow::createActions()
             return;
         }
         startPattern(history::tip(m_doc, id), false);
+    });
+    m_panelLineAction = new QAction(tr("Panel Lines"), this);
+    m_panelLineAction->setToolTip(tr("Panel Lines: click points along the selected shape's surface to cut a thin "
+                                     "groove that follows it (armour plates, vehicle panels, scale models)"));
+    m_panelLineAction->setStatusTip(m_panelLineAction->toolTip());
+    connect(m_panelLineAction, &QAction::triggered, this, [this] {
+        const ObjectId id = selectedOne();
+        if (id == kInvalidId || m_selection.size() != 1 || !m_doc.isTopLevel(id)) {
+            statusBar()->showMessage(tr("Panel Lines: select one shape on the plate first."), 6000);
+            return;
+        }
+        startPanelLines(history::tip(m_doc, id), false);
     });
     m_stampAction = new QAction(tr("Stamp"), this);
     m_stampAction->setToolTip(tr("Stamp: small details on the selected shape's surface (rivets, bolts, screws, "
@@ -1401,6 +1417,7 @@ void MainWindow::createToolBar()
         {m_mannequinAction, "mannequin"},
         {m_hollowAction, "hollow"},
         {m_stampAction, "stamp"},
+        {m_panelLineAction, "panel-lines"},
         {m_showPicturesAction, "reference"},
         {m_plateSizeAction, "plate"},
     };
@@ -1547,8 +1564,8 @@ void MainWindow::createToolBar()
     group(features, tr("Holes and Joints"), {button(m_holeAction), button(m_threadAction), button(m_socketAction), button(m_hingeAction),
                                        button(m_poseAction)});
     group(features, tr("Surface"),
-          {button(m_shellAction), button(m_hollowAction), button(m_followAction), button(m_stampAction),
-           button(m_edgesAction)});
+          {button(m_shellAction), button(m_hollowAction), button(m_followAction), button(m_panelLineAction),
+           button(m_stampAction), button(m_edgesAction)});
     group(features, tr("Repeat"), {button(m_patternAction)});
     common(features);
 
@@ -2088,6 +2105,45 @@ void MainWindow::createDocks()
     connect(m_threadPanel, &ThreadPanel::changed, this, [this] { m_threadTimer->start(); });
     connect(m_threadPanel, &ThreadPanel::applyRequested, this, &MainWindow::applyThread);
     connect(m_threadPanel, &ThreadPanel::cancelRequested, this, &MainWindow::endThread);
+    m_panelLinePanel = new PanelLinePanel;
+    stackLayout->addWidget(m_panelLinePanel);
+    m_panelLinePanel->hide();
+    connect(m_panelLinePanel, &PanelLinePanel::changed, this, [this] {
+        // A wider groove follows the surface in bigger steps: the line being drawn is
+        // laid again between its clicks.
+        auto& mode = m_panelLineMode;
+        for (std::size_t i = 0; i < mode.pieces.size(); ++i)
+            mode.pieces[i] = panelPiece(mode.anchors[i], mode.anchors[i + 1]);
+        updatePanelLinePreview();
+    });
+    connect(m_panelLinePanel, &PanelLinePanel::endLineRequested, this, [this] { endPanelLine(false); });
+    connect(m_panelLinePanel, &PanelLinePanel::closeLoopRequested, this, [this] { endPanelLine(true); });
+    connect(m_panelLinePanel, &PanelLinePanel::undoPointRequested, this, [this] {
+        auto& mode = m_panelLineMode;
+        if (!mode.anchors.empty())
+            mode.anchors.pop_back();
+        if (!mode.pieces.empty())
+            mode.pieces.pop_back();
+        updatePanelLinePreview();
+    });
+    connect(m_panelLinePanel, &PanelLinePanel::removeLineRequested, this, [this] {
+        auto& mode = m_panelLineMode;
+        if (!mode.anchors.empty()) {
+            mode.anchors.clear();
+            mode.pieces.clear();
+        } else if (!mode.lines.empty()) {
+            mode.lines.pop_back();
+        }
+        updatePanelLinePreview();
+    });
+    connect(m_panelLinePanel, &PanelLinePanel::clearRequested, this, [this] {
+        m_panelLineMode.lines.clear();
+        m_panelLineMode.anchors.clear();
+        m_panelLineMode.pieces.clear();
+        updatePanelLinePreview();
+    });
+    connect(m_panelLinePanel, &PanelLinePanel::applyRequested, this, &MainWindow::applyPanelLines);
+    connect(m_panelLinePanel, &PanelLinePanel::cancelRequested, this, &MainWindow::endPanelLines);
     m_stampPanel = new StampPanel;
     stackLayout->addWidget(m_stampPanel);
     m_stampPanel->hide();
@@ -2592,6 +2648,10 @@ void MainWindow::onViewportClicked(const QVector3D& origin, const QVector3D& dir
         stampClick(origin, direction);
         return;
     }
+    if (m_panelLineMode.active) {
+        panelLineClick(origin, direction);
+        return;
+    }
     if (m_hingeMode.active) {
         hingeClick(origin, direction);
         return;
@@ -2742,7 +2802,7 @@ void MainWindow::onLeftPressed(const QVector3D& origin, const QVector3D& directi
     }
     if (m_embossMode.active || m_edgesMode.active || m_holeMode.active || m_shellMode.active || m_followMode.active ||
         m_patternMode.active || m_threadMode.active || m_socketMode.active || m_joinMode.active ||
-        m_maskMode.active || m_hollowMode.active)
+        m_maskMode.active || m_hollowMode.active || m_panelLineMode.active)
         return;  // shapes stay put while the tool is open
 
     if (handle.valid() && multiSelection()) {
@@ -4646,7 +4706,7 @@ bool MainWindow::toolOpen() const
            m_patternMode.active || m_sculptMode.active || m_measureMode.active || m_threadMode.active ||
            m_socketMode.active || m_joinMode.active || m_maskMode.active || m_referenceMode.active ||
            m_hingeMode.active || m_poseMode.active || m_printCheckMode.active || m_mannequinOpen ||
-           m_hollowMode.active || m_stampMode.active;
+           m_hollowMode.active || m_stampMode.active || m_panelLineMode.active;
 }
 
 void MainWindow::startEmboss(ObjectId target, bool editing)
@@ -7052,6 +7112,8 @@ void MainWindow::refreshScene()
             endHollow();
         if (m_stampMode.active && !m_doc.find(m_stampMode.target))
             endStamp();
+        if (m_panelLineMode.active && !m_doc.find(m_panelLineMode.target))
+            endPanelLines();
         if (m_hingeMode.active && !m_doc.find(m_hingeMode.target))
             endHinge();
         if (m_maskMode.active && !m_doc.find(m_maskMode.target))
@@ -7249,6 +7311,16 @@ void MainWindow::refreshScene()
             }
             triangles += item.mesh->triangleCount();
             items.push_back(std::move(item));
+        }
+        // Panel lines drawn so far: what's cut away, red, seen through the shape.
+        if (m_panelLineMode.active && m_panelLineMode.shown) {
+            DisplayItem cut;
+            cut.id = kEdgesPickedItem;
+            cut.mesh = m_panelLineMode.shown;
+            cut.color = QVector3D(0.9f, 0.15f, 0.1f);
+            cut.ghost = true;
+            cut.helper = true;
+            items.push_back(cut);
         }
         // Stamps placed so far: gold standing out, red cut in (seen through the shape).
         if (m_stampMode.active && m_stampMode.shown) {
@@ -7506,6 +7578,7 @@ void MainWindow::refreshScene()
     m_shellAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_hollowAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_stampAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
+    m_panelLineAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_threadAction->setEnabled(m_shellAction->isEnabled());
     m_socketAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_hingeAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
@@ -7675,6 +7748,7 @@ void MainWindow::editStep(ObjectId id)
     case BooleanOp::Socket: startSocket(id, true); break;
     case BooleanOp::Hollow: startHollow(id, true); break;
     case BooleanOp::Stamp: startStamp(id, true); break;
+    case BooleanOp::PanelLines: startPanelLines(id, true); break;
     case BooleanOp::Hinge: startHinge(id, true); break;
     case BooleanOp::MaskSplit: startMask(id, true); break;
     case BooleanOp::Follow: startFollow(id, true); break;
@@ -7858,6 +7932,7 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
                                                   op == BooleanOp::Thread || op == BooleanOp::Socket ||
                                                   op == BooleanOp::Hinge || op == BooleanOp::MaskSplit ||
                                                   op == BooleanOp::Hollow || op == BooleanOp::Stamp ||
+                                                  op == BooleanOp::PanelLines ||
                                                   (op == BooleanOp::Split && m_doc.isTopLevel(id))));
         if (!opens) {
             // Nothing to open: show or hide what's inside, as a list does.
@@ -12612,6 +12687,218 @@ void MainWindow::applyStamp()
         m_stack.abortMacro();
         QMessageBox::warning(this, tr("Forge3D"), tr("It couldn't be stamped:\n%1").arg(QString::fromUtf8(e.what())));
         refreshScene();
+    }
+}
+
+// ---- Panel lines ------------------------------------------------------------------------
+
+void MainWindow::startPanelLines(ObjectId target, bool editing)
+{
+    const Body* body = m_doc.find(target);
+    if (!body || toolOpen())
+        return;
+    if (m_dragState.kind != Drag::Kind::None)
+        cancelDrag();
+    PanelLineMode mode;
+    mode.active = true;
+    mode.editing = editing;
+    mode.target = target;
+    PanelLineFinish finish;
+    if (editing) {
+        try {
+            finish = panelLinesInPlate(m_doc, target);
+        } catch (const std::exception& e) {
+            QMessageBox::information(this, tr("Forge3D"), QString::fromUtf8(e.what()));
+            return;
+        }
+        mode.lines = finish.lines;
+    }
+    m_panelLineMode = std::move(mode);
+    const QString name = QString::fromStdString(body->name);
+    m_panelLinePanel->start(editing ? tr("Change the panel lines on '%1'").arg(name)
+                                    : tr("Panel lines on '%1'").arg(name),
+                            editing ? &finish : nullptr);
+    m_propsDockWidth = m_propsDock->width();
+    m_properties->hide();
+    m_panelLinePanel->show();
+    statusBar()->showMessage(tr("Panel Lines: click points along the surface; End Line or Close Loop, then Apply. "
+                                "Esc cancels."));
+    updatePanelLinePreview();
+    refreshCommandState();
+}
+
+void MainWindow::endPanelLines()
+{
+    if (!m_panelLineMode.active)
+        return;
+    m_panelLineMode = PanelLineMode{};
+    m_panelLinePanel->hide();
+    m_properties->show();
+    QTimer::singleShot(0, this, [this] { resizeDocks({m_propsDock}, {m_propsDockWidth}, Qt::Horizontal); });
+    statusBar()->clearMessage();
+    refreshScene();
+    refreshCommandState();
+}
+
+std::optional<PanelPoint> MainWindow::panelPointAt(const QVector3D& origin, const QVector3D& direction) const
+{
+    const QVector3D d = direction.normalized();
+    std::optional<emboss::SurfacePoint> hit;
+    try {
+        hit = surfaceUnder(m_doc, m_panelLineMode.target, {origin.x(), origin.y(), origin.z()},
+                           {d.x(), d.y(), d.z()}, std::max(0.05, m_panelLinePanel->settings().width / 2.0));
+    } catch (const std::exception&) {
+        return std::nullopt;
+    }
+    if (!hit)
+        return std::nullopt;
+    PanelPoint p;
+    p.point = hit->point;
+    p.normal = hit->normal;
+    return p;
+}
+
+std::vector<PanelPoint> MainWindow::panelPiece(const PanelPoint& a, const PanelPoint& b) const
+{
+    const Vec3 pa{a.point[0], a.point[1], a.point[2]}, pb{b.point[0], b.point[1], b.point[2]};
+    Vec3 n{a.normal[0] + b.normal[0], a.normal[1] + b.normal[1], a.normal[2] + b.normal[2]};
+    const double nl = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+    n = nl > 1e-9 ? Vec3{n[0] / nl, n[1] / nl, n[2] / nl} : Vec3{a.normal[0], a.normal[1], a.normal[2]};
+    const double width = m_panelLinePanel->settings().width;
+    const auto points = stamp::rowPoints(pa, pb, panel::pointSpacing(width));
+    std::vector<PanelPoint> out;
+    const double lift = 2.0 + 4.0 * width;
+    for (std::size_t i = 1; i < points.size(); ++i) {
+        const Vec3& p = points[i];
+        if (i + 1 == points.size()) {
+            out.push_back(b);  // ends exactly where it was clicked
+            break;
+        }
+        // Dropped onto the surface from just outside it.
+        const QVector3D from(float(p[0] + n[0] * lift), float(p[1] + n[1] * lift), float(p[2] + n[2] * lift));
+        const QVector3D down(float(-n[0]), float(-n[1]), float(-n[2]));
+        if (auto q = panelPointAt(from, down))
+            out.push_back(*q);
+    }
+    if (out.empty())
+        out.push_back(b);
+    return out;
+}
+
+PanelLine MainWindow::currentPanelLine(bool closing) const
+{
+    const auto& mode = m_panelLineMode;
+    PanelLine line;
+    if (mode.anchors.empty())
+        return line;
+    line.points.push_back(mode.anchors.front());
+    for (const auto& piece : mode.pieces)
+        line.points.insert(line.points.end(), piece.begin(), piece.end());
+    if (closing && mode.anchors.size() >= 3) {
+        // Back round to the start (the last point before it; the loop joins itself).
+        auto back = panelPiece(mode.anchors.back(), mode.anchors.front());
+        back.pop_back();
+        line.points.insert(line.points.end(), back.begin(), back.end());
+        line.closed = true;
+    }
+    return line;
+}
+
+void MainWindow::endPanelLine(bool closing)
+{
+    auto& mode = m_panelLineMode;
+    if (closing && mode.anchors.size() < 3) {
+        m_panelLinePanel->setStatus(tr("A loop needs at least three points."), true);
+        return;
+    }
+    if (mode.anchors.size() >= 2) {
+        PanelLine line = currentPanelLine(closing);
+        if (line.points.size() >= 2)
+            mode.lines.push_back(std::move(line));
+    }
+    mode.anchors.clear();
+    mode.pieces.clear();
+    updatePanelLinePreview();
+}
+
+void MainWindow::panelLineClick(const QVector3D& origin, const QVector3D& direction)
+{
+    auto& mode = m_panelLineMode;
+    const auto p = panelPointAt(origin, direction);
+    if (!p) {
+        statusBar()->showMessage(tr("Panel Lines: click on the shape itself."), 4000);
+        return;
+    }
+    if (!mode.anchors.empty())
+        mode.pieces.push_back(panelPiece(mode.anchors.back(), *p));
+    mode.anchors.push_back(*p);
+    updatePanelLinePreview();
+}
+
+void MainWindow::updatePanelLinePreview()
+{
+    auto& mode = m_panelLineMode;
+    if (!mode.active)
+        return;
+    PanelLineFinish f = m_panelLinePanel->settings();
+    f.lines = mode.lines;
+    const PanelLine current = currentPanelLine(false);
+    if (current.points.size() >= 2)
+        f.lines.push_back(current);
+    m_panelLinePanel->setCounts(int(mode.lines.size()), int(mode.anchors.size()));
+    mode.shown.reset();
+    if (!f.lines.empty()) {
+        try {
+            mode.shown = std::make_shared<const Mesh>(panel::shown(f));
+            m_panelLinePanel->setStatus({}, false);
+        } catch (const std::exception& e) {
+            m_panelLinePanel->setStatus(QString::fromUtf8(e.what()), true);
+        }
+    }
+    refreshScene();
+}
+
+void MainWindow::applyPanelLines()
+{
+    auto& mode = m_panelLineMode;
+    if (!mode.active)
+        return;
+    if (mode.anchors.size() >= 2)
+        endPanelLine(false);  // the line being drawn counts
+    PanelLineFinish f = m_panelLinePanel->settings();
+    f.lines = mode.lines;
+    if (f.lines.empty())
+        return;
+    const ObjectId target = mode.target;
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    struct RestoreCursor {
+        ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
+    } restore;
+    try {
+        if (mode.editing) {
+            const Body after = withPanelLines(m_doc, target, f);
+            m_doc.previewMesh(*after.boolean);
+            const Body before = *m_doc.find(target);
+            endPanelLines();
+            run(std::make_unique<EditBodyCommand>(before, after, "Change panel lines"));
+            setSelection(history::objectOf(m_doc, target));
+            return;
+        }
+        Body r;
+        r.id = m_doc.allocateId();
+        r.name = m_doc.uniqueName("Panel-lined");
+        r.boolean = panelLineSpec(m_doc, target, f);
+        m_doc.previewMesh(*r.boolean);  // worked out (and kept) before anything changes
+        const ObjectId id = r.id;
+        endPanelLines();
+        const bool topLevel = m_doc.isTopLevel(target);
+        if (topLevel)
+            run(std::make_unique<CombineCommand>(std::move(r)));
+        else
+            run(std::make_unique<InsertStepCommand>(std::move(r), m_doc.parentOf(target)));
+        setSelection(topLevel ? id : history::objectOf(m_doc, target));
+    } catch (const std::exception& e) {
+        m_panelLinePanel->setStatus(tr("The lines couldn't be cut: %1").arg(QString::fromUtf8(e.what())), true);
     }
 }
 

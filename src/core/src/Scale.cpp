@@ -212,6 +212,25 @@ void scaleInto(const Document& doc, ObjectId id, const Vec3& factors, const Vec3
         out.push_back(std::move(next));
         return;
     }
+    if (body->boolean->op == BooleanOp::PanelLines && body->boolean->panelLines) {
+        // The lines move with the shape; evenly scaled, the grooves grow too.
+        Body next = *body;
+        PanelLineFinish& pl = *next.boolean->panelLines;
+        for (PanelLine& l : pl.lines)
+            for (PanelPoint& d : l.points) {
+                for (std::size_t k = 0; k < 3; ++k)
+                    d.point[k] = factors[k] * (d.point[k] - anchor[k]) + anchor[k];
+                Vec3 n{d.normal[0] / factors[0], d.normal[1] / factors[1], d.normal[2] / factors[2]};
+                const double len = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+                d.normal = {n[0] / len, n[1] / len, n[2] / len};
+            }
+        if (even(factors)) {
+            pl.width *= factors[0];
+            pl.depth *= factors[0];
+        }
+        out.push_back(std::move(next));
+        return;
+    }
     if (body->boolean->op == BooleanOp::Stamp && body->boolean->stamp) {
         // The stamps move with the shape; evenly scaled, they grow too (a custom stamp's
         // shape is fitted to the stamp's size, however big it is).

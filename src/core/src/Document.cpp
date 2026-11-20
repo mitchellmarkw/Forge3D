@@ -12,6 +12,7 @@
 #include "forge/core/Shell.h"
 #include "forge/core/Hollow.h"
 #include "forge/core/Stamp.h"
+#include "forge/core/PanelLines.h"
 #include "forge/core/Follow.h"
 #include "forge/core/Pattern.h"
 #include "forge/core/Emboss.h"
@@ -261,6 +262,12 @@ void Document::validateBoolean(const Body& body, const std::map<ObjectId, Object
         const auto& n = body.boolean->planeNormal;
         if (!(std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]) > 1e-9))
             throw std::invalid_argument("A hinge needs a direction");
+    } else if (op == BooleanOp::PanelLines) {
+        if (ops.size() != 1)
+            throw std::invalid_argument("Panel lines work on exactly one shape");
+        if (!body.boolean->panelLines)
+            throw std::invalid_argument("Panel lines need their lines");
+        panel::check(*body.boolean->panelLines);
     } else if (op == BooleanOp::Stamp) {
         if (!body.boolean->stamp)
             throw std::invalid_argument("Stamp needs its settings");
@@ -602,7 +609,7 @@ TopoDS_Shape Document::combine(const BooleanSpec& spec) const
         if (op == BooleanOp::Emboss || op == BooleanOp::Sculpt || op == BooleanOp::Simplify ||
             op == BooleanOp::Thread || op == BooleanOp::Smooth || op == BooleanOp::ExtrudeDown ||
             op == BooleanOp::Socket || op == BooleanOp::Hinge || op == BooleanOp::MaskSplit ||
-            op == BooleanOp::Hollow || op == BooleanOp::Stamp)
+            op == BooleanOp::Hollow || op == BooleanOp::Stamp || op == BooleanOp::PanelLines)
             throw GeometryError(toString(op) + " is worked out by the mesh engine");
         if (op == BooleanOp::Pattern)
             return patternShape(spec);
@@ -729,6 +736,7 @@ TopoDS_Shape Document::combine(const BooleanSpec& spec) const
             case BooleanOp::MaskSplit:
             case BooleanOp::Hollow:
             case BooleanOp::Stamp:
+            case BooleanOp::PanelLines:
                 break;  // handled above / by the mesh engine
             }
         }
@@ -846,7 +854,7 @@ TopoDS_Shape Document::previewCombine(const BooleanSpec& spec) const
          spec.op == BooleanOp::Follow || spec.op == BooleanOp::Pattern || spec.op == BooleanOp::Sculpt ||
          spec.op == BooleanOp::Simplify || spec.op == BooleanOp::Thread || spec.op == BooleanOp::Smooth ||
          spec.op == BooleanOp::ExtrudeDown || spec.op == BooleanOp::Socket || spec.op == BooleanOp::Hinge ||
-         spec.op == BooleanOp::MaskSplit || spec.op == BooleanOp::Hollow) &&
+         spec.op == BooleanOp::MaskSplit || spec.op == BooleanOp::Hollow || spec.op == BooleanOp::PanelLines) &&
         spec.operands.size() != 1)
         throw std::invalid_argument(toString(spec.op) + " works on exactly one shape");
     return combine(spec);
@@ -920,6 +928,7 @@ BooleanSpec Document::passThrough(const BooleanSpec& spec)
     pass.thread.reset();
     pass.hollow.reset();
     pass.stamp.reset();
+    pass.panelLines.reset();
     switch (spec.op) {
     case BooleanOp::Merge:
     case BooleanOp::Intersect:
@@ -1082,7 +1091,7 @@ bool Document::specUsesMesh(const BooleanSpec& spec) const
     if (spec.op == BooleanOp::Emboss || spec.op == BooleanOp::Sculpt || spec.op == BooleanOp::Simplify ||
         spec.op == BooleanOp::Thread || spec.op == BooleanOp::Smooth || spec.op == BooleanOp::ExtrudeDown ||
         spec.op == BooleanOp::Socket || spec.op == BooleanOp::Hinge || spec.op == BooleanOp::MaskSplit ||
-        spec.op == BooleanOp::Hollow || spec.op == BooleanOp::Stamp)
+        spec.op == BooleanOp::Hollow || spec.op == BooleanOp::Stamp || spec.op == BooleanOp::PanelLines)
         return true;  // letters following a surface, and sculpting, only exist as triangles
     for (ObjectId part : spec.operands)
         if (usesMeshEngine(part))
@@ -1401,6 +1410,11 @@ MeshSolid Document::combineMeshes(const BooleanSpec& spec) const
         const mask::Pieces pieces = mask::split(pos, idx, spec.maskSplit->dabs);
         const Mesh& piece = spec.maskSplit->masked ? pieces.masked : pieces.rest;
         return meshkernel::fromTriangles(piece.positions, piece.indices);
+    }
+    case BooleanOp::PanelLines: {
+        if (!spec.panelLines)
+            throw GeometryError("Panel lines have no lines");
+        return panel::apply(parts.front(), *spec.panelLines);
     }
     case BooleanOp::Stamp: {
         if (!spec.stamp)

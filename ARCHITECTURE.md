@@ -1376,3 +1376,19 @@ and sharp across edges.
   A press records the row start, a drag rebuilds the row (each point dropped onto the
   surface along the averaged normal), a release keeps it; a click adds one.
 - Scale moves the spots and, evenly scaled, grows the size, height and spacing.
+
+## Panel lines (slice 60)
+
+- `BooleanOp::PanelLines` with `PanelLineFinish` (profile, width, depth, and
+  `PanelLine`s of `PanelPoint`s: point and normal, close together, in step coordinates;
+  file format 36, each point stored as six numbers). A mesh-engine step.
+- The app lays each line between clicks: points every `panel::pointSpacing(width)`
+  along the straight run, each dropped onto the surface along the two clicks' averaged
+  normal (`surfaceUnder`), so the step itself needs no ray casting.
+- `panel::cutters`: one convex prism per pair of neighbouring points, the section
+  (V: a pentagon with a point at the depth; square; round: a half-ellipse) set upright
+  to the surface at each end and square to the piece, each end reaching on
+  min(width/2, half the piece) so bends have no gaps. `apply` subtracts them all in one
+  batch; a closed line has a piece back to its start.
+- App: `PanelLinePanel`, `PanelLineMode` (finished lines, the clicked points of the line
+  being drawn and the surface pieces between them, re-laid when the width changes).

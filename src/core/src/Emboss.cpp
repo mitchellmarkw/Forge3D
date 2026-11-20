@@ -623,7 +623,7 @@ ObjectId embossedPart(const Document& doc, ObjectId id)
     // An Emboss or a Socket being changed: picked on the part it works on.
     if (body->isBoolean() && (body->boolean->op == BooleanOp::Emboss || body->boolean->op == BooleanOp::Socket ||
                                 body->boolean->op == BooleanOp::Hinge || body->boolean->op == BooleanOp::Hollow ||
-                                body->boolean->op == BooleanOp::Stamp))
+                                body->boolean->op == BooleanOp::Stamp || body->boolean->op == BooleanOp::PanelLines))
         return body->boolean->operands.front();
     return id;
 }
