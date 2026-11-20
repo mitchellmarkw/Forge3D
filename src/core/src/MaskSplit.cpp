@@ -19,6 +19,33 @@ namespace {
 Vec3 add(const Vec3& a, const Vec3& b) { return {a[0] + b[0], a[1] + b[1], a[2] + b[2]}; }
 Vec3 sub(const Vec3& a, const Vec3& b) { return {a[0] - b[0], a[1] - b[1], a[2] - b[2]}; }
 Vec3 mul(const Vec3& a, double s) { return {a[0] * s, a[1] * s, a[2] * s}; }
+double dot3(const Vec3& a, const Vec3& b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
+Vec3 cross3(const Vec3& a, const Vec3& b)
+{
+    return {a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]};
+}
+Vec3 unit3(const Vec3& a, const Vec3& fallback)
+{
+    const double l = std::sqrt(dot3(a, a));
+    return l > 1e-12 ? mul(a, 1.0 / l) : fallback;
+}
+
+// A three-sided prism (its point aiming along +X: not the same turned any other way),
+// `size` from its middle to its point, from z0 to z1, set in `frame`.
+MeshSolid keyPrism(const Transform& frame, double size, double z0, double z1)
+{
+    const double c[3][2] = {{size, 0.0}, {-0.5 * size, 0.6 * size}, {-0.5 * size, -0.6 * size}};
+    std::vector<float> pos;
+    for (double z : {z0, z1})
+        for (const auto& xy : c) {
+            const Vec3 p = frame.apply(Vec3{xy[0], xy[1], z});
+            pos.insert(pos.end(), {float(p[0]), float(p[1]), float(p[2])});
+        }
+    // Counter-clockwise from above (+Z): bottom faces down, top up, sides out.
+    const std::vector<std::uint32_t> idx{0, 2, 1, 3, 4, 5, 0, 1, 4, 0, 4, 3, 1, 2, 5, 1, 5, 4, 2, 0, 3, 2, 3, 5};
+    return meshkernel::fromTriangles(pos, idx);
+}
+
 double dist2(const Vec3& a, const Vec3& b)
 {
     const Vec3 d = sub(a, b);
@@ -262,6 +289,7 @@ Pieces split(const std::vector<float>& positions, const std::vector<std::uint32_
     // A cap for each loop: rings drawn in to the loop's middle, then smoothed like a
     // stretched membrane (each inner point to the middle of its neighbours).
     std::vector<std::uint32_t> caps;
+    std::vector<KeySpot> keySpots;
     for (const auto& loop : loops) {
         const std::size_t n = loop.size();
         Vec3 c{0, 0, 0};
@@ -311,6 +339,20 @@ Pieces split(const std::vector<float>& positions, const std::vector<std::uint32_
                 if (!around[i].empty())
                     points[firstInner + i] = mul(sum, 1.0 / double(around[i].size()));
             }
+        // Where an alignment key could go: the cap's middle point (smoothed with the rest).
+        KeySpot spot;
+        spot.point = points[centre];
+        Vec3 way{0, 0, 0};
+        for (std::size_t t = 0; t + 2 < tris.size(); t += 3)
+            way = add(way, cross3(sub(points[tris[t + 1]], points[tris[t]]), sub(points[tris[t + 2]], points[tris[t]])));
+        spot.normal = unit3(way, {0, 0, 1});
+        double room = 1e300;
+        for (std::uint32_t v : loop)
+            room = std::min(room, std::sqrt(dist2(points[v], spot.point)));
+        spot.room = room;
+        const Vec3 toEdge = sub(points[loop.front()], spot.point);
+        spot.across = unit3(sub(toEdge, mul(spot.normal, dot3(toEdge, spot.normal))), {1, 0, 0});
+        keySpots.push_back(spot);
         caps.insert(caps.end(), tris.begin(), tris.end());
     }
 
@@ -339,14 +381,58 @@ Pieces split(const std::vector<float>& positions, const std::vector<std::uint32_
     out.masked = build(inTris, false);
     out.rest = build(outTris, true);
     out.caps = int(loops.size());
+    out.keySpots = std::move(keySpots);
     return out;
+}
+
+double keySize(double room)
+{
+    const double size = std::min(0.3 * room, 3.0);
+    return size >= 0.5 ? size : 0.0;
+}
+
+double keyLength(double size)
+{
+    return std::clamp(1.5 * size, 1.0, 4.0);
+}
+
+MeshSolid keyed(const Mesh& piece, const std::vector<KeySpot>& spots, bool masked, double fit)
+{
+    const MeshSolid solid = meshkernel::fromTriangles(piece.positions, piece.indices);
+    std::vector<MeshSolid> keys;
+    for (const KeySpot& s : spots) {
+        const double size = keySize(s.room);
+        if (size <= 0.0)
+            continue;
+        // The key's frame: X across the cap, Z out of the masked piece into the rest.
+        const Vec3 y = cross3(s.normal, s.across);
+        Transform frame;
+        for (int r = 0; r < 3; ++r) {
+            frame.m[r][0] = s.across[std::size_t(r)];
+            frame.m[r][1] = y[std::size_t(r)];
+            frame.m[r][2] = s.normal[std::size_t(r)];
+            frame.m[r][3] = s.point[std::size_t(r)];
+        }
+        const double length = keyLength(size);
+        if (masked)
+            keys.push_back(keyPrism(frame, size, -length, length));  // half in, half standing out
+        else
+            keys.push_back(keyPrism(frame, size + 2.0 * fit, -0.5, length + fit));
+    }
+    if (keys.empty())
+        return solid;
+    if (masked) {
+        keys.insert(keys.begin(), solid);
+        return meshkernel::merged(keys);
+    }
+    return meshkernel::subtracted(solid, keys);
 }
 
 std::string describe(const MaskSplitFinish& f)
 {
     const std::size_t n = f.dabs.size();
     return std::string(f.masked ? "the masked part" : "the rest") + " (" + std::to_string(n) +
-           (n == 1 ? " dab)" : " dabs)");
+           (n == 1 ? " dab" : " dabs") + (f.keys ? ", keyed)" : ")");
 }
 
 }  // namespace mask
@@ -371,7 +457,8 @@ std::vector<MaskDab> moved(const std::vector<MaskDab>& dabs, const Transform& t)
 
 }  // namespace
 
-BooleanSpec maskSplitSpec(const Document& doc, ObjectId target, const std::vector<MaskDab>& dabs, bool masked)
+BooleanSpec maskSplitSpec(const Document& doc, ObjectId target, const std::vector<MaskDab>& dabs, bool masked,
+                          double keyFit)
 {
     if (!doc.find(target))
         throw std::out_of_range("No body with id " + std::to_string(target));
@@ -383,6 +470,12 @@ BooleanSpec maskSplitSpec(const Document& doc, ObjectId target, const std::vecto
     spec.op = BooleanOp::MaskSplit;
     spec.operands = {target};
     spec.maskSplit = MaskSplitFinish{moved(dabs, toStep), masked};
+    if (keyFit >= 0.0) {
+        if (keyFit > 1.0)
+            throw std::invalid_argument("The keys' fit must be from 0 to 1 mm.");
+        spec.maskSplit->keys = true;
+        spec.maskSplit->keyFit = keyFit;
+    }
     const auto c = doc.worldBounds(target).center();
     const Vec3 centre = toStep.apply(Vec3{c[0], c[1], c[2]});
     spec.pivot = {centre[0], centre[1], centre[2]};
@@ -390,7 +483,7 @@ BooleanSpec maskSplitSpec(const Document& doc, ObjectId target, const std::vecto
 }
 
 std::vector<ObjectId> splitByMask(CommandStack& stack, Document& doc, ObjectId id, const std::vector<MaskDab>& dabs,
-                                  SplitKeep keep)
+                                  SplitKeep keep, double keyFit)
 {
     const Body* body = doc.find(id);
     if (!body)
@@ -398,7 +491,7 @@ std::vector<ObjectId> splitByMask(CommandStack& stack, Document& doc, ObjectId i
     if (!doc.isTopLevel(id))
         throw std::invalid_argument("Only a shape on the plate can be split");
     // Both pieces worked out first: refuse before changing anything.
-    BooleanSpec front = maskSplitSpec(doc, id, dabs, true), back = maskSplitSpec(doc, id, dabs, false);
+    BooleanSpec front = maskSplitSpec(doc, id, dabs, true, keyFit), back = maskSplitSpec(doc, id, dabs, false, keyFit);
     const Document::Preview frontShape = doc.previewResult(front), backShape = doc.previewResult(back);
     if (frontShape.empty || backShape.empty)
         throw std::invalid_argument("The mask doesn't cut '" + body->name + "' in two.");
@@ -445,15 +538,26 @@ std::vector<MaskDab> maskDabs(const Document& doc, ObjectId result)
     return moved(b.boolean->maskSplit->dabs, doc.worldTransform(result));
 }
 
-std::vector<Body> withMask(const Document& doc, ObjectId result, const std::vector<MaskDab>& dabs)
+std::vector<Body> withMask(const Document& doc, ObjectId result, const std::vector<MaskDab>& dabs,
+                           std::optional<double> keyFit)
 {
     const Body& b = maskStep(doc, result);
     if (dabs.empty())
         throw std::invalid_argument("Paint the mask first.");
     const std::vector<MaskDab> local = moved(dabs, doc.worldTransform(result).inverse());
     std::vector<Body> out;
+    if (keyFit && *keyFit > 1.0)
+        throw std::invalid_argument("The keys' fit must be from 0 to 1 mm.");
+    const auto setKeys = [&keyFit](MaskSplitFinish& f) {
+        if (!keyFit)
+            return;
+        f.keys = *keyFit >= 0.0;
+        if (f.keys)
+            f.keyFit = *keyFit;
+    };
     Body next = b;
     next.boolean->maskSplit->dabs = local;
+    setKeys(*next.boolean->maskSplit);
     out.push_back(next);
     // Its other piece, if it's still on the plate with the same mask: changed alike (the
     // dabs are in the same place on the part, wherever the piece has been moved since).
@@ -466,6 +570,7 @@ std::vector<Body> withMask(const Document& doc, ObjectId result, const std::vect
         if (f.masked != old.masked && f.dabs == old.dabs) {
             Body o = other;
             o.boolean->maskSplit->dabs = local;
+            setKeys(*o.boolean->maskSplit);
             out.push_back(o);
             break;
         }

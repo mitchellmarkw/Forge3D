@@ -1401,3 +1401,18 @@ and sharp across edges.
   surface along its normal's part lying in the plane, so the point stays in it.
 - Panel Lines keep each piece's plane (`PanelLineMode::planes`) to lay it again when the
   width changes; Stamp rows use the plane through the row's start.
+
+## Split for painting (slice 61)
+
+- `MaskSplitFinish` gains `keys` and `keyFit` (file format 37: `"keyFit"` in the step's
+  `"mask"`, present only when keyed).
+- `mask::split` also gives a `KeySpot` per cap: the cap's middle point after smoothing,
+  the cap's area-weighted normal (out of the masked piece into the rest), a direction
+  across it (towards the loop's first point) and the room (nearest loop point).
+- `mask::keyed`: an isosceles triangular prism per spot big enough (`keySize`: a third
+  of the room, at most 3 mm, none under 0.5 mm; `keyLength` 1.5 × that, 1–4 mm). The
+  masked piece merges pegs from −length to +length; the rest subtracts them grown by
+  2 × fit (in the size) from −0.5 to length + fit. Both pieces work the spots out from
+  the same mask, so they match.
+- `maskSplitSpec` / `splitByMask` take a key fit (negative: none); `withMask` can change
+  the keys on both pieces.
