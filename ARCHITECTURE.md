@@ -1306,3 +1306,18 @@ and sharp across edges.
   `QThreadPool`, dropped if the part changed since); the settings only re-classify.
   `DisplayItem::checkColours` draws the shade as three flat colours (`uMaskOn` 2 and
   `uOverhang` in the mesh shader).
+
+## Rescale Design (slice 56)
+
+- `Body::hardware` marks a joint part (file key `"hardware"`, left out of the result
+  fingerprint; `Document::setHardware`, carried by `EditBodyCommand`). Set by Quick
+  Socket's matching part, Quick Hinge's pieces and PrintSplit's `coneBody` and loose
+  pins.
+- `ScaleOptions{keepJoints, keepWalls}` threads through `scaledTree` (even factors
+  only). With `keepJoints` a hardware body is moved rigidly by its own origin
+  (`movedRigidly`); Socket, Hinge and Thread steps keep their sizes while their plane
+  points move. `keepWalls` keeps `ShellFinish::thickness`.
+- `rescaledDesign(doc, ids, factor, anchor, options)`: each top-level body by
+  `scaledTree` with the anchor taken into its own frame (a top-level hardware body
+  moved whole). `jointCount` counts hardware bodies and joint steps. The app anchors
+  at the middle of the footprint at its bottom and applies one `EditBodiesCommand`.

@@ -515,6 +515,15 @@ void Document::setColour(ObjectId id, std::optional<std::uint32_t> colour)
     notify(ChangeKind::Modified, id);
 }
 
+void Document::setHardware(ObjectId id, bool hardware)
+{
+    Body& body = require(id);
+    if (body.hardware == hardware)
+        return;
+    body.hardware = hardware;
+    notify(ChangeKind::Modified, id);
+}
+
 std::uint32_t Document::colourOf(ObjectId id) const
 {
     for (int depth = 0; depth < 1000; ++depth) {

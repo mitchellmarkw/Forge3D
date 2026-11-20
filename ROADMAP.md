@@ -82,11 +82,12 @@ Gate to Phase 2: a new user prints a customised part within 10 minutes.
 | 53 | Clicks (ratchet) on hinges and swivels; ridges in ball sockets for a stiffer hold | Done (0.62.0) |
 | 54 | Magnet pockets: standard sizes, open or under a skin, a matching pocket in the part it holds | Done (0.63.0) |
 | 55 | Print Check: thin walls and overhangs coloured on the parts, with how much of each | Done (0.64.0) |
-| — | Simplify by a number of triangles, with the STL file size | **Delivered for testing** (0.64.1) |
+| — | Simplify by a number of triangles, with the STL file size | Done (0.64.1) |
+| 56 | Rescale Design: to another scale, height or percentage, keeping joint sizes and wall thickness | **Delivered for testing** |
 
 Slices 39–41 close the gaps found in the [Phase 1 gate review](docs/PHASE1_GATE.md).
 
-Waiting for a place: 8 figure, toy and scale-model features, in order (Rescale, keeping joint sizes next). See [docs/TODO.md](docs/TODO.md).
+Waiting for a place: 7 figure, toy and scale-model features, in order (Proportion guide next). See [docs/TODO.md](docs/TODO.md).
 
 ## Phase 2: Sculpt · Phase 3: Hybrid · Phase 4: Pro
 

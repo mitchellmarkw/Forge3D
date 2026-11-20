@@ -4,19 +4,7 @@ Ideas waiting for a place on the [roadmap](../ROADMAP.md), in the order to build
 (agreed 2026-11-19: joints and fit first, then print checks, scale, detailing, workflow).
 Each has what's wanted, then notes on how it could fit Forge3D.
 
-## 1. Rescale, keeping joint sizes
-
-Move a design to another scale (1:12 to 1:18, say) where the shapes scale but the
-hardware doesn't.
-
-1. Choose the new scale (or a new height).
-2. Pegs, sockets, hinge pins, magnet pockets and the split pegs keep their real sizes;
-   wall thickness can be kept too. Everything else scales.
-
-Notes: the joint steps keep their placement but not their size when scaled
-(`Scale.cpp` today scales them all).
-
-## 2. Proportion guide (mannequin)
+## 1. Proportion guide (mannequin)
 
 A simple posable stick figure to build to, like a 3D reference image.
 
@@ -26,7 +14,7 @@ A simple posable stick figure to build to, like a 3D reference image.
 
 Notes: kept beside the reference images (not a body), drawn as simple shapes.
 
-## 3. Hollow with drain holes
+## 2. Hollow with drain holes
 
 For resin printing: Shell plus drain and vent holes.
 
@@ -37,7 +25,7 @@ For resin printing: Shell plus drain and vent holes.
 Notes: an option on Shell (holes through both walls), and plugs from Quick Socket's
 peg cutters.
 
-## 4. Surface stamps
+## 3. Surface stamps
 
 Small details stamped onto a surface: rivets, bolts, panel vents, scales, stitching,
 fabric seams.
@@ -48,7 +36,7 @@ fabric seams.
 Notes: each stamp a small mesh merged onto the surface (raised) or cut in (sunk),
 placed on the surface like Emboss.
 
-## 5. Panel-line cutter
+## 4. Panel-line cutter
 
 Draw a line on the surface and cut a groove of a set width and depth (for armour
 plates, vehicle panels, scale models).
@@ -56,7 +44,7 @@ plates, vehicle panels, scale models).
 Notes: a path on the surface (as Follow draws one) swept with a small V or square
 profile and cut away.
 
-## 6. Split for painting
+## 5. Split for painting
 
 Cut along a colour boundary into pieces easier to paint, then glued back.
 
@@ -65,7 +53,7 @@ Cut along a colour boundary into pieces easier to paint, then glued back.
 
 Notes: Split by Mask plus the split pegs from Split for Printing.
 
-## 7. Kit layout (sprue tree)
+## 6. Kit layout (sprue tree)
 
 Lay out small parts (hands, accessories) on a frame like a model kit, joined by thin
 gates, numbered.
@@ -73,7 +61,7 @@ gates, numbered.
 Notes: an extension of Lay Out: a frame round the parts, gates to the nearest part
 edges, embossed numbers.
 
-## 8. Parts list
+## 7. Parts list
 
 For every part: name, size, volume, and the estimated print weight and filament or
 resin cost; printed or saved as a table (for planning, quoting, or a kit's

@@ -724,6 +724,7 @@ private:
     ScaleCalculator* m_scaleCalculator = nullptr;  // Tools → Scale Calculator, made when first opened
     ToleranceDialog* m_toleranceDialog = nullptr;  // Tools → Tolerance Test Print
     void addToleranceTest(const tolerance::Settings& settings);
+    void rescaleDesign();
 
     // Reference Images
     QAction* m_referenceAction = nullptr;

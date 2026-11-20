@@ -147,6 +147,16 @@ PropertiesPanel::PropertiesPanel(QWidget* parent) : QWidget(parent)
             emit throughAllRequested(m_body->id, on);
     });
     general->addRow(m_throughAll);
+    m_hardware = new QCheckBox(tr("Joint part (keeps its size when rescaled)"));
+    m_hardware->setToolTip(tr("For a ball, peg, pin or other part that has to fit something bought or printed at "
+                              "a set size: Rescale Design (Tools) moves it with the design but leaves its size "
+                              "alone. Balls, pegs and stand-in magnets from Quick Socket, Quick Hinge's pieces "
+                              "and Split's pegs are joint parts already."));
+    connect(m_hardware, &QCheckBox::toggled, this, [this](bool on) {
+        if (m_body)
+            emit hardwareRequested(m_body->id, on);
+    });
+    general->addRow(m_hardware);
     m_keep = new QDoubleSpinBox;
     m_keep->setRange(0.1, 100.0);
     m_keep->setDecimals(1);
@@ -327,6 +337,10 @@ void PropertiesPanel::setBody(const Body* body, const QString& context, bool isP
                                                     "move them"));
     }
     m_editEdgesButton->setVisible(body->isBoolean() && body->boolean->op == BooleanOp::Edges && !isPart);
+    {
+        const QSignalBlocker block(m_hardware);
+        m_hardware->setChecked(body->hardware);
+    }
     const bool subtract = body->isBoolean() && body->boolean->op == BooleanOp::Subtract;
     m_throughAll->setVisible(subtract);
     if (subtract) {

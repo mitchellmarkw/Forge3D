@@ -56,6 +56,8 @@ add_executable(Forge3D WIN32
     PosePanel.cpp
     PrintCheckPanel.h
     PrintCheckPanel.cpp
+    RescaleDialog.h
+    RescaleDialog.cpp
     ScaleCalculator.cpp
     HingePanel.cpp
     ReferencePanel.cpp

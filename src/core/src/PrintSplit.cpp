@@ -228,6 +228,7 @@ Body coneBody(Document& doc, const std::string& name, const Vec3& base, const Ve
     Body b;
     b.id = doc.allocateId();
     b.name = name;
+    b.hardware = true;  // a peg, its hole or a pin end: keeps its size when rescaled
     b.spec = cone;
     double tiltX = 0, tiltY = 0, offset = 0;
     tiltsOfPlane({base, axis}, base, tiltX, tiltY, offset);
@@ -237,7 +238,7 @@ Body coneBody(Document& doc, const std::string& name, const Vec3& base, const Ve
 }
 
 ObjectId combine(CommandStack& stack, Document& doc, BooleanOp op, std::vector<ObjectId> operands,
-                 const std::string& name)
+                 const std::string& name, bool hardware = false)
 {
     BooleanSpec spec;
     spec.op = op;
@@ -250,6 +251,7 @@ ObjectId combine(CommandStack& stack, Document& doc, BooleanOp op, std::vector<O
     Body r;
     r.id = doc.allocateId();
     r.name = name;
+    r.hardware = hardware;
     r.boolean = std::move(spec);
     const ObjectId id = r.id;
     stack.execute(std::make_unique<CombineCommand>(std::move(r)));
@@ -495,7 +497,7 @@ KeyedSplit splitWithKeys(CommandStack& stack, Document& doc, ObjectId id, const 
                     const ObjectId a = lower.id, b = upper.id;
                     stack.execute(std::make_unique<AddBodyCommand>(std::move(lower)));
                     stack.execute(std::make_unique<AddBodyCommand>(std::move(upper)));
-                    out.pins.push_back(combine(stack, doc, BooleanOp::Merge, {a, b}, "Pin " + std::to_string(i + 1)));
+                    out.pins.push_back(combine(stack, doc, BooleanOp::Merge, {a, b}, "Pin " + std::to_string(i + 1), true));
                     x += 2 * r + 4.0;
                 }
             }
