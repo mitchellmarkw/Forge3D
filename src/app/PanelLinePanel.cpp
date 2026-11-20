@@ -55,8 +55,10 @@ PanelLinePanel::PanelLinePanel(QWidget* parent) : QWidget(parent)
     m_title->setFont(bold);
     m_title->setWordWrap(true);
     layout->addWidget(m_title);
-    auto* hint = new QLabel(tr("Click points along the surface: the line follows it from one to the next. End Line "
-                               "to start another, or Close Loop to join it back to where it began."));
+    auto* hint = new QLabel(tr("Click points along the surface: the line follows it from one to the next. Hold Shift "
+                               "as you click to keep it level with the last point, Ctrl to go straight up or down "
+                               "from it. End Line to start another, or Close Loop to join it back to where it "
+                               "began."));
     hint->setWordWrap(true);
     layout->addWidget(hint);
 

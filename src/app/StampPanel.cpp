@@ -56,8 +56,9 @@ StampPanel::StampPanel(QWidget* parent) : QWidget(parent)
     m_title->setFont(bold);
     m_title->setWordWrap(true);
     layout->addWidget(m_title);
-    auto* hint = new QLabel(tr("Click the shape to stamp one there; drag across it to stamp a row. Stamps stand out "
-                               "of the surface or are cut into it."));
+    auto* hint = new QLabel(tr("Click the shape to stamp one there; drag across it to stamp a row (hold Shift for a "
+                               "level row, Ctrl for an upright one). Stamps stand out of the surface or are cut "
+                               "into it."));
     hint->setWordWrap(true);
     layout->addWidget(hint);
 

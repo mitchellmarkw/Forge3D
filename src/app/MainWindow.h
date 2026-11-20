@@ -852,7 +852,22 @@ private:
     void endStamp();
     std::optional<StampSpot> stampSpotAt(const QVector3D& origin, const QVector3D& direction) const;
     void stampClick(const QVector3D& origin, const QVector3D& direction);
-    void stampDrag(const QVector3D& origin, const QVector3D& direction);
+    void stampDrag(const QVector3D& origin, const QVector3D& direction, Qt::KeyboardModifiers modifiers);
+
+    // Straight lines for stamp rows and panel lines: holding Shift keeps a line level
+    // (its height on the plate doesn't change), Ctrl keeps it upright (straight up and
+    // down as seen from where you're looking). Either way the line stays in a flat
+    // plane through where it started, following the surface across it.
+    struct StraightPlane {
+        Vec3 point{0, 0, 0};
+        Vec3 normal{0, 0, 1};
+    };
+    std::optional<StraightPlane> straightPlane(const std::array<double, 3>& from, Qt::KeyboardModifiers modifiers,
+                                               const QVector3D& direction) const;
+    // `q` (with the way out there, `n`) brought into the plane and back onto `target`'s
+    // surface, keeping in the plane.
+    std::optional<emboss::SurfacePoint> onSurfaceInPlane(ObjectId target, const Vec3& q, const Vec3& n,
+                                                         const StraightPlane& plane, double radius) const;
     void loadStampShape();
     void updateStampPreview();
     void applyStamp();
@@ -867,15 +882,17 @@ private:
         std::vector<PanelLine> lines;                  // finished, plate coordinates
         std::vector<PanelPoint> anchors;               // the line being drawn: the points clicked
         std::vector<std::vector<PanelPoint>> pieces;   // and the surface between each and the next
+        std::vector<std::optional<StraightPlane>> planes;  // each piece's plane, if drawn straight
         std::shared_ptr<const Mesh> shown;             // the grooves, plate coordinates (red)
     };
     PanelLineMode m_panelLineMode;
     void startPanelLines(ObjectId target, bool editing);
     void endPanelLines();
-    void panelLineClick(const QVector3D& origin, const QVector3D& direction);
+    void panelLineClick(const QVector3D& origin, const QVector3D& direction, Qt::KeyboardModifiers modifiers);
     std::optional<PanelPoint> panelPointAt(const QVector3D& origin, const QVector3D& direction) const;
     // The surface from a to b, as points close together (not a; ending on b).
-    std::vector<PanelPoint> panelPiece(const PanelPoint& a, const PanelPoint& b) const;
+    std::vector<PanelPoint> panelPiece(const PanelPoint& a, const PanelPoint& b,
+                                       const std::optional<StraightPlane>& plane = std::nullopt) const;
     PanelLine currentPanelLine(bool closing) const;
     void endPanelLine(bool closing);
     void updatePanelLinePreview();

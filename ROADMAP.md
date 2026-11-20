@@ -87,7 +87,8 @@ Gate to Phase 2: a new user prints a customised part within 10 minutes.
 | 57 | Figure Guide: a posable see-through mannequin at a figure line's height and proportions | Done (0.66.0) |
 | 58 | Hollow for resin: walls of a set thickness on any shape, drain holes (clicked or placed low), plugs | Done (0.67.0) |
 | 59 | Surface stamps: rivets, bolts, screws, studs, vents, scales, stitches and custom shapes, raised or sunk, clicked or in rows | Done (0.68.0) |
-| 60 | Panel lines: V, square or round grooves along lines clicked on the surface, open or closed | **Delivered for testing** |
+| 60 | Panel lines: V, square or round grooves along lines clicked on the surface, open or closed | Done (0.69.0) |
+| — | Shift for level, Ctrl for upright lines in Stamp rows and Panel Lines | **Delivered for testing** (0.69.1) |
 
 Slices 39–41 close the gaps found in the [Phase 1 gate review](docs/PHASE1_GATE.md).
 
