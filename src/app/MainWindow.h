@@ -76,6 +76,7 @@ class SocketPanel;
 class HingePanel;
 class PosePanel;
 class PrintCheckPanel;
+class MannequinPanel;
 class JoinPanel;
 class MaskPanel;
 class ReferencePanel;
@@ -743,6 +744,14 @@ private:
     ReferenceMode m_referenceMode;
     void startReferences(std::optional<RefView> view = std::nullopt);
     void endReferences();
+
+    // The figure guide (a mannequin to build to)
+    QAction* m_mannequinAction = nullptr;
+    MannequinPanel* m_mannequinPanel = nullptr;
+    bool m_mannequinOpen = false;                    // its panel is showing
+    std::shared_ptr<const Mesh> m_mannequinMesh;     // as drawn (none: none, or hidden)
+    void startMannequin();
+    void endMannequin();
     // Pictures to the view, and the chosen one to the panel.
     void refreshReferences();
     void referenceEdited(const QString& what, bool dragging);

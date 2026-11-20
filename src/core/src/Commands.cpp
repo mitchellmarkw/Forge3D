@@ -385,6 +385,34 @@ void SetPosesCommand::undo(Document& doc)
         doc.setPoses(*m_before);
 }
 
+SetMannequinCommand::SetMannequinCommand(std::optional<Mannequin> m, std::string label, bool mergeable)
+    : m_after(std::move(m)), m_label(std::move(label)), m_mergeable(mergeable)
+{
+}
+
+void SetMannequinCommand::redo(Document& doc)
+{
+    std::optional<Mannequin> before = doc.mannequin();
+    doc.setMannequin(m_after);  // throws before changing anything
+    if (!m_before)
+        m_before = std::move(before);
+}
+
+void SetMannequinCommand::undo(Document& doc)
+{
+    if (m_before)
+        doc.setMannequin(*m_before);
+}
+
+bool SetMannequinCommand::mergeWith(const Command& next)
+{
+    const auto* other = dynamic_cast<const SetMannequinCommand*>(&next);
+    if (!other || !other->m_mergeable || other->m_label != m_label)
+        return false;
+    m_after = other->m_after;
+    return true;
+}
+
 MacroCommand::MacroCommand(std::string label) : m_label(std::move(label)) {}
 
 void MacroCommand::appendApplied(std::unique_ptr<Command> command)

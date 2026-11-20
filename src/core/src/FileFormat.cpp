@@ -1099,6 +1099,13 @@ std::string toJson(const Document& doc, const std::string& createdBy)
                     {"createdBy", createdBy},
                     {"units", "mm"},
                     {"bodies", std::move(bodies)}};
+    if (const auto& m = doc.mannequin()) {
+        json joints = json::object();
+        for (int j = 0; j < kMJointCount; ++j)
+            joints[mannequin::key(MJoint(j))] = {m->pose[std::size_t(j)][0], m->pose[std::size_t(j)][1]};
+        root["mannequin"] = {{"height", m->height}, {"heads", m->heads}, {"x", m->x},      {"y", m->y},
+                             {"turn", m->turn},     {"shown", m->shown}, {"joints", joints}};
+    }
     if (!doc.poses().empty()) {
         json poses = json::array();
         for (const SavedPose& p : doc.poses()) {
@@ -1486,6 +1493,59 @@ std::vector<SavedPose> posesFromJson(const std::string& text)
             continue;
         }
     }
+    return out;
+}
+
+std::optional<Mannequin> mannequinFromJson(const std::string& text)
+{
+    json root;
+    try {
+        root = json::parse(text);
+    } catch (const json::parse_error&) {
+        return std::nullopt;
+    }
+    if (!root.is_object())
+        return std::nullopt;
+    const auto j = root.find("mannequin");
+    if (j == root.end() || !j->is_object())
+        return std::nullopt;
+    try {
+        Mannequin m;
+        m.height = j->value("height", m.height);
+        m.heads = j->value("heads", m.heads);
+        m.x = j->value("x", 0.0);
+        m.y = j->value("y", 0.0);
+        m.turn = j->value("turn", 0.0);
+        m.shown = j->value("shown", true);
+        if (const auto joints = j->find("joints"); joints != j->end() && joints->is_object())
+            for (const auto& [name, a] : joints->items())
+                if (const auto joint = mannequin::fromKey(name))
+                    m.pose[std::size_t(*joint)] = {a.at(0).get<double>(), a.at(1).get<double>()};
+        mannequin::validate(m);
+        return m;
+    } catch (const std::exception&) {
+        return std::nullopt;
+    }
+}
+
+std::optional<Mannequin> loadMannequin(const std::filesystem::path& path)
+{
+    std::string bytes;
+    try {
+        bytes = readWholeFile(path);
+    } catch (const std::exception&) {
+        return std::nullopt;
+    }
+    mz_zip_archive zip{};
+    if (!mz_zip_reader_init_mem(&zip, bytes.data(), bytes.size(), 0))
+        return std::nullopt;
+    std::optional<Mannequin> out;
+    size_t size = 0;
+    if (void* data = mz_zip_reader_extract_file_to_heap(&zip, kDocumentEntry, &size, 0)) {
+        out = mannequinFromJson(std::string(static_cast<const char*>(data), size));
+        mz_free(data);
+    }
+    mz_zip_reader_end(&zip);
     return out;
 }
 

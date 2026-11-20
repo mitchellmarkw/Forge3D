@@ -418,7 +418,7 @@ void Viewport::fitView()
 {
     Bounds all;
     for (const DisplayItem& item : m_items) {
-        if (!item.mesh || item.ghost || item.helper || item.alpha < 1.0f)
+        if (!item.mesh || (!item.fitted && (item.ghost || item.helper || item.alpha < 1.0f)))
             continue;
         const Bounds local = item.mesh->bounds();
         if (!local.valid)

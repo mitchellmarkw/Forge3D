@@ -83,11 +83,12 @@ Gate to Phase 2: a new user prints a customised part within 10 minutes.
 | 54 | Magnet pockets: standard sizes, open or under a skin, a matching pocket in the part it holds | Done (0.63.0) |
 | 55 | Print Check: thin walls and overhangs coloured on the parts, with how much of each | Done (0.64.0) |
 | — | Simplify by a number of triangles, with the STL file size | Done (0.64.1) |
-| 56 | Rescale Design: to another scale, height or percentage, keeping joint sizes and wall thickness | **Delivered for testing** |
+| 56 | Rescale Design: to another scale, height or percentage, keeping joint sizes and wall thickness | Done (0.65.0) |
+| 57 | Figure Guide: a posable see-through mannequin at a figure line's height and proportions | **Delivered for testing** |
 
 Slices 39–41 close the gaps found in the [Phase 1 gate review](docs/PHASE1_GATE.md).
 
-Waiting for a place: 7 figure, toy and scale-model features, in order (Proportion guide next). See [docs/TODO.md](docs/TODO.md).
+Waiting for a place: 6 figure, toy and scale-model features, in order (Hollow with drain holes next). See [docs/TODO.md](docs/TODO.md).
 
 ## Phase 2: Sculpt · Phase 3: Hybrid · Phase 4: Pro
 
