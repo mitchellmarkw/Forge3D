@@ -8,6 +8,7 @@
 class QCheckBox;
 class QComboBox;
 class QDoubleSpinBox;
+class QLineEdit;
 
 namespace forge::app {
 
@@ -32,6 +33,8 @@ private:
     QCheckBox* m_numbers = nullptr;
     QDoubleSpinBox* m_numberHeight = nullptr;
     QCheckBox* m_join = nullptr;
+    QLineEdit* m_name = nullptr;
+    QCheckBox* m_includeName = nullptr;
 };
 
 }  // namespace forge::app

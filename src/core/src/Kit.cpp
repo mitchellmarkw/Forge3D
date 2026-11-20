@@ -4,6 +4,7 @@
 #include "forge/core/CommandStack.h"
 #include "forge/core/Commands.h"
 #include "forge/core/Document.h"
+#include "forge/core/Emboss.h"
 #include "forge/core/Hinge.h"
 #include "forge/core/MeshKernel.h"
 #include "forge/core/Tolerance.h"
@@ -80,6 +81,8 @@ void check(const Settings& s)
         throw std::invalid_argument("The gates must be from 0.3 mm to as thick as the bars.");
     if (s.numbers && !(s.numberHeight >= 1.5 && s.numberHeight <= 10.0))
         throw std::invalid_argument("The numbers must be from 1.5 to 10 mm tall.");
+    if (s.name.size() > 60)
+        throw std::invalid_argument("The tree's name is too long (60 letters at most).");
 }
 
 Plan plan(const Document& doc, const std::vector<ObjectId>& ids, const Settings& s)
@@ -222,6 +225,37 @@ Plan plan(const Document& doc, const std::vector<ObjectId>& ids, const Settings&
             x += w + gap;
         }
     }
+    // The tree's name on a tag hanging under the bottom bar, centred.
+    if (s.includeName && s.name.find_first_not_of(" \t") != std::string::npos) {
+        // Measured first on a big flat plate, then made to fit the frame's width.
+        const auto plate = [](double w, double d, double h, double cx, double cy, std::vector<float>& pos,
+                              std::vector<std::uint32_t>& idx) {
+            meshkernel::triangles(block(cx - w / 2, cy - d / 2, 0, cx + w / 2, cy + d / 2, h), pos, idx);
+        };
+        EmbossText words;
+        words.text = s.name;
+        words.letterHeight = std::max(3.0, 1.4 * s.numberHeight);
+        words.depth = 0.6;
+        words.raised = true;
+        std::vector<float> pos;
+        std::vector<std::uint32_t> idx;
+        const double big = 40.0 * words.letterHeight * double(s.name.size()) + 100.0;
+        plate(big, 10.0 * words.letterHeight, 1.2, 0, 0, pos, idx);
+        Bounds lb = meshkernel::bounds(emboss::letters(pos, idx, {0, 0, 1.2}, {0, 0, 1}, words));
+        double width = double(lb.max[0] - lb.min[0]);
+        const double room = frameWidth - 4.0;
+        if (width > room && room > 0) {
+            words.letterHeight = std::max(2.0, words.letterHeight * room / width);
+            lb = meshkernel::bounds(emboss::letters(pos, idx, {0, 0, 1.2}, {0, 0, 1}, words));
+            width = double(lb.max[0] - lb.min[0]);
+        }
+        const double depth = double(lb.max[1] - lb.min[1]) + 3.0;
+        const double cx = x0 + frameWidth / 2, cy = y0 - depth / 2 + 0.2;  // overlapping the bar a little
+        plate(width + 4.0, depth, 1.2, cx, cy, pos, idx);
+        pieces.push_back(meshkernel::fromTriangles(pos, idx));
+        pieces.push_back(emboss::letters(pos, idx, {cx, cy, 1.2}, {0, 0, 1}, words));
+        out.area.expand(float(cx - width / 2 - 2.0), float(cy - depth / 2), 0);
+    }
     // Kept as one closed surface (shared corners), so it can be made a solid again.
     meshkernel::triangles(meshkernel::merged(pieces), out.frame.positions, out.frame.indices);
     out.area.expand(float(x0), float(y0), 0);
@@ -255,7 +289,8 @@ ObjectId make(CommandStack& stack, Document& doc, const std::vector<ObjectId>& i
         if (s.join) {
             Body kit;
             kit.id = doc.allocateId();
-            kit.name = doc.uniqueName("Kit");
+            const bool named = s.includeName && s.name.find_first_not_of(" \t") != std::string::npos;
+            kit.name = named ? s.name : doc.uniqueName("Kit");
             kit.boolean = BooleanSpec{};
             kit.boolean->op = BooleanOp::Merge;
             kit.boolean->operands.push_back(frameId);

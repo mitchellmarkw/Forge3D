@@ -90,7 +90,8 @@ Gate to Phase 2: a new user prints a customised part within 10 minutes.
 | 60 | Panel lines: V, square or round grooves along lines clicked on the surface, open or closed | Done (0.69.0) |
 | — | Shift for level, Ctrl for upright lines in Stamp rows and Panel Lines | Done (0.69.1) |
 | 61 | Split for painting: alignment keys on Split by Mask's cuts, so pieces glue back one way | Done (0.70.0) |
-| 62 | Kit layout: parts in rows on a sprue frame, gated, numbered, joined | **Delivered for testing** |
+| 62 | Kit layout: parts in rows on a sprue frame, gated, numbered, joined | Done (0.71.0) |
+| — | Kit Layout: the tree's name on a tag under the frame | **Delivered for testing** (0.71.1) |
 
 Slices 39–41 close the gaps found in the [Phase 1 gate review](docs/PHASE1_GATE.md).
 

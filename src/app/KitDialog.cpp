@@ -7,6 +7,7 @@
 #include <QDoubleSpinBox>
 #include <QFormLayout>
 #include <QLabel>
+#include <QLineEdit>
 #include <QPushButton>
 #include <QSettings>
 #include <QVBoxLayout>
@@ -54,6 +55,21 @@ KitDialog::KitDialog(int selected, int everything, QWidget* parent) : QDialog(pa
                                "the nearest bar by a thin gate, with its number on a tag beside it."));
     help->setWordWrap(true);
     layout->addWidget(help);
+
+    auto* nameForm = new QFormLayout;
+    m_name = new QLineEdit(prefs.value(QStringLiteral("kit/name")).toString());
+    m_name->setMaxLength(60);
+    m_name->setPlaceholderText(tr("e.g. Hero Hands A"));
+    m_name->setToolTip(tr("Raised on a tag under the frame, as on a model kit's tree (and the joined kit is named "
+                          "after it)"));
+    nameForm->addRow(tr("Tree Name:"), m_name);
+    layout->addLayout(nameForm);
+    m_includeName = new QCheckBox(tr("Include Name"));
+    m_includeName->setChecked(prefs.value(QStringLiteral("kit/includeName"), true).toBool());
+    m_includeName->setToolTip(tr("Print the tree's name on its tag"));
+    layout->addWidget(m_includeName);
+    connect(m_includeName, &QCheckBox::toggled, m_name, &QWidget::setEnabled);
+    m_name->setEnabled(m_includeName->isChecked());
 
     m_scope = new QComboBox;
     m_scope->addItem(selected == 1 ? tr("The selected shape") : tr("The %1 selected shapes").arg(selected));
@@ -115,6 +131,8 @@ kit::Settings KitDialog::settings() const
     s.numbers = m_numbers->isChecked();
     s.numberHeight = m_numberHeight->value();
     s.join = m_join->isChecked();
+    s.name = m_name->text().trimmed().toStdString();
+    s.includeName = m_includeName->isChecked();
     return s;
 }
 
@@ -128,6 +146,8 @@ void KitDialog::remember() const
     prefs.setValue(QStringLiteral("kit/numbers"), s.numbers);
     prefs.setValue(QStringLiteral("kit/numberHeight"), s.numberHeight);
     prefs.setValue(QStringLiteral("kit/join"), s.join);
+    prefs.setValue(QStringLiteral("kit/name"), m_name->text().trimmed());
+    prefs.setValue(QStringLiteral("kit/includeName"), s.includeName);
 }
 
 }  // namespace forge::app
