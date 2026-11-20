@@ -68,6 +68,8 @@ add_executable(Forge3D WIN32
     PanelLinePanel.cpp
     KitDialog.h
     KitDialog.cpp
+    PartsListDialog.h
+    PartsListDialog.cpp
     ScaleCalculator.cpp
     HingePanel.cpp
     ReferencePanel.cpp

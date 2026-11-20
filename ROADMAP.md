@@ -91,11 +91,12 @@ Gate to Phase 2: a new user prints a customised part within 10 minutes.
 | — | Shift for level, Ctrl for upright lines in Stamp rows and Panel Lines | Done (0.69.1) |
 | 61 | Split for painting: alignment keys on Split by Mask's cuts, so pieces glue back one way | Done (0.70.0) |
 | 62 | Kit layout: parts in rows on a sprue frame, gated, numbered, joined | Done (0.71.0) |
-| — | Kit Layout: the tree's name on a tag under the frame | **Delivered for testing** (0.71.1) |
+| — | Kit Layout: the tree's name on a tag under the frame | Done (0.71.1) |
+| 63 | Parts list: size, volume, weight and cost per part, copied or saved as CSV or PDF | **Delivered for testing** |
 
 Slices 39–41 close the gaps found in the [Phase 1 gate review](docs/PHASE1_GATE.md).
 
-Waiting for a place: 1 figure, toy and scale-model feature (Parts list next). See [docs/TODO.md](docs/TODO.md).
+Waiting for a place: none — the figure, toy and scale-model list is done. See [docs/TODO.md](docs/TODO.md).
 
 ## Phase 2: Sculpt · Phase 3: Hybrid · Phase 4: Pro
 

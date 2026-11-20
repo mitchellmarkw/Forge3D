@@ -58,6 +58,7 @@ add_executable(forge_tests
     test_stamp.cpp
     test_panel_lines.cpp
     test_kit.cpp
+    test_parts_list.cpp
     bench_sculpt.cpp
     fuzz_files.cpp
     test_undo_random.cpp
