@@ -29,6 +29,9 @@ struct Mesh {
     // Optional, one per vertex, 0..1: how much of it is shaded (sculpting's mask, drawn
     // darker). Empty: none.
     std::vector<float> shade;
+    // Optional, four per vertex: painted colour (red, green, blue, 0..1) and how much it
+    // shows (0: the shape's own colour). Empty: none.
+    std::vector<float> paint;
 
     std::size_t vertexCount() const { return positions.size() / 3; }
     std::size_t triangleCount() const { return indices.size() / 3; }

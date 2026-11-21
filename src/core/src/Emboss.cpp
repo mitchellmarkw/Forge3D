@@ -624,7 +624,7 @@ ObjectId embossedPart(const Document& doc, ObjectId id)
     if (body->isBoolean() && (body->boolean->op == BooleanOp::Emboss || body->boolean->op == BooleanOp::Socket ||
                                 body->boolean->op == BooleanOp::Hinge || body->boolean->op == BooleanOp::Hollow ||
                                 body->boolean->op == BooleanOp::Stamp || body->boolean->op == BooleanOp::PanelLines ||
-                                body->boolean->op == BooleanOp::Posed))
+                                body->boolean->op == BooleanOp::Posed || body->boolean->op == BooleanOp::Paint))
         return body->boolean->operands.front();
     return id;
 }

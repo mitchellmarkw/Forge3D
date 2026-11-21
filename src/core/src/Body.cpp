@@ -431,6 +431,7 @@ std::string toString(BooleanOp op)
     case BooleanOp::Stamp: return "Stamp";
     case BooleanOp::PanelLines: return "Panel Lines";
     case BooleanOp::Posed: return "Pose Figure";
+    case BooleanOp::Paint: return "Paint";
     }
     return "Combine";
 }

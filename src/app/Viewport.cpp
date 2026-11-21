@@ -42,6 +42,7 @@ const char* kMeshVertexShader = R"(#version 330 core
 layout(location = 0) in vec3 aPosition;
 layout(location = 1) in vec3 aNormal;
 layout(location = 2) in float aShade;
+layout(location = 3) in vec4 aPaint;
 uniform mat4 uMvp;
 uniform mat4 uModelView;
 uniform mat4 uModel;
@@ -50,9 +51,11 @@ out vec3 vNormal;
 out vec3 vViewPos;
 out vec3 vWorldPos;
 out float vShade;
+out vec4 vPaint;
 void main() {
     vNormal = uNormalMatrix * aNormal;
     vShade = aShade;
+    vPaint = aPaint;
     vWorldPos = (uModel * vec4(aPosition, 1.0)).xyz;
     vViewPos = (uModelView * vec4(aPosition, 1.0)).xyz;
     gl_Position = uMvp * vec4(aPosition, 1.0);
@@ -64,6 +67,7 @@ in vec3 vNormal;
 in vec3 vViewPos;
 in vec3 vWorldPos;
 in float vShade;  // sculpting's mask: 1 = masked, drawn dark
+in vec4 vPaint;   // painted colour, and how much of it shows (0: the shape's own)
 uniform vec4 uClip;         // section view: plane normal (plate) and offset
 uniform float uClipOn;      // 0 or 1
 uniform vec3 uClipNormalView;  // the plane's normal as the camera sees it, towards the cut-away side
@@ -111,7 +115,8 @@ void main() {
     float spec = pow(max(dot(n, normalize(key + toEye)), 0.0), 48.0) * 0.20;
     // 1: too big for the printer (orange-red); 0.5: only off the plate (amber).
     vec3 warnColour = uWarn > 0.75 ? vec3(0.93, 0.33, 0.16) : vec3(0.96, 0.72, 0.18);
-    vec3 tinted = mix(uColor, warnColour, uWarn > 0.0 ? 0.75 : 0.0);
+    vec3 own = mix(uColor, vPaint.rgb, clamp(vPaint.a, 0.0, 1.0));
+    vec3 tinted = mix(own, warnColour, uWarn > 0.0 ? 0.75 : 0.0);
     vec3 base = mix(tinted, vec3(0.16, 0.16, 0.20), clamp(vShade, 0.0, 1.0) * 0.8);
     vec3 color = base * (0.28 + 0.62 * diffuse + 0.15 * head) + vec3(spec);
     // Selection: lighten the body and add a bright cyan glow toward its silhouette.
@@ -227,6 +232,7 @@ void Viewport::GpuMesh::destroy()
     positions.destroy();
     normals.destroy();
     shade.destroy();
+    paint.destroy();
     indices.destroy();
     indexCount = 0;
     source.reset();
@@ -777,6 +783,16 @@ void Viewport::upload(GpuMesh& gpu, const std::shared_ptr<const forge::Mesh>& me
     glEnableVertexAttribArray(2);
     glVertexAttribPointer(2, 1, GL_FLOAT, GL_FALSE, 0, nullptr);
 
+    // Painted colours, or none (all zero: the shape's own colour).
+    if (mesh->paint.size() == 4 * mesh->vertexCount()) {
+        fill(gpu.paint, mesh->paint.data(), mesh->paint.size() * sizeof(float), gpu.pointRoom * 4 * sizeof(float));
+    } else {
+        const std::vector<float> none(4 * std::max(mesh->vertexCount(), gpu.pointRoom), 0.0f);
+        fill(gpu.paint, none.data(), none.size() * sizeof(float), gpu.pointRoom * 4 * sizeof(float));
+    }
+    glEnableVertexAttribArray(3);
+    glVertexAttribPointer(3, 4, GL_FLOAT, GL_FALSE, 0, nullptr);
+
     // The index buffer binding is stored in the VAO, so bind it while the VAO is bound.
     fill(gpu.indices, mesh->indices.data(), mesh->indices.size() * sizeof(std::uint32_t),
          gpu.triangleRoom * 3 * sizeof(std::uint32_t));
@@ -824,6 +840,7 @@ void Viewport::syncGpuMeshes()
             continue;
         }
         const bool masked = mesh.shade.size() == mesh.vertexCount();
+        const bool painted = mesh.paint.size() == 4 * mesh.vertexCount();
         for (const auto& [first, last] : merged(changes.points, mesh.vertexCount())) {
             const int offset = int(first * 3 * sizeof(float));
             const int bytes = int((last - first) * 3 * sizeof(float));
@@ -839,6 +856,14 @@ void Viewport::syncGpuMeshes()
             } else {
                 const std::vector<float> none(count, 0.0f);
                 gpu.shade.write(int(first * sizeof(float)), none.data(), int(count * sizeof(float)));
+            }
+            gpu.paint.bind();
+            if (painted) {
+                gpu.paint.write(int(first * 4 * sizeof(float)), mesh.paint.data() + 4 * std::size_t(first),
+                                int(count * 4 * sizeof(float)));
+            } else {
+                const std::vector<float> none(4 * count, 0.0f);
+                gpu.paint.write(int(first * 4 * sizeof(float)), none.data(), int(count * 4 * sizeof(float)));
             }
         }
         const auto triangles = merged(changes.triangles, mesh.triangleCount());

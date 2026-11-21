@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.75.0 Beta — Slice 66: Paint (2026-11-20)
+
+- **Paint** (Sculpt tab): brush colours onto one shape (skin, clothes, eyes) for colour printing.
+  - Sixteen ready colours for figures (three skin tones, black, white, metals...), Other Colour for any, and the
+    colours already on the shape to pick again.
+  - Brush size ([ and ]), Ctrl rubs out (back to the shape's own colour), Mirror left-right, Fill All for a base
+    colour, Undo Stroke (Ctrl+Z) and Clear.
+  - A step in the history ("Painted · 3 colours"): double-click it, or Paint again, to carry on painting. The
+    colours show in the view, move with the shape and grow with it in Rescale Design.
+  - A shape with few triangles (a box, a ball) is divided finer, so the paint's edges are where you painted.
+  - Paint after posing: the paint stays where it was put on the plate's shape, so a pose added afterwards
+    bends the figure away from it.
+- **3MF export with the colours**: each triangle's colour as a standard 3MF material, and as painted filaments
+  for Bambu Studio, OrcaSlicer and PrusaSlicer (the shape's own colour is filament 1, then each painted colour in
+  turn, up to 16).
+- **Split by Mask**: "Mask from a painted colour" masks wherever one colour is, to cut it off as its own piece
+  (for printing or painting it separately).
+- **File format 39**: files with a Paint step need this version to open.
+
 ## 0.74.0 Beta — Slice 65: Pose Figure (2026-11-20)
 
 - **Pose Figure** (Sculpt tab): bend a figure sculpted in one piece, or an imported one, at its joints, the

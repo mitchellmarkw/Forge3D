@@ -67,6 +67,7 @@
     <file alias="print-check.svg">icons/print-check.svg</file>
     <file alias="mannequin.svg">icons/mannequin.svg</file>
     <file alias="pose-figure.svg">icons/pose-figure.svg</file>
+    <file alias="paint.svg">icons/paint.svg</file>
     <file alias="hollow.svg">icons/hollow.svg</file>
     <file alias="stamp.svg">icons/stamp.svg</file>
     <file alias="panel-lines.svg">icons/panel-lines.svg</file>

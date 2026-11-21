@@ -3,6 +3,7 @@
 
 #include "forge/core/Document.h"
 #include "forge/core/MeshKernel.h"
+#include "forge/core/Paint.h"
 #include "forge/core/Transform.h"
 
 #include <BRepBuilderAPI_Copy.hxx>
@@ -150,17 +151,53 @@ std::string objText(const std::vector<ExportMesh>& meshes)
     return out.str();
 }
 
+// How PrusaSlicer, Bambu Studio and OrcaSlicer mark a whole triangle painted with a
+// filament (counted from 1): "4", "8", then "0C", "1C"... up to "DC" for the 16th.
+std::string slicerPaint(std::size_t filament)
+{
+    if (filament == 1)
+        return "4";
+    if (filament == 2)
+        return "8";
+    const char* hex = "0123456789ABCDEF";
+    return std::string(1, hex[(filament - 3) & 0xF]) + "C";
+}
+
 std::string threeMfModel(const std::vector<ExportMesh>& meshes)
 {
+    bool painted = false;
+    for (const ExportMesh& m : meshes)
+        painted = painted || !m.triangleColours.empty();
     std::ostringstream out;
     out << R"(<?xml version="1.0" encoding="UTF-8"?>)" << "\n"
-        << R"(<model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">)"
-        << "\n <metadata name=\"Application\">Forge3D</metadata>\n <resources>\n";
-    // Each colour once, as a base material the objects refer to (id after the objects').
+        << R"(<model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02")";
+    if (painted)
+        out << R"( xmlns:slic3rpe="http://schemas.slic3r.org/3mf/2017/06")";
+    out << ">\n <metadata name=\"Application\">Forge3D</metadata>\n";
+    if (painted)
+        out << " <metadata name=\"slic3rpe:Version3mf\">1</metadata>\n";
+    out << " <resources>\n";
+    // Each colour once, as a base material the objects (and painted triangles) refer to
+    // (id after the objects'). The shapes' own colours first: filament 1 is the first
+    // shape's, as slicers number them.
     std::vector<std::uint32_t> colours;
+    const auto addColour = [&colours](std::uint32_t c) {
+        c &= 0xFFFFFFu;
+        if (std::find(colours.begin(), colours.end(), c) == colours.end())
+            colours.push_back(c);
+    };
     for (const ExportMesh& m : meshes)
-        if (std::find(colours.begin(), colours.end(), m.colour & 0xFFFFFFu) == colours.end())
-            colours.push_back(m.colour & 0xFFFFFFu);
+        addColour(m.colour);
+    for (const ExportMesh& m : meshes)
+        for (std::uint32_t c : m.triangleColours)
+            if (c != paint::kOwnColour)
+                addColour(c);
+    const auto indexOf = [&colours](std::uint32_t c) {
+        return std::size_t(std::find(colours.begin(), colours.end(), c & 0xFFFFFFu) - colours.begin());
+    };
+    // Slicers' painting only knows 16 filaments: more colours than that are left to the
+    // standard colours.
+    const bool slicerColours = painted && colours.size() <= 16;
     const std::size_t materials = meshes.size() + 1;
     if (!meshes.empty()) {
         out << "  <basematerials id=\"" << materials << "\">\n";
@@ -173,17 +210,30 @@ std::string threeMfModel(const std::vector<ExportMesh>& meshes)
     }
     for (std::size_t i = 0; i < meshes.size(); ++i) {
         const ExportMesh& m = meshes[i];
-        const auto pindex = std::find(colours.begin(), colours.end(), m.colour & 0xFFFFFFu) - colours.begin();
+        const std::size_t own = indexOf(m.colour);
         out << "  <object id=\"" << i + 1 << "\" type=\"model\" name=\"" << xmlEscape(m.name) << "\" pid=\""
-            << materials << "\" pindex=\"" << pindex << "\">\n"
+            << materials << "\" pindex=\"" << own << "\">\n"
             << "   <mesh>\n    <vertices>\n";
         for (std::size_t p = 0; p + 2 < m.positions.size(); p += 3)
             out << "     <vertex x=\"" << number(m.positions[p]) << "\" y=\"" << number(m.positions[p + 1])
                 << "\" z=\"" << number(m.positions[p + 2]) << "\"/>\n";
         out << "    </vertices>\n    <triangles>\n";
-        for (std::size_t t = 0; t + 2 < m.indices.size(); t += 3)
+        const bool paintedHere = m.triangleColours.size() == m.triangleCount();
+        for (std::size_t t = 0; t + 2 < m.indices.size(); t += 3) {
             out << "     <triangle v1=\"" << m.indices[t] << "\" v2=\"" << m.indices[t + 1] << "\" v3=\""
-                << m.indices[t + 2] << "\"/>\n";
+                << m.indices[t + 2] << "\"";
+            if (paintedHere) {
+                const std::uint32_t c = m.triangleColours[t / 3];
+                const std::size_t index = c == paint::kOwnColour ? own : indexOf(c);
+                if (index != own)
+                    out << " pid=\"" << materials << "\" p1=\"" << index << "\"";
+                if (slicerColours && index != 0) {
+                    const std::string code = slicerPaint(index + 1);
+                    out << " slic3rpe:mmu_segmentation=\"" << code << "\" paint_color=\"" << code << "\"";
+                }
+            }
+            out << "/>\n";
+        }
         out << "    </triangles>\n   </mesh>\n  </object>\n";
     }
     out << " </resources>\n <build>\n";
@@ -341,6 +391,11 @@ std::vector<ExportMesh> exportMeshes(const Document& doc, const std::vector<Obje
             }
         }
         m.openEdges = countOpenEdges(m.indices);
+        // Painted: each triangle's colour, from where it is on the shape.
+        const std::vector<PaintDab> dabs = paint::objectPaint(doc, id);
+        if (!dabs.empty())
+            m.triangleColours =
+                paint::triangleColours(m.positions, m.indices, paint::Field(dabs), toPlate.inverse());
         out.push_back(std::move(m));
     }
     return out;

@@ -81,7 +81,9 @@ namespace forge::file {
 //  37  alignment keys on Split by Mask's cuts ("keyFit" in "mask")
 //  38  Pose Figure steps (operation "posed": the skeleton's points and each joint's
 //      angles by name, blend, feetFlat, onGround)
-inline constexpr int kFormatVersion = 38;
+//  39  Paint steps (operation "paint": "colours" as "#RRGGBB", and dabs, each [x, y, z,
+//      radius, colour number], -1 rubbing out)
+inline constexpr int kFormatVersion = 39;
 // The highest sculpt::Brush number a file may hold (Pattern).
 inline constexpr int kLastSculptBrush = 13;
 inline constexpr const char* kExtension = ".f3d";
