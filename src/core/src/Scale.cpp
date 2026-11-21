@@ -213,6 +213,19 @@ void scaleInto(const Document& doc, ObjectId id, const Vec3& factors, const Vec3
         out.push_back(std::move(next));
         return;
     }
+    if (body->boolean->op == BooleanOp::Paint && body->boolean->paint) {
+        // The paint moves and stretches with the shape (each dab's reach grows only when
+        // scaled evenly).
+        Body next = *body;
+        for (PaintDab& d : next.boolean->paint->dabs) {
+            for (std::size_t k = 0; k < 3; ++k)
+                d.centre[k] = factors[k] * (d.centre[k] - anchor[k]) + anchor[k];
+            if (even(factors))
+                d.radius *= factors[0];
+        }
+        out.push_back(std::move(next));
+        return;
+    }
     if (body->boolean->op == BooleanOp::Posed && body->boolean->posed) {
         // The skeleton moves and stretches with the figure; evenly scaled, the bends
         // spread further too.

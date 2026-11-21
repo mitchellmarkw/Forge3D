@@ -6,6 +6,9 @@
 #include <QColor>
 #include <QWidget>
 
+#include <cstdint>
+#include <vector>
+
 class QCheckBox;
 class QComboBox;
 class QDoubleSpinBox;
@@ -36,9 +39,13 @@ public:
     // Mask brush uses them too).
     QColor unmaskedColour() const { return m_unmaskedColour; }
     QColor maskedColour() const { return m_maskedColour; }
+    // The colours painted on the shape (Paint): one can be picked as the mask. None: hidden.
+    void setPaintColours(const std::vector<std::uint32_t>& colours);
 
 signals:
     void coloursChanged();
+    // The mask made from where this painted colour is.
+    void paintColourChosen(std::uint32_t colour);
     void brushSizeChanged(double radius);
     void undoStrokeRequested();
     void clearRequested();
@@ -47,6 +54,8 @@ signals:
 
 private:
     QLabel* m_title = nullptr;
+    QWidget* m_fromPaintBox = nullptr;
+    QComboBox* m_fromPaint = nullptr;
     QDoubleSpinBox* m_size = nullptr;
     QWidget* m_keepBox = nullptr;
     QComboBox* m_keep = nullptr;

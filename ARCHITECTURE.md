@@ -1478,3 +1478,23 @@ and sharp across edges.
   skin, the posed preview, the skeleton drawn ghosted on top). Dragging a ball: fitting moves it in the view plane
   (mirrored about the waist's X); posing searches the joint above it for the angles that point its bone at the
   mouse (`rig::moves`, a halving pattern search within the joint's range).
+
+## Paint (slice 66)
+
+- Core `Paint.h` / `Paint.cpp` (namespace `paint`): `BooleanOp::Paint` with `PaintFinish` (dabs in order:
+  centre in the step's coordinates, radius, colour 0xRRGGBB, erase). A mesh engine step whose shape is its
+  part's, divided finer (`paintSurface`: `sculpt::refined` to about 60 thousand triangles) when it has fewer.
+  File format 39 (operation "paint": a "colours" list of "#RRGGBB" and dabs `[x, y, z, r, colour number]`).
+- Colours are spatial, like Split by Mask's dabs: `paint::Field` files dabs in a grid (dabs much bigger than most,
+  such as Fill All, kept apart and checked everywhere); a triangle takes the last dab over its middle
+  (`triangleColours`). `objectPaint` gathers every switched-on Paint step of an object's history into its own
+  coordinates, so later steps that move the shape rigidly keep the paint on it (steps that reshape it, such as a
+  pose after painting, don't carry it).
+- Display: `Mesh::paint` (four floats per point: colour and how much) as vertex attribute 3; the mesh shader mixes
+  it over the shape's colour. `MainWindow::paintedMesh` caches each painted object's coloured copy by mesh pointer
+  and dabs. The Paint tool shows the fine surface with each triangle's own corners and updates only the triangles
+  under each dab (their middles filed in a grid).
+- 3MF: `ExportMesh::triangleColours`; base materials hold the shapes' colours then the painted ones; painted
+  triangles get `pid`/`p1`, plus `slic3rpe:mmu_segmentation` and `paint_color` (filament n: "4", "8", then
+  "0C".."DC") when there are 16 colours or fewer.
+- Split by Mask: `paint::maskFor` turns one colour's dabs into mask dabs (other colours' dabs rub out).

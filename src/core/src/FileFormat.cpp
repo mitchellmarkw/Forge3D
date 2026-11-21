@@ -5,6 +5,7 @@
 #include "forge/core/Hollow.h"
 #include "forge/core/Stamp.h"
 #include "forge/core/PanelLines.h"
+#include "forge/core/Paint.h"
 #include "forge/core/Rig.h"
 #include "forge/core/MeshKernel.h"
 
@@ -238,6 +239,7 @@ const char* opName(BooleanOp op)
     case BooleanOp::Stamp: return "stamp";
     case BooleanOp::PanelLines: return "panelLines";
     case BooleanOp::Posed: return "posed";
+    case BooleanOp::Paint: return "paint";
     }
     return "merge";
 }
@@ -409,6 +411,24 @@ json bodyToJson(const Body& b)
             j["stamp"] = json{{"kind", stamp::key(st->kind)}, {"size", st->size},   {"height", st->height},
                               {"sunk", st->sunk},              {"spin", st->spin},   {"spacing", st->spacing},
                               {"spots", std::move(spots)}};
+        }
+        if (const auto& pa = b.boolean->paint) {
+            // The colours once ("#RRGGBB"), then each dab: [x, y, z, radius, colour number],
+            // -1 rubbing out.
+            const std::vector<std::uint32_t> used = paint::colours(pa->dabs);
+            json colours = json::array();
+            for (std::uint32_t c : used) {
+                char hex[8];
+                std::snprintf(hex, sizeof hex, "#%06X", unsigned(c));
+                colours.push_back(hex);
+            }
+            json dabs = json::array();
+            for (const PaintDab& d : pa->dabs) {
+                const auto at = std::find(used.begin(), used.end(), d.colour & 0xFFFFFFu);
+                dabs.push_back(json::array({d.centre[0], d.centre[1], d.centre[2], d.radius,
+                                            d.erase ? std::int64_t(-1) : std::int64_t(at - used.begin())}));
+            }
+            j["paint"] = json{{"colours", std::move(colours)}, {"dabs", std::move(dabs)}};
         }
         if (const auto& po = b.boolean->posed) {
             json points = json::object();
@@ -625,6 +645,8 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
             spec.op = BooleanOp::PanelLines;
         else if (op == "posed" && version >= 38)
             spec.op = BooleanOp::Posed;
+        else if (op == "paint" && version >= 39)
+            spec.op = BooleanOp::Paint;
         else
             damaged(where + ": unknown combine operation '" + op + "'");
         const auto operands = j.find("operands");
@@ -926,6 +948,38 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
                 damaged(where + ": " + e.what());
             }
             spec.stamp = std::move(st);
+        }
+        if (spec.op == BooleanOp::Paint) {
+            const auto pj = j.find("paint");
+            if (pj == j.end() || !pj->is_object())
+                damaged(where + ": missing the paint");
+            PaintFinish pa;
+            try {
+                std::vector<std::uint32_t> colours;
+                for (const json& c : pj->at("colours")) {
+                    const std::string hex = c.get<std::string>();
+                    if (hex.size() != 7 || hex[0] != '#')
+                        throw std::invalid_argument("colour");
+                    colours.push_back(std::uint32_t(std::stoul(hex.substr(1), nullptr, 16)));
+                }
+                for (const json& d : pj->at("dabs")) {
+                    PaintDab dab;
+                    dab.centre = {d.at(0).get<double>(), d.at(1).get<double>(), d.at(2).get<double>()};
+                    dab.radius = d.at(3).get<double>();
+                    const std::int64_t c = d.at(4).get<std::int64_t>();
+                    dab.erase = c < 0;
+                    dab.colour = c < 0 ? 0u : colours.at(std::size_t(c));
+                    pa.dabs.push_back(dab);
+                }
+            } catch (const std::exception&) {
+                damaged(where + ": the paint is broken");
+            }
+            try {
+                paint::check(pa);
+            } catch (const std::exception& e) {
+                damaged(where + ": " + e.what());
+            }
+            spec.paint = std::move(pa);
         }
         if (spec.op == BooleanOp::Posed) {
             const auto pj = j.find("posed");

@@ -324,6 +324,7 @@ enum class BooleanOp {
                   // a second operand, if any, is the shape used as the stamp)
     PanelLines,   // thin grooves cut along lines drawn on the surface (see `panelLines`)
     Posed,        // a figure bent at its joints by a simple skeleton inside it (see `posed`)
+    Paint,        // colours brushed onto the surface (see `paint`; the shape stays as it was)
 };
 
 // What happens to the picked edges of a shape.
@@ -694,6 +695,22 @@ struct PosedFinish {
     bool operator==(const PosedFinish&) const = default;
 };
 
+// A Paint step: colours brushed onto the surface with a round brush, as dabs in order (a
+// later dab wins where they overlap; an `erase` dab gives the shape its own colour back).
+// Each triangle takes the colour of the last dab over its middle. Dabs are in the step's
+// coordinates; colours 0xRRGGBB.
+struct PaintDab {
+    std::array<double, 3> centre{0.0, 0.0, 0.0};
+    double radius = 2.0;
+    std::uint32_t colour = 0;
+    bool erase = false;
+    bool operator==(const PaintDab&) const = default;
+};
+struct PaintFinish {
+    std::vector<PaintDab> dabs;
+    bool operator==(const PaintFinish&) const = default;
+};
+
 //   Merge:     everything in any part.
 //   Subtract:  the first part, minus all the others.
 //   Intersect: only what every part shares.
@@ -748,6 +765,8 @@ struct BooleanSpec {
     std::optional<PanelLineFinish> panelLines{};
     // Posed: the skeleton and the pose.
     std::optional<PosedFinish> posed{};
+    // Paint: the colours brushed on.
+    std::optional<PaintFinish> paint{};
     // Edges: what to do to which edges.
     std::optional<EdgeFinish> edges{};
     // Shell: how thick, and which faces are left open.

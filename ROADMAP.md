@@ -94,11 +94,12 @@ Gate to Phase 2: a new user prints a customised part within 10 minutes.
 | — | Kit Layout: the tree's name on a tag under the frame | Done (0.71.1) |
 | 63 | Parts list: size, volume, weight and cost per part, copied or saved as CSV or PDF | Done (0.72.0) |
 | 64 | Tidy-up towards 1.0: help guide for the figure tools, speed check on a heavy sculpt, release notes | Done (0.73.0) |
-| 65 | Pose Figure: a skeleton in one sculpted figure, fitted and posed (ready poses, typed angles, dragged balls), a step in the history | **Delivered for testing** |
+| 65 | Pose Figure: a skeleton in one sculpted figure, fitted and posed (ready poses, typed angles, dragged balls), a step in the history | Done (0.74.0) |
+| 66 | Paint: colours brushed onto one shape, kept as a step, shown, exported to 3MF for colour printers, split along by colour | **Delivered for testing** |
 
 Slices 39–41 close the gaps found in the [Phase 1 gate review](docs/PHASE1_GATE.md).
 
-Waiting for a place: painting colours onto one shape. See [docs/TODO.md](docs/TODO.md).
+Waiting for a place: nothing yet. See [docs/TODO.md](docs/TODO.md).
 
 ## Phase 2: Sculpt · Phase 3: Hybrid · Phase 4: Pro
 

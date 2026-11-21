@@ -10,6 +10,8 @@
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QIcon>
+#include <QPixmap>
 #include <QPushButton>
 #include <QSignalBlocker>
 #include <QSettings>
@@ -51,6 +53,24 @@ MaskPanel::MaskPanel(QWidget* parent) : QWidget(parent)
     help->setStyleSheet(QStringLiteral("color: palette(mid);"));
     layout->addWidget(help);
     layout->addSpacing(6);
+
+    // A painted colour as the mask (Split for painting along the colours).
+    m_fromPaintBox = new QWidget;
+    auto* fromColumn = new QVBoxLayout(m_fromPaintBox);
+    fromColumn->setContentsMargins(0, 0, 0, 0);
+    fromColumn->setSpacing(0);
+    fromColumn->addWidget(new QLabel(tr("Mask from a painted colour:")));
+    m_fromPaint = new QComboBox;
+    m_fromPaint->setToolTip(tr("Masks wherever this colour is painted (instead of the mask so far), to cut that "
+                               "colour off as its own piece"));
+    fromColumn->addWidget(m_fromPaint);
+    layout->addWidget(m_fromPaintBox);
+    m_fromPaintBox->hide();
+    connect(m_fromPaint, &QComboBox::activated, this, [this](int index) {
+        if (index <= 0)
+            return;
+        emit paintColourChosen(m_fromPaint->itemData(index).toUInt());
+    });
 
     auto* form = new QFormLayout;
     m_size = new QDoubleSpinBox;
@@ -270,6 +290,22 @@ void MaskPanel::setApplyEnabled(bool on)
 double MaskPanel::keyFit() const
 {
     return m_keys->isChecked() ? m_keyFit->value() : -1.0;
+}
+
+}  // namespace forge::app
+
+namespace forge::app {
+
+void MaskPanel::setPaintColours(const std::vector<std::uint32_t>& colours)
+{
+    m_fromPaint->clear();
+    m_fromPaint->addItem(tr("Choose a colour..."));
+    for (std::uint32_t c : colours) {
+        QPixmap pix(16, 16);
+        pix.fill(QColor::fromRgb(QRgb(c)));
+        m_fromPaint->addItem(QIcon(pix), QColor::fromRgb(QRgb(c)).name().toUpper(), QVariant::fromValue(uint(c)));
+    }
+    m_fromPaintBox->setVisible(!colours.empty());
 }
 
 }  // namespace forge::app

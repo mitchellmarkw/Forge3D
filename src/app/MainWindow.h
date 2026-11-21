@@ -10,6 +10,7 @@
 #include "forge/core/Emboss.h"
 #include "forge/core/Join.h"
 #include "forge/core/Measure.h"
+#include "forge/core/Paint.h"
 #include "forge/core/Rig.h"
 #include "forge/core/Sculpt.h"
 #include "forge/core/Sketch.h"
@@ -80,6 +81,7 @@ class PrintCheckPanel;
 class MannequinPanel;
 class HollowPanel;
 class PoseFigurePanel;
+class PaintPanel;
 class StampPanel;
 class PanelLinePanel;
 class JoinPanel;
@@ -865,6 +867,47 @@ private:
     void poseFigureRelease();
     void updatePoseFigurePreview();
     void applyPoseFigure();
+
+    // Paint: colours brushed onto one shape
+    QAction* m_paintAction = nullptr;
+    PaintPanel* m_paintPanel = nullptr;
+    struct PaintMode {
+        bool active = false;
+        bool editing = false;
+        ObjectId target = kInvalidId;  // the shape painted, or the Paint step being changed
+        ObjectId object = kInvalidId;  // the shape on the plate it's shown as
+        ObjectId part = kInvalidId;    // whose surface is painted
+        Transform toPlate;             // the part's coordinates to the plate
+        std::shared_ptr<Mesh> shown;   // the part's surface, each triangle its own corners, painted
+        std::vector<PaintDab> below;   // paint from earlier steps (plate coordinates)
+        std::vector<PaintDab> dabs;    // this step's, plate coordinates, in order
+        std::vector<std::size_t> strokeStarts;
+        bool stroking = false;
+        bool erasing = false;
+        std::optional<Vec3> lastDab;   // plate coordinates
+        double mirrorX = 0.0;          // the part's middle, its own X (mirroring)
+        double cell = 1.0;             // triangles' middles filed in a grid (part coordinates)
+        std::unordered_map<std::uint64_t, std::vector<std::uint32_t>> grid;
+        std::vector<float> middles;    // 3 per triangle, part coordinates
+    };
+    PaintMode m_paintMode;
+    void startPaint(ObjectId target, bool editing);
+    void endPaint();
+    std::optional<emboss::SurfacePoint> paintHit(const QVector3D& origin, const QVector3D& direction) const;
+    void paintHover(const QVector3D& origin, const QVector3D& direction);
+    void paintAt(const QVector3D& origin, const QVector3D& direction);
+    void paintDab(const Vec3& centre, double radius, bool erase);
+    void repaintPaint();
+    void undoPaintStroke();
+    void applyPaint();
+    // Shapes with paint, shown coloured (worked out again only when the shape or its paint changes).
+    struct PaintedShown {
+        std::shared_ptr<const Mesh> source;
+        std::vector<PaintDab> dabs;
+        std::shared_ptr<const Mesh> painted;
+    };
+    std::unordered_map<ObjectId, PaintedShown> m_paintedShown;
+    std::shared_ptr<const Mesh> paintedMesh(ObjectId id, const std::shared_ptr<const Mesh>& mesh);
 
     // Surface stamps: rivets, bolts, vents, scales, stitches... clicked or dragged in rows
     QAction* m_stampAction = nullptr;

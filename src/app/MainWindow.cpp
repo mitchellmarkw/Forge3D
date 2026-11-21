@@ -29,6 +29,7 @@
 #include "MannequinPanel.h"
 #include "HollowPanel.h"
 #include "PoseFigurePanel.h"
+#include "PaintPanel.h"
 #include "StampPanel.h"
 #include "PanelLinePanel.h"
 #include "forge/core/PanelLines.h"
@@ -378,6 +379,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
             sculptHover(o, d);
         if (m_maskMode.active)
             maskHover(o, d);
+        if (m_paintMode.active)
+            paintHover(o, d);
         if (m_measureMode.active)
             measureHover(o, d, px);
         if (m_referenceMode.active && m_referenceMode.picking == 2) {
@@ -514,6 +517,10 @@ void MainWindow::createActions()
             undoMaskStroke();
             return;
         }
+        if (m_paintMode.active) {
+            undoPaintStroke();
+            return;
+        }
         if (m_referenceMode.active)
             m_referencePanel->setStatus({}, false);
         const QString label = QString::fromStdString(m_stack.undoLabel());
@@ -624,6 +631,8 @@ void MainWindow::createActions()
             endHollow();
         else if (m_poseFigureMode.active)
             endPoseFigure();
+        else if (m_paintMode.active)
+            endPaint();
         else if (m_stampMode.active)
             endStamp();
         else if (m_panelLineMode.active)
@@ -808,6 +817,18 @@ void MainWindow::createActions()
         }
         startSculpt(history::tip(m_doc, id), false);
     });
+    m_paintAction = new QAction(tr("Paint"), this);
+    m_paintAction->setToolTip(tr("Paint: brush colours onto the selected shape (skin, clothes, eyes), for colour "
+                                 "printing; exported with the colours in 3MF files"));
+    m_paintAction->setStatusTip(m_paintAction->toolTip());
+    connect(m_paintAction, &QAction::triggered, this, [this] {
+        const ObjectId id = selectedOne();
+        if (id == kInvalidId || m_selection.size() != 1 || !m_doc.isTopLevel(id)) {
+            statusBar()->showMessage(tr("Paint: select one shape on the plate first."), 6000);
+            return;
+        }
+        startPaint(history::tip(m_doc, id), false);
+    });
     m_measureAction = new QAction(tr("Measure"), this);
     m_measureAction->setToolTip(tr("Measure: click faces, edges, corners or points to see sizes, distances and "
                                    "angles"));
@@ -837,6 +858,8 @@ void MainWindow::createActions()
             m_sculptPanel->setSize(m_sculptPanel->size() / 1.2);
         if (m_maskMode.active)
             m_maskPanel->setBrushSize(m_maskPanel->brushSize() / 1.2);
+        if (m_paintMode.active)
+            m_paintPanel->setBrushSize(m_paintPanel->brushSize() / 1.2);
     });
     m_sculptBigger = new QAction(this);
     m_sculptBigger->setShortcut(Qt::Key_BracketRight);
@@ -845,6 +868,8 @@ void MainWindow::createActions()
             m_sculptPanel->setSize(m_sculptPanel->size() * 1.2);
         if (m_maskMode.active)
             m_maskPanel->setBrushSize(m_maskPanel->brushSize() * 1.2);
+        if (m_paintMode.active)
+            m_paintPanel->setBrushSize(m_paintPanel->brushSize() * 1.2);
     });
     addAction(m_sculptSmaller);
     addAction(m_sculptBigger);
@@ -1443,6 +1468,7 @@ void MainWindow::createToolBar()
         {m_mannequinAction, "mannequin"},
         {m_hollowAction, "hollow"},
         {m_poseFigureAction, "pose-figure"},
+        {m_paintAction, "paint"},
         {m_stampAction, "stamp"},
         {m_panelLineAction, "panel-lines"},
         {m_showPicturesAction, "reference"},
@@ -1597,7 +1623,7 @@ void MainWindow::createToolBar()
     common(features);
 
     Page sculpt = page(tr("Sculpt"), tr("Sculpting brushes"));
-    group(sculpt, tr("Brushes"), {button(m_sculptAction)});
+    group(sculpt, tr("Brushes"), {button(m_sculptAction), button(m_paintAction)});
     group(sculpt, tr("Whole Shape"), {button(m_smoothAction), button(m_simplifyAction), button(m_poseFigureAction)});
     common(sculpt);
 
@@ -2197,6 +2223,48 @@ void MainWindow::createDocks()
     });
     connect(m_stampPanel, &StampPanel::applyRequested, this, &MainWindow::applyStamp);
     connect(m_stampPanel, &StampPanel::cancelRequested, this, &MainWindow::endStamp);
+    m_paintPanel = new PaintPanel;
+    stackLayout->addWidget(m_paintPanel);
+    m_paintPanel->hide();
+    connect(m_paintPanel, &PaintPanel::fillRequested, this, [this] {
+        auto& mode = m_paintMode;
+        if (!mode.active || !mode.shown)
+            return;
+        // One dab big enough for the whole surface, as a stroke of its own.
+        const Bounds b = mode.shown->bounds();
+        const auto c = b.center();
+        mode.strokeStarts.push_back(mode.dabs.size());
+        const QColor colour = m_paintPanel->colour();
+        mode.dabs.push_back({mode.toPlate.apply(Vec3{c[0], c[1], c[2]}), double(b.radius()) * 1.5 + 1.0,
+                             std::uint32_t(colour.rgb() & 0xFFFFFFu), false});
+        repaintPaint();
+    });
+    connect(m_paintPanel, &PaintPanel::undoStrokeRequested, this, &MainWindow::undoPaintStroke);
+    connect(m_paintPanel, &PaintPanel::clearRequested, this, [this] {
+        if (!m_paintMode.active)
+            return;
+        m_paintMode.dabs.clear();
+        m_paintMode.strokeStarts.clear();
+        repaintPaint();
+    });
+    connect(m_paintPanel, &PaintPanel::brushSizeChanged, this, [this] {
+        if (m_paintMode.active)
+            m_viewport->setBrushRing(std::nullopt);  // shown again at the new size when the mouse moves
+    });
+    connect(m_paintPanel, &PaintPanel::applyRequested, this, &MainWindow::applyPaint);
+    connect(m_paintPanel, &PaintPanel::cancelRequested, this, &MainWindow::endPaint);
+    connect(m_maskPanel, &MaskPanel::paintColourChosen, this, [this](std::uint32_t colour) {
+        auto& mode = m_maskMode;
+        if (!mode.active)
+            return;
+        const ObjectId object = history::objectOf(m_doc, mode.part);
+        const auto painted = paint::moved(paint::objectPaint(m_doc, object), m_doc.worldTransform(object));
+        mode.dabs = paint::maskFor(painted, colour);
+        mode.strokeStarts.clear();
+        if (!mode.dabs.empty())
+            mode.strokeStarts.push_back(0);
+        repaintMask();
+    });
     m_poseFigurePanel = new PoseFigurePanel;
     stackLayout->addWidget(m_poseFigurePanel);
     m_poseFigurePanel->hide();
@@ -2745,7 +2813,7 @@ void MainWindow::onViewportClicked(const QVector3D& origin, const QVector3D& dir
         joinClick(origin, direction);
         return;
     }
-    if (m_maskMode.active)
+    if (m_maskMode.active || m_paintMode.active)
         return;  // painting is done by pressing and dragging
     if (m_referenceMode.active) {
         referenceClick(origin, direction);
@@ -2851,6 +2919,14 @@ void MainWindow::onLeftPressed(const QVector3D& origin, const QVector3D& directi
         beginStroke(origin, direction, modifiers);
         return;
     }
+    if (m_paintMode.active) {
+        m_paintMode.stroking = true;
+        m_paintMode.erasing = modifiers.testFlag(Qt::ControlModifier);
+        m_paintMode.lastDab.reset();
+        m_paintMode.strokeStarts.push_back(m_paintMode.dabs.size());
+        paintAt(origin, direction);
+        return;
+    }
     if (m_maskMode.active) {
         m_maskMode.stroking = true;
         m_maskMode.erasing = modifiers.testFlag(Qt::ControlModifier);
@@ -2893,7 +2969,8 @@ void MainWindow::onLeftPressed(const QVector3D& origin, const QVector3D& directi
     }
     if (m_embossMode.active || m_edgesMode.active || m_holeMode.active || m_shellMode.active || m_followMode.active ||
         m_patternMode.active || m_threadMode.active || m_socketMode.active || m_joinMode.active ||
-        m_maskMode.active || m_hollowMode.active || m_panelLineMode.active || m_poseFigureMode.active)
+        m_maskMode.active || m_hollowMode.active || m_panelLineMode.active || m_poseFigureMode.active ||
+        m_paintMode.active)
         return;  // shapes stay put while the tool is open
 
     if (handle.valid() && multiSelection()) {
@@ -3021,6 +3098,12 @@ void MainWindow::onLeftDragged(const QVector3D& origin, const QVector3D& directi
     if (m_sculptMode.active) {
         if (m_sculptMode.stroking)
             sculptAt(origin, direction, modifiers);
+        return;
+    }
+    if (m_paintMode.active) {
+        if (m_paintMode.stroking)
+            paintAt(origin, direction);
+        paintHover(origin, direction);
         return;
     }
     if (m_maskMode.active) {
@@ -3256,6 +3339,15 @@ void MainWindow::onLeftReleased(bool wasDrag)
     }
     if (m_referenceMode.active || m_referenceMode.dragging) {
         m_referenceMode.dragging = false;
+        return;
+    }
+    if (m_paintMode.active) {
+        m_paintMode.stroking = false;
+        m_paintMode.lastDab.reset();
+        // A press that painted nothing isn't a stroke.
+        if (!m_paintMode.strokeStarts.empty() && m_paintMode.strokeStarts.back() == m_paintMode.dabs.size())
+            m_paintMode.strokeStarts.pop_back();
+        m_paintPanel->setStrokes(int(m_paintMode.strokeStarts.size()));
         return;
     }
     if (m_maskMode.active) {
@@ -4805,7 +4897,8 @@ bool MainWindow::toolOpen() const
            m_patternMode.active || m_sculptMode.active || m_measureMode.active || m_threadMode.active ||
            m_socketMode.active || m_joinMode.active || m_maskMode.active || m_referenceMode.active ||
            m_hingeMode.active || m_poseMode.active || m_printCheckMode.active || m_mannequinOpen ||
-           m_hollowMode.active || m_stampMode.active || m_panelLineMode.active || m_poseFigureMode.active;
+           m_hollowMode.active || m_stampMode.active || m_panelLineMode.active || m_poseFigureMode.active ||
+           m_paintMode.active;
 }
 
 void MainWindow::startEmboss(ObjectId target, bool editing)
@@ -7219,6 +7312,8 @@ void MainWindow::refreshScene()
             endHinge();
         if (m_maskMode.active && !m_doc.find(m_maskMode.target))
             endMask();
+        if (m_paintMode.active && !m_doc.find(m_paintMode.target))
+            endPaint();
         if (m_joinMode.active && ((m_joinMode.moving != kInvalidId && !m_doc.find(m_joinMode.moving)) ||
                                   (m_joinMode.fixed != kInvalidId && !m_doc.find(m_joinMode.fixed))))
             endJoin();
@@ -7242,6 +7337,13 @@ void MainWindow::refreshScene()
                 continue;
             }
             item.model = toQMatrix(m_doc.worldTransform(id));
+            if (!(m_paintMode.active && id == m_paintMode.object))
+                item.mesh = paintedMesh(id, item.mesh);  // painted: shown in its colours
+            if (m_paintMode.active && id == m_paintMode.object && m_paintMode.shown) {
+                item.mesh = m_paintMode.shown;
+                item.model = toQMatrix(m_paintMode.toPlate);
+                item.selected = false;  // the colours as they are, not lightened
+            }
             if (m_maskMode.active && id == m_maskMode.object && m_maskMode.shown) {
                 item.mesh = m_maskMode.shown;
                 item.model = toQMatrix(m_maskMode.toPlate);
@@ -7697,6 +7799,7 @@ void MainWindow::refreshScene()
     m_shellAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_hollowAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_poseFigureAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
+    m_paintAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_stampAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_panelLineAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_threadAction->setEnabled(m_shellAction->isEnabled());
@@ -7868,6 +7971,7 @@ void MainWindow::editStep(ObjectId id)
     case BooleanOp::Socket: startSocket(id, true); break;
     case BooleanOp::Hollow: startHollow(id, true); break;
     case BooleanOp::Posed: startPoseFigure(id, true); break;
+    case BooleanOp::Paint: startPaint(id, true); break;
     case BooleanOp::Stamp: startStamp(id, true); break;
     case BooleanOp::PanelLines: startPanelLines(id, true); break;
     case BooleanOp::Hinge: startHinge(id, true); break;
@@ -8053,7 +8157,7 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
                                                   op == BooleanOp::Thread || op == BooleanOp::Socket ||
                                                   op == BooleanOp::Hinge || op == BooleanOp::MaskSplit ||
                                                   op == BooleanOp::Hollow || op == BooleanOp::Stamp ||
-                                                  op == BooleanOp::PanelLines || op == BooleanOp::Posed ||
+                                                  op == BooleanOp::PanelLines || op == BooleanOp::Posed || op == BooleanOp::Paint ||
                                                   (op == BooleanOp::Split && m_doc.isTopLevel(id))));
         if (!opens) {
             // Nothing to open: show or hide what's inside, as a list does.
@@ -11152,6 +11256,8 @@ void MainWindow::startMask(ObjectId target, bool editing)
         keyFit = body->boolean->maskSplit->keyFit;
     m_maskPanel->start(editing ? tr("Change the mask of '%1'").arg(name) : tr("Split '%1' by mask").arg(name), editing,
                        keyFit);
+    m_maskPanel->setPaintColours(
+        paint::colours(paint::objectPaint(m_doc, history::objectOf(m_doc, m_maskMode.part))));
     m_propsDockWidth = m_propsDock->width();
     m_properties->hide();
     m_maskPanel->show();
@@ -11336,6 +11442,347 @@ void MainWindow::endMask()
     statusBar()->clearMessage();
     refreshScene();
     refreshCommandState();
+}
+
+// ---- Paint ------------------------------------------------------------------------------
+
+void MainWindow::startPaint(ObjectId target, bool editing)
+{
+    const Body* body = m_doc.find(target);
+    if (!body || toolOpen())
+        return;
+    // Painting a shape whose last step is paint goes on with that step.
+    if (!editing && body->isBoolean() && body->boolean->op == BooleanOp::Paint && !body->isOff())
+        editing = true;
+    if (m_dragState.kind != Drag::Kind::None)
+        cancelDrag();
+    PaintMode mode;
+    mode.active = true;
+    mode.editing = editing;
+    mode.target = target;
+    mode.object = history::objectOf(m_doc, target);
+    try {
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        struct RestoreCursor {
+            ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
+        } restore;
+        if (editing && (!body->isBoolean() || body->boolean->op != BooleanOp::Paint))
+            return;
+        mode.part = editing ? body->boolean->operands.front() : target;
+        mode.toPlate = m_doc.worldTransform(mode.part);
+        // Paint from the steps before this one shows (and stays) as it is.
+        for (ObjectId step : history::steps(m_doc, mode.object)) {
+            if (editing && step == target)
+                break;
+            const Body* b = m_doc.find(step);
+            if (b && b->isBoolean() && !b->isOff() && b->boolean->op == BooleanOp::Paint && b->boolean->paint) {
+                const auto dabs = paint::moved(b->boolean->paint->dabs, m_doc.worldTransform(step));
+                mode.below.insert(mode.below.end(), dabs.begin(), dabs.end());
+            }
+            if (step == target)
+                break;
+        }
+        if (editing) {
+            mode.dabs = paintInPlate(m_doc, target);
+            if (!mode.dabs.empty())
+                mode.strokeStarts.push_back(0);  // what was painted before, as one stroke
+        }
+        const auto surface = m_doc.mesh(mode.part);
+        if (!surface || surface->empty())
+            throw std::runtime_error("The shape has no surface to paint on.");
+        // The surface as the step will leave it (a shape with few triangles divided
+        // finer), each triangle with its own corners so it shows one colour.
+        const Mesh fine = paint::paintSurface(*surface);
+        auto shown = std::make_shared<Mesh>();
+        const std::size_t triangles = fine.triangleCount();
+        shown->positions.resize(triangles * 9);
+        shown->normals.resize(triangles * 9);
+        shown->indices.resize(triangles * 3);
+        mode.middles.resize(triangles * 3);
+        for (std::size_t t = 0; t < triangles; ++t) {
+            Vec3 p[3];
+            for (int k = 0; k < 3; ++k) {
+                const std::size_t v = fine.indices[3 * t + std::size_t(k)];
+                p[k] = {fine.positions[3 * v], fine.positions[3 * v + 1], fine.positions[3 * v + 2]};
+            }
+            const Vec3 u{p[1][0] - p[0][0], p[1][1] - p[0][1], p[1][2] - p[0][2]};
+            const Vec3 w{p[2][0] - p[0][0], p[2][1] - p[0][1], p[2][2] - p[0][2]};
+            Vec3 n{u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0]};
+            const double len = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+            if (len > 0)
+                n = {n[0] / len, n[1] / len, n[2] / len};
+            for (int k = 0; k < 3; ++k) {
+                for (std::size_t a = 0; a < 3; ++a) {
+                    shown->positions[9 * t + 3 * std::size_t(k) + a] = float(p[k][a]);
+                    shown->normals[9 * t + 3 * std::size_t(k) + a] = float(n[a]);
+                }
+                shown->indices[3 * t + std::size_t(k)] = std::uint32_t(3 * t + std::size_t(k));
+            }
+            for (std::size_t a = 0; a < 3; ++a)
+                mode.middles[3 * t + a] = float((p[0][a] + p[1][a] + p[2][a]) / 3.0);
+        }
+        shown->paint.assign(shown->vertexCount() * 4, 0.0f);
+        mode.shown = shown;
+        const Bounds b = shown->bounds();
+        mode.mirrorX = 0.5 * (b.min[0] + b.max[0]);
+        // The triangles' middles filed in a grid, to find those under a dab quickly.
+        mode.cell = std::max(0.25, double(b.radius()) / 60.0);
+        for (std::uint32_t t = 0; t < triangles; ++t) {
+            const float* m = &mode.middles[3 * std::size_t(t)];
+            mode.grid[maskCellKey(std::int64_t(std::floor(m[0] / mode.cell)), std::int64_t(std::floor(m[1] / mode.cell)),
+                                  std::int64_t(std::floor(m[2] / mode.cell)))]
+                .push_back(t);
+        }
+    } catch (const std::exception& e) {
+        QMessageBox::information(this, tr("Forge3D"), QString::fromUtf8(e.what()));
+        return;
+    }
+    m_paintMode = std::move(mode);
+    const QString name = QString::fromStdString(body->name);
+    m_paintPanel->start(editing ? tr("Change the paint on '%1'").arg(name) : tr("Paint '%1'").arg(name), editing);
+    m_propsDockWidth = m_propsDock->width();
+    m_properties->hide();
+    m_paintPanel->show();
+    statusBar()->showMessage(tr("Paint: drag over the shape to paint it (Ctrl rubs out), then Apply. Esc cancels."));
+    repaintPaint();
+    refreshScene();
+    refreshCommandState();
+}
+
+std::optional<emboss::SurfacePoint> MainWindow::paintHit(const QVector3D& origin, const QVector3D& direction) const
+{
+    const auto& mode = m_paintMode;
+    if (!mode.shown)
+        return std::nullopt;
+    const Transform toLocal = mode.toPlate.inverse();
+    const auto hit = emboss::surfaceAt(mode.shown->positions, mode.shown->indices,
+                                       toLocal.apply({origin.x(), origin.y(), origin.z()}),
+                                       toLocal.applyDirection({direction.x(), direction.y(), direction.z()}), 0.2);
+    if (!hit)
+        return std::nullopt;
+    return emboss::SurfacePoint{mode.toPlate.apply(hit->point), mode.toPlate.applyDirection(hit->normal)};
+}
+
+void MainWindow::paintHover(const QVector3D& origin, const QVector3D& direction)
+{
+    const auto hit = paintHit(origin, direction);
+    if (!hit) {
+        m_viewport->setBrushRing(std::nullopt);
+        return;
+    }
+    m_viewport->setBrushRing(Viewport::BrushRing{
+        QVector3D(float(hit->point[0]), float(hit->point[1]), float(hit->point[2])),
+        QVector3D(float(hit->normal[0]), float(hit->normal[1]), float(hit->normal[2])),
+        float(m_paintPanel->brushSize())});
+}
+
+void MainWindow::paintAt(const QVector3D& origin, const QVector3D& direction)
+{
+    auto& mode = m_paintMode;
+    const auto hit = paintHit(origin, direction);
+    if (!hit)
+        return;
+    const double radius = m_paintPanel->brushSize();
+    // Dabs about a quarter of the brush apart, filled in along the way when the mouse
+    // jumps, so a stroke is even however fast it goes.
+    const double spacing = radius * 0.25;
+    if (mode.lastDab) {
+        const Vec3 last = *mode.lastDab;
+        const double d = std::hypot(hit->point[0] - last[0], hit->point[1] - last[1], hit->point[2] - last[2]);
+        if (d < spacing)
+            return;
+        if (d < radius * 8.0) {
+            const int steps = int(std::floor(d / spacing));
+            for (int i = 1; i < steps; ++i) {
+                const double t = double(i) / steps;
+                paintDab({last[0] + (hit->point[0] - last[0]) * t, last[1] + (hit->point[1] - last[1]) * t,
+                          last[2] + (hit->point[2] - last[2]) * t},
+                         radius, mode.erasing);
+            }
+        }
+    }
+    mode.lastDab = hit->point;
+    paintDab(hit->point, radius, mode.erasing);
+}
+
+void MainWindow::paintDab(const Vec3& centre, double radius, bool erase)
+{
+    auto& mode = m_paintMode;
+    const std::uint32_t colour = std::uint32_t(m_paintPanel->colour().rgb() & 0xFFFFFFu);
+    std::vector<Vec3> centres{centre};
+    if (m_paintPanel->mirror()) {
+        // The same on the other side, across the part's middle (its own X).
+        Vec3 c = mode.toPlate.inverse().apply(centre);
+        c[0] = 2 * mode.mirrorX - c[0];
+        centres.push_back(mode.toPlate.apply(c));
+    }
+    std::vector<std::uint32_t> touched;
+    const float rgb[3] = {float((colour >> 16) & 0xFF) / 255.f, float((colour >> 8) & 0xFF) / 255.f,
+                          float(colour & 0xFF) / 255.f};
+    auto& paintAttr = mode.shown->paint;
+    for (const Vec3& at : centres) {
+        mode.dabs.push_back({at, radius, colour, erase});
+        const Vec3 c = mode.toPlate.inverse().apply(at);
+        const auto lo = [&](int k) { return std::int64_t(std::floor((c[std::size_t(k)] - radius) / mode.cell)); };
+        const auto hi = [&](int k) { return std::int64_t(std::floor((c[std::size_t(k)] + radius) / mode.cell)); };
+        for (std::int64_t i = lo(0); i <= hi(0); ++i)
+            for (std::int64_t j = lo(1); j <= hi(1); ++j)
+                for (std::int64_t k = lo(2); k <= hi(2); ++k) {
+                    const auto found = mode.grid.find(maskCellKey(i, j, k));
+                    if (found == mode.grid.end())
+                        continue;
+                    for (std::uint32_t t : found->second) {
+                        const float* m = &mode.middles[3 * std::size_t(t)];
+                        const double dx = m[0] - c[0], dy = m[1] - c[1], dz = m[2] - c[2];
+                        if (dx * dx + dy * dy + dz * dz > radius * radius)
+                            continue;
+                        for (std::size_t v = 3 * std::size_t(t); v < 3 * std::size_t(t) + 3; ++v) {
+                            paintAttr[4 * v] = rgb[0];
+                            paintAttr[4 * v + 1] = rgb[1];
+                            paintAttr[4 * v + 2] = rgb[2];
+                            paintAttr[4 * v + 3] = erase ? 0.0f : 1.0f;
+                        }
+                        touched.push_back(t);
+                    }
+                }
+    }
+    if (touched.empty())
+        return;
+    std::sort(touched.begin(), touched.end());
+    Viewport::MeshChanges changes;
+    for (std::size_t i = 0; i < touched.size();) {
+        std::size_t j = i + 1;
+        while (j < touched.size() && touched[j] <= touched[j - 1] + 1)
+            ++j;
+        changes.points.push_back({3 * touched[i], 3 * (touched[j - 1] + 1)});
+        i = j;
+    }
+    m_viewport->meshChanged(mode.object, changes);
+}
+
+void MainWindow::repaintPaint()
+{
+    auto& mode = m_paintMode;
+    if (!mode.active || !mode.shown)
+        return;
+    std::vector<PaintDab> all = mode.below;
+    all.insert(all.end(), mode.dabs.begin(), mode.dabs.end());
+    const auto colours = paint::triangleColours(mode.shown->positions, mode.shown->indices, paint::Field(all),
+                                                mode.toPlate);
+    paint::colourMesh(*mode.shown, colours);
+    Viewport::MeshChanges everything;
+    everything.everything = true;
+    m_viewport->meshChanged(mode.object, everything);
+    m_paintPanel->setStrokes(int(mode.strokeStarts.size()));
+    m_paintPanel->setUsed(paint::colours(all));
+}
+
+void MainWindow::undoPaintStroke()
+{
+    auto& mode = m_paintMode;
+    if (!mode.active || mode.strokeStarts.empty())
+        return;
+    mode.dabs.resize(mode.strokeStarts.back());
+    mode.strokeStarts.pop_back();
+    repaintPaint();
+}
+
+void MainWindow::applyPaint()
+{
+    auto& mode = m_paintMode;
+    if (!mode.active)
+        return;
+    if (mode.dabs.empty() && !mode.editing) {
+        m_paintPanel->setStatus(tr("Paint something first: drag over the shape."), true);
+        return;
+    }
+    const ObjectId target = mode.target;
+    const std::vector<PaintDab> dabs = mode.dabs;
+    std::optional<Body> result;
+    try {
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        struct RestoreCursor {
+            ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
+        } restore;
+        if (mode.editing) {
+            result = withPaint(m_doc, target, dabs);
+        } else {
+            Body r;
+            r.id = m_doc.allocateId();
+            r.name = m_doc.uniqueName("Painted");
+            r.boolean = paintSpec(m_doc, target, dabs);
+            m_doc.previewMesh(*r.boolean);  // worked out (and kept) before anything changes
+            result = std::move(r);
+        }
+    } catch (const std::exception& e) {
+        m_paintPanel->setStatus(tr("It couldn't be painted: %1").arg(QString::fromUtf8(e.what())), true);
+        return;
+    }
+    if (mode.editing) {
+        const Body* now = m_doc.find(target);
+        if (!now)
+            return endPaint();
+        const Body before = *now;
+        endPaint();
+        if (before != *result)
+            run(std::make_unique<EditBodyCommand>(before, *result, "Change paint"));
+        setSelection(history::objectOf(m_doc, target));
+        return;
+    }
+    const ObjectId id = result->id;
+    endPaint();
+    try {
+        if (!m_doc.isTopLevel(target))
+            m_stack.execute(std::make_unique<InsertStepCommand>(std::move(*result), m_doc.parentOf(target)));
+        else
+            m_stack.execute(std::make_unique<CombineCommand>(std::move(*result)));
+    } catch (const std::exception& e) {
+        QMessageBox::warning(this, tr("Forge3D"), tr("It couldn't be painted:\n%1").arg(QString::fromUtf8(e.what())));
+        refreshScene();
+        return;
+    }
+    refreshScene();
+    refreshCommandState();
+    setSelection(m_doc.isTopLevel(id) ? id : history::objectOf(m_doc, target));
+    statusBar()->showMessage(tr("Painted. Export as 3MF for a colour printer; Split by Mask can cut a colour off "
+                                "as its own piece."),
+                             10000);
+}
+
+void MainWindow::endPaint()
+{
+    if (!m_paintMode.active)
+        return;
+    m_paintMode = PaintMode{};
+    m_viewport->setBrushRing(std::nullopt);
+    m_paintPanel->hide();
+    m_properties->show();
+    QTimer::singleShot(0, this, [this] { resizeDocks({m_propsDock}, {m_propsDockWidth}, Qt::Horizontal); });
+    statusBar()->clearMessage();
+    refreshScene();
+    refreshCommandState();
+}
+
+std::shared_ptr<const Mesh> MainWindow::paintedMesh(ObjectId id, const std::shared_ptr<const Mesh>& mesh)
+{
+    std::vector<PaintDab> dabs;
+    try {
+        dabs = paint::objectPaint(m_doc, id);
+    } catch (const std::exception&) {
+        return mesh;
+    }
+    if (dabs.empty() || !mesh) {
+        m_paintedShown.erase(id);
+        return mesh;
+    }
+    auto& cached = m_paintedShown[id];
+    if (cached.source == mesh && cached.dabs == dabs && cached.painted)
+        return cached.painted;
+    auto painted = std::make_shared<Mesh>(*mesh);
+    paint::colourMesh(*painted,
+                      paint::triangleColours(painted->positions, painted->indices, paint::Field(dabs)));
+    cached = {mesh, std::move(dabs), painted};
+    return painted;
 }
 
 // ---- Reference Images ----------------------------------------------------------------

@@ -226,6 +226,7 @@ private:
         QOpenGLBuffer positions{QOpenGLBuffer::VertexBuffer};
         QOpenGLBuffer normals{QOpenGLBuffer::VertexBuffer};
         QOpenGLBuffer shade{QOpenGLBuffer::VertexBuffer};  // one float per point: the mask
+        QOpenGLBuffer paint{QOpenGLBuffer::VertexBuffer};  // four floats per point: painted colour, how much
         QOpenGLBuffer indices{QOpenGLBuffer::IndexBuffer};
         int indexCount = 0;
         // Room on the card, in points and triangles (more than the mesh has, for a mesh
