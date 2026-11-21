@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.77.0 Beta — Slice 68: Cut into Parts (2026-11-20)
+
+- **Cut into Parts** (Sculpt tab): a figure sculpted in one piece cut at its joints, with the joints put in, as one
+  undo step.
+  - A skeleton is placed in the figure (as in Pose Figure); drag its balls into the middle of each joint, both sides
+    together if you like. Each cut goes through its ball, square to the limb, shown as a red disc.
+  - Choose where to cut (**Usual Figure**: ball joints at the neck, shoulders and hips, hinges at the elbows and
+    knees; or a joint at a time; the neck, waist, shoulders, elbows, wrists, hips, knees and ankles) and what goes
+    in: a ball joint (the ball on its neck on the piece nearer the middle, the snap-in socket in the limb), a hinge,
+    a double hinge, a swivel, one of your joint standard's joints, or just a cut.
+  - Sized to the limb (the panel says how thick it is at each cut) or from the joint standard, with your printer's
+    fit (Resin or FDM).
+  - The pieces are named for what they hold (Torso, Head, Left upper arm, Left lower leg...); hinge pins and links
+    come out beside them. Each cut is a step in the piece's history; Pose Test turns the pieces at their joints.
+- **File format 40**: files with Cut into Parts steps need this version to open.
+
 ## 0.76.0 Beta — Slice 67: Joint Standards (2026-11-20)
 
 - **Joint standards** (Tools → Joint Standards): a figure line's joint sizes, kept by name ("5-inch line": 6 mm

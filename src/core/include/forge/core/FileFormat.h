@@ -83,7 +83,9 @@ namespace forge::file {
 //      angles by name, blend, feetFlat, onGround)
 //  39  Paint steps (operation "paint": "colours" as "#RRGGBB", and dabs, each [x, y, z,
 //      radius, colour number], -1 rubbing out)
-inline constexpr int kFormatVersion = 39;
+//  40  Cut into Parts steps (operation "limbCut": the joint, the cut's point and normal,
+//      the limb's reach as rods [ax, ay, az, bx, by, bz, radius], gap, and which piece)
+inline constexpr int kFormatVersion = 40;
 // The highest sculpt::Brush number a file may hold (Pattern).
 inline constexpr int kLastSculptBrush = 13;
 inline constexpr const char* kExtension = ".f3d";

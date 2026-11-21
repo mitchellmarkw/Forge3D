@@ -11,6 +11,7 @@
 #include "forge/core/Join.h"
 #include "forge/core/Measure.h"
 #include "forge/core/JointStandard.h"
+#include "forge/core/LimbCut.h"
 #include "forge/core/Paint.h"
 #include "forge/core/Rig.h"
 #include "forge/core/Sculpt.h"
@@ -84,6 +85,7 @@ class HollowPanel;
 class PoseFigurePanel;
 class PaintPanel;
 class JointStandardsDialog;
+class CutPartsPanel;
 class StampPanel;
 class PanelLinePanel;
 class JoinPanel;
@@ -874,6 +876,30 @@ private:
     void poseFigureRelease();
     void updatePoseFigurePreview();
     void applyPoseFigure();
+
+    // Cut into Parts: a one-piece figure cut at its joints, with joints put in
+    QAction* m_cutPartsAction = nullptr;
+    CutPartsPanel* m_cutPartsPanel = nullptr;
+    struct CutPartsMode {
+        bool active = false;
+        ObjectId target = kInvalidId;      // the figure (on the plate)
+        std::shared_ptr<const Mesh> rest;  // its surface, plate coordinates
+        rig::Points fitted{};              // as first placed (Place It Again)
+        rig::Points points{};              // plate coordinates
+        std::map<int, limbcut::Cut> cuts;  // planned, by rig::Joint
+        std::vector<standards::Joint> standard;  // the joint standard's, as offered
+        std::shared_ptr<const Mesh> skeleton, discs;
+        int picked = -1;
+        Vec3 dragPlanePoint{}, dragPlaneNormal{};
+    };
+    CutPartsMode m_cutPartsMode;
+    void startCutParts(ObjectId target);
+    void endCutParts();
+    bool cutPartsGrab(const QVector3D& origin, const QVector3D& direction);
+    void cutPartsDrag(const QVector3D& origin, const QVector3D& direction);
+    void updateCutPartsPreview(bool replan);
+    std::vector<limbcut::Choice> cutPartsChoices() const;
+    void applyCutParts();
 
     // Paint: colours brushed onto one shape
     QAction* m_paintAction = nullptr;

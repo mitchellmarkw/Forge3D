@@ -38,6 +38,7 @@ add_library(forge_core STATIC
     src/Rig.cpp
     src/Paint.cpp
     src/JointStandard.cpp
+    src/LimbCut.cpp
     src/Stamp.cpp
     src/PanelLines.cpp
     src/Kit.cpp
