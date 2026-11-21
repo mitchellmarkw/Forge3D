@@ -325,6 +325,7 @@ enum class BooleanOp {
     PanelLines,   // thin grooves cut along lines drawn on the surface (see `panelLines`)
     Posed,        // a figure bent at its joints by a simple skeleton inside it (see `posed`)
     Paint,        // colours brushed onto the surface (see `paint`; the shape stays as it was)
+    LimbCut,      // a figure cut at a joint: the limb, or the rest (see `limbCut`)
 };
 
 // What happens to the picked edges of a shape.
@@ -711,6 +712,26 @@ struct PaintFinish {
     bool operator==(const PaintFinish&) const = default;
 };
 
+// A Limb Cut step (Cut into Parts): a figure cut at a joint, square to the limb. The cut
+// is the plane through `point` facing `normal` (into the limb); the limb is what of the
+// part lies beyond it inside `reach` (rounded rods along the limb's bones, as fat as the
+// limb). `gap` opens the cut up: each side is cut back half of it. `joint` is the
+// rig::Joint cut at. In the step's coordinates.
+struct LimbRod {
+    std::array<double, 3> a{0.0, 0.0, 0.0}, b{0.0, 0.0, 0.0};
+    double radius = 1.0;
+    bool operator==(const LimbRod&) const = default;
+};
+struct LimbCutFinish {
+    int joint = 0;
+    std::array<double, 3> point{0.0, 0.0, 0.0};
+    std::array<double, 3> normal{0.0, 0.0, 1.0};
+    std::vector<LimbRod> reach;
+    double gap = 0.0;
+    bool limb = true;  // this piece is the limb (false: the rest)
+    bool operator==(const LimbCutFinish&) const = default;
+};
+
 //   Merge:     everything in any part.
 //   Subtract:  the first part, minus all the others.
 //   Intersect: only what every part shares.
@@ -767,6 +788,8 @@ struct BooleanSpec {
     std::optional<PosedFinish> posed{};
     // Paint: the colours brushed on.
     std::optional<PaintFinish> paint{};
+    // Limb Cut: where, and which piece.
+    std::optional<LimbCutFinish> limbCut{};
     // Edges: what to do to which edges.
     std::optional<EdgeFinish> edges{};
     // Shell: how thick, and which faces are left open.

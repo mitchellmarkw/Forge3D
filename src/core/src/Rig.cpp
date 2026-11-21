@@ -114,8 +114,9 @@ constexpr const char* kPointTitles[kRigPointCount] = {
 
 enum Bone {
     Hips, Chest, HeadBone, LUpperArm, RUpperArm, LForearm, RForearm, LHandBone, RHandBone, LThigh, RThigh, LShin,
-    RShin, LFoot, RFoot, kBoneCount
+    RShin, LFoot, RFoot, kBoneEnd
 };
+static_assert(int(kBoneEnd) == kBoneCount);
 
 struct BoneInfo {
     int parent;      // -1: the hips
@@ -873,6 +874,94 @@ Skin::Posed Skin::posed(const PosedFinish& f) const
         for (Vec3& p : out.points)
             p[2] += double(shift);
     }
+    return out;
+}
+
+int boneOf(Joint j)
+{
+    for (int b = Chest; b < kBoneCount; ++b)
+        if (kBones[b].joint == int(j))
+            return b;
+    return Hips;
+}
+
+int parentBone(int bone)
+{
+    return bone >= 0 && bone < kBoneCount ? kBones[bone].parent : -1;
+}
+
+std::vector<int> boneAndBelow(int bone)
+{
+    std::vector<int> out{bone};
+    for (std::size_t i = 0; i < out.size(); ++i)
+        for (int b = Chest; b < kBoneCount; ++b)
+            if (kBones[b].parent == out[i])
+                out.push_back(b);
+    return out;
+}
+
+const char* boneTitle(int bone)
+{
+    static const char* const titles[kBoneCount] = {
+        "Pelvis",       "Chest",         "Head",        "Left upper arm", "Right upper arm",
+        "Left forearm", "Right forearm", "Left hand",   "Right hand",     "Left thigh",
+        "Right thigh",  "Left shin",     "Right shin",  "Left foot",      "Right foot"};
+    return bone >= 0 && bone < kBoneCount ? titles[bone] : "Part";
+}
+
+std::string pieceName(const std::vector<int>& bones)
+{
+    if (bones.empty())
+        return "Part";
+    const auto has = [&](int b) { return std::find(bones.begin(), bones.end(), b) != bones.end(); };
+    // The top bone: the one whose parent isn't in the piece.
+    int top = bones.front();
+    for (int b : bones)
+        if (!has(parentBone(b)))
+            top = b;
+    switch (top) {
+    case Hips: return has(Chest) ? (bones.size() >= kBoneCount ? "Figure" : "Torso") : "Pelvis";
+    case Chest: return has(HeadBone) ? "Upper body" : "Chest";
+    case LUpperArm: return has(LForearm) ? "Left arm" : "Left upper arm";
+    case RUpperArm: return has(RForearm) ? "Right arm" : "Right upper arm";
+    case LThigh: return has(LShin) ? "Left leg" : "Left thigh";
+    case RThigh: return has(RShin) ? "Right leg" : "Right thigh";
+    case LShin: return has(LFoot) ? "Left lower leg" : "Left shin";
+    case RShin: return has(RFoot) ? "Right lower leg" : "Right shin";
+    default: return boneTitle(top);
+    }
+}
+
+std::vector<std::array<Vec3, 2>> boneSegments(const Points& points, int bone)
+{
+    std::vector<std::array<Vec3, 2>> out;
+    if (bone < 0 || bone >= kBoneCount)
+        return out;
+    const auto all = segments(points);  // kept: looping over a part of a temporary would outlive it
+    for (const Segment& s : all[std::size_t(bone)])
+        out.push_back({s.a, s.b});
+    return out;
+}
+
+std::vector<int> nearestBones(const Mesh& mesh, const Points& points)
+{
+    const auto segs = segments(points);
+    const std::size_t n = mesh.vertexCount();
+    std::vector<int> out(n, 0);
+    inParallel(n, [&](std::size_t from, std::size_t to) {
+        for (std::size_t i = from; i < to; ++i) {
+            const Vec3 q{mesh.positions[3 * i], mesh.positions[3 * i + 1], mesh.positions[3 * i + 2]};
+            double best = std::numeric_limits<double>::max();
+            for (std::size_t b = 0; b < kBoneCount; ++b)
+                for (const Segment& s : segs[b]) {
+                    const double d = segmentDistance(q, s);
+                    if (d < best) {
+                        best = d;
+                        out[i] = int(b);
+                    }
+                }
+        }
+    });
     return out;
 }
 

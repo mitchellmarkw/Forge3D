@@ -11,6 +11,7 @@
 #include "forge/core/Edges.h"
 #include "forge/core/Shell.h"
 #include "forge/core/Hollow.h"
+#include "forge/core/LimbCut.h"
 #include "forge/core/Paint.h"
 #include "forge/core/Rig.h"
 #include "forge/core/Stamp.h"
@@ -296,6 +297,12 @@ void Document::validateBoolean(const Body& body, const std::map<ObjectId, Object
         if (!body.boolean->paint)
             throw std::invalid_argument("Paint needs its colours");
         paint::check(*body.boolean->paint);
+    } else if (op == BooleanOp::LimbCut) {
+        if (ops.size() != 1)
+            throw std::invalid_argument("Cut into Parts works on exactly one shape");
+        if (!body.boolean->limbCut)
+            throw std::invalid_argument("Cut into Parts needs its cut");
+        limbcut::check(*body.boolean->limbCut);
     } else if (op == BooleanOp::Smooth) {
         if (ops.size() != 1)
             throw std::invalid_argument("Smooth works on exactly one shape");
@@ -624,7 +631,7 @@ TopoDS_Shape Document::combine(const BooleanSpec& spec) const
             op == BooleanOp::Thread || op == BooleanOp::Smooth || op == BooleanOp::ExtrudeDown ||
             op == BooleanOp::Socket || op == BooleanOp::Hinge || op == BooleanOp::MaskSplit ||
             op == BooleanOp::Hollow || op == BooleanOp::Stamp || op == BooleanOp::PanelLines ||
-            op == BooleanOp::Posed || op == BooleanOp::Paint)
+            op == BooleanOp::Posed || op == BooleanOp::Paint || op == BooleanOp::LimbCut)
             throw GeometryError(toString(op) + " is worked out by the mesh engine");
         if (op == BooleanOp::Pattern)
             return patternShape(spec);
@@ -754,6 +761,7 @@ TopoDS_Shape Document::combine(const BooleanSpec& spec) const
             case BooleanOp::PanelLines:
             case BooleanOp::Posed:
             case BooleanOp::Paint:
+            case BooleanOp::LimbCut:
                 break;  // handled above / by the mesh engine
             }
         }
@@ -872,7 +880,7 @@ TopoDS_Shape Document::previewCombine(const BooleanSpec& spec) const
          spec.op == BooleanOp::Simplify || spec.op == BooleanOp::Thread || spec.op == BooleanOp::Smooth ||
          spec.op == BooleanOp::ExtrudeDown || spec.op == BooleanOp::Socket || spec.op == BooleanOp::Hinge ||
          spec.op == BooleanOp::MaskSplit || spec.op == BooleanOp::Hollow || spec.op == BooleanOp::PanelLines ||
-         spec.op == BooleanOp::Posed || spec.op == BooleanOp::Paint) &&
+         spec.op == BooleanOp::Posed || spec.op == BooleanOp::Paint || spec.op == BooleanOp::LimbCut) &&
         spec.operands.size() != 1)
         throw std::invalid_argument(toString(spec.op) + " works on exactly one shape");
     return combine(spec);
@@ -949,6 +957,7 @@ BooleanSpec Document::passThrough(const BooleanSpec& spec)
     pass.panelLines.reset();
     pass.posed.reset();
     pass.paint.reset();
+    pass.limbCut.reset();
     switch (spec.op) {
     case BooleanOp::Merge:
     case BooleanOp::Intersect:
@@ -1112,7 +1121,7 @@ bool Document::specUsesMesh(const BooleanSpec& spec) const
         spec.op == BooleanOp::Thread || spec.op == BooleanOp::Smooth || spec.op == BooleanOp::ExtrudeDown ||
         spec.op == BooleanOp::Socket || spec.op == BooleanOp::Hinge || spec.op == BooleanOp::MaskSplit ||
         spec.op == BooleanOp::Hollow || spec.op == BooleanOp::Stamp || spec.op == BooleanOp::PanelLines ||
-        spec.op == BooleanOp::Posed || spec.op == BooleanOp::Paint)
+        spec.op == BooleanOp::Posed || spec.op == BooleanOp::Paint || spec.op == BooleanOp::LimbCut)
         return true;  // letters following a surface, and sculpting, only exist as triangles
     for (ObjectId part : spec.operands)
         if (usesMeshEngine(part))
@@ -1458,6 +1467,11 @@ MeshSolid Document::combineMeshes(const BooleanSpec& spec) const
         if (!spec.paint)
             throw GeometryError("Paint has no colours");
         return paint::apply(parts.front(), *spec.paint);
+    }
+    case BooleanOp::LimbCut: {
+        if (!spec.limbCut)
+            throw GeometryError("Cut into Parts has no cut");
+        return limbcut::apply(parts.front(), *spec.limbCut);
     }
     case BooleanOp::Socket: {
         if (!spec.socket)

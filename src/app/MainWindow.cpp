@@ -31,6 +31,7 @@
 #include "PoseFigurePanel.h"
 #include "PaintPanel.h"
 #include "JointStandardsDialog.h"
+#include "CutPartsPanel.h"
 #include "Standards.h"
 #include "StampPanel.h"
 #include "PanelLinePanel.h"
@@ -636,6 +637,8 @@ void MainWindow::createActions()
             endPoseFigure();
         else if (m_paintMode.active)
             endPaint();
+        else if (m_cutPartsMode.active)
+            endCutParts();
         else if (m_stampMode.active)
             endStamp();
         else if (m_panelLineMode.active)
@@ -819,6 +822,18 @@ void MainWindow::createActions()
             return;
         }
         startSculpt(history::tip(m_doc, id), false);
+    });
+    m_cutPartsAction = new QAction(tr("Cut into Parts"), this);
+    m_cutPartsAction->setToolTip(tr("Cut into Parts: cut a figure sculpted in one piece at its joints (neck, shoulders, "
+                                    "elbows, hips, knees...) and put ball joints or hinges in the cuts"));
+    m_cutPartsAction->setStatusTip(m_cutPartsAction->toolTip());
+    connect(m_cutPartsAction, &QAction::triggered, this, [this] {
+        const ObjectId id = selectedOne();
+        if (id == kInvalidId || m_selection.size() != 1 || !m_doc.isTopLevel(id)) {
+            statusBar()->showMessage(tr("Cut into Parts: select one figure on the plate first."), 6000);
+            return;
+        }
+        startCutParts(id);
     });
     m_paintAction = new QAction(tr("Paint"), this);
     m_paintAction->setToolTip(tr("Paint: brush colours onto the selected shape (skin, clothes, eyes), for colour "
@@ -1489,6 +1504,7 @@ void MainWindow::createToolBar()
         {m_hollowAction, "hollow"},
         {m_poseFigureAction, "pose-figure"},
         {m_paintAction, "paint"},
+        {m_cutPartsAction, "cut-parts"},
         {m_stampAction, "stamp"},
         {m_panelLineAction, "panel-lines"},
         {m_showPicturesAction, "reference"},
@@ -1644,7 +1660,8 @@ void MainWindow::createToolBar()
 
     Page sculpt = page(tr("Sculpt"), tr("Sculpting brushes"));
     group(sculpt, tr("Brushes"), {button(m_sculptAction), button(m_paintAction)});
-    group(sculpt, tr("Whole Shape"), {button(m_smoothAction), button(m_simplifyAction), button(m_poseFigureAction)});
+    group(sculpt, tr("Whole Shape"), {button(m_smoothAction), button(m_simplifyAction), button(m_poseFigureAction),
+                                      button(m_cutPartsAction)});
     common(sculpt);
 
     Page viewPage = page(tr("View"), tr("Turn, slide and zoom the view; look inside; the build plate"));
@@ -2243,6 +2260,18 @@ void MainWindow::createDocks()
     });
     connect(m_stampPanel, &StampPanel::applyRequested, this, &MainWindow::applyStamp);
     connect(m_stampPanel, &StampPanel::cancelRequested, this, &MainWindow::endStamp);
+    m_cutPartsPanel = new CutPartsPanel;
+    stackLayout->addWidget(m_cutPartsPanel);
+    m_cutPartsPanel->hide();
+    connect(m_cutPartsPanel, &CutPartsPanel::changed, this, [this] { updateCutPartsPreview(false); });
+    connect(m_cutPartsPanel, &CutPartsPanel::fitAgainRequested, this, [this] {
+        if (!m_cutPartsMode.active)
+            return;
+        m_cutPartsMode.points = m_cutPartsMode.fitted;
+        updateCutPartsPreview(true);
+    });
+    connect(m_cutPartsPanel, &CutPartsPanel::applyRequested, this, &MainWindow::applyCutParts);
+    connect(m_cutPartsPanel, &CutPartsPanel::cancelRequested, this, &MainWindow::endCutParts);
     m_paintPanel = new PaintPanel;
     stackLayout->addWidget(m_paintPanel);
     m_paintPanel->hide();
@@ -2857,7 +2886,7 @@ void MainWindow::onViewportClicked(const QVector3D& origin, const QVector3D& dir
         poseClick(origin, direction);
         return;
     }
-    if (m_poseFigureMode.active)
+    if (m_poseFigureMode.active || m_cutPartsMode.active)
         return;  // balls are picked by pressing on them
     if (m_followMode.active) {
         followClick(origin, direction);
@@ -2977,6 +3006,10 @@ void MainWindow::onLeftPressed(const QVector3D& origin, const QVector3D& directi
         poseFigureGrab(origin, direction);  // a ball of the skeleton
         return;
     }
+    if (m_cutPartsMode.active) {
+        cutPartsGrab(origin, direction);
+        return;
+    }
     if (m_stampMode.active) {
         // Dragging from the shape stamps a row.
         m_stampMode.rowStart = stampSpotAt(origin, direction);
@@ -3004,7 +3037,7 @@ void MainWindow::onLeftPressed(const QVector3D& origin, const QVector3D& directi
     if (m_embossMode.active || m_edgesMode.active || m_holeMode.active || m_shellMode.active || m_followMode.active ||
         m_patternMode.active || m_threadMode.active || m_socketMode.active || m_joinMode.active ||
         m_maskMode.active || m_hollowMode.active || m_panelLineMode.active || m_poseFigureMode.active ||
-        m_paintMode.active)
+        m_paintMode.active || m_cutPartsMode.active)
         return;  // shapes stay put while the tool is open
 
     if (handle.valid() && multiSelection()) {
@@ -3157,6 +3190,10 @@ void MainWindow::onLeftDragged(const QVector3D& origin, const QVector3D& directi
     }
     if (m_poseFigureMode.active) {
         poseFigureDrag(origin, direction);
+        return;
+    }
+    if (m_cutPartsMode.active) {
+        cutPartsDrag(origin, direction);
         return;
     }
     if (m_stampMode.active) {
@@ -3369,6 +3406,13 @@ void MainWindow::onLeftReleased(bool wasDrag)
     }
     if (m_poseFigureMode.active) {
         poseFigureRelease();
+        return;
+    }
+    if (m_cutPartsMode.active) {
+        if (m_cutPartsMode.picked >= 0) {
+            m_cutPartsMode.picked = -1;
+            updateCutPartsPreview(true);
+        }
         return;
     }
     if (m_referenceMode.active || m_referenceMode.dragging) {
@@ -4932,7 +4976,7 @@ bool MainWindow::toolOpen() const
            m_socketMode.active || m_joinMode.active || m_maskMode.active || m_referenceMode.active ||
            m_hingeMode.active || m_poseMode.active || m_printCheckMode.active || m_mannequinOpen ||
            m_hollowMode.active || m_stampMode.active || m_panelLineMode.active || m_poseFigureMode.active ||
-           m_paintMode.active;
+           m_paintMode.active || m_cutPartsMode.active;
 }
 
 void MainWindow::startEmboss(ObjectId target, bool editing)
@@ -7348,6 +7392,8 @@ void MainWindow::refreshScene()
             endMask();
         if (m_paintMode.active && !m_doc.find(m_paintMode.target))
             endPaint();
+        if (m_cutPartsMode.active && !m_doc.find(m_cutPartsMode.target))
+            endCutParts();
         if (m_joinMode.active && ((m_joinMode.moving != kInvalidId && !m_doc.find(m_joinMode.moving)) ||
                                   (m_joinMode.fixed != kInvalidId && !m_doc.find(m_joinMode.fixed))))
             endJoin();
@@ -7445,6 +7491,23 @@ void MainWindow::refreshScene()
                     cut.ghost = true;
                     cut.helper = true;
                     items.push_back(cut);
+                }
+            }
+            if (m_cutPartsMode.active && id == m_cutPartsMode.target) {
+                // See-through, with the skeleton and the cuts (orange discs) inside.
+                item.alpha = 0.45f;
+                item.selected = false;
+                for (const auto& shown : {m_cutPartsMode.skeleton, m_cutPartsMode.discs}) {
+                    if (!shown)
+                        continue;
+                    DisplayItem extra;
+                    extra.id = shown == m_cutPartsMode.skeleton ? kEdgesPickedItem : kEdgesHoverItem;
+                    extra.mesh = shown;
+                    extra.color = shown == m_cutPartsMode.skeleton ? QVector3D(1.0f, 0.55f, 0.1f)
+                                                                   : QVector3D(0.9f, 0.2f, 0.15f);
+                    extra.ghost = true;
+                    extra.helper = true;
+                    items.push_back(extra);
                 }
             }
             if (m_poseFigureMode.active && id == history::objectOf(m_doc, m_poseFigureMode.target)) {
@@ -7834,6 +7897,7 @@ void MainWindow::refreshScene()
     m_hollowAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_poseFigureAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_paintAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
+    m_cutPartsAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_stampAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_panelLineAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_threadAction->setEnabled(m_shellAction->isEnabled());
@@ -11478,6 +11542,302 @@ void MainWindow::endMask()
     statusBar()->clearMessage();
     refreshScene();
     refreshCommandState();
+}
+
+// ---- Cut into Parts ------------------------------------------------------------------------
+
+void MainWindow::startCutParts(ObjectId target)
+{
+    const Body* body = m_doc.find(target);
+    if (!body || toolOpen() || !m_doc.isTopLevel(target))
+        return;
+    if (m_dragState.kind != Drag::Kind::None)
+        cancelDrag();
+    CutPartsMode mode;
+    mode.active = true;
+    mode.target = target;
+    try {
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        struct RestoreCursor {
+            ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
+        } restore;
+        auto rest = std::make_shared<Mesh>(*m_doc.mesh(target));
+        const Transform t = m_doc.worldTransform(target);
+        for (std::size_t i = 0; i + 2 < rest->positions.size(); i += 3) {
+            const Vec3 p = t.apply(Vec3{rest->positions[i], rest->positions[i + 1], rest->positions[i + 2]});
+            for (std::size_t k = 0; k < 3; ++k)
+                rest->positions[i + k] = float(p[k]);
+        }
+        if (rest->empty())
+            throw std::invalid_argument("There's no surface to cut.");
+        mode.fitted = rig::fit(*rest).points;
+        mode.points = mode.fitted;
+        mode.rest = std::move(rest);
+    } catch (const std::exception& e) {
+        QMessageBox::information(this, tr("Forge3D"),
+                                 tr("This shape can't be cut into parts:\n%1").arg(QString::fromUtf8(e.what())));
+        return;
+    }
+    QStringList standard;
+    if (const auto s = standardsfile::active())
+        for (const auto& j : s->joints) {
+            mode.standard.push_back(j);
+            standard << QStringLiteral("%1 (%2)").arg(QString::fromStdString(j.name),
+                                                      QString::fromStdString(standards::describe(j)));
+        }
+    m_cutPartsMode = std::move(mode);
+    m_cutPartsPanel->start(tr("Cut '%1' into parts").arg(QString::fromStdString(body->name)), standard);
+    m_propsDockWidth = m_propsDock->width();
+    m_properties->hide();
+    m_cutPartsPanel->show();
+    statusBar()->showMessage(tr("Cut into Parts: drag the balls into the joints, choose where to cut (Usual Figure, "
+                                "or a joint at a time), then Apply. Esc cancels."));
+    updateCutPartsPreview(true);
+    refreshCommandState();
+}
+
+void MainWindow::endCutParts()
+{
+    if (!m_cutPartsMode.active)
+        return;
+    m_cutPartsMode = CutPartsMode{};
+    m_cutPartsPanel->hide();
+    m_properties->show();
+    QTimer::singleShot(0, this, [this] { resizeDocks({m_propsDock}, {m_propsDockWidth}, Qt::Horizontal); });
+    statusBar()->clearMessage();
+    refreshScene();
+    refreshCommandState();
+}
+
+std::vector<limbcut::Choice> MainWindow::cutPartsChoices() const
+{
+    const auto& mode = m_cutPartsMode;
+    std::vector<limbcut::Choice> out;
+    const bool resin = m_cutPartsPanel->resin();
+    for (const auto& [joint, chosen] : m_cutPartsPanel->choices()) {
+        if (!chosen.cut)
+            continue;
+        limbcut::Choice c;
+        c.joint = rig::Joint(joint);
+        const auto planned = mode.cuts.find(joint);
+        const double radius = planned != mode.cuts.end() ? planned->second.limbRadius : 4.0;
+        c.ball = limbcut::ballFor(radius);
+        c.ball.resin = resin;
+        c.ball.fit = fits::starting(resin, tolerance::Kind::Ball);
+        const auto hinge = [&](HingeKind kind) {
+            c.kind = limbcut::JointKind::Hinge;
+            c.hinge = limbcut::hingeFor(radius, kind);
+        };
+        switch (chosen.type) {
+        case CutPartsPanel::JustCut: c.kind = limbcut::JointKind::Cut; break;
+        case CutPartsPanel::Ball: c.kind = limbcut::JointKind::Ball; break;
+        case CutPartsPanel::Hinge: hinge(HingeKind::Single); break;
+        case CutPartsPanel::DoubleHinge: hinge(HingeKind::Double); break;
+        case CutPartsPanel::Swivel: hinge(HingeKind::Swivel); break;
+        default: {
+            const int k = chosen.type - CutPartsPanel::FirstStandard;
+            if (k < 0 || k >= int(mode.standard.size()))
+                break;
+            const auto& j = mode.standard[std::size_t(k)];
+            if (j.socket && j.socket->kind == SocketKind::Ball) {
+                c.kind = limbcut::JointKind::Ball;
+                c.ball = standards::applied(*j.socket, c.ball);
+            } else if (j.hinge) {
+                c.kind = limbcut::JointKind::Hinge;
+                c.hinge = standards::applied(*j.hinge, c.hinge);
+            } else {
+                c.kind = limbcut::JointKind::Cut;  // a peg or magnet socket isn't a joint for a cut
+            }
+        }
+        }
+        c.hinge.resin = resin;
+        c.hinge.fit = fits::starting(resin, c.hinge.kind == HingeKind::Swivel ? tolerance::Kind::Peg
+                                                                               : tolerance::Kind::Pin);
+        out.push_back(c);
+    }
+    return out;
+}
+
+void MainWindow::updateCutPartsPreview(bool replan)
+{
+    auto& mode = m_cutPartsMode;
+    if (!mode.active)
+        return;
+    const double ball = std::max(0.3, 0.015 * rig::height(mode.points));
+    try {
+        if (replan || mode.cuts.empty()) {
+            mode.cuts.clear();
+            const auto joints = limbcut::cuttable();
+            const auto planned = limbcut::plan(*mode.rest, mode.points, joints);
+            for (std::size_t i = 0; i < joints.size(); ++i)
+                mode.cuts[int(joints[i])] = planned[i];
+        }
+        m_cutPartsPanel->setStatus({}, false);
+    } catch (const std::exception& e) {
+        mode.cuts.clear();
+        m_cutPartsPanel->setStatus(QString::fromUtf8(e.what()), true);
+    }
+    // The skeleton, the joint being chosen bigger.
+    const int highlight = mode.picked >= 0 ? mode.picked : int(rig::pivot(rig::Joint(m_cutPartsPanel->joint())));
+    mode.skeleton = std::make_shared<const Mesh>(rig::skeletonMesh(mode.points, ball, highlight));
+    // A disc at each cut, as wide as the limb's reach there.
+    std::vector<Mesh> discs;
+    QString info;
+    const auto choices = cutPartsChoices();
+    for (const limbcut::Choice& c : choices) {
+        const auto planned = mode.cuts.find(int(c.joint));
+        if (planned == mode.cuts.end())
+            continue;
+        const LimbCutFinish& f = planned->second.finish;
+        // A flat disc a little wider than the limb.
+        const QVector3D n(float(f.normal[0]), float(f.normal[1]), float(f.normal[2]));
+        QVector3D x = QVector3D::crossProduct(std::abs(n.z()) < 0.9f ? QVector3D(0, 0, 1) : QVector3D(1, 0, 0), n);
+        x.normalize();
+        const QVector3D y = QVector3D::crossProduct(n, x);
+        const QVector3D centre(float(f.point[0]), float(f.point[1]), float(f.point[2]));
+        const float r = float(std::max(1.0, planned->second.limbRadius * 1.5));
+        Mesh disc;
+        constexpr int around = 36;
+        for (int side = 0; side < 2; ++side) {
+            const QVector3D c = centre + n * (side == 0 ? -0.1f : 0.1f);
+            const QVector3D facing = side == 0 ? -n : n;
+            const auto base = std::uint32_t(disc.vertexCount());
+            for (int k = -1; k < around; ++k) {
+                const double t = 2 * std::numbers::pi * k / around;
+                const QVector3D q = k < 0 ? c : c + r * (float(std::cos(t)) * x + float(std::sin(t)) * y);
+                disc.positions.insert(disc.positions.end(), {q.x(), q.y(), q.z()});
+                disc.normals.insert(disc.normals.end(), {facing.x(), facing.y(), facing.z()});
+            }
+            for (int k = 0; k < around; ++k) {
+                const std::uint32_t a = base + 1 + std::uint32_t(k), b = base + 1 + std::uint32_t((k + 1) % around);
+                if (side == 0)
+                    disc.indices.insert(disc.indices.end(), {base, b, a});
+                else
+                    disc.indices.insert(disc.indices.end(), {base, a, b});
+            }
+        }
+        discs.push_back(std::move(disc));
+        if (int(c.joint) == m_cutPartsPanel->joint()) {
+            switch (c.kind) {
+            case limbcut::JointKind::Ball:
+                info = tr("A %1 mm ball on the piece nearer the middle, its socket in the limb (fit %2 mm).")
+                           .arg(c.ball.size)
+                           .arg(c.ball.fit);
+                break;
+            case limbcut::JointKind::Hinge:
+                info = QString::fromStdString(hinge::describe(c.hinge)) +
+                       tr(" (fit %1 mm); the limb's end becomes the tab.").arg(c.hinge.fit);
+                break;
+            default: info = tr("Cut straight across, nothing put in."); break;
+            }
+            info += tr(" The limb is about %1 mm thick here.").arg(2.0 * planned->second.limbRadius, 0, 'f', 1);
+        }
+    }
+    m_cutPartsPanel->setInfo(info);
+    mode.discs = discs.empty() ? nullptr : together(discs);
+    refreshScene();
+}
+
+bool MainWindow::cutPartsGrab(const QVector3D& origin, const QVector3D& direction)
+{
+    auto& mode = m_cutPartsMode;
+    const QVector3D d = direction.normalized();
+    const double reach = 2.0 * std::max(0.3, 0.015 * rig::height(mode.points));
+    int best = -1;
+    double bestT = std::numeric_limits<double>::max();
+    for (int i = 0; i < kRigPointCount; ++i) {
+        const Vec3& p = mode.points[std::size_t(i)];
+        const QVector3D c{float(p[0]), float(p[1]), float(p[2])};
+        const float t = QVector3D::dotProduct(c - origin, d);
+        if (t < 0)
+            continue;
+        if ((origin + t * d - c).length() <= reach && t < bestT) {
+            bestT = t;
+            best = i;
+        }
+    }
+    if (best < 0)
+        return false;
+    // The joint at this ball, chosen in the panel.
+    for (rig::Joint j : limbcut::cuttable())
+        if (int(rig::pivot(j)) == best)
+            m_cutPartsPanel->setJoint(int(j));
+    mode.picked = best;
+    mode.dragPlanePoint = mode.points[std::size_t(best)];
+    mode.dragPlaneNormal = {-d.x(), -d.y(), -d.z()};
+    updateCutPartsPreview(false);
+    return true;
+}
+
+void MainWindow::cutPartsDrag(const QVector3D& origin, const QVector3D& direction)
+{
+    auto& mode = m_cutPartsMode;
+    if (mode.picked < 0)
+        return;
+    const QVector3D p(float(mode.dragPlanePoint[0]), float(mode.dragPlanePoint[1]), float(mode.dragPlanePoint[2]));
+    const QVector3D n(float(mode.dragPlaneNormal[0]), float(mode.dragPlaneNormal[1]), float(mode.dragPlaneNormal[2]));
+    const auto hit = view::intersectPlane(origin, direction, p, n);
+    if (!hit)
+        return;
+    const Vec3 target{hit->x(), hit->y(), hit->z()};
+    const rig::Points before = mode.points;
+    mode.points[std::size_t(mode.picked)] = target;
+    const rig::Point other = rig::mirrored(rig::Point(mode.picked));
+    if (m_cutPartsPanel->mirror() && int(other) != mode.picked) {
+        const double middle = mode.points[std::size_t(rig::Point::Waist)][0];
+        mode.points[std::size_t(other)] = {2 * middle - target[0], target[1], target[2]};
+    }
+    PosedFinish f;
+    f.points = mode.points;
+    try {
+        rig::check(f);
+    } catch (const std::exception&) {
+        mode.points = before;
+        return;
+    }
+    updateCutPartsPreview(false);  // planned again when the ball is let go
+}
+
+void MainWindow::applyCutParts()
+{
+    auto& mode = m_cutPartsMode;
+    if (!mode.active)
+        return;
+    const auto choices = cutPartsChoices();
+    if (choices.empty()) {
+        m_cutPartsPanel->setStatus(tr("Choose where to cut first: try Usual Figure."), true);
+        return;
+    }
+    const ObjectId target = mode.target;
+    const rig::Points points = mode.points;
+    limbcut::Made made;
+    try {
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        struct RestoreCursor {
+            ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
+        } restore;
+        std::uint32_t link = 0;
+        while (link == 0)
+            link = QRandomGenerator::global()->generate() & 0x3FFFFFFFu;
+        made = limbcut::cutIntoParts(m_stack, m_doc, target, points, choices, link);
+    } catch (const std::exception& e) {
+        m_cutPartsPanel->setStatus(tr("It couldn't be cut: %1").arg(QString::fromUtf8(e.what())), true);
+        refreshScene();
+        return;
+    }
+    endCutParts();
+    qInfo().noquote() << "Command:" << QString::fromStdString(m_stack.undoLabel());
+    refreshScene();
+    refreshCommandState();
+    setSelection(made.pieces);
+    statusBar()->showMessage(
+        made.extras.empty()
+            ? tr("Cut into %1 parts. Pose Test turns them at their joints.").arg(made.pieces.size())
+            : tr("Cut into %1 parts, with %2 hinge pins or links to print beside them. Pose Test turns them at "
+                 "their joints.")
+                  .arg(made.pieces.size())
+                  .arg(made.extras.size()),
+        10000);
 }
 
 // ---- Joint standards ---------------------------------------------------------------------

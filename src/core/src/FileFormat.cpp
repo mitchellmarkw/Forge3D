@@ -5,6 +5,7 @@
 #include "forge/core/Hollow.h"
 #include "forge/core/Stamp.h"
 #include "forge/core/PanelLines.h"
+#include "forge/core/LimbCut.h"
 #include "forge/core/Paint.h"
 #include "forge/core/Rig.h"
 #include "forge/core/MeshKernel.h"
@@ -240,6 +241,7 @@ const char* opName(BooleanOp op)
     case BooleanOp::PanelLines: return "panelLines";
     case BooleanOp::Posed: return "posed";
     case BooleanOp::Paint: return "paint";
+    case BooleanOp::LimbCut: return "limbCut";
     }
     return "merge";
 }
@@ -411,6 +413,17 @@ json bodyToJson(const Body& b)
             j["stamp"] = json{{"kind", stamp::key(st->kind)}, {"size", st->size},   {"height", st->height},
                               {"sunk", st->sunk},              {"spin", st->spin},   {"spacing", st->spacing},
                               {"spots", std::move(spots)}};
+        }
+        if (const auto& lc = b.boolean->limbCut) {
+            json reach = json::array();
+            for (const LimbRod& r : lc->reach)
+                reach.push_back(json::array({r.a[0], r.a[1], r.a[2], r.b[0], r.b[1], r.b[2], r.radius}));
+            j["limbCut"] = json{{"joint", rig::key(rig::Joint(lc->joint))},
+                                {"point", lc->point},
+                                {"normal", lc->normal},
+                                {"reach", std::move(reach)},
+                                {"gap", lc->gap},
+                                {"limb", lc->limb}};
         }
         if (const auto& pa = b.boolean->paint) {
             // The colours once ("#RRGGBB"), then each dab: [x, y, z, radius, colour number],
@@ -647,6 +660,8 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
             spec.op = BooleanOp::Posed;
         else if (op == "paint" && version >= 39)
             spec.op = BooleanOp::Paint;
+        else if (op == "limbCut" && version >= 40)
+            spec.op = BooleanOp::LimbCut;
         else
             damaged(where + ": unknown combine operation '" + op + "'");
         const auto operands = j.find("operands");
@@ -948,6 +963,37 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
                 damaged(where + ": " + e.what());
             }
             spec.stamp = std::move(st);
+        }
+        if (spec.op == BooleanOp::LimbCut) {
+            const auto cj = j.find("limbCut");
+            if (cj == j.end() || !cj->is_object())
+                damaged(where + ": missing the cut");
+            LimbCutFinish c;
+            try {
+                const std::string joint = cj->at("joint").get<std::string>();
+                c.joint = -1;
+                for (int i = 0; i < kRigJointCount; ++i)
+                    if (joint == rig::key(rig::Joint(i)))
+                        c.joint = i;
+                for (std::size_t k = 0; k < 3; ++k) {
+                    c.point[k] = cj->at("point").at(k).get<double>();
+                    c.normal[k] = cj->at("normal").at(k).get<double>();
+                }
+                for (const json& r : cj->at("reach"))
+                    c.reach.push_back({{r.at(0).get<double>(), r.at(1).get<double>(), r.at(2).get<double>()},
+                                       {r.at(3).get<double>(), r.at(4).get<double>(), r.at(5).get<double>()},
+                                       r.at(6).get<double>()});
+                c.gap = cj->value("gap", 0.0);
+                c.limb = cj->value("limb", true);
+            } catch (const std::exception&) {
+                damaged(where + ": the cut is broken");
+            }
+            try {
+                limbcut::check(c);
+            } catch (const std::exception& e) {
+                damaged(where + ": " + e.what());
+            }
+            spec.limbCut = std::move(c);
         }
         if (spec.op == BooleanOp::Paint) {
             const auto pj = j.find("paint");
