@@ -37,6 +37,7 @@ add_library(forge_core STATIC
     src/Hollow.cpp
     src/Rig.cpp
     src/Paint.cpp
+    src/JointStandard.cpp
     src/Stamp.cpp
     src/PanelLines.cpp
     src/Kit.cpp

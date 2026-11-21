@@ -10,6 +10,7 @@
 #include "forge/core/Emboss.h"
 #include "forge/core/Join.h"
 #include "forge/core/Measure.h"
+#include "forge/core/JointStandard.h"
 #include "forge/core/Paint.h"
 #include "forge/core/Rig.h"
 #include "forge/core/Sculpt.h"
@@ -82,6 +83,7 @@ class MannequinPanel;
 class HollowPanel;
 class PoseFigurePanel;
 class PaintPanel;
+class JointStandardsDialog;
 class StampPanel;
 class PanelLinePanel;
 class JoinPanel;
@@ -733,6 +735,11 @@ private:
 
     ScaleCalculator* m_scaleCalculator = nullptr;  // Tools → Scale Calculator, made when first opened
     ToleranceDialog* m_toleranceDialog = nullptr;  // Tools → Tolerance Test Print
+    JointStandardsDialog* m_standardsDialog = nullptr;  // Tools → Joint Standards
+    // The joint standard in use's sockets and hinges, as offered in Quick Socket and Quick Hinge.
+    std::vector<standards::Joint> m_standardSockets, m_standardHinges;
+    void refreshStandardRows();
+    void saveToStandard(bool hinge);
     void addToleranceTest(const tolerance::Settings& settings);
     void rescaleDesign();
     void makeKit();

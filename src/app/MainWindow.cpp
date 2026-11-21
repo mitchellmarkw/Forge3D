@@ -30,6 +30,8 @@
 #include "HollowPanel.h"
 #include "PoseFigurePanel.h"
 #include "PaintPanel.h"
+#include "JointStandardsDialog.h"
+#include "Standards.h"
 #include "StampPanel.h"
 #include "PanelLinePanel.h"
 #include "forge/core/PanelLines.h"
@@ -109,6 +111,7 @@
 #include <QDropEvent>
 #include <QMimeData>
 #include <QInputDialog>
+#include <QLineEdit>
 #include <QThreadPool>
 #include <QProcess>
 #include <QKeySequence>
@@ -1366,12 +1369,29 @@ void MainWindow::createMenus()
             m_toleranceDialog = new ToleranceDialog(this);
             connect(m_toleranceDialog, &ToleranceDialog::addRequested, this, &MainWindow::addToleranceTest);
         }
+        m_toleranceDialog->refreshStandard();
         m_toleranceDialog->show();
         m_toleranceDialog->raise();
         m_toleranceDialog->activateWindow();
     });
     toleranceTest->setStatusTip(tr("Print holes, cups and pin holes at stepped fits once, and use the fit that worked "
                                    "best from then on"));
+    QAction* jointStandards = tools->addAction(tr("&Joint Standards..."), this, [this] {
+        if (!m_standardsDialog) {
+            m_standardsDialog = new JointStandardsDialog(this);
+            connect(m_standardsDialog, &JointStandardsDialog::changed, this, [this] {
+                refreshStandardRows();
+                if (m_toleranceDialog)
+                    m_toleranceDialog->refreshStandard();
+            });
+        }
+        m_standardsDialog->reload();
+        m_standardsDialog->show();
+        m_standardsDialog->raise();
+        m_standardsDialog->activateWindow();
+    });
+    jointStandards->setStatusTip(tr("A figure line's joint sizes, kept by name, for Quick Socket, Quick Hinge and "
+                                    "the Tolerance Test Print to start from"));
     tools->addSeparator();
     QAction* rescale = tools->addAction(tr("&Rescale Design..."), this, &MainWindow::rescaleDesign);
     rescale->setStatusTip(tr("Move the design to another scale (1:12 to 1:18, say), keeping the joints at their real "
@@ -2361,6 +2381,13 @@ void MainWindow::createDocks()
     m_socketTimer->setInterval(250);
     connect(m_socketTimer, &QTimer::timeout, this, &MainWindow::updateSocketPreview);
     connect(m_socketPanel, &SocketPanel::changed, this, [this] { m_socketTimer->start(); });
+    connect(m_socketPanel->standardRow(), &StandardRow::chosen, this, [this](int i) {
+        if (i < 0 || i >= int(m_standardSockets.size()) || !m_standardSockets[std::size_t(i)].socket)
+            return;
+        m_socketPanel->setFinish(standards::applied(*m_standardSockets[std::size_t(i)].socket, m_socketPanel->finish()));
+        m_socketTimer->start();
+    });
+    connect(m_socketPanel->standardRow(), &StandardRow::saveRequested, this, [this] { saveToStandard(false); });
     connect(m_socketPanel, &SocketPanel::applyRequested, this, &MainWindow::applySocket);
     connect(m_socketPanel, &SocketPanel::cancelRequested, this, &MainWindow::endSocket);
     connect(m_socketPanel, &SocketPanel::addMatchingRequested, this, &MainWindow::addMatchingPart);
@@ -2376,6 +2403,13 @@ void MainWindow::createDocks()
     m_hingeTimer->setInterval(250);
     connect(m_hingeTimer, &QTimer::timeout, this, &MainWindow::updateHingePreview);
     connect(m_hingePanel, &HingePanel::changed, this, [this] { m_hingeTimer->start(); });
+    connect(m_hingePanel->standardRow(), &StandardRow::chosen, this, [this](int i) {
+        if (i < 0 || i >= int(m_standardHinges.size()) || !m_standardHinges[std::size_t(i)].hinge)
+            return;
+        m_hingePanel->setFinish(standards::applied(*m_standardHinges[std::size_t(i)].hinge, m_hingePanel->finish()));
+        m_hingeTimer->start();
+    });
+    connect(m_hingePanel->standardRow(), &StandardRow::saveRequested, this, [this] { saveToStandard(true); });
     connect(m_hingePanel, &HingePanel::applyRequested, this, &MainWindow::applyHinge);
     connect(m_hingePanel, &HingePanel::cancelRequested, this, &MainWindow::endHinge);
     connect(m_hingePanel, &HingePanel::addPiecesRequested, this, &MainWindow::addHingePieces);
@@ -10063,6 +10097,7 @@ void MainWindow::startSocket(ObjectId target, bool editing)
     }
     m_socketMode = std::move(mode);
     const QString name = QString::fromStdString(body->name);
+    refreshStandardRows();
     m_socketPanel->start(editing ? tr("Change the socket in '%1'").arg(name) : tr("Socket in '%1'").arg(name),
                          editing);
     m_socketPanel->setFinish(finish);
@@ -10853,6 +10888,7 @@ void MainWindow::startHinge(ObjectId target, bool editing)
     }
     m_hingeMode = std::move(mode);
     const QString name = QString::fromStdString(body->name);
+    refreshStandardRows();
     m_hingePanel->start(editing ? tr("Change the joint in '%1'").arg(name) : tr("Joint in '%1'").arg(name), editing);
     m_hingePanel->setFinish(finish);
     if (!editing)
@@ -11442,6 +11478,103 @@ void MainWindow::endMask()
     statusBar()->clearMessage();
     refreshScene();
     refreshCommandState();
+}
+
+// ---- Joint standards ---------------------------------------------------------------------
+
+void MainWindow::refreshStandardRows()
+{
+    m_standardSockets.clear();
+    m_standardHinges.clear();
+    const auto standard = standardsfile::active();
+    QStringList sockets, hinges;
+    if (standard)
+        for (const auto& j : standard->joints) {
+            const QString label = QStringLiteral("%1 (%2)").arg(QString::fromStdString(j.name),
+                                                               QString::fromStdString(standards::describe(j)));
+            if (j.socket) {
+                m_standardSockets.push_back(j);
+                sockets << label;
+            } else if (j.hinge) {
+                m_standardHinges.push_back(j);
+                hinges << label;
+            }
+        }
+    const QString name = standard ? QString::fromStdString(standard->name) : QString();
+    m_socketPanel->standardRow()->setJoints(name, sockets);
+    m_hingePanel->standardRow()->setJoints(name, hinges);
+}
+
+void MainWindow::saveToStandard(bool hinge)
+{
+    std::vector<standards::Standard> list;
+    try {
+        list = standardsfile::load();
+    } catch (const std::exception& e) {
+        QMessageBox::warning(this, tr("Forge3D"), QString::fromUtf8(e.what()));
+        return;
+    }
+    // The standard in use, or a new one if there's none yet.
+    const QString active = standardsfile::activeName();
+    auto it = std::find_if(list.begin(), list.end(),
+                           [&](const standards::Standard& s) { return QString::fromStdString(s.name) == active; });
+    QString standardName = active;
+    if (it == list.end()) {
+        bool ok = false;
+        standardName = QInputDialog::getText(this, tr("New Joint Standard"),
+                                             tr("There's no joint standard in use yet. Name one (a figure line, a "
+                                                "scale...):"),
+                                             QLineEdit::Normal,
+                                             QString::fromStdString(standards::uniqueName(list, "My figure line")), &ok)
+                           .trimmed();
+        if (!ok || standardName.isEmpty())
+            return;
+        standards::Standard s;
+        s.name = standards::uniqueName(list, standardName.toStdString());
+        standardName = QString::fromStdString(s.name);
+        list.push_back(s);
+        it = list.end() - 1;
+    }
+    bool ok = false;
+    const QString name =
+        QInputDialog::getText(this, tr("Save to Joint Standard"),
+                              tr("A name for this joint in '%1' (Shoulder ball, Wrist peg, Knee hinge...):")
+                                  .arg(standardName),
+                              QLineEdit::Normal, QString(), &ok)
+            .trimmed();
+    if (!ok || name.isEmpty())
+        return;
+    const standards::Joint joint = hinge ? standards::jointFrom(name.toStdString(), m_hingePanel->finish())
+                                         : standards::jointFrom(name.toStdString(), m_socketPanel->finish());
+    try {
+        standards::check(joint);
+    } catch (const std::exception& e) {
+        QMessageBox::warning(this, tr("Forge3D"), QString::fromUtf8(e.what()));
+        return;
+    }
+    auto& joints = it->joints;
+    const auto same = std::find_if(joints.begin(), joints.end(),
+                                   [&](const standards::Joint& j) { return j.name == joint.name; });
+    if (same != joints.end()) {
+        if (QMessageBox::question(this, tr("Save to Joint Standard"),
+                                  tr("'%1' already has a joint called '%2'. Replace it with these sizes?")
+                                      .arg(standardName, name)) != QMessageBox::Yes)
+            return;
+        *same = joint;
+    } else {
+        joints.push_back(joint);
+    }
+    try {
+        standardsfile::save(list);
+    } catch (const std::exception& e) {
+        QMessageBox::warning(this, tr("Forge3D"), QString::fromUtf8(e.what()));
+        return;
+    }
+    standardsfile::setActiveName(standardName);
+    refreshStandardRows();
+    if (m_standardsDialog)
+        m_standardsDialog->reload();
+    statusBar()->showMessage(tr("Saved '%1' to the joint standard '%2'.").arg(name, standardName), 6000);
 }
 
 // ---- Paint ------------------------------------------------------------------------------

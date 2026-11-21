@@ -20,6 +20,8 @@ class ToleranceDialog : public QDialog {
 
 public:
     explicit ToleranceDialog(QWidget* parent = nullptr);
+    // Offers the joint standard in use's sizes (Tools → Joint Standards), if there is one.
+    void refreshStandard();
 
 signals:
     void addRequested(const forge::tolerance::Settings& settings);
@@ -42,6 +44,8 @@ private:
     QComboBox* m_printer = nullptr;
     QDoubleSpinBox* m_best[3] = {};
     QLabel* m_status = nullptr;
+    class QPushButton* m_fromStandard = nullptr;
+    double m_grip = 10.0;  // a ball's grip (from the joint standard)
 };
 
 }  // namespace forge::app

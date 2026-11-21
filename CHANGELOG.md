@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.76.0 Beta — Slice 67: Joint Standards (2026-11-20)
+
+- **Joint standards** (Tools → Joint Standards): a figure line's joint sizes, kept by name ("5-inch line": 6 mm
+  shoulder balls, 3 mm wrist pegs, a knee hinge...), so every figure in the line takes the same joints.
+  - Choose the standard in use; make, rename and delete standards, with notes; rename, remove and reorder their
+    joints.
+  - Export a standard to a file to share or back it up; Import adds standards from one.
+  - Kept in Documents/Forge3D/Joint Standards.json, beside the custom shapes.
+- **Quick Socket and Quick Hinge**: a row at the top lists the standard's sockets (or hinges) to start from (its
+  sizes come over; the printer and fit stay), and **Save to Standard...** keeps the settings as a named joint
+  (making a standard first if there's none).
+- **Tolerance Test Print**: "Use the Sizes of '…'" sizes the test to the standard's first ball, round peg and
+  hinge pin.
+- Help → Figure, Toy and Kit Tools has a Joint Standards section.
+- No change to the file format.
+
 ## 0.75.0 Beta — Slice 66: Paint (2026-11-20)
 
 - **Paint** (Sculpt tab): brush colours onto one shape (skin, clothes, eyes) for colour printing.

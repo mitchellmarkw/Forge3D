@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "SocketPanel.h"
 
+#include "Standards.h"
+
 #include "Fits.h"
 
 #include <QCheckBox>
@@ -66,6 +68,8 @@ SocketPanel::SocketPanel(QWidget* parent) : QWidget(parent)
     m_placed->setWordWrap(true);
     layout->addWidget(m_placed);
     layout->addSpacing(6);
+    m_standardRow = new StandardRow;
+    layout->addWidget(m_standardRow);
 
     m_kind = new QComboBox;
     m_kind->addItem(tr("A ball (ball joint)"));

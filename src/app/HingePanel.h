@@ -14,6 +14,8 @@ class QPushButton;
 
 namespace forge::app {
 
+class StandardRow;
+
 // Quick Hinge's settings: the kind of joint (single or double hinge, swivel), how the
 // other half is made, its sizes, the pin, which way it bends, the printer and fit. The
 // spot is picked in the view.
@@ -36,6 +38,8 @@ public:
     void setPlaced(bool placed);
     void setStatus(const QString& text, bool problem);
     void setApplyEnabled(bool on);
+    // The joint standard's joints to start from (Tools → Joint Standards).
+    StandardRow* standardRow() const { return m_standardRow; }
 
 signals:
     void changed();
@@ -52,6 +56,7 @@ private:
 
     bool m_editing = false;
     QLabel* m_title = nullptr;
+    StandardRow* m_standardRow = nullptr;
     QLabel* m_placed = nullptr;
     QComboBox* m_kind = nullptr;
     QLabel* m_kindHelp = nullptr;
