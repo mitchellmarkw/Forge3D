@@ -66,6 +66,10 @@ add_executable(Forge3D WIN32
     PoseFigurePanel.cpp
     PaintPanel.h
     PaintPanel.cpp
+    Standards.h
+    Standards.cpp
+    JointStandardsDialog.h
+    JointStandardsDialog.cpp
     StampPanel.h
     StampPanel.cpp
     PanelLinePanel.h

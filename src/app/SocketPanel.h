@@ -14,6 +14,8 @@ class QPushButton;
 
 namespace forge::app {
 
+class StandardRow;
+
 // Quick Socket's settings: what the socket takes (a ball or a peg, and its size), how a
 // ball is held, the printer and fit, the turn, and relief cuts. The spot is picked in
 // the view.
@@ -30,6 +32,8 @@ public:
     void setPlaced(bool placed);
     void setStatus(const QString& text, bool problem);
     void setApplyEnabled(bool on);
+    // The joint standard's joints to start from (Tools → Joint Standards).
+    StandardRow* standardRow() const { return m_standardRow; }
     // A magnet: a matching pocket in another part, and which part ("" none yet).
     bool matchingPocket() const;
     void setOtherPart(const QString& name, bool picking);
@@ -49,6 +53,7 @@ private:
     void showKind();
 
     QLabel* m_title = nullptr;
+    StandardRow* m_standardRow = nullptr;
     QLabel* m_placed = nullptr;
     QComboBox* m_kind = nullptr;
     QWidget* m_ballBox = nullptr;

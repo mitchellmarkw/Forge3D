@@ -1498,3 +1498,14 @@ and sharp across edges.
   triangles get `pid`/`p1`, plus `slic3rpe:mmu_segmentation` and `paint_color` (filament n: "4", "8", then
   "0C".."DC") when there are 16 colours or fewer.
 - Split by Mask: `paint::maskFor` turns one colour's dabs into mask dabs (other colours' dabs rub out).
+
+## Joint standards (slice 67)
+
+- Core `JointStandard.h` / `.cpp` (namespace `standards`): `Standard` (name, notes, joints) and `Joint` (name, a
+  `SocketFinish` or a `HingeFinish`). `applied` puts a joint's sizes on a socket or hinge being made, keeping its
+  fit, printer, turn (and a hinge's half and link); `jointFrom` keeps the sizes from one. `toleranceSizes` sizes
+  the tolerance test from the first ball, round peg and printed hinge pin. JSON ("forge3d-joint-standards",
+  version 1) for the library and for sharing; not part of the .f3d file.
+- App: `Standards.h` (`standardsfile`: Documents/Forge3D/Joint Standards.json and the one in use, a preference;
+  `StandardRow`, the row at the top of SocketPanel and HingePanel), `JointStandardsDialog` (Tools menu),
+  `MainWindow::refreshStandardRows` / `saveToStandard`.

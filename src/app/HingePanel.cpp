@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "HingePanel.h"
 
+#include "Standards.h"
+
 #include "Fits.h"
 
 #include <QCheckBox>
@@ -67,6 +69,8 @@ HingePanel::HingePanel(QWidget* parent) : QWidget(parent)
     m_placed->setWordWrap(true);
     layout->addWidget(m_placed);
     layout->addSpacing(6);
+    m_standardRow = new StandardRow;
+    layout->addWidget(m_standardRow);
 
     m_kind = new QComboBox;
     m_kind->addItem(tr("Single hinge"));

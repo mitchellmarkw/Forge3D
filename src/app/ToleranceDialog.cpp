@@ -2,6 +2,7 @@
 #include "ToleranceDialog.h"
 
 #include "Fits.h"
+#include "Standards.h"
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -107,7 +108,31 @@ ToleranceDialog::ToleranceDialog(QWidget* parent) : QDialog(parent)
     grid->addWidget(m_fitsText, row++, 0, 1, 5);
     auto* add = new QPushButton(tr("Add to the Plate"));
     add->setToolTip(tr("Add the test bars and the pieces to try in them, ready to print"));
-    grid->addWidget(add, row++, 0, 1, 5, Qt::AlignLeft);
+    m_fromStandard = new QPushButton;
+    m_fromStandard->setToolTip(tr("Test the sizes your figure line uses: its first ball, round peg and hinge pin"));
+    auto* addRow = new QHBoxLayout;
+    addRow->addWidget(add);
+    addRow->addWidget(m_fromStandard);
+    addRow->addStretch(1);
+    grid->addLayout(addRow, row++, 0, 1, 5);
+    connect(m_fromStandard, &QPushButton::clicked, this, [this] {
+        const auto standard = standardsfile::active();
+        if (!standard)
+            return;
+        tolerance::Settings now;
+        now.pegSize = m_pegSize->value();
+        now.pegDepth = m_pegDepth->value();
+        now.ballSize = m_ballSize->value();
+        now.pinSize = m_pinSize->value();
+        now.grip = m_grip;
+        const tolerance::Settings sized = standards::toleranceSizes(*standard, now);
+        m_pegSize->setValue(sized.pegSize);
+        m_pegDepth->setValue(sized.pegDepth);
+        m_ballSize->setValue(sized.ballSize);
+        m_pinSize->setValue(sized.pinSize);
+        m_grip = sized.grip;
+        m_status->setText(tr("Sizes from '%1'.").arg(QString::fromStdString(standard->name)));
+    });
     layout->addWidget(make);
 
     // 2. Record
@@ -160,6 +185,7 @@ ToleranceDialog::ToleranceDialog(QWidget* parent) : QDialog(parent)
         s.pegDepth = m_pegDepth->value();
         s.ballSize = m_ballSize->value();
         s.pinSize = m_pinSize->value();
+        s.grip = m_grip;
         try {
             s.fits = tolerance::steps(m_from->value(), m_to->value(), m_step->value());
             tolerance::check(s);
@@ -230,6 +256,18 @@ void ToleranceDialog::showFits()
         m_fitsText->setText(QString::fromUtf8(e.what()));
         m_fitsText->setStyleSheet(QStringLiteral("color: #c0392b;"));
     }
+}
+
+}  // namespace forge::app
+
+namespace forge::app {
+
+void ToleranceDialog::refreshStandard()
+{
+    const auto standard = standardsfile::active();
+    m_fromStandard->setVisible(standard.has_value());
+    if (standard)
+        m_fromStandard->setText(tr("Use the Sizes of '%1'").arg(QString::fromStdString(standard->name)));
 }
 
 }  // namespace forge::app
