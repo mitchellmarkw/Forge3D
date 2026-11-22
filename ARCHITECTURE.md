@@ -1557,3 +1557,11 @@ and sharp across edges.
   half's underside where it was when the wall changes. `mouldPart` gives the part in the step's coordinates for the
   app, and `embossedPart` sends clicks on a half to the part inside.
 - File format 41.
+- 0.78.1: `MouldFinish` gained the first cut's `axis` and an optional second cut (`axis2`, `parting2`, `secondIn`:
+  both halves or one), with each piece named by `top` and `side2`; `mould::pieces` lists them and `sameMould`
+  matches a mould's pieces for `withMould`. Keys: four in the corners of the first cut, two at the far corners of
+  the second in each half it cuts; a piece gets a cut's pegs on its low side and holes on its high side.
+  `mould::undercuts` files the part's triangles on a grid square to each cut's axis (`Shadow`) and marks a triangle
+  when it faces away from its piece's pull (by more than about 3°) or a line from it along the pull meets the part;
+  a piece of a second cut may come away along either cut. `bestSplit` scores each axis at its widest place and at
+  20–80% across. File format 42.

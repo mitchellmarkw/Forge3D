@@ -421,6 +421,8 @@ json bodyToJson(const Body& b)
             for (const auto& v : mo->vents)
                 vents.push_back(v);
             j["mould"] = json{{"top", mo->top},           {"parting", mo->parting},     {"wall", mo->wall},
+                              {"axis", mo->axis},         {"second", mo->second},       {"axis2", mo->axis2},
+                              {"parting2", mo->parting2}, {"secondIn", mo->secondIn},   {"side2", mo->side2},
                               {"keys", mo->keys},         {"keySize", mo->keySize},     {"keyFit", mo->keyFit},
                               {"spoutSize", mo->spoutSize}, {"spout", mo->spout},       {"ventSize", mo->ventSize},
                               {"vents", std::move(vents)}};
@@ -986,6 +988,12 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
                 m.top = mj->at("top").get<bool>();
                 m.parting = mj->at("parting").get<double>();
                 m.wall = mj->at("wall").get<double>();
+                m.axis = mj->value("axis", 2);
+                m.second = mj->value("second", false);
+                m.axis2 = mj->value("axis2", 0);
+                m.parting2 = mj->value("parting2", 0.0);
+                m.secondIn = mj->value("secondIn", 0);
+                m.side2 = mj->value("side2", 0);
                 m.keys = mj->value("keys", m.keys);
                 m.keySize = mj->value("keySize", m.keySize);
                 m.keyFit = mj->value("keyFit", m.keyFit);

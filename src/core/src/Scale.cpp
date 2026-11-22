@@ -222,7 +222,9 @@ void scaleInto(const Document& doc, ObjectId id, const Vec3& factors, const Vec3
             for (std::size_t k = 0; k < 3; ++k)
                 p[k] = factors[k] * (p[k] - anchor[k]) + anchor[k];
         };
-        m.parting = factors[2] * (m.parting - anchor[2]) + anchor[2];
+        const std::size_t a = std::size_t(m.axis), a2 = std::size_t(m.axis2);
+        m.parting = factors[a] * (m.parting - anchor[a]) + anchor[a];
+        m.parting2 = factors[a2] * (m.parting2 - anchor[a2]) + anchor[a2];
         scalePoint(m.spout);
         for (auto& v : m.vents)
             scalePoint(v);

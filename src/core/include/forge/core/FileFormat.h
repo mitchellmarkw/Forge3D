@@ -87,7 +87,9 @@ namespace forge::file {
 //      the limb's reach as rods [ax, ay, az, bx, by, bz, radius], gap, and which piece)
 //  41  Mould steps (operation "mould": top, parting, wall, keys, keySize, keyFit,
 //      spoutSize, spout, ventSize, vents [x, y, z])
-inline constexpr int kFormatVersion = 41;
+//  42  a mould's cut directions and second cut ("axis", "second", "axis2", "parting2",
+//      "secondIn", "side2" in "mould")
+inline constexpr int kFormatVersion = 42;
 // The highest sculpt::Brush number a file may hold (Pattern).
 inline constexpr int kLastSculptBrush = 13;
 inline constexpr const char* kExtension = ".f3d";
