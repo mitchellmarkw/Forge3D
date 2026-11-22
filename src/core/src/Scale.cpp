@@ -213,6 +213,29 @@ void scaleInto(const Document& doc, ObjectId id, const Vec3& factors, const Vec3
         out.push_back(std::move(next));
         return;
     }
+    if (body->boolean->op == BooleanOp::LimbCut && body->boolean->limbCut) {
+        // The cut moves and stretches with the figure; evenly scaled, the limb's reach and
+        // the gap grow too.
+        Body next = *body;
+        LimbCutFinish& c = *next.boolean->limbCut;
+        const auto scalePoint = [&](std::array<double, 3>& p) {
+            for (std::size_t k = 0; k < 3; ++k)
+                p[k] = factors[k] * (p[k] - anchor[k]) + anchor[k];
+        };
+        scalePoint(c.point);
+        Vec3 n{c.normal[0] / factors[0], c.normal[1] / factors[1], c.normal[2] / factors[2]};
+        const double len = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+        c.normal = {n[0] / len, n[1] / len, n[2] / len};
+        for (LimbRod& r : c.reach) {
+            scalePoint(r.a);
+            scalePoint(r.b);
+            r.radius *= std::max({factors[0], factors[1], factors[2]});
+        }
+        if (even(factors))
+            c.gap *= factors[0];
+        out.push_back(std::move(next));
+        return;
+    }
     if (body->boolean->op == BooleanOp::Paint && body->boolean->paint) {
         // The paint moves and stretches with the shape (each dab's reach grows only when
         // scaled evenly).

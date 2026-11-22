@@ -112,6 +112,24 @@ private:
     std::unique_ptr<Impl> m;
 };
 
+// The bones (15: the hips, chest, head, then upper arms, forearms, hands, thighs, shins and
+// feet, left first), for cutting a figure into parts.
+inline constexpr int kBoneCount = 15;
+// The bone a joint turns (the one past it), and the bone a bone hangs from (-1: the hips).
+int boneOf(Joint j);
+int parentBone(int bone);
+// The bone and every bone hanging from it.
+std::vector<int> boneAndBelow(int bone);
+// "Pelvis", "Chest", "Head", "Left upper arm"...
+const char* boneTitle(int bone);
+// A name for a piece holding these bones: "Torso" (pelvis and chest), "Left arm" (upper arm
+// and forearm), "Left forearm"...: the top bone's, widened when it holds the next one too.
+std::string pieceName(const std::vector<int>& bones);
+// The line pieces a bone's surface is weighted to.
+std::vector<std::array<Vec3, 2>> boneSegments(const Points& points, int bone);
+// Each point of the surface's nearest bone.
+std::vector<int> nearestBones(const Mesh& mesh, const Points& points);
+
 // The figure posed, as a solid (the Posed step).
 MeshSolid apply(const MeshSolid& solid, const PosedFinish& f);
 

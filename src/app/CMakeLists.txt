@@ -70,6 +70,8 @@ add_executable(Forge3D WIN32
     Standards.cpp
     JointStandardsDialog.h
     JointStandardsDialog.cpp
+    CutPartsPanel.h
+    CutPartsPanel.cpp
     StampPanel.h
     StampPanel.cpp
     PanelLinePanel.h
@@ -100,6 +102,11 @@ add_executable(Forge3D WIN32
     icons.qrc
     help.qrc
 )
+
+# MainWindow.cpp has grown past MSVC's default limit of sections in one object file.
+if(MSVC)
+    target_compile_options(Forge3D PRIVATE /bigobj)
+endif()
 if(WIN32)
     # The program's own icon (Explorer, the taskbar, the installer's shortcuts).
     target_sources(Forge3D PRIVATE Forge3D.rc)

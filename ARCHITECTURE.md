@@ -1509,3 +1509,25 @@ and sharp across edges.
 - App: `Standards.h` (`standardsfile`: Documents/Forge3D/Joint Standards.json and the one in use, a preference;
   `StandardRow`, the row at the top of SocketPanel and HingePanel), `JointStandardsDialog` (Tools menu),
   `MainWindow::refreshStandardRows` / `saveToStandard`.
+
+## Cut into Parts (slice 68)
+
+- Core `LimbCut.h` / `.cpp` (namespace `limbcut`): `BooleanOp::LimbCut` with `LimbCutFinish` (the joint, the cut's
+  point and normal, the limb's reach as rods, the gap, which piece). A mesh engine step: the reach (merged rounded
+  rods, `rod`) trimmed at the cut plane, intersected with the part (the limb) or subtracted from it (the rest).
+  File format 40 (operation "limbCut").
+- `plan`: the cut through the joint's ball, square to the limb (halfway between the two bones at elbows, knees,
+  wrists and ankles); the reach rods along the bones below, each as fat as nearly all (97 %) of the surface nearest
+  that bone (`rig::nearestBones`), so a stray point (the crotch nearest a thigh) doesn't swell it; the limb's
+  thickness at the cut, the median distance of the limb's surface round it.
+- `cutIntoParts`: from the middle out, each cut makes the rest (on the piece) and the limb (on a copy, its solid
+  seeded so it isn't worked out again); each bone's piece is tracked, so later cuts find their limb, and pieces are
+  named by `rig::pieceName`. Then the joints on the finished pieces: a ball joint is a Socket step in the limb and a
+  Merge of a ball on a neck (`ballOnNeck`, an imported-style body) onto the other piece; a hinge is a fork step on
+  the piece nearer the middle and a tab step (`hinge::otherHalf`) on the limb, sharing a link number, the pin square
+  to the limb and the front, the slot reaching just through the limb, and the pins (`hinge::pieces`) as joint parts.
+- Rig: bones exposed (`rig::boneOf`, `parentBone`, `boneAndBelow`, `boneTitle`, `pieceName`, `boneSegments`,
+  `nearestBones`). (Fixed: `boneSegments` looped over a part of a temporary.)
+- App: `CutPartsPanel` (skeleton, Usual Figure, a joint at a time, what goes in, printer) and
+  `MainWindow::CutPartsMode` (the figure see-through, the skeleton and red discs ghosted; balls dragged as in Pose
+  Figure; the cuts planned again when a ball is let go).
