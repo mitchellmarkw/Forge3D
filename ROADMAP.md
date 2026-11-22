@@ -101,11 +101,12 @@ Gate to Phase 2: a new user prints a customised part within 10 minutes.
 | 69 | Make Mould: a mould box round a part, split either way into two to four pieces, with undercut checking, registration keys, a pour spout and air vents | Done (0.78.1) |
 | 70 | Hand Ports: wrist pegs for swappable hands, the sockets for them, and grip holes sized to accessories' handles | Done (0.79.0) |
 | 71 | Make Hand: fists, gripping, open, relaxed and pointing hands at a figure's scale, with the wrist socket and grip hole | Done (0.80.0) |
-| 72 | Make Room: trim just what's in the way for a joint to turn to a chosen angle (a 90° knee) | **Delivered for testing** |
+| 72 | Make Room: trim just what's in the way for a joint to turn to a chosen angle (a 90° knee) | Done (0.81.0) |
+| 73 | Texture stamps: more sculpting textures (chainmail, twill, knit, leather, cracks, wood, pores), pictures pressed once as stamps, turned | **Delivered for testing** |
 
 Slices 39–41 close the gaps found in the [Phase 1 gate review](docs/PHASE1_GATE.md).
 
-Waiting for a place: texture stamps, linked left/right parts, a "will it stand?" check, and more. See [docs/TODO.md](docs/TODO.md).
+Waiting for a place: linked left/right parts, a "will it stand?" check, display bases, and more. See [docs/TODO.md](docs/TODO.md).
 
 ## Phase 2: Sculpt · Phase 3: Hybrid · Phase 4: Pro
 

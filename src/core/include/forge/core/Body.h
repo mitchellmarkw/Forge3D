@@ -422,14 +422,16 @@ struct SculptStroke {
     std::vector<std::array<float, 3>> dabs;  // where each dab went (Grab: where it started)
     std::array<float, 3> grab{0.f, 0.f, 0.f};  // Grab: how far it was pulled
     int pattern = -1;    // Pattern: which of the step's patterns (SculptFinish::patterns)
-    double tile = 0.0;   // Pattern: how wide one repeat of it is, mm
+    double tile = 0.0;   // Pattern: how wide one repeat of it is, mm (a stamp: how wide it is)
+    double turn = 0.0;   // Pattern: degrees the picture is turned round the surface's facing
+    bool once = false;   // Pattern: pressed once, as a stamp centred on the first dab (not repeating)
     bool operator==(const SculptStroke&) const = default;
 };
 
 // A pattern the Pattern brush presses in: one of the built-in ones (by name), or a
 // picture of the user's (light parts stand highest; it repeats side by side).
 struct SculptPattern {
-    std::string name;  // built-in: "scales", "hexagons", "weave", "skin", "bricks"; else the file
+    std::string name;  // built-in: see sculpt::builtInPatterns(); else the file
     bool builtIn = true;
     std::shared_ptr<const PictureData> image;  // a picture of the user's (not built-in)
     bool operator==(const SculptPattern& o) const

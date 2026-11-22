@@ -70,6 +70,9 @@ SculptPanel::SculptPanel(QWidget* parent) : QWidget(parent)
     const std::pair<const char*, const char*> builtIn[] = {
         {"scales", QT_TR_NOOP("Scales")}, {"hexagons", QT_TR_NOOP("Hexagons")}, {"weave", QT_TR_NOOP("Woven cloth")},
         {"skin", QT_TR_NOOP("Skin")},     {"bricks", QT_TR_NOOP("Bricks")},
+        {"chainmail", QT_TR_NOOP("Chainmail")}, {"twill", QT_TR_NOOP("Twill (denim)")}, {"knit", QT_TR_NOOP("Knitting")},
+        {"leather", QT_TR_NOOP("Leather")}, {"cracks", QT_TR_NOOP("Cracked stone")}, {"wood", QT_TR_NOOP("Wood grain")},
+        {"pores", QT_TR_NOOP("Skin pores")},
     };
     for (const auto& [name, label] : builtIn) {
         SculptPattern p;
@@ -78,8 +81,15 @@ SculptPanel::SculptPanel(QWidget* parent) : QWidget(parent)
         m_pattern->addItem(tr(label));
     }
     m_pattern->addItem(tr("Your own picture..."));
-    m_pattern->setToolTip(tr("What the brush presses in. It repeats side by side; light parts stand highest."));
+    m_pattern->setToolTip(tr("What the brush presses in; light parts stand highest. Your own picture: a logo, an "
+                             "emblem, a scar..."));
     patternLayout->addWidget(labelled(tr("Pattern:"), m_pattern));
+    m_patternPress = new QComboBox;
+    m_patternPress->addItem(tr("Repeating, where you drag"));
+    m_patternPress->addItem(tr("Once, as a stamp, where you click"));
+    m_patternPress->setToolTip(tr("Repeating covers the surface you drag over; a stamp presses the picture once, "
+                                  "centred where you click (good for an emblem or a patch)"));
+    patternLayout->addWidget(labelled(tr("Press it:"), m_patternPress));
     auto* patternForm = new QFormLayout;
     patternForm->setContentsMargins(0, 0, 0, 0);
     m_patternSize = new QDoubleSpinBox;
@@ -89,7 +99,15 @@ SculptPanel::SculptPanel(QWidget* parent) : QWidget(parent)
     m_patternSize->setValue(4.0);
     m_patternSize->setSuffix(tr(" mm"));
     m_patternSize->setToolTip(tr("How wide one repeat of the pattern is. Strength sets how deep it goes."));
-    patternForm->addRow(tr("Pattern size:"), m_patternSize);
+    m_patternSizeLabel = new QLabel(tr("Pattern size:"));
+    patternForm->addRow(m_patternSizeLabel, m_patternSize);
+    m_patternTurn = new QDoubleSpinBox;
+    m_patternTurn->setRange(-180.0, 180.0);
+    m_patternTurn->setDecimals(0);
+    m_patternTurn->setSingleStep(15.0);
+    m_patternTurn->setSuffix(tr("°"));
+    m_patternTurn->setToolTip(tr("Turns the picture round, flat on the surface"));
+    patternForm->addRow(tr("Turned:"), m_patternTurn);
     patternLayout->addLayout(patternForm);
     layout->addWidget(m_patternBox);
     connect(m_pattern, &QComboBox::activated, this, [this](int index) {
@@ -101,6 +119,12 @@ SculptPanel::SculptPanel(QWidget* parent) : QWidget(parent)
             return;
         }
         m_lastPattern = index;
+    });
+    connect(m_patternPress, &QComboBox::currentIndexChanged, this, [this](int once) {
+        m_patternSizeLabel->setText(once == 1 ? tr("Stamp size:") : tr("Pattern size:"));
+        m_patternSize->setToolTip(once == 1 ? tr("How wide the stamp is. Strength sets how deep it goes.")
+                                            : tr("How wide one repeat of the pattern is. Strength sets how deep it "
+                                                 "goes."));
     });
 
     const auto describe = [this](int index) {
@@ -132,8 +156,9 @@ SculptPanel::SculptPanel(QWidget* parent) : QWidget(parent)
                               "them in Split by Mask).");
             break;
         case 13:
-            hint = QT_TR_NOOP("Presses a repeating pattern into the surface where you drag (scales, cloth, skin...). "
-                              "Going over again doesn't press deeper. Ctrl: engraves it.");
+            hint = QT_TR_NOOP("Presses a pattern into the surface where you drag (scales, cloth, chainmail, skin...), "
+                              "or a picture once as a stamp where you click. Going over again doesn't press deeper. "
+                              "Ctrl: engraves it.");
             break;
         default: break;
         }
@@ -296,6 +321,16 @@ SculptPattern SculptPanel::pattern() const
 double SculptPanel::patternSize() const
 {
     return m_patternSize->value();
+}
+
+bool SculptPanel::patternOnce() const
+{
+    return m_patternPress->currentIndex() == 1;
+}
+
+double SculptPanel::patternTurn() const
+{
+    return m_patternTurn->value();
 }
 
 void SculptPanel::addOwnPattern(const SculptPattern& pattern)

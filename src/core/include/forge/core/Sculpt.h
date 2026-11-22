@@ -50,6 +50,8 @@ std::shared_ptr<const PictureData> patternImage(const SculptPattern& pattern);
 const std::vector<std::string>& builtInPatterns();
 // How deep a Pattern stroke presses (negative: engraved): a share of its repeat size.
 double patternDepth(const SculptStroke& stroke);
+// A stamp's brush radius: enough to reach its picture's corners (`tile` wide).
+double stampRadius(const PictureData& image, double tile);
 
 // Mirror planes through `centre`, each across one axis: what the brush does on one side
 // happens on the other too.
@@ -136,8 +138,11 @@ public:
     // Both return the points changed.
     // Pattern: dabs between beginPattern and endPattern press `image` in (light parts
     // highest), repeating every `tile` mm across the surface, up to `depth` mm (below the
-    // surface if negative). Going over the same place again doesn't press it deeper.
-    void beginPattern(std::shared_ptr<const PictureData> image, double tile, double depth);
+    // surface if negative), turned `turn` degrees round the facing. Going over the same
+    // place again doesn't press it deeper. `once`: a stamp, the picture pressed once,
+    // `tile` mm wide, centred on the first dab (nothing outside it).
+    void beginPattern(std::shared_ptr<const PictureData> image, double tile, double depth, double turn = 0.0,
+                      bool once = false);
     void endPattern();
 
     std::pair<std::uint32_t, std::uint32_t> clearMask();
@@ -196,6 +201,9 @@ private:
         std::shared_ptr<const PictureData> image;
         double tile = 1.0;
         double depth = 0.0;
+        double turn = 0.0;
+        bool once = false;
+        std::array<double, 3> origin{0, 0, 0};  // a stamp's middle
         bool framed = false;  // u, v set (from the first dab's facing)
         std::array<double, 3> u{1, 0, 0}, v{0, 1, 0};
         struct Base {

@@ -315,6 +315,10 @@ json bodyToJson(const Body& b)
                 if (st.pattern >= 0) {
                     sj["pattern"] = st.pattern;
                     sj["tile"] = st.tile;
+                    if (st.turn != 0.0)
+                        sj["turn"] = st.turn;
+                    if (st.once)
+                        sj["once"] = true;
                 }
                 strokes.push_back(std::move(sj));
             }
@@ -793,6 +797,8 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
                     st.finest = s.value("finest", 0.0);
                     st.pattern = s.value("pattern", -1);
                     st.tile = s.value("tile", 0.0);
+                    st.turn = s.value("turn", 0.0);
+                    st.once = s.value("once", false);
                     const auto dabs = s.value("dabs", std::vector<float>{});
                     for (std::size_t i = 0; i + 2 < dabs.size(); i += 3)
                         st.dabs.push_back({dabs[i], dabs[i + 1], dabs[i + 2]});

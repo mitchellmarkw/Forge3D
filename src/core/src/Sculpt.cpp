@@ -699,7 +699,8 @@ std::pair<std::uint32_t, std::uint32_t> Sculptor::applyFrom(const Dab& dab, cons
         const std::size_t before = m_mesh.vertexCount();
         // A pattern needs triangles a good deal smaller than one repeat of it.
         const double limit = dab.brush == Brush::Pattern && m_pattern
-                                 ? std::max(m_detail, std::min(dab.radius * 0.08, m_pattern->tile / 24.0))
+                                 ? std::max(m_detail, std::min(dab.radius * 0.08,
+                                                               m_pattern->tile / (m_pattern->once ? 64.0 : 24.0)))
                                  : std::max(m_detail, dab.radius * 0.08);
         if (splitAround(touched, limit)) {
             grownFrom = std::uint32_t(before);
@@ -830,11 +831,19 @@ std::pair<std::uint32_t, std::uint32_t> Sculptor::applyFrom(const Dab& dab, cons
             // time (so strokes that meet line up).
             const V3 n = areaNormal;
             const V3 ref = std::abs(n.z) < 0.9 ? V3{0, 0, 1} : V3{1, 0, 0};
-            V3 u = cross(n, ref);
-            u = u * (1.0 / len(u));
-            const V3 v = cross(n, u);
+            V3 u0 = cross(n, ref);
+            u0 = u0 * (1.0 / len(u0));
+            const V3 v0 = cross(n, u0);
+            // Turned round the facing.
+            const double a = layer.turn * 3.14159265358979 / 180.0;
+            const V3 u = u0 * std::cos(a) + v0 * std::sin(a);
+            const V3 v = v0 * std::cos(a) - u0 * std::sin(a);
             layer.u = {u.x, u.y, u.z};
             layer.v = {v.x, v.y, v.z};
+            // A stamp's middle: the first dab's, seen from its first image.
+            const Vec3 middle = m_dabSymmetry.centre;
+            const Vec3 back = m_dabSymmetry.mirrored({c.x - middle[0], c.y - middle[1], c.z - middle[2]}, m_dabImage);
+            layer.origin = {back[0] + middle[0], back[1] + middle[1], back[2] + middle[2]};
             layer.framed = true;
         }
         const PictureData& image = *layer.image;
@@ -862,7 +871,12 @@ std::pair<std::uint32_t, std::uint32_t> Sculptor::applyFrom(const Dab& dab, cons
                 base.facing = {m_mesh.normals[3 * v], m_mesh.normals[3 * v + 1], m_mesh.normals[3 * v + 2]};
             }
             const V3 from{base.at[0], base.at[1], base.at[2]};
-            const float w = float(falloff(len(from - c), dab.radius) * (1.0 - double(maskAt(v))));
+            // A stamp's picture makes its own edges: all of it, wherever the brush reaches,
+            // on the surface facing the way it's pressed (not round the back of a thin part).
+            const V3 facing{base.facing[0], base.facing[1], base.facing[2]};
+            const float w = float((layer.once ? (len(from - c) <= dab.radius && dot(facing, areaNormal) > 0.1 ? 1.0 : 0.0)
+                                              : falloff(len(from - c), dab.radius)) *
+                                  (1.0 - double(maskAt(v))));
             if (!(w > base.done))
                 continue;  // had as much already: going over again doesn't press deeper
             base.done = w;
@@ -872,8 +886,18 @@ std::pair<std::uint32_t, std::uint32_t> Sculptor::applyFrom(const Dab& dab, cons
             const Vec3 back = m_dabSymmetry.mirrored({from.x - middle[0], from.y - middle[1], from.z - middle[2]},
                                                      m_dabImage);
             const V3 q{back[0] + middle[0], back[1] + middle[1], back[2] + middle[2]};
-            const double h = height(dot(q, V3{layer.u[0], layer.u[1], layer.u[2]}) / tileW,
-                                    dot(q, V3{layer.v[0], layer.v[1], layer.v[2]}) / tileH);
+            double h = 0.0;
+            if (layer.once) {
+                // Once, centred: nothing outside the picture.
+                const V3 o{layer.origin[0], layer.origin[1], layer.origin[2]};
+                const double s = dot(q - o, V3{layer.u[0], layer.u[1], layer.u[2]}) / tileW + 0.5;
+                const double t = 0.5 - dot(q - o, V3{layer.v[0], layer.v[1], layer.v[2]}) / tileH;
+                if (s >= 0.0 && s <= 1.0 && t >= 0.0 && t <= 1.0)
+                    h = height(std::min(s, 0.9999), std::min(t, 0.9999));
+            } else {
+                h = height(dot(q, V3{layer.u[0], layer.u[1], layer.u[2]}) / tileW,
+                           dot(q, V3{layer.v[0], layer.v[1], layer.v[2]}) / tileH);
+            }
             moved[i] = from + V3{base.facing[0], base.facing[1], base.facing[2]} * (layer.depth * h * w);
         }
         break;
@@ -1169,12 +1193,15 @@ void Sculptor::endSnake()
 
 static_assert(int(Brush::Pattern) == file::kLastSculptBrush, "files must be able to hold every brush");
 
-void Sculptor::beginPattern(std::shared_ptr<const PictureData> image, double tile, double depth)
+void Sculptor::beginPattern(std::shared_ptr<const PictureData> image, double tile, double depth, double turn,
+                            bool once)
 {
     m_pattern.emplace();
     m_pattern->image = std::move(image);
     m_pattern->tile = std::max(tile, 1e-3);
     m_pattern->depth = depth;
+    m_pattern->turn = turn;
+    m_pattern->once = once;
 }
 
 void Sculptor::endPattern()
@@ -1413,7 +1440,7 @@ void replay(Sculptor& sculptor, const SculptStroke& stroke, const Mesh& start,
         if (stroke.pattern < 0 || stroke.pattern >= int(patterns.size()))
             return;  // its pattern is missing: nothing to press
         sculptor.beginPattern(patternImage(patterns[std::size_t(stroke.pattern)]), stroke.tile,
-                              patternDepth(stroke));
+                              patternDepth(stroke), stroke.turn, stroke.once);
     }
     Dab dab;
     dab.radius = stroke.radius;
