@@ -30,6 +30,7 @@
 #include "HollowPanel.h"
 #include "MouldPanel.h"
 #include "PortPanel.h"
+#include "HandPanel.h"
 #include "PoseFigurePanel.h"
 #include "PaintPanel.h"
 #include "JointStandardsDialog.h"
@@ -43,6 +44,7 @@
 #include "forge/core/Hollow.h"
 #include "forge/core/Mould.h"
 #include "forge/core/Port.h"
+#include "forge/core/Hand.h"
 #include "MaskPanel.h"
 #include "ReferencePanel.h"
 #include "ScaleCalculator.h"
@@ -641,6 +643,8 @@ void MainWindow::createActions()
             endMould();
         else if (m_portMode.active)
             endPort();
+        else if (m_handMode.active)
+            endHand();
         else if (m_poseFigureMode.active)
             endPoseFigure();
         else if (m_paintMode.active)
@@ -1096,6 +1100,11 @@ void MainWindow::createActions()
         }
         startHollow(history::tip(m_doc, id), false);
     });
+    m_handAction = new QAction(tr("Make Hand"), this);
+    m_handAction->setToolTip(tr("Make Hand: fists, gripping, open, relaxed and pointing hands at your figure's scale, "
+                                "with the socket for the wrist peg"));
+    m_handAction->setStatusTip(m_handAction->toolTip());
+    connect(m_handAction, &QAction::triggered, this, &MainWindow::startHand);
     m_portAction = new QAction(tr("Hand Ports"), this);
     m_portAction->setToolTip(tr("Hand Ports: a wrist peg on an arm for swappable hands, the socket for it in each "
                                 "hand, and grip holes through hands sized to weapons' handles"));
@@ -1538,6 +1547,7 @@ void MainWindow::createToolBar()
         {m_hollowAction, "hollow"},
         {m_mouldAction, "mould"},
         {m_portAction, "ports"},
+        {m_handAction, "hand"},
         {m_poseFigureAction, "pose-figure"},
         {m_paintAction, "paint"},
         {m_cutPartsAction, "cut-parts"},
@@ -1697,7 +1707,7 @@ void MainWindow::createToolBar()
     Page sculpt = page(tr("Sculpt"), tr("Sculpting brushes"));
     group(sculpt, tr("Brushes"), {button(m_sculptAction), button(m_paintAction)});
     group(sculpt, tr("Whole Shape"), {button(m_smoothAction), button(m_simplifyAction), button(m_poseFigureAction),
-                                      button(m_cutPartsAction)});
+                                      button(m_cutPartsAction), button(m_handAction)});
     common(sculpt);
 
     Page viewPage = page(tr("View"), tr("Turn, slide and zoom the view; look inside; the build plate"));
@@ -2408,6 +2418,24 @@ void MainWindow::createDocks()
     stackLayout->addWidget(m_hollowPanel);
     m_hollowPanel->hide();
     connect(m_hollowPanel, &HollowPanel::changed, this, &MainWindow::updateHollowPreview);
+    m_handPanel = new HandPanel;
+    stackLayout->addWidget(m_handPanel);
+    m_handPanel->hide();
+    m_handTimer = new QTimer(this);
+    m_handTimer->setSingleShot(true);
+    m_handTimer->setInterval(200);
+    connect(m_handTimer, &QTimer::timeout, this, &MainWindow::updateHandPreview);
+    connect(m_handPanel, &HandPanel::changed, this, [this] { m_handTimer->start(); });
+    connect(m_handPanel, &HandPanel::applyRequested, this, &MainWindow::applyHand);
+    connect(m_handPanel, &HandPanel::cancelRequested, this, &MainWindow::endHand);
+    connect(m_handPanel->standardRow(), &StandardRow::chosen, this, [this](int index) {
+        if (index >= 0 && index < int(m_standardPorts.size()) && m_standardPorts[std::size_t(index)].socket)
+            m_handPanel->setWrist(*m_standardPorts[std::size_t(index)].socket);
+    });
+    connect(m_handPanel->standardRow(), &StandardRow::saveRequested, this, [this] {
+        if (const auto w = m_handPanel->wrist())
+            saveToStandard(false, &*w);
+    });
     m_portPanel = new PortPanel;
     stackLayout->addWidget(m_portPanel);
     m_portPanel->hide();
@@ -3145,7 +3173,7 @@ void MainWindow::onLeftPressed(const QVector3D& origin, const QVector3D& directi
         m_patternMode.active || m_threadMode.active || m_socketMode.active || m_joinMode.active ||
         m_maskMode.active || m_hollowMode.active || m_panelLineMode.active || m_poseFigureMode.active ||
         m_paintMode.active || m_cutPartsMode.active || m_mouldMode.active ||
-        m_portMode.active)
+        m_portMode.active || m_handMode.active)
         return;  // shapes stay put while the tool is open
 
     if (handle.valid() && multiSelection()) {
@@ -5085,7 +5113,8 @@ bool MainWindow::toolOpen() const
            m_socketMode.active || m_joinMode.active || m_maskMode.active || m_referenceMode.active ||
            m_hingeMode.active || m_poseMode.active || m_printCheckMode.active || m_mannequinOpen ||
            m_hollowMode.active || m_stampMode.active || m_panelLineMode.active || m_poseFigureMode.active ||
-           m_paintMode.active || m_cutPartsMode.active || m_mouldMode.active || m_portMode.active;
+           m_paintMode.active || m_cutPartsMode.active || m_mouldMode.active || m_portMode.active ||
+           m_handMode.active;
 }
 
 void MainWindow::startEmboss(ObjectId target, bool editing)
@@ -7770,6 +7799,16 @@ void MainWindow::refreshScene()
             marks.helper = true;
             items.push_back(marks);
         }
+        // Make Hand: the hand to be made, see-through.
+        if (m_handMode.active && m_handMode.preview && !m_handMode.preview->empty()) {
+            DisplayItem h;
+            h.id = kMouldItem - 6;
+            h.mesh = m_handMode.preview;
+            h.color = QVector3D(0.85f, 0.62f, 0.45f);
+            h.alpha = 0.75f;
+            h.helper = true;
+            items.push_back(h);
+        }
         // Hand Ports: the peg gold, a hole red, seen through.
         if (m_portMode.active && m_portMode.shape && !m_portMode.shape->empty()) {
             DisplayItem h;
@@ -8053,6 +8092,7 @@ void MainWindow::refreshScene()
     m_hollowAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_mouldAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_portAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
+    m_handAction->setEnabled(!toolOpen());
     m_poseFigureAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_paintAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_cutPartsAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
@@ -12039,6 +12079,7 @@ void MainWindow::refreshStandardRows()
     m_socketPanel->standardRow()->setJoints(name, sockets);
     m_hingePanel->standardRow()->setJoints(name, hinges);
     m_portPanel->standardRow()->setJoints(name, ports);
+    m_handPanel->standardRow()->setJoints(name, ports);
 }
 
 void MainWindow::saveToStandard(bool hinge, const SocketFinish* socket)
@@ -13486,6 +13527,112 @@ void MainWindow::endMannequin()
     QTimer::singleShot(0, this, [this] { resizeDocks({m_propsDock}, {m_propsDockWidth}, Qt::Horizontal); });
     statusBar()->clearMessage();
     refreshCommandState();
+}
+
+// ---- Make Hand ------------------------------------------------------------------------
+
+void MainWindow::startHand()
+{
+    if (toolOpen())
+        return;
+    if (m_dragState.kind != Drag::Kind::None)
+        cancelDrag();
+    HandMode mode;
+    mode.active = true;
+    // Beside the selected shape (an arm, a figure), else in the plate's middle.
+    if (const ObjectId id = selectedOne(); id != kInvalidId && m_doc.find(id)) {
+        const Bounds b = m_doc.worldBounds(id);
+        const double length = m_handPanel->settings().length;
+        mode.x = double(b.max[0]) + length * (m_handPanel->pair() ? 1.6 : 0.8);
+        mode.y = (double(b.min[1]) + b.max[1]) / 2.0;
+    }
+    m_handMode = std::move(mode);
+    refreshStandardRows();
+    m_handPanel->start();
+    m_propsDockWidth = m_propsDock->width();
+    m_properties->hide();
+    m_handPanel->show();
+    statusBar()->showMessage(tr("Make Hand: choose the pose and size, then Make. Esc cancels."));
+    updateHandPreview();
+    refreshCommandState();
+}
+
+void MainWindow::endHand()
+{
+    if (!m_handMode.active)
+        return;
+    m_handTimer->stop();
+    m_handMode = HandMode{};
+    m_handPanel->hide();
+    m_properties->show();
+    QTimer::singleShot(0, this, [this] { resizeDocks({m_propsDock}, {m_propsDockWidth}, Qt::Horizontal); });
+    statusBar()->clearMessage();
+    refreshScene();
+    refreshCommandState();
+}
+
+void MainWindow::updateHandPreview()
+{
+    auto& mode = m_handMode;
+    if (!mode.active)
+        return;
+    m_handTimer->stop();
+    mode.preview.reset();
+    try {
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        struct RestoreCursor {
+            ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
+        } restore;
+        const HandSettings s = m_handPanel->settings();
+        const auto wrist = m_handPanel->wrist();
+        if (wrist)
+            socket::check(*wrist);
+        const double r = wrist ? hand::socketRadius(*wrist) : 0.0, d = wrist ? hand::socketDepth(*wrist) : 0.0;
+        std::vector<Mesh> pieces;
+        const bool pair = m_handPanel->pair();
+        const double gap = s.length * 0.9;
+        for (int i = 0; i < (pair ? 2 : 1); ++i) {
+            HandSettings h = s;
+            if (pair)
+                h.left = i == 1;
+            Mesh m = hand::make(h, r, d).mesh;
+            const double dx = mode.x + (pair ? (i == 0 ? -gap / 2.0 : gap / 2.0) : 0.0);
+            for (std::size_t v = 0; v < m.vertexCount(); ++v) {
+                m.positions[3 * v] += float(dx);
+                m.positions[3 * v + 1] += float(mode.y);
+            }
+            pieces.push_back(std::move(m));
+        }
+        mode.preview = together(pieces);
+        m_handPanel->setStatus(tr("Make adds %1, standing on the wrist.")
+                                   .arg(pair ? tr("the pair") : QString::fromStdString(hand::nameOf(s))),
+                               false);
+        m_handPanel->setApplyEnabled(true);
+    } catch (const std::exception& e) {
+        m_handPanel->setStatus(QString::fromUtf8(e.what()), true);
+        m_handPanel->setApplyEnabled(false);
+    }
+    refreshScene();
+}
+
+void MainWindow::applyHand()
+{
+    auto& mode = m_handMode;
+    if (!mode.active)
+        return;
+    try {
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        struct RestoreCursor {
+            ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
+        } restore;
+        const std::vector<ObjectId> made = hand::addHands(m_stack, m_doc, m_handPanel->settings(),
+                                                          m_handPanel->wrist(), m_handPanel->pair(), mode.x, mode.y);
+        endHand();
+        qInfo().noquote() << "Command:" << QString::fromStdString(m_stack.undoLabel());
+        setSelection(made);
+    } catch (const std::exception& e) {
+        m_handPanel->setStatus(tr("The hand couldn't be made: %1").arg(QString::fromUtf8(e.what())), true);
+    }
 }
 
 // ---- Hand Ports -----------------------------------------------------------------------

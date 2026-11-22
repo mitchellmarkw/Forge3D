@@ -84,6 +84,7 @@ class MannequinPanel;
 class HollowPanel;
 class MouldPanel;
 class PortPanel;
+class HandPanel;
 class PoseFigurePanel;
 class PaintPanel;
 class JointStandardsDialog;
@@ -896,6 +897,21 @@ private:
     void updatePortPreview();
     void applyPort();
     PortFinish portSettings() const;
+
+    // Make Hand: fists, gripping, open, relaxed and pointing hands at a figure's scale
+    QAction* m_handAction = nullptr;
+    HandPanel* m_handPanel = nullptr;
+    QTimer* m_handTimer = nullptr;
+    struct HandMode {
+        bool active = false;
+        double x = 0.0, y = 0.0;  // where the hand (the pair's middle) stands
+        std::shared_ptr<const Mesh> preview;
+    };
+    HandMode m_handMode;
+    void startHand();
+    void endHand();
+    void updateHandPreview();
+    void applyHand();
 
     // Pose Figure: bones in one sculpted figure, to bend it at its joints
     QAction* m_poseFigureAction = nullptr;

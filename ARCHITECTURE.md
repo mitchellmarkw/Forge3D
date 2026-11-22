@@ -1577,3 +1577,16 @@ and sharp across edges.
   a snap-in ball socket for a ball end), so Quick Socket changes it. `fromSocket` / `jointFor` turn a standard's
   peg or ball joints into a peg or grip size and back; the Hand Ports panel's StandardRow offers them.
 - Port steps count as joints for "keep joint sizes" when scaling. File format 43.
+
+## Make Hand (slice 71, 0.80.0)
+
+- `hand::make` builds the hand as a signed-distance field in hand units (the hand's length is 1): a rounded-box palm
+  and wrist, each finger three capsules and the thumb three more plus the ball of it, smoothly joined, cut flat at the
+  wrist, and meshes it with `meshkernel::levelSet` (L/75 apart). A left hand mirrors the field in X.
+- Poses bend each finger's joints round a fixed axis towards the palm. Fist, gripping and pointing fingers are
+  *wrapped*: each joint bends as far as it can (in 2° steps, up to its limit) before the segment would come within
+  the rod's radius plus its own of a rod in front of the palm (the handle with its fit; a thin core for a fist), so a
+  grip fits the handle snugly. The thumb lies across the front of the curled fingers.
+- The wrist is made wide and long enough for the socket's room (`socketRadius`, `socketDepth`) plus a wall.
+- `hand::addHands` (one macro) adds the mesh (`hinge::pieceBody`), a Socket step at the wrist face (opening down) and,
+  gripping, a Port grip step along the handle's line. No file-format change.

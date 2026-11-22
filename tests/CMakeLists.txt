@@ -61,6 +61,7 @@ add_executable(forge_tests
     test_limb_cut.cpp
     test_mould.cpp
     test_port.cpp
+    test_hand.cpp
     test_stamp.cpp
     test_panel_lines.cpp
     test_kit.cpp
