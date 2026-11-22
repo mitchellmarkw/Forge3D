@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.78.1 Beta — Make Mould: split either way, undercuts, more pieces (2026-11-21)
+
+- **Split direction**: horizontal (top and bottom halves, as before) or vertical (left and right, or front and
+  back). The cut starts where the part is widest that way; "Cut at" sets where.
+- **Undercuts** are found as you go: the places a piece would catch on the part as it's pulled straight off show red
+  on the part, with how much of the surface that is. **Find Best Split** tries each direction at several places and
+  picks the one with the least undercut (of those about as good, the widest). A standing figure usually splits
+  front and back.
+- **Three- and four-part moulds**: a second cut, another way, through one half or both. Each piece can come away
+  along either of its cuts, which frees more undercuts. Keys go on the second cut too (two in each half it cuts).
+  The pieces are named by where they are ("… mould (top, left)"); changing one changes them all. The number of
+  pieces and the cuts' directions are set when the mould is made.
+- The spout and vents still run straight up; with a vertical cut they're split between the pieces. A mould with
+  more than two pieces takes a few seconds longer to make.
+- Saved files are now format 42.
+
 ## 0.78.0 Beta — Slice 69: Make Mould (2026-11-21)
 
 - **Make Mould** (Print/Save tab): a two-part mould box round the selected shape, for casting resin copies of a

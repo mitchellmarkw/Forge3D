@@ -2395,7 +2395,21 @@ void MainWindow::createDocks()
     connect(m_mouldPanel, &MouldPanel::changed, this, &MainWindow::updateMouldPreview);
     connect(m_mouldPanel, &MouldPanel::widestRequested, this, [this] {
         if (m_mouldMode.active)
-            m_mouldPanel->setParting(mould::widest(m_mouldMode.part));
+            m_mouldPanel->setParting(mould::widest(m_mouldMode.part, m_mouldPanel->settings().axis));
+    });
+    connect(m_mouldPanel, &MouldPanel::directionChanged, this, [this] {
+        if (!m_mouldMode.active)
+            return;
+        m_mouldPanel->setParting(mould::widest(m_mouldMode.part, m_mouldPanel->settings().axis));
+        updateMouldPreview();
+    });
+    connect(m_mouldPanel, &MouldPanel::bestRequested, this, [this] {
+        if (!m_mouldMode.active)
+            return;
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        const MouldFinish best = mould::bestSplit(m_mouldMode.part, mouldSettings());
+        QApplication::restoreOverrideCursor();
+        m_mouldPanel->setSplit(best.axis, best.parting);
     });
     connect(m_mouldPanel, &MouldPanel::placeVentsRequested, this, [this] {
         auto& mode = m_mouldMode;
@@ -2403,7 +2417,8 @@ void MainWindow::createDocks()
             return;
         const MouldFinish f = mouldSettings();
         mode.vents.clear();
-        for (const Vec3& v : mould::highSpots(mode.part, f.parting, mode.spout, f.ventSize))
+        const double above = f.axis == 2 ? f.parting : -std::numeric_limits<double>::infinity();
+        for (const Vec3& v : mould::highSpots(mode.part, above, mode.spout, f.ventSize))
             mode.vents.push_back(v);
         updateMouldPreview();
     });
@@ -3993,7 +4008,7 @@ constexpr std::uint64_t kMeasureHoverItem = ~std::uint64_t{0} - 8;
 constexpr std::uint64_t kMeasureLineItem = ~std::uint64_t{0} - 9;
 constexpr std::uint64_t kMeasureCentreItem = ~std::uint64_t{0} - 10;
 constexpr std::uint64_t kMannequinItem = ~std::uint64_t{0} - 20;
-constexpr std::uint64_t kMouldItem = ~std::uint64_t{0} - 30;  // to - 33: the Make Mould helpers
+constexpr std::uint64_t kMouldItem = ~std::uint64_t{0} - 30;  // to - 34: the Make Mould helpers
 
 // Thin six-sided tubes along lines: how picked edges are drawn.
 std::shared_ptr<const Mesh> tubes(const std::vector<const std::vector<Vec3>*>& lines, float radius)
@@ -7710,7 +7725,7 @@ void MainWindow::refreshScene()
             marks.helper = true;
             items.push_back(marks);
         }
-        // Make Mould: the box see-through, the parting face yellow, the spout and vents red
+        // Make Mould: the box see-through, the cuts yellow, the undercuts, spout and vents red
         // and the keys gold (seen through).
         if (m_mouldMode.active) {
             const QMatrix4x4 frame = toQMatrix(m_mouldMode.toPlate);
@@ -7729,6 +7744,7 @@ void MainWindow::refreshScene()
                 h.helper = true;
                 items.push_back(h);
             };
+            helper(m_mouldMode.undercuts, QVector3D(1.0f, 0.1f, 0.05f), 1.0f, true);
             helper(m_mouldMode.channels, QVector3D(0.9f, 0.15f, 0.1f), 1.0f, true);
             helper(m_mouldMode.keys, QVector3D(0.9f, 0.68f, 0.18f), 1.0f, true);
             helper(m_mouldMode.sheet, QVector3D(1.0f, 0.85f, 0.2f), 0.4f, false);
@@ -13413,6 +13429,9 @@ MouldFinish MainWindow::mouldSettings() const
     MouldFinish f = m_mouldPanel->settings();
     f.spout = m_mouldMode.spout;
     f.vents = m_mouldMode.vents;
+    // Which piece: the first (the others follow from it).
+    f.top = true;
+    f.side2 = f.second && f.secondIn != -1 ? 1 : 0;
     return f;
 }
 
@@ -13460,9 +13479,8 @@ void MainWindow::startMould(ObjectId target, bool editing)
     mode.vents = f.vents;
     m_mouldMode = std::move(mode);
     const QString name = QString::fromStdString(body->name);
-    const Bounds& pb = m_mouldMode.partBounds;
     m_mouldPanel->start(editing ? tr("Change the mould '%1'").arg(name) : tr("Make a mould of '%1'").arg(name), editing,
-                        f, double(pb.min[2]) + 0.1, double(pb.max[2]) - 0.1);
+                        f, m_mouldMode.partBounds);
     m_propsDockWidth = m_propsDock->width();
     m_properties->hide();
     m_mouldPanel->show();
@@ -13502,7 +13520,7 @@ void MainWindow::mouldClick(const QVector3D& origin, const QVector3D& direction)
     }
     const Vec3 p = mode.toPlate.inverse().apply(spot->point);
     const MouldFinish f = mouldSettings();
-    if (p[2] <= f.parting) {
+    if (f.axis == 2 && p[2] <= f.parting) {
         m_mouldPanel->setStatus(tr("Click the part above the parting face (yellow): the spout and vents go up out of "
                                    "the top half."),
                                 true);
@@ -13528,15 +13546,18 @@ void MainWindow::updateMouldPreview()
     const MouldFinish f = mouldSettings();
     const Bounds& pb = mode.partBounds;
     mode.box = together({mould::boxMesh(mould::box(pb, f.wall))});
-    mode.sheet = together({mould::partingSheet(pb, f)});
+    mode.sheet = together({mould::partingSheets(pb, f)});
     mode.channels = together({mould::channels(pb, f)});
-    mode.keys = f.keys ? together({mould::keys(pb, f, false)}) : nullptr;
+    mode.keys = f.keys ? together({mould::keys(pb, f)}) : nullptr;
+    const mould::Undercuts u = mould::undercuts(mode.part, f);
+    mode.undercuts = u.triangles.empty() ? nullptr : together({mould::undercutMesh(mode.part, u)});
+    m_mouldPanel->setUndercut(u.area, u.total);
     int vents = 0;
     for (const auto& v : f.vents)
-        if (v[2] > f.parting)
+        if (f.axis != 2 || v[2] > f.parting)
             ++vents;
     m_mouldPanel->setVentCount(vents);
-    const bool spoutOk = f.spout[2] > f.parting;
+    const bool spoutOk = f.axis != 2 || f.spout[2] > f.parting;
     if (!spoutOk)
         m_mouldPanel->setStatus(tr("The spout is below the parting face: lower the parting face, or choose \"The "
                                    "spout\" under Clicking the part places and click the part higher up."),
@@ -13546,8 +13567,8 @@ void MainWindow::updateMouldPreview()
                                    "by themselves."),
                                 true);
     else
-        m_mouldPanel->setStatus(tr("Apply makes the two halves (a few seconds on a big part), closed round the part. "
-                                   "Print the top half upside down; the bottom half as it sits."),
+        m_mouldPanel->setStatus(tr("Apply makes the pieces (a few seconds on a big part), closed round the part. "
+                                   "Print each piece with its cut face down."),
                                 false);
     m_mouldPanel->setApplyEnabled(spoutOk);
     refreshScene();

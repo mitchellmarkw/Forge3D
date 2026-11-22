@@ -326,7 +326,7 @@ enum class BooleanOp {
     Posed,        // a figure bent at its joints by a simple skeleton inside it (see `posed`)
     Paint,        // colours brushed onto the surface (see `paint`; the shape stays as it was)
     LimbCut,      // a figure cut at a joint: the limb, or the rest (see `limbCut`)
-    Mould,        // one half of a two-part mould box round the part (see `mould`)
+    Mould,        // one piece of a mould box round the part (see `mould`)
 };
 
 // What happens to the picked edges of a shape.
@@ -733,15 +733,25 @@ struct LimbCutFinish {
     bool operator==(const LimbCutFinish&) const = default;
 };
 
-// A Mould step: one half of a two-part box round the part, for casting copies of it.
-// The box is the part's box with `wall` all round, the part taken out, parted level at
-// height `parting`. Registration keys in the corners: pegs on the bottom half, holes
-// (bigger by `keyFit`) in the top. A pour spout from `spout` (where it meets the part,
-// near its top) and air vents from each of `vents` run straight up out of the top. In the
-// step's coordinates.
+// A Mould step: one piece of a mould box round the part, for casting copies of it. The
+// box is the part's box with `wall` all round, the part taken out, parted by a flat face
+// square to `axis` (2: level, top and bottom halves; 0: upright, left and right; 1:
+// upright, front and back) at `parting` along it. A second cut (three or four pieces)
+// square to `axis2` at `parting2` goes through both halves (`secondIn` 0) or only the
+// half on one side of the first (+1: the `top` side, -1: the other). Registration keys
+// near the corners of each cut: pegs on the piece on the low side, holes (bigger by
+// `keyFit`) on the high side. A pour spout from `spout` (where it meets the part, near its
+// top) and air vents from each of `vents` run straight up out of the top. In the step's
+// coordinates.
 struct MouldFinish {
-    bool top = false;       // this half is the top one (false: the bottom)
-    double parting = 0.0;   // the height of the flat face where the halves meet
+    bool top = false;       // this piece is on the side `axis` points to (top, right or back)
+    int axis = 2;
+    double parting = 0.0;   // where the first cut is, along `axis`
+    bool second = false;    // a second cut
+    int axis2 = 0;
+    double parting2 = 0.0;
+    int secondIn = 0;
+    int side2 = 0;          // this piece's side of the second cut (+1: the way axis2 points; 0: not cut)
     double wall = 8.0;      // mm round the part
     bool keys = true;
     double keySize = 6.0;   // a key's diameter at the parting face

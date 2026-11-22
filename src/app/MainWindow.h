@@ -863,7 +863,7 @@ private:
         std::array<double, 3> spout{0.0, 0.0, 0.0};  // step coordinates
         std::vector<std::array<double, 3>> vents;
         std::shared_ptr<const Mesh> shownPart;   // editing: the part, shown instead of the halves
-        std::shared_ptr<const Mesh> box, sheet, channels, keys;  // drawn helpers (step coordinates)
+        std::shared_ptr<const Mesh> box, sheet, channels, keys, undercuts;  // drawn helpers (step coordinates)
     };
     MouldMode m_mouldMode;
     void startMould(ObjectId target, bool editing);
