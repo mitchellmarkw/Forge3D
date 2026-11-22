@@ -311,6 +311,20 @@ void Document::validateBoolean(const Body& body, const std::map<ObjectId, Object
         if (!body.boolean->mould)
             throw std::invalid_argument("Mould needs its settings");
         mould::check(*body.boolean->mould);
+    } else if (op == BooleanOp::Linked) {
+        if (!ops.empty())
+            throw std::invalid_argument("A linked mirror has no parts of its own");
+        if (!body.boolean->link || body.boolean->link->source == kInvalidId)
+            throw std::invalid_argument("A linked mirror needs the shape it mirrors");
+        if (body.boolean->link->source == body.id)
+            throw std::invalid_argument("A shape can't mirror itself");
+        const auto& n = body.boolean->link->normal;
+        const double len = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+        if (!(len > 1e-9) || !std::isfinite(len))
+            throw std::invalid_argument("A linked mirror needs a mirror direction");
+        for (double v : body.boolean->link->point)
+            if (!std::isfinite(v))
+                throw std::invalid_argument("A linked mirror's plane is damaged");
     } else if (op == BooleanOp::Port) {
         if (ops.size() != 1)
             throw std::invalid_argument("A port goes on exactly one shape");
@@ -646,7 +660,7 @@ TopoDS_Shape Document::combine(const BooleanSpec& spec) const
             op == BooleanOp::Socket || op == BooleanOp::Hinge || op == BooleanOp::MaskSplit ||
             op == BooleanOp::Hollow || op == BooleanOp::Stamp || op == BooleanOp::PanelLines ||
             op == BooleanOp::Posed || op == BooleanOp::Paint || op == BooleanOp::LimbCut ||
-            op == BooleanOp::Mould || op == BooleanOp::Port)
+            op == BooleanOp::Mould || op == BooleanOp::Port || op == BooleanOp::Linked)
             throw GeometryError(toString(op) + " is worked out by the mesh engine");
         if (op == BooleanOp::Pattern)
             return patternShape(spec);
@@ -779,6 +793,7 @@ TopoDS_Shape Document::combine(const BooleanSpec& spec) const
             case BooleanOp::LimbCut:
             case BooleanOp::Mould:
             case BooleanOp::Port:
+            case BooleanOp::Linked:
                 break;  // handled above / by the mesh engine
             }
         }
@@ -898,7 +913,7 @@ TopoDS_Shape Document::previewCombine(const BooleanSpec& spec) const
          spec.op == BooleanOp::ExtrudeDown || spec.op == BooleanOp::Socket || spec.op == BooleanOp::Hinge ||
          spec.op == BooleanOp::MaskSplit || spec.op == BooleanOp::Hollow || spec.op == BooleanOp::PanelLines ||
          spec.op == BooleanOp::Posed || spec.op == BooleanOp::Paint || spec.op == BooleanOp::LimbCut ||
-         spec.op == BooleanOp::Mould || spec.op == BooleanOp::Port) &&
+         spec.op == BooleanOp::Mould || spec.op == BooleanOp::Port || spec.op == BooleanOp::Linked) &&
         spec.operands.size() != 1)
         throw std::invalid_argument(toString(spec.op) + " works on exactly one shape");
     return combine(spec);
@@ -1142,7 +1157,7 @@ bool Document::specUsesMesh(const BooleanSpec& spec) const
         spec.op == BooleanOp::Socket || spec.op == BooleanOp::Hinge || spec.op == BooleanOp::MaskSplit ||
         spec.op == BooleanOp::Hollow || spec.op == BooleanOp::Stamp || spec.op == BooleanOp::PanelLines ||
         spec.op == BooleanOp::Posed || spec.op == BooleanOp::Paint || spec.op == BooleanOp::LimbCut ||
-        spec.op == BooleanOp::Mould || spec.op == BooleanOp::Port)
+        spec.op == BooleanOp::Mould || spec.op == BooleanOp::Port || spec.op == BooleanOp::Linked)
         return true;  // letters following a surface, and sculpting, only exist as triangles
     for (ObjectId part : spec.operands)
         if (usesMeshEngine(part))
@@ -1173,7 +1188,18 @@ MeshSolid Document::meshSolid(ObjectId id) const
     if (!body)
         throw std::out_of_range("No body with id " + std::to_string(id));
     MeshSolid built;
-    if (body->isBoolean() && usesMeshEngine(id)) {
+    if (body->isBoolean() && body->boolean->op == BooleanOp::Linked) {
+        // Nothing to fall back on: a problem leaves it empty.
+        try {
+            if (body->isOff())
+                throw GeometryError("Turned off");
+            built = combineMeshes(*body->boolean);
+            m_problems.erase(id);
+        } catch (const GeometryError& e) {
+            m_problems[id] = e.what();
+            built = meshkernel::fromTriangles({}, {});
+        }
+    } else if (body->isBoolean() && usesMeshEngine(id)) {
         if (!body->isOff() && m_lastPreview && m_lastPreview->spec == *body->boolean &&
             partsUnchanged(*m_lastPreview))
             built = m_lastPreview->solid;
@@ -1405,6 +1431,11 @@ Mesh Document::sculpted(const Mesh& start, const SculptFinish& finish) const
 
 MeshSolid Document::combineMeshes(const BooleanSpec& spec) const
 {
+    if (spec.op == BooleanOp::Linked) {
+        if (!spec.link)
+            throw GeometryError("The linked mirror has lost what it mirrors");
+        return linkedMirror(*spec.link);
+    }
     std::vector<MeshSolid> parts;
     for (ObjectId part : spec.operands)
         parts.push_back(meshkernel::transformed(meshSolid(part), localTransform(part)));
@@ -1861,8 +1892,96 @@ void Document::removeListener(int handle)
     m_listeners.erase(handle);
 }
 
+ObjectId Document::linkedTop(ObjectId source) const
+{
+    // Up through the steps the source is the first part of (not a group's).
+    ObjectId at = source;
+    for (int depth = 0; depth < 10000; ++depth) {
+        const ObjectId up = parentOf(at);
+        const Body* parent = up == kInvalidId ? nullptr : find(up);
+        if (!parent || !parent->isBoolean() || parent->boolean->op == BooleanOp::Group ||
+            parent->boolean->operands.empty() || parent->boolean->operands.front() != at)
+            break;
+        at = up;
+    }
+    return at;
+}
+
+MeshSolid Document::linkedMirror(const MirrorLink& link) const
+{
+    const ObjectId top = linkedTop(link.source);
+    if (!find(top))
+        throw GeometryError("The shape it mirrors is gone");
+    // A link can't take in itself (a linked mirror inside what it mirrors).
+    thread_local std::set<ObjectId> making;
+    if (!making.insert(top).second)
+        throw GeometryError("A linked mirror can't take in its own other side");
+    struct Done {
+        ObjectId id;
+        ~Done() { making.erase(id); }
+    } done{top};
+    Mesh m;
+    meshkernel::triangles(meshSolid(top), m.positions, m.indices);
+    const Transform t = worldTransform(top);
+    const double l = std::sqrt(link.normal[0] * link.normal[0] + link.normal[1] * link.normal[1] +
+                               link.normal[2] * link.normal[2]);
+    const Vec3 n{link.normal[0] / l, link.normal[1] / l, link.normal[2] / l};
+    for (std::size_t i = 0; i < m.vertexCount(); ++i) {
+        const Vec3 p = t.apply({m.positions[3 * i], m.positions[3 * i + 1], m.positions[3 * i + 2]});
+        const double d = (p[0] - link.point[0]) * n[0] + (p[1] - link.point[1]) * n[1] + (p[2] - link.point[2]) * n[2];
+        for (std::size_t k = 0; k < 3; ++k)
+            m.positions[3 * i + k] = float(p[k] - 2.0 * d * n[k]);
+    }
+    for (std::size_t tri = 0; tri + 2 < m.indices.size(); tri += 3)
+        std::swap(m.indices[tri + 1], m.indices[tri + 2]);  // a mirror turns it inside out
+    return meshkernel::fromTriangles(m.positions, m.indices);
+}
+
+void Document::touchLinks(ChangeKind kind, ObjectId id)
+{
+    // Linked mirrors of what changed (or of anything, when something went) are made again.
+    std::vector<ObjectId> changed{id};
+    std::set<ObjectId> done{id};
+    while (!changed.empty()) {
+        const ObjectId c = changed.back();
+        changed.pop_back();
+        ObjectId top = c;
+        for (int depth = 0; depth < 10000 && parentOf(top) != kInvalidId; ++depth)
+            top = parentOf(top);
+        for (const Body& b : m_bodies) {
+            if (!b.isBoolean() || b.boolean->op != BooleanOp::Linked || !b.boolean->link || done.count(b.id))
+                continue;
+            ObjectId theirs = linkedTop(b.boolean->link->source);
+            for (int depth = 0; depth < 10000 && parentOf(theirs) != kInvalidId; ++depth)
+                theirs = parentOf(theirs);
+            if (kind != ChangeKind::Removed && theirs != top && b.boolean->link->source != c)
+                continue;
+            done.insert(b.id);
+            m_shapeCache.erase(b.id);
+            m_meshCache.erase(b.id);
+            m_solidCache.erase(b.id);
+            m_problems.erase(b.id);
+            m_linksToTell.push_back(b.id);
+            changed.push_back(b.id);
+        }
+    }
+}
+
 void Document::notify(ChangeKind kind, ObjectId id)
 {
+    if (!m_tellingLinks) {
+        touchLinks(kind, id);
+        // What's above each touched link changes too; then everyone hears of each.
+        m_tellingLinks = true;
+        const std::vector<ObjectId> links = std::move(m_linksToTell);
+        m_linksToTell.clear();
+        for (ObjectId l : links)
+            invalidate(l, false);
+        m_tellingLinks = false;
+        for (ObjectId l : links)
+            if (find(l))
+                notify(ChangeKind::Modified, l);
+    }
     const Change change{kind, id};
     // Copy so a listener may add or remove listeners while being called.
     const auto listeners = m_listeners;

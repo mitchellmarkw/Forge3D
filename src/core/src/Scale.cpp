@@ -213,6 +213,9 @@ void scaleInto(const Document& doc, ObjectId id, const Vec3& factors, const Vec3
         out.push_back(std::move(next));
         return;
     }
+    if (body->boolean->op == BooleanOp::Linked)
+        throw std::invalid_argument("'" + body->name + "' is a linked mirror: it follows the shape it mirrors. "
+                                    "Resize that one (or unlink it first)");
     if (body->boolean->op == BooleanOp::Port && body->boolean->port) {
         // The spot moves with the part; the peg or hole keeps its size if joints are kept
         // (so it still fits the standard), else grows with an even scale.

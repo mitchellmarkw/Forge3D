@@ -237,6 +237,12 @@ private:
     MeshSolid combineMeshes(const BooleanSpec& spec) const;
     bool specUsesMesh(const BooleanSpec& spec) const;
     void notify(ChangeKind kind, ObjectId id);
+    // Linked mirrors: the step a link follows, its shape, and keeping them up to date.
+    ObjectId linkedTop(ObjectId source) const;
+    MeshSolid linkedMirror(const MirrorLink& link) const;
+    void touchLinks(ChangeKind kind, ObjectId id);
+    std::vector<ObjectId> m_linksToTell;
+    bool m_tellingLinks = false;
 
     std::vector<Body> m_bodies;
     std::map<ObjectId, ObjectId> m_parentOf;  // part -> result

@@ -139,6 +139,7 @@
 #include <QTextDocument>
 #include <QCursor>
 #include <QDialogButtonBox>
+#include <QFormLayout>
 #include <QFile>
 #include <QGuiApplication>
 #include <QScrollBar>
@@ -583,6 +584,14 @@ void MainWindow::createActions()
     addMirror(tr("Left / right (X)"), tr("Flip across X: what was on the left ends up on the right"), 0);
     addMirror(tr("Front / back (Y)"), tr("Flip across Y: what was at the front ends up at the back"), 1);
     addMirror(tr("Upside down (Z)"), tr("Flip across Z: the top ends up at the bottom, still on the plate"), 2);
+    m_mirrorMenu->addSeparator();
+    m_linkedMirror = m_mirrorMenu->addAction(tr("Linked Copy on the Other Side..."));
+    m_linkedMirror->setToolTip(tr("A mirrored copy that keeps up: change the left arm (sculpt it, add a peg...) and "
+                                  "the right one changes too"));
+    connect(m_linkedMirror, &QAction::triggered, this, [this] { linkedMirror(); });
+    m_unlink = m_mirrorMenu->addAction(tr("Unlink"));
+    m_unlink->setToolTip(tr("Makes a linked copy a shape of its own, as it is now: it stops following the other"));
+    connect(m_unlink, &QAction::triggered, this, &MainWindow::unlinkSelected);
 
     m_colourMenu = new QMenu(tr("Colour"), this);
     m_colourMenu->menuAction()->setToolTip(
@@ -4037,6 +4046,113 @@ void MainWindow::manageCustomShapes()
     dialog.exec();
 }
 
+void MainWindow::linkedMirror(ObjectId changing)
+{
+    const Body* linked = changing == kInvalidId ? nullptr : m_doc.find(changing);
+    const ObjectId source = linked ? linked->boolean->link->source : selectedOne();
+    if (!linked && (source == kInvalidId || m_selection.size() != 1 || !m_doc.isTopLevel(source))) {
+        statusBar()->showMessage(tr("Linked copy: select one shape on the plate first."), 6000);
+        return;
+    }
+    // Where the mirror goes: by default the middle of everything else (the body, for an
+    // arm), else the plate's middle.
+    const auto middleOfOthers = [this, source](int axis) {
+        Bounds all;
+        for (const Body& b : m_doc.bodies())
+            if (m_doc.isTopLevel(b.id) && b.id != source &&
+                !(b.isBoolean() && b.boolean->op == BooleanOp::Linked && b.boolean->link &&
+                  b.boolean->link->source == source)) {
+                try {
+                    const Bounds w = m_doc.worldBounds(b.id);
+                    if (w.valid) {
+                        all.expand(w.min[0], w.min[1], w.min[2]);
+                        all.expand(w.max[0], w.max[1], w.max[2]);
+                    }
+                } catch (const std::exception&) {
+                }
+            }
+        return all.valid ? (double(all.min[std::size_t(axis)]) + all.max[std::size_t(axis)]) / 2.0 : 0.0;
+    };
+    QDialog dialog(this);
+    dialog.setWindowTitle(linked ? tr("Move the Mirror") : tr("Linked Copy on the Other Side"));
+    auto* layout = new QVBoxLayout(&dialog);
+    auto* intro = new QLabel(linked ? tr("Where '%1' is mirrored from '%2'.")
+                                          .arg(QString::fromStdString(linked->name),
+                                               QString::fromStdString(m_doc.find(source)
+                                                                          ? m_doc.find(source)->name
+                                                                          : std::string("?")))
+                                    : tr("A mirrored copy of '%1' that keeps up with it: what you do to it later (a "
+                                         "change of size, sculpting, a peg...) shows on the copy too.")
+                                          .arg(QString::fromStdString(m_doc.find(source)->name)));
+    intro->setWordWrap(true);
+    layout->addWidget(intro);
+    auto* across = new QComboBox;
+    across->addItem(tr("Left / right (across X)"));
+    across->addItem(tr("Front / back (across Y)"));
+    auto* acrossLabel = new QLabel(tr("Mirror:"));
+    auto* acrossBox = new QVBoxLayout;
+    acrossBox->setSpacing(0);
+    acrossBox->addWidget(acrossLabel);
+    acrossBox->addWidget(across);
+    layout->addLayout(acrossBox);
+    auto* form = new QFormLayout;
+    auto* at = new QDoubleSpinBox;
+    at->setRange(-10000.0, 10000.0);
+    at->setDecimals(2);
+    at->setSuffix(tr(" mm"));
+    at->setToolTip(tr("Where the mirror is, along X (or Y): the middle of the body for an arm or a leg"));
+    form->addRow(tr("Mirror at:"), at);
+    layout->addLayout(form);
+    auto* middle = new QPushButton(tr("Middle of the Other Shapes"));
+    layout->addWidget(middle);
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+    layout->addWidget(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    if (linked) {
+        const MirrorLink& l = *linked->boolean->link;
+        const int axis = std::abs(l.normal[1]) > std::abs(l.normal[0]) ? 1 : 0;
+        across->setCurrentIndex(axis);
+        at->setValue(l.point[std::size_t(axis)]);
+    } else {
+        at->setValue(middleOfOthers(0));
+    }
+    connect(middle, &QPushButton::clicked, &dialog, [&] { at->setValue(middleOfOthers(across->currentIndex())); });
+    connect(across, &QComboBox::currentIndexChanged, &dialog,
+            [&](int axis) { at->setValue(middleOfOthers(axis)); });
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+    try {
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        struct RestoreCursor {
+            ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
+        } restore;
+        if (linked) {
+            run(std::make_unique<EditBodyCommand>(*linked, withLinkPlane(m_doc, changing, across->currentIndex(),
+                                                                         at->value()),
+                                                  "Move the mirror"));
+            return;
+        }
+        const ObjectId made = addLinkedMirror(m_stack, m_doc, source, across->currentIndex(), at->value());
+        qInfo().noquote() << "Command:" << QString::fromStdString(m_stack.undoLabel());
+        setSelection(made);
+    } catch (const std::exception& e) {
+        QMessageBox::warning(this, tr("Forge3D"), tr("The linked copy couldn't be made:\n%1").arg(QString::fromUtf8(e.what())));
+    }
+}
+
+void MainWindow::unlinkSelected()
+{
+    const ObjectId id = selectedOne();
+    try {
+        const ObjectId made = unlinkMirror(m_stack, m_doc, id);
+        qInfo().noquote() << "Command:" << QString::fromStdString(m_stack.undoLabel());
+        setSelection(made);
+    } catch (const std::exception& e) {
+        QMessageBox::warning(this, tr("Forge3D"), tr("It couldn't be unlinked:\n%1").arg(QString::fromUtf8(e.what())));
+    }
+}
+
 void MainWindow::mirrorSelected(int axis)
 {
     if (m_selection.empty())
@@ -6440,6 +6556,11 @@ void MainWindow::choosePicture()
 
 void MainWindow::separateSelected()
 {
+    if (const Body* one = m_doc.find(selectedOne());
+        one && one->isBoolean() && one->boolean->op == BooleanOp::Linked) {
+        unlinkSelected();  // a linked mirror has no parts: unlinking is its "separate"
+        return;
+    }
     const Body* body = m_doc.find(selectedOne());
     if (!body || !body->isBoolean()) {
         statusBar()->showMessage(tr("Select one combined shape (Merge, Subtract or Intersect) to separate it."), 6000);
@@ -7980,6 +8101,14 @@ void MainWindow::refreshScene()
             switch (selected->boolean->op) {
             case BooleanOp::Split: context = tr("Made from: %1, cut by a plane").arg(names.join(QString())); break;
             case BooleanOp::Mirror: context = tr("Made from: %1, mirrored").arg(names.join(QString())); break;
+            case BooleanOp::Linked: {
+                const Body* source = selected->boolean->link ? m_doc.find(selected->boolean->link->source) : nullptr;
+                context = source ? tr("A mirror of '%1', kept up to date with it. Double-click it in the list to "
+                                      "move the mirror.")
+                                       .arg(QString::fromStdString(source->name))
+                                 : tr("A mirror of a shape that's gone: Undo, or delete this one.");
+                break;
+            }
             case BooleanOp::Group: context = tr("A group of: %1").arg(names.join(QStringLiteral(", "))); break;
             case BooleanOp::Edges: {
                 const auto& f = selected->boolean->edges;
@@ -8076,6 +8205,12 @@ void MainWindow::refreshScene()
     for (QAction* a : {m_duplicate, m_copy, m_cut, m_saveCustomShape})
         a->setEnabled(anySelected && allTopLevel && !toolOpen());
     m_mirrorMenu->menuAction()->setEnabled(anySelected && allTopLevel && !toolOpen() && !rolled);
+    {
+        const Body* one = m_selection.size() == 1 ? m_doc.find(m_selection.front()) : nullptr;
+        const bool isLink = one && one->isBoolean() && one->boolean->op == BooleanOp::Linked;
+        m_linkedMirror->setEnabled(m_selection.size() == 1 && allTopLevel);
+        m_unlink->setEnabled(isLink && allTopLevel);
+    }
     m_colourMenu->menuAction()->setEnabled(anySelected && !toolOpen());
     m_layOutMenu->menuAction()->setEnabled(m_doc.bodyCount() > 0 && !toolOpen() && (!anySelected || allTopLevel));
     m_group->setEnabled(m_selection.size() >= 2 && allTopLevel && !rolled);
@@ -8276,6 +8411,7 @@ void MainWindow::editStep(ObjectId id)
     case BooleanOp::Hollow: startHollow(id, true); break;
     case BooleanOp::Mould: startMould(id, true); break;
     case BooleanOp::Port: startPort(id, true); break;
+    case BooleanOp::Linked: linkedMirror(id); break;
     case BooleanOp::Posed: startPoseFigure(id, true); break;
     case BooleanOp::Paint: startPaint(id, true); break;
     case BooleanOp::Stamp: startStamp(id, true); break;
@@ -8464,7 +8600,7 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
                                                   op == BooleanOp::Hinge || op == BooleanOp::MaskSplit ||
                                                   op == BooleanOp::Hollow || op == BooleanOp::Stamp ||
                                                   op == BooleanOp::PanelLines || op == BooleanOp::Posed || op == BooleanOp::Paint ||
-                                                  op == BooleanOp::Mould || op == BooleanOp::Port ||
+                                                  op == BooleanOp::Mould || op == BooleanOp::Port || op == BooleanOp::Linked ||
                                                   (op == BooleanOp::Split && m_doc.isTopLevel(id))));
         if (!opens) {
             // Nothing to open: show or hide what's inside, as a list does.

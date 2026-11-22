@@ -435,6 +435,7 @@ std::string toString(BooleanOp op)
     case BooleanOp::LimbCut: return "Cut into Parts";
     case BooleanOp::Mould: return "Mould";
     case BooleanOp::Port: return "Port";
+    case BooleanOp::Linked: return "Linked mirror";
     }
     return "Combine";
 }

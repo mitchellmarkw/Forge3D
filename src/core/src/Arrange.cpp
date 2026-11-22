@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "forge/core/Arrange.h"
+#include <cctype>
+#include <cstring>
+#include "forge/core/MeshKernel.h"
+#include "forge/core/Hinge.h"
 
 #include "forge/core/CommandStack.h"
 #include "forge/core/Commands.h"
@@ -171,6 +175,95 @@ std::vector<ObjectId> mirrorBodies(CommandStack& stack, Document& doc, const std
             made.push_back(r.id);
             stack.execute(std::make_unique<CombineCommand>(std::move(r)));
         }
+    });
+    return made;
+}
+
+std::string otherSideName(const std::string& name)
+{
+    static const std::pair<const char*, const char*> swaps[] = {
+        {"Left", "Right"}, {"left", "right"}, {"LEFT", "RIGHT"}, {"Right", "Left"}, {"right", "left"}, {"RIGHT", "LEFT"}};
+    // The first side word in the name (whole words only, or "L"/"R" on their own).
+    std::size_t best = std::string::npos;
+    std::string from, to;
+    for (const auto& [a, b] : swaps) {
+        for (std::size_t at = name.find(a); at != std::string::npos; at = name.find(a, at + 1)) {
+            const std::size_t end = at + std::strlen(a);
+            const bool startOk = at == 0 || !std::isalpha(static_cast<unsigned char>(name[at - 1]));
+            const bool endOk = end == name.size() || !std::isalpha(static_cast<unsigned char>(name[end]));
+            if (startOk && endOk && at < best) {
+                best = at;
+                from = a;
+                to = b;
+            }
+        }
+    }
+    if (best != std::string::npos)
+        return name.substr(0, best) + to + name.substr(best + from.size());
+    return name + " (mirrored)";
+}
+
+ObjectId addLinkedMirror(CommandStack& stack, Document& doc, ObjectId id, int axis, double at)
+{
+    if (axis < 0 || axis > 1)
+        throw std::invalid_argument("A linked mirror goes left / right or front / back");
+    if (!std::isfinite(at))
+        throw std::invalid_argument("The mirror's place isn't a number");
+    requireOnPlate(doc, {id});
+    BooleanSpec spec;
+    spec.op = BooleanOp::Linked;
+    MirrorLink link;
+    link.source = id;
+    link.normal = {axis == 0 ? 1.0 : 0.0, axis == 1 ? 1.0 : 0.0, 0.0};
+    link.point = {axis == 0 ? at : 0.0, axis == 1 ? at : 0.0, 0.0};
+    spec.link = link;
+    Body r = resultAround(doc, spec, otherSideName(doc.find(id)->name));
+    r.colour = doc.colourOf(id);  // the same colour as the other side
+    const ObjectId made = r.id;
+    stack.execute(std::make_unique<AddBodyCommand>(std::move(r)));  // no parts to take in
+    return made;
+}
+
+Body withLinkPlane(const Document& doc, ObjectId linked, int axis, double at)
+{
+    const Body* b = doc.find(linked);
+    if (!b || !b->isBoolean() || b->boolean->op != BooleanOp::Linked || !b->boolean->link)
+        throw std::invalid_argument("That isn't a linked mirror");
+    if (axis < 0 || axis > 1 || !std::isfinite(at))
+        throw std::invalid_argument("A linked mirror goes left / right or front / back");
+    Body next = *b;
+    next.boolean->link->normal = {axis == 0 ? 1.0 : 0.0, axis == 1 ? 1.0 : 0.0, 0.0};
+    next.boolean->link->point = {axis == 0 ? at : 0.0, axis == 1 ? at : 0.0, 0.0};
+    return next;
+}
+
+ObjectId unlinkMirror(CommandStack& stack, Document& doc, ObjectId linked)
+{
+    const Body* b = doc.find(linked);
+    if (!b || !b->isBoolean() || b->boolean->op != BooleanOp::Linked)
+        throw std::invalid_argument("That isn't a linked mirror");
+    if (!doc.isTopLevel(linked))
+        throw std::invalid_argument("'" + b->name + "' has steps on top of it: Separate them first, then unlink it");
+    // As it is on the plate now.
+    Mesh m;
+    meshkernel::triangles(doc.meshSolid(linked), m.positions, m.indices);
+    if (const auto problem = doc.problemWith(linked))
+        throw std::invalid_argument("'" + b->name + "' can't be made right now: " + *problem);
+    if (m.indices.empty())
+        throw std::invalid_argument("'" + b->name + "' is empty");
+    const Transform t = doc.worldTransform(linked);
+    for (std::size_t i = 0; i < m.vertexCount(); ++i) {
+        const Vec3 p = t.apply({m.positions[3 * i], m.positions[3 * i + 1], m.positions[3 * i + 2]});
+        for (std::size_t k = 0; k < 3; ++k)
+            m.positions[3 * i + k] = float(p[k]);
+    }
+    Body own = hinge::pieceBody(m, b->name);
+    own.id = doc.allocateId();
+    own.colour = b->colour;
+    const ObjectId made = own.id;
+    asOneStep(stack, "Unlink " + b->name, [&] {
+        stack.execute(std::make_unique<RemoveBodyCommand>(linked));
+        stack.execute(std::make_unique<AddBodyCommand>(own));
     });
     return made;
 }

@@ -328,6 +328,7 @@ enum class BooleanOp {
     LimbCut,      // a figure cut at a joint: the limb, or the rest (see `limbCut`)
     Mould,        // one piece of a mould box round the part (see `mould`)
     Port,         // a wrist or accessory peg added, or a grip hole cut through (see `port`)
+    Linked,       // another shape mirrored, kept up to date with it (see `link`; no parts)
 };
 
 // What happens to the picked edges of a shape.
@@ -736,6 +737,18 @@ struct LimbCutFinish {
     bool operator==(const LimbCutFinish&) const = default;
 };
 
+// A linked mirror (slice 74): a shape that is another shape (`source`) mirrored in a
+// plane, kept up to date as that shape changes: steps added on top of the source (a
+// Sculpt, a socket...) show too, as long as the source is the first part of each. It has
+// no parts of its own; on the plate it starts where the mirror puts it (plate
+// coordinates are its own) and can be moved from there.
+struct MirrorLink {
+    ObjectId source = kInvalidId;
+    std::array<double, 3> point{0.0, 0.0, 0.0};
+    std::array<double, 3> normal{1.0, 0.0, 0.0};
+    bool operator==(const MirrorLink&) const = default;
+};
+
 // A Port step (hand and accessory ports): a peg added to the part at a spot (a wrist peg
 // for swappable hands, a handle on an accessory), standing out along `direction`, or a
 // round grip hole cut through it for a handle, from the spot in along -`direction` (or
@@ -852,6 +865,8 @@ struct BooleanSpec {
     std::optional<MouldFinish> mould{};
     // Port: the peg or grip hole.
     std::optional<PortFinish> port{};
+    // Linked: the shape mirrored, and the mirror.
+    std::optional<MirrorLink> link{};
     // Edges: what to do to which edges.
     std::optional<EdgeFinish> edges{};
     // Shell: how thick, and which faces are left open.

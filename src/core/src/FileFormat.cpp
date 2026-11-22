@@ -246,6 +246,7 @@ const char* opName(BooleanOp op)
     case BooleanOp::LimbCut: return "limbCut";
     case BooleanOp::Mould: return "mould";
     case BooleanOp::Port: return "port";
+    case BooleanOp::Linked: return "linked";
     }
     return "merge";
 }
@@ -422,6 +423,8 @@ json bodyToJson(const Body& b)
                               {"sunk", st->sunk},              {"spin", st->spin},   {"spacing", st->spacing},
                               {"spots", std::move(spots)}};
         }
+        if (const auto& li = b.boolean->link)
+            j["link"] = json{{"source", li->source}, {"point", li->point}, {"normal", li->normal}};
         if (const auto& po = b.boolean->port) {
             static const char* shapes[] = {"round", "square", "hexagon", "octagon"};
             static const char* ends[] = {"flat", "chamfer", "ball"};
@@ -701,6 +704,8 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
             spec.op = BooleanOp::Mould;
         else if (op == "port" && version >= 43)
             spec.op = BooleanOp::Port;
+        else if (op == "linked" && version >= 45)
+            spec.op = BooleanOp::Linked;
         else
             damaged(where + ": unknown combine operation '" + op + "'");
         const auto operands = j.find("operands");
@@ -1004,6 +1009,22 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
                 damaged(where + ": " + e.what());
             }
             spec.stamp = std::move(st);
+        }
+        if (spec.op == BooleanOp::Linked) {
+            const auto lj = j.find("link");
+            if (lj == j.end() || !lj->is_object())
+                damaged(where + ": missing what the linked mirror mirrors");
+            MirrorLink link;
+            try {
+                link.source = lj->at("source").get<ObjectId>();
+                for (std::size_t k = 0; k < 3; ++k) {
+                    link.point[k] = lj->at("point").at(k).get<double>();
+                    link.normal[k] = lj->at("normal").at(k).get<double>();
+                }
+            } catch (const std::exception&) {
+                damaged(where + ": the linked mirror is broken");
+            }
+            spec.link = link;
         }
         if (spec.op == BooleanOp::Port) {
             const auto pj = j.find("port");

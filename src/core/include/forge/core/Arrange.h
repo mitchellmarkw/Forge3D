@@ -44,6 +44,19 @@ double leftEdge(const Document& doc, const std::vector<ObjectId>& ids);
 // undoes the mirror. Returns the new results.
 std::vector<ObjectId> mirrorBodies(CommandStack& stack, Document& doc, const std::vector<ObjectId>& ids, int axis);
 
+// Linked mirrors (slice 74). A copy of shape `id` (on the plate) mirrored across the
+// plate axis `axis` (0 = X, left / right; 1 = Y, front / back) at `at` mm along it, that
+// keeps up with the shape as it changes (see MirrorLink). Named for the other side
+// ("Left arm" → "Right arm", else "<name> (mirrored)"). One undo step; returns it.
+ObjectId addLinkedMirror(CommandStack& stack, Document& doc, ObjectId id, int axis, double at);
+// "Left arm" ↔ "Right arm" (and left/right, L/R words), else "<name> (mirrored)".
+std::string otherSideName(const std::string& name);
+// The linked mirror with its mirror moved (`axis`, `at`); the caller records it.
+Body withLinkPlane(const Document& doc, ObjectId linked, int axis, double at);
+// Makes a linked mirror (on the plate) a shape of its own as it is now, no longer
+// following the other: one undo step. Returns the new shape.
+ObjectId unlinkMirror(CommandStack& stack, Document& doc, ObjectId linked);
+
 // Groups shapes on the plate so they move, turn and resize as one ("Group 1"),
 // without merging them. Separate ungroups. Needs two or more shapes.
 ObjectId groupBodies(CommandStack& stack, Document& doc, const std::vector<ObjectId>& ids);
