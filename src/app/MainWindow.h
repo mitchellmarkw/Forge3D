@@ -83,6 +83,7 @@ class PrintCheckPanel;
 class MannequinPanel;
 class HollowPanel;
 class MouldPanel;
+class PortPanel;
 class PoseFigurePanel;
 class PaintPanel;
 class JointStandardsDialog;
@@ -742,7 +743,8 @@ private:
     // The joint standard in use's sockets and hinges, as offered in Quick Socket and Quick Hinge.
     std::vector<standards::Joint> m_standardSockets, m_standardHinges;
     void refreshStandardRows();
-    void saveToStandard(bool hinge);
+    // `socket`: the joint to keep (else the Quick Socket or Quick Hinge panel's).
+    void saveToStandard(bool hinge, const SocketFinish* socket = nullptr);
     void addToleranceTest(const tolerance::Settings& settings);
     void rescaleDesign();
     void makeKit();
@@ -872,6 +874,28 @@ private:
     void updateMouldPreview();
     void applyMould();
     MouldFinish mouldSettings() const;
+
+    // Hand Ports: a peg on an arm, the socket for it in a hand, or a grip hole
+    QAction* m_portAction = nullptr;
+    PortPanel* m_portPanel = nullptr;
+    std::vector<standards::Joint> m_standardPorts;  // the standard's peg and ball joints offered
+    struct PortMode {
+        bool active = false;
+        bool editing = false;
+        ObjectId target = kInvalidId;  // the shape, or the Port step being changed
+        Transform toPlate;             // the step's coordinates to the plate (new: none)
+        std::optional<emboss::SurfacePoint> spot;  // step coordinates
+        std::optional<std::array<double, 3>> exit;  // grip: the way out
+        double reach = 100.0;                        // how far a straight grip hole goes
+        std::shared_ptr<const Mesh> shape;           // drawn (step coordinates)
+    };
+    PortMode m_portMode;
+    void startPort(ObjectId target, bool editing);
+    void endPort();
+    void portClick(const QVector3D& origin, const QVector3D& direction);
+    void updatePortPreview();
+    void applyPort();
+    PortFinish portSettings() const;
 
     // Pose Figure: bones in one sculpted figure, to bend it at its joints
     QAction* m_poseFigureAction = nullptr;

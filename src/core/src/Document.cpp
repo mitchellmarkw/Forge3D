@@ -13,6 +13,7 @@
 #include "forge/core/Hollow.h"
 #include "forge/core/LimbCut.h"
 #include "forge/core/Mould.h"
+#include "forge/core/Port.h"
 #include "forge/core/Paint.h"
 #include "forge/core/Rig.h"
 #include "forge/core/Stamp.h"
@@ -310,6 +311,12 @@ void Document::validateBoolean(const Body& body, const std::map<ObjectId, Object
         if (!body.boolean->mould)
             throw std::invalid_argument("Mould needs its settings");
         mould::check(*body.boolean->mould);
+    } else if (op == BooleanOp::Port) {
+        if (ops.size() != 1)
+            throw std::invalid_argument("A port goes on exactly one shape");
+        if (!body.boolean->port)
+            throw std::invalid_argument("A port needs its settings");
+        port::check(*body.boolean->port);
     } else if (op == BooleanOp::Smooth) {
         if (ops.size() != 1)
             throw std::invalid_argument("Smooth works on exactly one shape");
@@ -639,7 +646,7 @@ TopoDS_Shape Document::combine(const BooleanSpec& spec) const
             op == BooleanOp::Socket || op == BooleanOp::Hinge || op == BooleanOp::MaskSplit ||
             op == BooleanOp::Hollow || op == BooleanOp::Stamp || op == BooleanOp::PanelLines ||
             op == BooleanOp::Posed || op == BooleanOp::Paint || op == BooleanOp::LimbCut ||
-            op == BooleanOp::Mould)
+            op == BooleanOp::Mould || op == BooleanOp::Port)
             throw GeometryError(toString(op) + " is worked out by the mesh engine");
         if (op == BooleanOp::Pattern)
             return patternShape(spec);
@@ -771,6 +778,7 @@ TopoDS_Shape Document::combine(const BooleanSpec& spec) const
             case BooleanOp::Paint:
             case BooleanOp::LimbCut:
             case BooleanOp::Mould:
+            case BooleanOp::Port:
                 break;  // handled above / by the mesh engine
             }
         }
@@ -890,7 +898,7 @@ TopoDS_Shape Document::previewCombine(const BooleanSpec& spec) const
          spec.op == BooleanOp::ExtrudeDown || spec.op == BooleanOp::Socket || spec.op == BooleanOp::Hinge ||
          spec.op == BooleanOp::MaskSplit || spec.op == BooleanOp::Hollow || spec.op == BooleanOp::PanelLines ||
          spec.op == BooleanOp::Posed || spec.op == BooleanOp::Paint || spec.op == BooleanOp::LimbCut ||
-         spec.op == BooleanOp::Mould) &&
+         spec.op == BooleanOp::Mould || spec.op == BooleanOp::Port) &&
         spec.operands.size() != 1)
         throw std::invalid_argument(toString(spec.op) + " works on exactly one shape");
     return combine(spec);
@@ -969,6 +977,7 @@ BooleanSpec Document::passThrough(const BooleanSpec& spec)
     pass.paint.reset();
     pass.limbCut.reset();
     pass.mould.reset();
+    pass.port.reset();
     switch (spec.op) {
     case BooleanOp::Merge:
     case BooleanOp::Intersect:
@@ -1133,7 +1142,7 @@ bool Document::specUsesMesh(const BooleanSpec& spec) const
         spec.op == BooleanOp::Socket || spec.op == BooleanOp::Hinge || spec.op == BooleanOp::MaskSplit ||
         spec.op == BooleanOp::Hollow || spec.op == BooleanOp::Stamp || spec.op == BooleanOp::PanelLines ||
         spec.op == BooleanOp::Posed || spec.op == BooleanOp::Paint || spec.op == BooleanOp::LimbCut ||
-        spec.op == BooleanOp::Mould)
+        spec.op == BooleanOp::Mould || spec.op == BooleanOp::Port)
         return true;  // letters following a surface, and sculpting, only exist as triangles
     for (ObjectId part : spec.operands)
         if (usesMeshEngine(part))
@@ -1489,6 +1498,11 @@ MeshSolid Document::combineMeshes(const BooleanSpec& spec) const
         if (!spec.mould)
             throw GeometryError("Mould has no settings");
         return mould::apply(parts.front(), *spec.mould);
+    }
+    case BooleanOp::Port: {
+        if (!spec.port)
+            throw GeometryError("Port has no settings");
+        return port::apply(parts.front(), *spec.port);
     }
     case BooleanOp::Socket: {
         if (!spec.socket)

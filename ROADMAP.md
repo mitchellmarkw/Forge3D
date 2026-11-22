@@ -98,11 +98,12 @@ Gate to Phase 2: a new user prints a customised part within 10 minutes.
 | 66 | Paint: colours brushed onto one shape, kept as a step, shown, exported to 3MF for colour printers, split along by colour | Done (0.75.0) |
 | 67 | Joint standards: a figure line's joint sizes by name, for Quick Socket, Quick Hinge and the Tolerance Test Print | Done (0.76.0) |
 | 68 | Cut into Parts: a one-piece figure cut at its joints (skeleton fitted), ball joints or hinges put in, pieces named | Done (0.77.2) |
-| 69 | Make Mould: a two-part mould box round a part, parted where it's widest, with registration keys, a pour spout and air vents | **Delivered for testing** |
+| 69 | Make Mould: a mould box round a part, split either way into two to four pieces, with undercut checking, registration keys, a pour spout and air vents | Done (0.78.1) |
+| 70 | Hand Ports: wrist pegs for swappable hands, the sockets for them, and grip holes sized to accessories' handles | **Delivered for testing** |
 
 Slices 39–41 close the gaps found in the [Phase 1 gate review](docs/PHASE1_GATE.md).
 
-Waiting for a place: hand and accessory ports, a hand generator, joint cut-outs for a target angle, and more. See [docs/TODO.md](docs/TODO.md).
+Waiting for a place: a hand generator, joint cut-outs for a target angle, texture stamps, and more. See [docs/TODO.md](docs/TODO.md).
 
 ## Phase 2: Sculpt · Phase 3: Hybrid · Phase 4: Pro
 

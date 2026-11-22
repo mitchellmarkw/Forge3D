@@ -7,6 +7,7 @@
 #include "forge/core/PanelLines.h"
 #include "forge/core/LimbCut.h"
 #include "forge/core/Mould.h"
+#include "forge/core/Port.h"
 #include "forge/core/Paint.h"
 #include "forge/core/Rig.h"
 #include "forge/core/MeshKernel.h"
@@ -244,6 +245,7 @@ const char* opName(BooleanOp op)
     case BooleanOp::Paint: return "paint";
     case BooleanOp::LimbCut: return "limbCut";
     case BooleanOp::Mould: return "mould";
+    case BooleanOp::Port: return "port";
     }
     return "merge";
 }
@@ -415,6 +417,22 @@ json bodyToJson(const Body& b)
             j["stamp"] = json{{"kind", stamp::key(st->kind)}, {"size", st->size},   {"height", st->height},
                               {"sunk", st->sunk},              {"spin", st->spin},   {"spacing", st->spacing},
                               {"spots", std::move(spots)}};
+        }
+        if (const auto& po = b.boolean->port) {
+            static const char* shapes[] = {"round", "square", "hexagon", "octagon"};
+            static const char* ends[] = {"flat", "chamfer", "ball"};
+            j["port"] = json{{"kind", po->kind == PortKind::Grip ? "grip" : "peg"},
+                             {"shape", shapes[int(po->shape)]},
+                             {"size", po->size},
+                             {"length", po->length},
+                             {"fit", po->fit},
+                             {"end", ends[int(po->end)]},
+                             {"ball", po->ball},
+                             {"turn", po->turn},
+                             {"point", po->point},
+                             {"direction", po->direction},
+                             {"hasExit", po->hasExit},
+                             {"exit", po->exit}};
         }
         if (const auto& mo = b.boolean->mould) {
             json vents = json::array();
@@ -677,6 +695,8 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
             spec.op = BooleanOp::LimbCut;
         else if (op == "mould" && version >= 41)
             spec.op = BooleanOp::Mould;
+        else if (op == "port" && version >= 43)
+            spec.op = BooleanOp::Port;
         else
             damaged(where + ": unknown combine operation '" + op + "'");
         const auto operands = j.find("operands");
@@ -978,6 +998,41 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
                 damaged(where + ": " + e.what());
             }
             spec.stamp = std::move(st);
+        }
+        if (spec.op == BooleanOp::Port) {
+            const auto pj = j.find("port");
+            if (pj == j.end() || !pj->is_object())
+                damaged(where + ": missing the port's settings");
+            PortFinish p;
+            try {
+                p.kind = pj->at("kind").get<std::string>() == "grip" ? PortKind::Grip : PortKind::Peg;
+                const std::string shape = pj->value("shape", std::string("round"));
+                p.shape = shape == "square"    ? PegShape::Square
+                          : shape == "hexagon" ? PegShape::Hexagon
+                          : shape == "octagon" ? PegShape::Octagon
+                                               : PegShape::Round;
+                p.size = pj->at("size").get<double>();
+                p.length = pj->value("length", p.length);
+                p.fit = pj->value("fit", p.fit);
+                const std::string end = pj->value("end", std::string("chamfer"));
+                p.end = end == "flat" ? PegEnd::Flat : end == "ball" ? PegEnd::Ball : PegEnd::Chamfer;
+                p.ball = pj->value("ball", p.ball);
+                p.turn = pj->value("turn", 0.0);
+                for (std::size_t k = 0; k < 3; ++k) {
+                    p.point[k] = pj->at("point").at(k).get<double>();
+                    p.direction[k] = pj->at("direction").at(k).get<double>();
+                    p.exit[k] = pj->at("exit").at(k).get<double>();
+                }
+                p.hasExit = pj->value("hasExit", false);
+            } catch (const std::exception&) {
+                damaged(where + ": the port's settings are broken");
+            }
+            try {
+                port::check(p);
+            } catch (const std::exception& e) {
+                damaged(where + ": " + e.what());
+            }
+            spec.port = std::move(p);
         }
         if (spec.op == BooleanOp::Mould) {
             const auto mj = j.find("mould");

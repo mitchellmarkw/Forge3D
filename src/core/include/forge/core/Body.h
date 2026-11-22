@@ -327,6 +327,7 @@ enum class BooleanOp {
     Paint,        // colours brushed onto the surface (see `paint`; the shape stays as it was)
     LimbCut,      // a figure cut at a joint: the limb, or the rest (see `limbCut`)
     Mould,        // one piece of a mould box round the part (see `mould`)
+    Port,         // a wrist or accessory peg added, or a grip hole cut through (see `port`)
 };
 
 // What happens to the picked edges of a shape.
@@ -733,6 +734,30 @@ struct LimbCutFinish {
     bool operator==(const LimbCutFinish&) const = default;
 };
 
+// A Port step (hand and accessory ports): a peg added to the part at a spot (a wrist peg
+// for swappable hands, a handle on an accessory), standing out along `direction`, or a
+// round grip hole cut through it for a handle, from the spot in along -`direction` (or
+// towards `exit`). Sizes in mm; in the step's coordinates.
+enum class PortKind { Peg, Grip };
+// A peg's far end: flat, with its edge taken off (easier to push in), or a ball (for a
+// ball socket: a ball-jointed wrist).
+enum class PegEnd { Flat, Chamfer, Ball };
+struct PortFinish {
+    PortKind kind = PortKind::Peg;
+    PegShape shape = PegShape::Round;  // a peg's (a grip hole is round)
+    double size = 3.0;    // the peg's diameter (round) or across its flats; the handle's diameter
+    double length = 4.0;  // Peg: how far it stands out (Ball: to the ball's middle)
+    double fit = 0.1;     // Grip: room all round
+    PegEnd end = PegEnd::Chamfer;
+    double ball = 4.0;    // Peg, Ball end: the ball's diameter
+    double turn = 0.0;    // degrees round the peg's axis (its flats)
+    std::array<double, 3> point{0.0, 0.0, 0.0};
+    std::array<double, 3> direction{0.0, 0.0, 1.0};  // out of the surface
+    bool hasExit = false;  // Grip: aimed at a way out (else straight in, through)
+    std::array<double, 3> exit{0.0, 0.0, 0.0};
+    bool operator==(const PortFinish&) const = default;
+};
+
 // A Mould step: one piece of a mould box round the part, for casting copies of it. The
 // box is the part's box with `wall` all round, the part taken out, parted by a flat face
 // square to `axis` (2: level, top and bottom halves; 0: upright, left and right; 1:
@@ -823,6 +848,8 @@ struct BooleanSpec {
     std::optional<LimbCutFinish> limbCut{};
     // Mould: which half, and the box's settings.
     std::optional<MouldFinish> mould{};
+    // Port: the peg or grip hole.
+    std::optional<PortFinish> port{};
     // Edges: what to do to which edges.
     std::optional<EdgeFinish> edges{};
     // Shell: how thick, and which faces are left open.

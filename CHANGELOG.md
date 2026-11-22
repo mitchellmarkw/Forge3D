@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.79.0 Beta — Slice 70: Hand Ports (2026-11-22)
+
+- **Hand Ports** (Features tab, beside Quick Hinge): swappable hands and accessories.
+  - **A peg** on an arm (or an accessory, as its handle): click where it goes and it stands straight out of the
+    surface, joined to it. Round, square, hexagon or octagon (turned to line up its flats); a flat end, a chamfered
+    end that pushes in easily, or a ball on the end for a ball-jointed wrist.
+  - **The socket for the peg** in a hand: the same sizes, cut with room for your printer (a snap-in ball socket for
+    a ball end). It's a Quick Socket step, so it changes like one.
+  - **A grip hole** through a hand for a weapon's or a prop's handle: click where the handle goes in; it goes
+    straight through, or set the way out to aim it. Sized to the handle with room all round.
+- Sizes come from the joint standard in use (its peg and ball joints), so every hand, arm and accessory in a line
+  fits; **Save to Standard** keeps a peg or a grip size in it.
+- Double-click a peg or grip hole in the history to change it; scaling with "keep joint sizes" keeps their sizes.
+- Saved files are now format 43.
+
 ## 0.78.1 Beta — Make Mould: split either way, undercuts, more pieces (2026-11-21)
 
 - **Split direction**: horizontal (top and bottom halves, as before) or vertical (left and right, or front and
