@@ -8,6 +8,7 @@
 
 class QCheckBox;
 class QComboBox;
+class QDoubleSpinBox;
 class QLabel;
 
 namespace forge::app {
@@ -23,6 +24,8 @@ public:
     struct Choice {
         bool cut = false;
         int type = JustCut;
+        double forward = 0.0;  // the cut turned by hand (limbcut::Tilt), degrees
+        double side = 0.0;
     };
 
     explicit CutPartsPanel(QWidget* parent = nullptr);
@@ -57,6 +60,9 @@ private:
     QComboBox* m_joint = nullptr;
     QCheckBox* m_cut = nullptr;
     QComboBox* m_type = nullptr;
+    QDoubleSpinBox* m_forward = nullptr;
+    QDoubleSpinBox* m_side = nullptr;
+    QWidget* m_tiltBox = nullptr;
     QComboBox* m_printer = nullptr;
     QLabel* m_title = nullptr;
     QLabel* m_summary = nullptr;

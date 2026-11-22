@@ -62,13 +62,27 @@ bool isLimbJoint(rig::Joint j)
     }
 }
 
+bool isRightSide(rig::Joint j)
+{
+    switch (j) {
+    case rig::Joint::RightShoulder:
+    case rig::Joint::RightElbow:
+    case rig::Joint::RightWrist:
+    case rig::Joint::RightHip:
+    case rig::Joint::RightKnee:
+    case rig::Joint::RightAnkle: return true;
+    default: return false;
+    }
+}
+
 Vec3 boneDirection(const rig::Points& points, int bone)
 {
     const auto segs = rig::boneSegments(points, bone);
     return segs.empty() ? Vec3{0, 0, 1} : unit(sub(segs.front()[1], segs.front()[0]));
 }
 
-Cut planOne(const Mesh& figure, const rig::Points& points, rig::Joint joint, const std::vector<int>& nearest)
+Cut planOne(const Mesh& figure, const rig::Points& points, rig::Joint joint, const std::vector<int>& nearest,
+            const Tilt& tilt)
 {
     const int bone = rig::boneOf(joint);
     const Vec3 p = points[std::size_t(rig::pivot(joint))];
@@ -87,6 +101,12 @@ Cut planOne(const Mesh& figure, const rig::Points& points, rig::Joint joint, con
         if (isLimbJoint(joint))
             normal = unit(add(normal, boneDirection(points, rig::parentBone(bone))), normal);
     }
+    // The right side turns the other way round the front-back line, so the same numbers
+    // on both sides make a mirrored pair.
+    Tilt turned = tilt;
+    if (isRightSide(joint))
+        turned.side = -turned.side;
+    normal = tilted(normal, turned);
 
     // How far each bone's surface reaches from it.
     const std::vector<int> below = rig::boneAndBelow(bone);
@@ -185,17 +205,40 @@ std::vector<rig::Joint> cuttable()
             J::LeftAnkle, J::RightAnkle};
 }
 
-Cut plan(const Mesh& figure, const rig::Points& points, rig::Joint joint)
+Vec3 tilted(const Vec3& normal, const Tilt& tilt)
 {
-    return planOne(figure, points, joint, rig::nearestBones(figure, points));
+    const Vec3 front{0, -1, 0};
+    const auto turn = [](const Vec3& v, const Vec3& axis, double degrees) {
+        // Rodrigues: v cos + (k x v) sin + k (k . v)(1 - cos).
+        const double a = degrees * std::numbers::pi / 180.0;
+        const Vec3 k = unit(axis);
+        return add(add(mul(v, std::cos(a)), mul(cross(k, v), std::sin(a))), mul(k, dot(k, v) * (1 - std::cos(a))));
+    };
+    Vec3 n = unit(normal);
+    if (tilt.forward != 0.0) {
+        // Round the line square to the cut and the front: tips the cut towards the front.
+        Vec3 axis = cross(n, front);
+        if (length(axis) < 1e-6)
+            axis = {1, 0, 0};
+        n = turn(n, axis, tilt.forward);
+    }
+    if (tilt.side != 0.0)
+        n = turn(n, mul(front, -1.0), tilt.side);  // round the line from front to back
+    return unit(n);
 }
 
-std::vector<Cut> plan(const Mesh& figure, const rig::Points& points, const std::vector<rig::Joint>& joints)
+Cut plan(const Mesh& figure, const rig::Points& points, rig::Joint joint, const Tilt& tilt)
+{
+    return planOne(figure, points, joint, rig::nearestBones(figure, points), tilt);
+}
+
+std::vector<Cut> plan(const Mesh& figure, const rig::Points& points, const std::vector<rig::Joint>& joints,
+                      const std::vector<Tilt>& tilts)
 {
     const std::vector<int> nearest = rig::nearestBones(figure, points);
     std::vector<Cut> out;
-    for (rig::Joint j : joints)
-        out.push_back(planOne(figure, points, j, nearest));
+    for (std::size_t i = 0; i < joints.size(); ++i)
+        out.push_back(planOne(figure, points, joints[i], nearest, i < tilts.size() ? tilts[i] : Tilt{}));
     return out;
 }
 
@@ -390,9 +433,12 @@ Made cutIntoParts(CommandStack& stack, Document& doc, ObjectId figure, const rig
             surface.positions[i + k] = float(p[k]);
     }
     std::vector<rig::Joint> joints;
-    for (const Choice& c : choices)
+    std::vector<Tilt> tilts;
+    for (const Choice& c : choices) {
         joints.push_back(c.joint);
-    std::vector<Cut> cuts = plan(surface, points, joints);
+        tilts.push_back(c.tilt);
+    }
+    std::vector<Cut> cuts = plan(surface, points, joints, tilts);
 
     std::map<int, ObjectId> owner;  // each bone's piece
     for (int b = 0; b < rig::kBoneCount; ++b)

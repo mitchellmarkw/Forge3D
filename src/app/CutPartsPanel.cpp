@@ -6,6 +6,8 @@
 
 #include <QCheckBox>
 #include <QComboBox>
+#include <QDoubleSpinBox>
+#include <QFormLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -90,6 +92,33 @@ CutPartsPanel::CutPartsPanel(QWidget* parent) : QWidget(parent)
                           "the socket in the limb; a hinge puts the fork in the piece nearer the middle and makes "
                           "the tab from the limb's end. Sized to the limb, or from your joint standard."));
     cuts->addWidget(labelled(tr("Joint type:"), m_type));
+    // Turning the cut by hand, for a figure whose joints don't sit square to the body.
+    m_tiltBox = new QWidget;
+    auto* tilt = new QFormLayout(m_tiltBox);
+    tilt->setContentsMargins(0, 0, 0, 0);
+    m_forward = new QDoubleSpinBox;
+    m_side = new QDoubleSpinBox;
+    for (QDoubleSpinBox* spin : {m_forward, m_side}) {
+        spin->setRange(-80.0, 80.0);
+        spin->setDecimals(0);
+        spin->setSingleStep(5.0);
+        spin->setSuffix(tr("°"));
+        spin->setKeyboardTracking(false);
+    }
+    m_forward->setToolTip(tr("Tips the cut towards the front (less than 0: towards the back)"));
+    m_side->setToolTip(tr("Turns the cut round the line from front to back. At a shoulder, more makes it square "
+                          "to an arm hanging down, less to an arm raised; elsewhere it tips the cut "
+                          "towards one side. The same number on the other side makes a mirrored pair"));
+    auto* straighten = new QPushButton(tr("Straighten"));
+    straighten->setToolTip(tr("Back to the way Forge3D turned the cut"));
+    tilt->addRow(tr("Tip forward:"), m_forward);
+    tilt->addRow(tr("Tilt sideways:"), m_side);
+    tilt->addRow(QString(), straighten);
+    cuts->addWidget(m_tiltBox);
+    connect(straighten, &QPushButton::clicked, this, [this] {
+        m_forward->setValue(0.0);
+        m_side->setValue(0.0);
+    });
     m_info = wrapped(QString());
     m_info->setStyleSheet(QStringLiteral("color: palette(mid);"));
     cuts->addWidget(m_info);
@@ -138,12 +167,16 @@ CutPartsPanel::CutPartsPanel(QWidget* parent) : QWidget(parent)
         Choice c;
         c.cut = m_cut->isChecked();
         c.type = m_type->currentIndex();
+        c.forward = m_forward->value();
+        c.side = m_side->value();
         choose(joint(), c);
         showJoint();
         emit changed();
     };
     connect(m_cut, &QCheckBox::toggled, this, edited);
     connect(m_type, &QComboBox::currentIndexChanged, this, edited);
+    connect(m_forward, &QDoubleSpinBox::valueChanged, this, edited);
+    connect(m_side, &QDoubleSpinBox::valueChanged, this, edited);
     connect(usual, &QPushButton::clicked, this, [this] {
         using J = rig::Joint;
         for (auto& [j, c] : m_choices)
@@ -212,8 +245,9 @@ void CutPartsPanel::choose(int joint, const Choice& c)
     if (m_mirror->isChecked()) {
         for (rig::Joint j : limbcut::cuttable()) {
             const rig::Point p = rig::pivot(rig::Joint(joint));
-            if (int(j) != joint && rig::pivot(j) == rig::mirrored(p))
-                m_choices[int(j)] = c;
+            if (int(j) != joint && rig::pivot(j) == rig::mirrored(p)) {
+                m_choices[int(j)] = c;  // the same numbers make a mirrored pair
+            }
         }
     }
 }
@@ -226,6 +260,9 @@ void CutPartsPanel::showJoint()
     m_cut->setChecked(c.cut);
     m_type->setCurrentIndex(std::min(c.type, m_type->count() - 1));
     m_type->setEnabled(c.cut);
+    m_forward->setValue(c.forward);
+    m_side->setValue(c.side);
+    m_tiltBox->setEnabled(c.cut);
     m_loading = was;
     showSummary();
 }
@@ -235,8 +272,12 @@ void CutPartsPanel::showSummary()
     QStringList lines;
     for (rig::Joint j : limbcut::cuttable()) {
         const Choice& c = m_choices[int(j)];
-        if (c.cut)
-            lines << tr("%1: %2").arg(tr(rig::title(j)), m_type->itemText(c.type));
+        if (!c.cut)
+            continue;
+        QString line = tr("%1: %2").arg(tr(rig::title(j)), m_type->itemText(c.type));
+        if (c.forward != 0.0 || c.side != 0.0)
+            line += tr(" (turned %1°, %2°)").arg(c.forward).arg(c.side);
+        lines << line;
     }
     m_summary->setText(lines.isEmpty() ? tr("No cuts chosen yet: try Usual Figure, or pick a joint and tick Cut here.")
                                        : tr("Cuts (%1):\n%2").arg(lines.size()).arg(lines.join(QLatin1Char('\n'))));
