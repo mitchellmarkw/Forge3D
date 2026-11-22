@@ -66,6 +66,8 @@ add_executable(Forge3D WIN32
     MouldPanel.cpp
     PortPanel.h
     PortPanel.cpp
+    HandPanel.h
+    HandPanel.cpp
     PoseFigurePanel.h
     PoseFigurePanel.cpp
     PaintPanel.h

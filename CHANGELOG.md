@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.80.0 Beta — Slice 71: Make Hand (2026-11-22)
+
+- **Make Hand** (Sculpt tab): a hand at your figure's scale, standing on its wrist, ready to print or sculpt further.
+  - Poses: **fist**, **gripping** (the fingers wrap round a handle of the diameter you give, with the hole for it
+    cut through at the angle you set), **open**, **relaxed** and **pointing**.
+  - Right, left, or a pair. Scale 1:6, 1:10, 1:12 or 1:18 (from a person's 189 mm hand), or set the length;
+    **Fullness** makes it chunkier and sturdier, as toy hands are.
+  - **The wrist socket** for the arm's wrist peg (Hand Ports) is cut straight in: a peg socket or a snap-in ball
+    socket, with sizes from your joint standard or the ones Hand Ports used last. The wrist grows to hold it with a
+    wall round it.
+  - It's one undo step; the socket and grip hole are steps of their own, so Quick Socket and Hand Ports change them.
+
 ## 0.79.0 Beta — Slice 70: Hand Ports (2026-11-22)
 
 - **Hand Ports** (Features tab, beside Quick Hinge): swappable hands and accessories.

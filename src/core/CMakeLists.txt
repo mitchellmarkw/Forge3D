@@ -41,6 +41,7 @@ add_library(forge_core STATIC
     src/LimbCut.cpp
     src/Mould.cpp
     src/Port.cpp
+    src/Hand.cpp
     src/Stamp.cpp
     src/PanelLines.cpp
     src/Kit.cpp
