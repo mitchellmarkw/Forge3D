@@ -28,7 +28,7 @@ std::vector<rig::Joint> cuttable();
 // A cut worked out on a figure (the points and mesh in the same coordinates).
 struct Cut {
     LimbCutFinish finish;  // the plane, and the limb's reach (finish.limb, finish.gap unset)
-    double limbRadius = 0.0;  // how thick the limb is at the cut (from the ball to its surface, typically)
+    double limbRadius = 0.0;  // how thick the limb is at the cut (from its bone to its surface, typically)
 };
 Cut plan(const Mesh& figure, const rig::Points& points, rig::Joint joint);
 // Every cut, sharing the work of finding which bone each part of the surface is nearest.

@@ -45,14 +45,17 @@ double capsuleField(const Capsule& c, const Vec3& q)
 
 // A figure about 148 mm tall in a T pose, made of rounded rods, standing on the plate
 // and facing -Y.
-MeshSolid tFigure()
+MeshSolid tFigure(double armDrop = 0.0)
 {
+    // The arms 60 mm long from the shoulders, dropped this many degrees from level.
+    const double c = 60.0 * std::cos(armDrop * 3.14159265358979 / 180.0);
+    const double d = 60.0 * std::sin(armDrop * 3.14159265358979 / 180.0);
     const std::vector<Capsule> parts{
         {{0, 0, 62}, {0, 0, 112}, 12},     // torso
         {{0, 0, 112}, {0, 0, 128}, 5},     // neck
         {{0, 0, 136}, {0, 0, 138}, 10},    // head
-        {{12, 0, 118}, {72, 0, 118}, 4.5},  // left arm (+X)
-        {{-12, 0, 118}, {-72, 0, 118}, 4.5},
+        {{12, 0, 118}, {12 + c, 0, 118 - d}, 4.5},  // left arm (+X)
+        {{-12, 0, 118}, {-12 - c, 0, 118 - d}, 4.5},
         {{9, 0, 62}, {12, 0, 7}, 6},       // left leg
         {{-9, 0, 62}, {-12, 0, 7}, 6},
         {{12, 2, 4}, {12, -14, 3.5}, 3.5},  // feet
@@ -151,6 +154,41 @@ TEST_CASE("Cut into Parts: a cut square to the limb", "[limbcut]")
     LimbCutFinish bad = limb;
     bad.reach.clear();
     CHECK_THROWS_AS(limbcut::check(bad), std::invalid_argument);
+}
+
+TEST_CASE("Cut into Parts: arms angled down are still cut off square to the body", "[limbcut]")
+{
+    // An A pose: the arms 45 degrees down. The shoulder cut is upright, not square to the arm,
+    // so it takes the arm and none of the body beside it.
+    const MeshSolid solid = tFigure(45.0);
+    const Mesh figure = trianglesOf(solid);
+    const PosedFinish skeleton = rig::fit(figure);
+    const limbcut::Cut left = limbcut::plan(figure, skeleton.points, Joint::LeftShoulder);
+    const limbcut::Cut right = limbcut::plan(figure, skeleton.points, Joint::RightShoulder);
+    CHECK_THAT(left.finish.normal[0], WithinAbs(1.0, 1e-9));
+    CHECK_THAT(right.finish.normal[0], WithinAbs(-1.0, 1e-9));
+    CHECK_THAT(limbcut::plan(figure, skeleton.points, Joint::LeftHip).finish.normal[2], WithinAbs(-1.0, 1e-9));
+    const limbcut::Cut neck = limbcut::plan(figure, skeleton.points, Joint::Neck);
+    CHECK_THAT(neck.finish.normal[2], WithinAbs(1.0, 1e-9));
+    CHECK(neck.limbRadius < 8.0);  // the neck (5 mm), not the head (10 mm)
+    CHECK_THAT(left.limbRadius, WithinAbs(4.5, 1.2));  // the arm's thickness, though cut at a slant
+    // The shoulder's ball found where the arm meets the body, on the arm's line.
+    const Vec3 shoulder = skeleton.points[std::size_t(Point::LeftShoulder)];
+    CHECK(shoulder[0] > 12.0);
+    CHECK(shoulder[0] < 22.0);
+    CHECK_THAT(shoulder[2], WithinAbs(118.0 - (shoulder[0] - 12.0), 2.0));
+
+    LimbCutFinish limb = left.finish;
+    limb.limb = true;
+    const double arm = meshkernel::volume(limbcut::apply(solid, limb));
+    const double wholeArm = 3.14159 * 4.5 * 4.5 * 60.0 + 4.0 / 3.0 * 3.14159 * 4.5 * 4.5 * 4.5;
+    CHECK(arm > 0.5 * wholeArm);
+    CHECK(arm < wholeArm);  // nothing of the torso with it
+    // The body keeps its full width at the shoulders.
+    LimbCutFinish rest = left.finish;
+    rest.limb = false;
+    const Bounds body = meshkernel::bounds(limbcut::apply(solid, rest));
+    CHECK(body.max[0] > left.finish.point[0] - 0.5);
 }
 
 TEST_CASE("Cut into Parts: a figure cut and jointed in one go", "[limbcut]")

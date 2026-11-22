@@ -72,9 +72,21 @@ Cut planOne(const Mesh& figure, const rig::Points& points, rig::Joint joint, con
 {
     const int bone = rig::boneOf(joint);
     const Vec3 p = points[std::size_t(rig::pivot(joint))];
+    // Cuts on the body go the body's way, whichever way the limb hangs: the shoulders
+    // straight up and down (square to the sides), the neck and waist level, the hips level.
+    // Cuts along a limb go square to it, halfway between its two bones.
     Vec3 normal = boneDirection(points, bone);
-    if (isLimbJoint(joint))  // halfway between the two bones' directions
-        normal = unit(add(normal, boneDirection(points, rig::parentBone(bone))), normal);
+    switch (joint) {
+    case rig::Joint::Neck:
+    case rig::Joint::Waist: normal = {0, 0, 1}; break;
+    case rig::Joint::LeftShoulder: normal = {1, 0, 0}; break;  // the figure's left is +X
+    case rig::Joint::RightShoulder: normal = {-1, 0, 0}; break;
+    case rig::Joint::LeftHip:
+    case rig::Joint::RightHip: normal = {0, 0, -1}; break;
+    default:
+        if (isLimbJoint(joint))
+            normal = unit(add(normal, boneDirection(points, rig::parentBone(bone))), normal);
+    }
 
     // How far each bone's surface reaches from it.
     const std::vector<int> below = rig::boneAndBelow(bone);
@@ -84,12 +96,23 @@ Cut planOne(const Mesh& figure, const rig::Points& points, rig::Joint joint, con
     for (int b = 0; b < rig::kBoneCount; ++b)
         segs[std::size_t(b)] = rig::boneSegments(points, b);
     const int parent = rig::parentBone(bone);
-    std::vector<double> ring;  // the limb's surface round the cut: how far from the ball
+    std::vector<double> ring;  // the limb's surface round it, near the cut: how far from the bone
+    const Vec3 boneDir = boneDirection(points, bone);
+    const auto boneSegs = rig::boneSegments(points, bone);
+    const double boneLength =
+        boneSegs.empty() ? 0.0 : length(sub(boneSegs.front()[1], boneSegs.front()[0]));
+    // At the cut, but a little way into a limb cut off the body at a slant (the head and
+    // chest widen past the neck and waist: right at the cut for those).
+    const bool body = joint == rig::Joint::Neck || joint == rig::Joint::Waist;
+    const Vec3 across = body ? p : add(p, mul(boneDir, 0.25 * boneLength));
     std::vector<std::vector<double>> distances(rig::kBoneCount);
     for (std::size_t i = 0; i < n; ++i) {
         const Vec3 q{figure.positions[3 * i], figure.positions[3 * i + 1], figure.positions[3 * i + 2]};
         const int b = nearest[i];
-        if (std::find(below.begin(), below.end(), b) != below.end()) {
+        // Only the limb's side of the cut counts: the body beside a shoulder, nearest the
+        // upper arm though it is, mustn't fatten the arm's reach.
+        const bool beyond = dot(sub(q, p), normal) > 0.0;
+        if (beyond && std::find(below.begin(), below.end(), b) != below.end()) {
             double d = std::numeric_limits<double>::max();
             for (const auto& s : segs[std::size_t(b)])
                 d = std::min(d, segmentDistance(q, s[0], s[1]));
@@ -98,8 +121,15 @@ Cut planOne(const Mesh& figure, const rig::Points& points, rig::Joint joint, con
         // The limb's thickness at the cut: the nearest surface in the cut's plane.
         const Vec3 d = sub(q, p);
         const double along = dot(d, normal);
-        if (std::abs(along) < 0.75 && b == bone)
-            ring.push_back(length(sub(d, mul(normal, along))));
+        (void)along;
+        // The limb's thickness a little way along its bone, across it (a cut at a slant
+        // across an arm is longer than the arm is thick).
+        if (b == bone) {
+            const Vec3 e = sub(q, across);
+            const double t = dot(e, boneDir);
+            if (std::abs(t) < 0.75)
+                ring.push_back(length(sub(e, mul(boneDir, t))));
+        }
         (void)parent;
     }
     // How far each bone's surface reaches: nearly all of it (a few points of another part
@@ -123,19 +153,24 @@ Cut planOne(const Mesh& figure, const rig::Points& points, rig::Joint joint, con
     cut.finish.joint = int(joint);
     cut.finish.point = p;
     cut.finish.normal = normal;
-    for (int b : below) {
-        // A bone with no surface of its own (a hand inside a fist) takes the widest.
-        const double r = (reach[std::size_t(b)] > 0 ? reach[std::size_t(b)] : widest) * 1.1 + 0.3;
-        for (const auto& s : segs[std::size_t(b)])
-            cut.finish.reach.push_back({s[0], s[1], r});
-    }
-    // The limb's thickness at the cut: its surface round the cut, typically (a ball off to
-    // one side evens out).
+    // The limb's thickness at the cut: how far its surface round the cut is from the bone,
+    // typically.
     if (!ring.empty()) {
         std::nth_element(ring.begin(), ring.begin() + std::ptrdiff_t(ring.size() / 2), ring.end());
         cut.limbRadius = ring[ring.size() / 2];
     } else {
         cut.limbRadius = 0.6 * widest;
+    }
+    for (int b : below) {
+        // A bone with no surface of its own (a hand inside a fist) takes the widest.
+        double r = (reach[std::size_t(b)] > 0 ? reach[std::size_t(b)] : widest) * 1.1 + 0.3;
+        // Where a limb is cut off the body, it's no fatter than it is there: its reach can't
+        // swell into the body beside it. (Not the head or the chest, which widen past the
+        // neck and waist.)
+        if (b == bone && !ring.empty() && joint != rig::Joint::Neck && joint != rig::Joint::Waist)
+            r = std::min(r, 1.4 * cut.limbRadius + 0.5);
+        for (const auto& s : segs[std::size_t(b)])
+            cut.finish.reach.push_back({s[0], s[1], r});
     }
     return cut;
 }

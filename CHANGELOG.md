@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.77.1 Beta — Cut into Parts: cuts the body's way (2026-11-21)
+
+- **Shoulder cuts are upright** (square to the body's side), whichever way the arm hangs: an arm angled down no
+  longer takes a slice of the chest with it. The neck and waist are cut level, the hips level at the crotch.
+  Elbows, knees, wrists and ankles are still cut square to the limb.
+- **The skeleton is placed better**: each shoulder ball where its arm meets the body (following the arm's line in),
+  the hips at the crotch, and the knees, elbows and wrists in the middle of the limb (a leg close by no longer
+  pulls a knee off-centre). Pose Figure gets the better placing too.
+- **A limb's reach stops at the limb**: where a limb is cut off the body, its reach is no fatter than the limb is
+  there, and only the limb's side of the cut counts when sizing it.
+- The limb's thickness (for sizing joints) is measured across the limb, not along a slanted cut.
+
 ## 0.77.0 Beta — Slice 68: Cut into Parts (2026-11-20)
 
 - **Cut into Parts** (Sculpt tab): a figure sculpted in one piece cut at its joints, with the joints put in, as one
