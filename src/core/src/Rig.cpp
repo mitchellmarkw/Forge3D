@@ -7,7 +7,9 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <functional>
 #include <limits>
+#include <optional>
 #include <numbers>
 #include <sstream>
 #include <stdexcept>
@@ -618,7 +620,7 @@ PosedFinish fit(const Mesh& mesh)
 
     // Moves a limb's point into the middle of the limb: the surface round it, across the
     // limb (along `along` it stays put).
-    auto centred = [&](const Vec3& q, const Vec3& along, double reach) {
+    auto centredOnce = [&](const Vec3& q, const Vec3& along, double reach) {
         Vec3 sum{0, 0, 0};
         std::size_t count = 0;
         for (std::size_t i = 0; i < n; ++i) {
@@ -633,6 +635,91 @@ PosedFinish fit(const Mesh& mesh)
         const Vec3 mean = mul(sum, 1.0 / double(count));
         return add(q, sub(mean, mul(along, dot(mean, along))));
     };
+    // Then again, reaching just past the limb's own surface, so a limb close by (the other
+    // leg, the body beside an arm) doesn't pull it off the middle.
+    auto centred = [&](const Vec3& q, const Vec3& along, double reach) {
+        Vec3 c = centredOnce(q, along, reach);
+        for (int pass = 0; pass < 3; ++pass) {
+            std::vector<double> d;
+            for (std::size_t i = 0; i < n; ++i) {
+                const Vec3 e = sub(vert(i), c);
+                const double t = dot(e, along);
+                if (std::abs(t) < 0.12 * H && length(e) < reach)
+                    d.push_back(length(sub(e, mul(along, t))));
+            }
+            if (d.size() < 6)
+                break;
+            std::nth_element(d.begin(), d.begin() + std::ptrdiff_t(d.size() / 4), d.end());
+            const double nearSide = d[d.size() / 4];  // the limb's own surface is the nearest
+            c = centredOnce(c, along, std::min(reach, 1.6 * nearSide + 0.5));
+        }
+        return c;
+    };
+
+    // How much surface there is round a point of a limb's line (within `within` of it, in
+    // a thin slice across the line), and how far it typically is.
+    struct Round {
+        std::size_t count = 0;
+        double typical = 0.0;
+    };
+    const auto round = [&](const Vec3& at, const Vec3& axis, double within) {
+        std::vector<double> d;
+        for (std::size_t i = 0; i < n; ++i) {
+            const Vec3 e = sub(vert(i), at);
+            const double t = dot(e, axis);
+            if (std::abs(t) > 0.08 * H)
+                continue;
+            const double r = length(sub(e, mul(axis, t)));
+            if (r < within)
+                d.push_back(r);
+        }
+        Round out;
+        out.count = d.size();
+        if (d.size() >= 6) {
+            std::nth_element(d.begin(), d.begin() + std::ptrdiff_t(d.size() / 2), d.end());
+            out.typical = d[d.size() / 2];
+        }
+        return out;
+    };
+    // From `from` along a limb's line (`axis`, towards the body), the last point before
+    // what's round it gets much fatter than the limb: where the limb meets the body.
+    // `stop`: a point the walk mustn't pass (true there). Nothing found: `from`.
+    const auto meetsBody = [&](const Vec3& from, const Vec3& axis, double reachOut, double roomFactor,
+                               const std::function<bool(const Vec3&)>& stop) {
+        const Round limb = round(from, axis, reachOut);
+        if (limb.typical <= 0.0)
+            return from;
+        const double within = roomFactor * limb.typical;
+        const std::size_t limbCount = round(from, axis, within).count;
+        const double step = 0.05 * H;
+        Vec3 at = from;
+        for (int k = 0; k < 80; ++k) {
+            const Vec3 next = add(at, mul(axis, step));
+            if (stop(next))
+                break;
+            const Round here = round(next, axis, within);
+            // Much more surface round it (the body beside), or much less (inside the body,
+            // its surface further off), or further off: past where the limb meets the body.
+            if (here.count > 2 * limbCount || 2 * here.count < limbCount || here.typical > 1.5 * limb.typical)
+                break;
+            at = next;
+        }
+        return at;
+    };
+
+    // The crotch: the lowest surface on the figure's middle line between the legs (if the
+    // legs stand apart, so it's well above the knees).
+    std::optional<double> crotchZ;
+    {
+        double lowest = std::numeric_limits<double>::max();
+        for (std::size_t i = 0; i < n; ++i) {
+            const Vec3 v = vert(i);
+            if (std::abs(v[0] - cx) < 0.1 * H && std::abs(v[1] - cy) < 0.6 * H)
+                lowest = std::min(lowest, v[2]);
+        }
+        if (lowest > kneeZ + 0.1 * R && lowest < waistZ)
+            crotchZ = lowest;
+    }
 
     for (int side = 0; side < 2; ++side) {
         const double s = side == 0 ? 1.0 : -1.0;  // left is +X (the figure faces -Y)
@@ -665,13 +752,19 @@ PosedFinish fit(const Mesh& mesh)
         const Vec3 along = unit(sub(tip, shoulder));
         const Vec3 elbow = centred(lerp(shoulder, tip, upperArm / arm), along, 0.8 * H);
         const Vec3 wrist = centred(lerp(shoulder, tip, (upperArm + forearm) / arm), along, 0.6 * H);
+        if (out) {
+            // The shoulder where the arm meets the body: along the arm's line in from the elbow.
+            const Vec3 inward = unit(sub(elbow, wrist), mul(along, -1.0));
+            shoulder = meetsBody(elbow, inward, 0.8 * H, 3.0,
+                                 [&](const Vec3& q) { return s * (q[0] - cx) < 0.2 * H; });
+        }
         set(left ? Point::LeftShoulder : Point::RightShoulder, shoulder);
         set(left ? Point::LeftElbow : Point::RightElbow, elbow);
         set(left ? Point::LeftWrist : Point::RightWrist, wrist);
         set(left ? Point::LeftHand : Point::RightHand, tip);
 
         // Legs: the foot is the surface low down on this side.
-        const Vec3 hip{cx + s * hipX, cy, hipZ};
+        Vec3 hip{cx + s * hipX, cy, hipZ};
         Vec3 sum{0, 0, 0};
         std::size_t count = 0;
         double toeY = std::numeric_limits<double>::max(), heelY = -toeY;
@@ -700,6 +793,13 @@ PosedFinish fit(const Mesh& mesh)
         const Vec3 legAlong = unit(sub(ankle, hip));
         const double t = (hipZ - kneeZ) / std::max(1e-6, hipZ - ankleZ);
         const Vec3 knee = centred(lerp(hip, ankle, t), legAlong, 0.9 * H);
+        // The hip where the leg meets the body: up the leg's line from the knee to the
+        // crotch's height.
+        if (crotchZ && count > 0) {
+            const Vec3 up = unit(sub(knee, ankle), {0, 0, 1});
+            if (up[2] > 0.3)
+                hip = add(knee, mul(up, (*crotchZ - knee[2]) / up[2]));
+        }
         set(left ? Point::LeftHip : Point::RightHip, hip);
         set(left ? Point::LeftKnee : Point::RightKnee, knee);
         set(left ? Point::LeftAnkle : Point::RightAnkle, ankle);

@@ -106,6 +106,10 @@ TEST_CASE("Pose Figure: the skeleton is fitted to a T-posed figure", "[rig]")
     CHECK(pt(p, Point::RightHip)[0] < 0);
     CHECK(pt(p, Point::LeftHip)[2] > pt(p, Point::LeftKnee)[2]);
     CHECK(pt(p, Point::LeftKnee)[2] > pt(p, Point::LeftAnkle)[2]);
+    // The hips at the crotch (the body's bottom, 50 mm up), the knees in the middle of the
+    // leg (not pulled towards the other one).
+    CHECK_THAT(pt(p, Point::LeftHip)[2], WithinAbs(50.0, 3.0));
+    CHECK_THAT(pt(p, Point::LeftKnee)[0], WithinAbs(12.0 - 3.0 * (pt(p, Point::LeftKnee)[2] - 7.0) / 55.0, 1.5));
     CHECK(pt(p, Point::LeftToe)[1] < pt(p, Point::LeftAnkle)[1] - 5);
     CHECK(pt(p, Point::Head)[2] > 140);
     CHECK(f.blend > 0.5);

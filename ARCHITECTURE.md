@@ -1531,3 +1531,9 @@ and sharp across edges.
 - App: `CutPartsPanel` (skeleton, Usual Figure, a joint at a time, what goes in, printer) and
   `MainWindow::CutPartsMode` (the figure see-through, the skeleton and red discs ghosted; balls dragged as in Pose
   Figure; the cuts planned again when a ball is let go).
+- 0.77.1: cuts on the body go the body's way (shoulders square to ±X, neck and waist level, hips level); elbows,
+  knees, wrists and ankles stay square to the limb. Reach measured only beyond the cut, and the first bone's capped
+  at 1.4 × the limb's thickness (not for the neck or waist). `rig::fit`: shoulders found by `meetsBody` (along
+  the arm's line in from the elbow until the surface round it changes: much more, much less, or further off),
+  hips at the crotch (the lowest surface on the middle line), and `centred` run again with a reach just past the
+  limb's own surface so a neighbouring limb doesn't pull it.
