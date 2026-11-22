@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.83.0 Beta — Slice 74: Linked left/right parts (2026-11-22)
+
+- **Mirror → Linked Copy on the Other Side...** (Design tab): a mirrored copy of the selected shape that keeps up
+  with it. Make the left arm, link a right arm, then keep working on the left: change its size, sculpt it, add a
+  peg or a socket, and the right arm changes too.
+  - Mirror left / right or front / back, at the middle of the other shapes (the body, for an arm or a leg) or where
+    you say.
+  - It's named for the other side ("Left arm" → "Right arm") and takes the same colour. It can be moved from where it
+    starts, and steps can be added on top of it (for something only that side has).
+  - Steps on the original carry over as long as it's the first part of each (a Sculpt, a Paint, a socket, a peg, a
+    cut...). Merging it into something bigger mirrors the whole of that.
+  - Double-click it in the list to move the mirror. **Unlink** (Mirror menu, or the button in Properties) makes it a
+    shape of its own as it is now. Delete the original and it goes empty (with a warning) until you Undo.
+- Saved files are now format 45.
+
 ## 0.82.0 Beta — Slice 73: Texture stamps (2026-11-22)
 
 - The sculpting **Pattern** brush has seven more textures: **chainmail**, **twill (denim)**, **knitting**,

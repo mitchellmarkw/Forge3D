@@ -165,6 +165,11 @@ private:
     void cutSelected();
     void paste();
     void mirrorSelected(int axis);
+    // Linked mirror: a copy on the other side that keeps up (or, for one, its mirror moved).
+    void linkedMirror(ObjectId changing = kInvalidId);
+    void unlinkSelected();
+    QAction* m_linkedMirror = nullptr;
+    QAction* m_unlink = nullptr;
     void groupSelected();
     // Handles for the selection: one shape's, or a shared set (move / turn only) at
     // the middle of several shapes on the plate.

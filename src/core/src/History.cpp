@@ -248,6 +248,14 @@ std::string describe(const Document& doc, ObjectId id)
     case BooleanOp::LimbCut: return spec.limbCut ? limbcut::describe(*spec.limbCut) : std::string();
     case BooleanOp::Mould: return spec.mould ? mould::describe(*spec.mould) : std::string();
     case BooleanOp::Port: return spec.port ? port::describe(*spec.port) : std::string();
+    case BooleanOp::Linked: {
+        if (!spec.link)
+            return std::string();
+        const Body* source = doc.find(spec.link->source);
+        const std::string across = std::abs(spec.link->normal[1]) > std::abs(spec.link->normal[0]) ? "front / back"
+                                                                                                   : "left / right";
+        return "Mirror of '" + (source ? source->name : std::string("(gone)")) + "', " + across + ", kept up to date";
+    }
     case BooleanOp::Stamp: {
         if (!spec.stamp)
             return {};

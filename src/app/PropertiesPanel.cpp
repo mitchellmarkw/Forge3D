@@ -436,6 +436,10 @@ void PropertiesPanel::setBody(const Body* body, const QString& context, bool isP
             button->setText(tr("Remove the joint"));
             button->setToolTip(tr("Give back the shape without this half of the joint, where it is"));
             break;
+        case BooleanOp::Linked:
+            button->setText(tr("Unlink"));
+            button->setToolTip(tr("Make it a shape of its own, as it is now: it stops following the other side"));
+            break;
         case BooleanOp::Group:
             button->setText(tr("Ungroup"));
             button->setToolTip(tr("Let the shapes in this group move on their own again, where they are"));

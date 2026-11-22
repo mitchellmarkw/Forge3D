@@ -1613,3 +1613,17 @@ and sharp across edges.
   brush reaches facing within about 84° of the pressing direction taking all of it (the picture makes the edges).
   `stampRadius` reaches the picture's corners; a stamp's depth is 6% of its width at full strength (30% for a
   repeat). A stamp stroke keeps only its first dab. File format 44.
+
+## Linked mirrors (slice 74, 0.83.0)
+
+- `BooleanOp::Linked`: a step with no parts and a `MirrorLink` (source id, mirror point and normal). The mesh
+  engine makes it (`Document::linkedMirror`): the source followed up through every step it's the first part of
+  (`linkedTop`, not into a group), its solid placed on the plate, reflected in the plane, the triangles turned the
+  right way out. Its plate coordinates are its own (pivot set from the result at creation), so it can be moved on.
+- Keeping up: `Document::notify` first calls `touchLinks`, which clears the caches of every linked mirror whose source
+  (followed up to the top of the plate) is where the change was (any link at all on a removal), and of links of those
+  links, then invalidates what's above each and tells listeners they changed. A guard stops it re-entering, and a
+  thread-local set refuses a link that would take in itself.
+- A problem (the source gone, the step off) leaves it empty with the problem noted. It's added with
+  `AddBodyCommand` (CombineCommand needs parts); `withLinkPlane` moves the mirror; `unlinkMirror` swaps it (on the
+  plate) for a mesh shape of its triangles. Scaling refuses it. File format 45.
