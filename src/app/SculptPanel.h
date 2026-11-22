@@ -32,6 +32,9 @@ public:
     // Pattern brush: the pattern chosen and how wide one repeat of it is (mm).
     SculptPattern pattern() const;
     double patternSize() const;
+    // Pressed once as a stamp (not repeating), and turned round the surface's facing.
+    bool patternOnce() const;
+    double patternTurn() const;
     // A picture of the user's to press in: added to the list and chosen.
     void addOwnPattern(const SculptPattern& pattern);
     bool mirrorX() const;
@@ -82,6 +85,9 @@ private:
     QWidget* m_patternBox = nullptr;     // shown for the Pattern brush only
     QComboBox* m_pattern = nullptr;      // built-ins, own pictures, then "Your own picture..."
     QDoubleSpinBox* m_patternSize = nullptr;
+    QLabel* m_patternSizeLabel = nullptr;
+    QComboBox* m_patternPress = nullptr;  // repeating, or once (a stamp)
+    QDoubleSpinBox* m_patternTurn = nullptr;
     std::vector<SculptPattern> m_patterns;  // in the list's order (without the last item)
     int m_lastPattern = 0;
     QPushButton* m_undo = nullptr;

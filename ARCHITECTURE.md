@@ -1602,3 +1602,14 @@ and sharp across edges.
 - `makeRoom` (one macro) adds each cut as a mesh shape and subtracts it from its part with a Subtract step that keeps
   the part's name. The Pose Test panel runs it on the thread pool and applies the result if the document hasn't
   changed meanwhile; the document change rebuilds the pose's joints.
+
+## Texture stamps (slice 73, 0.82.0)
+
+- Seven more built-in patterns in `Patterns.cpp` (chainmail, twill, knit, leather, cracks, wood, pores), made from
+  seamless value noise (`smoothNoise`) and seamless cells (`cellDistances`, Worley-style with a jittered point per
+  grid square, the grid wrapped).
+- `SculptStroke` gained `turn` (the pattern's u/v turned round the first dab's facing) and `once`: a stamp, the
+  picture `tile` wide centred on the first dab (`PatternLayer::origin`), sampled without repeating, every point the
+  brush reaches facing within about 84° of the pressing direction taking all of it (the picture makes the edges).
+  `stampRadius` reaches the picture's corners; a stamp's depth is 6% of its width at full strength (30% for a
+  repeat). A stamp stroke keeps only its first dab. File format 44.

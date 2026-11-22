@@ -4,6 +4,8 @@
 #include "forge/core/Sculpt.h"
 #include "forge/core/Tessellator.h"
 
+#include <fstream>
+#include <cstdlib>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
@@ -745,6 +747,56 @@ TEST_CASE("Sculpt: the Pattern brush", "[sculpt][pattern]")
         CHECK(deepest < 20.0 - depth * 0.8);
     }
 
+    SECTION("A stamp: the picture pressed once, centred, turned")
+    {
+        const Mesh start = sculpt::refined(box(20), 0.25, 10'000'000);
+        // A white square in the middle of a black picture.
+        auto square = std::make_shared<PictureData>();
+        square->width = square->height = 64;
+        square->grey.assign(64 * 64, 0);
+        for (int y = 16; y < 48; ++y)
+            for (int x = 16; x < 48; ++x)
+                square->grey[std::size_t(y) * 64 + std::size_t(x)] = 255;
+        const auto raisedAt = [](const Mesh& m, double x, double y) {
+            double z = -1e9;
+            for (std::size_t v = 0; v < m.vertexCount(); ++v)
+                if (std::abs(m.positions[3 * v] - x) < 0.3 && std::abs(m.positions[3 * v + 1] - y) < 0.3)
+                    z = std::max(z, double(m.positions[3 * v + 2]));
+            return z - 20.0;
+        };
+        for (double turn : {0.0, 45.0}) {
+            sculpt::Sculptor s(start);
+            s.setDetail(0.1);
+            s.beginPattern(square, 8.0, 0.5, turn, true);
+            sculpt::Dab dab;
+            dab.brush = sculpt::Brush::Pattern;
+            dab.radius = sculpt::stampRadius(*square, 8.0);
+            dab.strength = 1.0;
+            dab.centre = {0, 0, 20};
+            s.apply(dab, s.triangleAt(dab.centre));
+            s.endPattern();
+            INFO("turned " << turn);
+            CHECK(raisedAt(s.mesh(), 0.0, 0.0) > 0.45);   // the square
+            CHECK(raisedAt(s.mesh(), 6.0, 0.0) < 0.05);   // outside the stamp: not repeated
+            CHECK(raisedAt(s.mesh(), 3.2, 0.0) < 0.05);   // outside the square, on its black
+            // Turned 45°, the square's corner reaches out along X.
+            CHECK((turn == 0.0 ? raisedAt(s.mesh(), 2.5, 0.0) < 0.05 : raisedAt(s.mesh(), 2.5, 0.0) > 0.4));
+            CHECK(closed(s.mesh()));
+        }
+        CHECK_THAT(sculpt::stampRadius(*square, 8.0), WithinRel(std::sqrt(32.0) * 1.02, 1e-9));
+        if (const char* out = std::getenv("FORGE_PATTERN_DUMP"))
+            for (const std::string& name : sculpt::builtInPatterns()) {
+                SculptPattern pat;
+                pat.name = name;
+                const auto im = sculpt::patternImage(pat);
+                std::ofstream f(std::string(out) + name + ".pgm", std::ios::binary);
+                f << "P5 " << im->width * 2 << " " << im->height * 2 << " 255\n";
+                for (int y = 0; y < im->height * 2; ++y)
+                    for (int x = 0; x < im->width * 2; ++x)
+                        f.put(char(im->grey[std::size_t(y % im->height) * im->width + std::size_t(x % im->width)]));
+            }
+    }
+
     SECTION("Kept as strokes: played back, saved with the step (a picture of one's own too)")
     {
         Document doc;
@@ -779,6 +831,20 @@ TEST_CASE("Sculpt: the Pattern brush", "[sculpt][pattern]")
             st.mirrorX = k == 1;
             for (double x = -2; x <= 2; x += 0.7)
                 st.dabs.push_back({float(x + 6 * k - 3), float(4 * k - 2), 20.f});
+            finish.strokes.push_back(st);
+        }
+        {
+            // A stamp, turned (kept in the file too).
+            SculptStroke st;
+            st.brush = int(sculpt::Brush::Pattern);
+            st.strength = 1;
+            st.finest = 0.2;
+            st.pattern = 1;
+            st.tile = 4;
+            st.turn = 30;
+            st.once = true;
+            st.radius = sculpt::stampRadius(*pic, 4);
+            st.dabs.push_back({-4.f, -5.f, 20.f});
             finish.strokes.push_back(st);
         }
         Body step;

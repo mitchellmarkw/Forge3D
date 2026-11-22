@@ -91,7 +91,9 @@ namespace forge::file {
 //      "secondIn", "side2" in "mould")
 //  43  Port steps (operation "port": kind peg / grip, shape, size, length, fit, end
 //      flat / chamfer / ball, ball, turn, point, direction, hasExit, exit)
-inline constexpr int kFormatVersion = 43;
+//  44  Pattern strokes turned ("turn") and pressed once as stamps ("once"); more built-in
+//      patterns (chainmail, twill, knit, leather, cracks, wood, pores)
+inline constexpr int kFormatVersion = 44;
 // The highest sculpt::Brush number a file may hold (Pattern).
 inline constexpr int kLastSculptBrush = 13;
 inline constexpr const char* kExtension = ".f3d";

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.82.0 Beta — Slice 73: Texture stamps (2026-11-22)
+
+- The sculpting **Pattern** brush has seven more textures: **chainmail**, **twill (denim)**, **knitting**,
+  **leather**, **cracked stone**, **wood grain** and **skin pores** (with scales, hexagons, woven cloth, skin and
+  bricks as before).
+- **Press it: once, as a stamp**: the picture is pressed once, centred where you click, **Stamp size** wide, nothing
+  outside it, only on the surface facing you. Good for an emblem, a logo or a scar from your own picture, or a patch
+  of one of the textures. A stamp goes in shallower for its size than a repeating pattern (Strength sets it; Ctrl
+  engraves it).
+- **Turned**: the picture or pattern turned round, flat on the surface.
+- Saved files are now format 44.
+
 ## 0.81.0 Beta — Slice 72: Make Room (2026-11-22)
 
 - **Make Room** (Pose Test, under the chosen joint): cuts away just what's in the way so the joint turns as far as

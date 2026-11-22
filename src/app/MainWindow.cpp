@@ -5671,9 +5671,14 @@ void MainWindow::sculptAt(const QVector3D& origin, const QVector3D& direction, Q
                 found = m_sculptMode.patterns.insert(m_sculptMode.patterns.end(), chosen);
             next.pattern = int(found - m_sculptMode.patterns.begin());
             next.tile = m_sculptPanel->patternSize();
+            next.turn = m_sculptPanel->patternTurn();
+            next.once = m_sculptPanel->patternOnce();
             try {
-                m_sculptMode.sculptor->beginPattern(sculpt::patternImage(chosen), next.tile,
-                                                    sculpt::patternDepth(next));
+                const auto image = sculpt::patternImage(chosen);
+                if (next.once)
+                    next.radius = sculpt::stampRadius(*image, next.tile);  // reaches the picture's corners
+                m_sculptMode.sculptor->beginPattern(image, next.tile, sculpt::patternDepth(next), next.turn,
+                                                    next.once);
             } catch (const std::exception& e) {
                 statusBar()->showMessage(QString::fromUtf8(e.what()), 6000);
                 return;
@@ -5684,6 +5689,8 @@ void MainWindow::sculptAt(const QVector3D& origin, const QVector3D& direction, Q
         m_sculptMode.sculptor->setDetail(m_sculptMode.strokes.back().finest);
     }
     SculptStroke& stroke = m_sculptMode.strokes.back();
+    if (stroke.once && !stroke.dabs.empty())
+        return;  // a stamp: pressed once, where the click was
     const Vec3 centre = asStored(hit->point);
     stroke.dabs.push_back({float(centre[0]), float(centre[1]), float(centre[2])});
     sculpt::Dab dab;
