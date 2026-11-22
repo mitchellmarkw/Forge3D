@@ -28,6 +28,7 @@
 #include "PrintCheckPanel.h"
 #include "MannequinPanel.h"
 #include "HollowPanel.h"
+#include "MouldPanel.h"
 #include "PoseFigurePanel.h"
 #include "PaintPanel.h"
 #include "JointStandardsDialog.h"
@@ -39,6 +40,7 @@
 #include "forge/core/Stamp.h"
 #include "Fits.h"
 #include "forge/core/Hollow.h"
+#include "forge/core/Mould.h"
 #include "MaskPanel.h"
 #include "ReferencePanel.h"
 #include "ScaleCalculator.h"
@@ -633,6 +635,8 @@ void MainWindow::createActions()
             endSocket();
         else if (m_hollowMode.active)
             endHollow();
+        else if (m_mouldMode.active)
+            endMould();
         else if (m_poseFigureMode.active)
             endPoseFigure();
         else if (m_paintMode.active)
@@ -1088,6 +1092,18 @@ void MainWindow::createActions()
         }
         startHollow(history::tip(m_doc, id), false);
     });
+    m_mouldAction = new QAction(tr("Make Mould"), this);
+    m_mouldAction->setToolTip(tr("Make Mould: a two-part mould box round the selected shape, for casting resin "
+                                 "copies of a printed master, with registration keys, a pour spout and air vents"));
+    m_mouldAction->setStatusTip(m_mouldAction->toolTip());
+    connect(m_mouldAction, &QAction::triggered, this, [this] {
+        const ObjectId id = selectedOne();
+        if (id == kInvalidId || m_selection.size() != 1 || !m_doc.isTopLevel(id)) {
+            statusBar()->showMessage(tr("Make Mould: select one shape on the plate first."), 6000);
+            return;
+        }
+        startMould(id, false);
+    });
     m_shellAction = new QAction(tr("Shell"), this);
     m_shellAction->setToolTip(tr("Shell: hollow the selected shape out to walls of a set thickness, leaving the "
                                  "faces you click open"));
@@ -1502,6 +1518,7 @@ void MainWindow::createToolBar()
         {m_referenceAction, "reference"},
         {m_mannequinAction, "mannequin"},
         {m_hollowAction, "hollow"},
+        {m_mouldAction, "mould"},
         {m_poseFigureAction, "pose-figure"},
         {m_paintAction, "paint"},
         {m_cutPartsAction, "cut-parts"},
@@ -1677,7 +1694,7 @@ void MainWindow::createToolBar()
     common(viewPage);
 
     Page print = page(tr("Print/Save"), tr("Save it, or get it to the printer"));
-    group(print, tr("Prepare"), {button(m_splitToFit), menuButton(m_layOutMenu)});
+    group(print, tr("Prepare"), {button(m_splitToFit), menuButton(m_layOutMenu), button(m_mouldAction)});
     group(print, tr("Out"), {button(m_save), button(m_export), button(m_sendToSlicer)});
     group(print, tr("Library"), {button(m_saveCustomShape)});
     common(print);
@@ -2372,6 +2389,35 @@ void MainWindow::createDocks()
     stackLayout->addWidget(m_hollowPanel);
     m_hollowPanel->hide();
     connect(m_hollowPanel, &HollowPanel::changed, this, &MainWindow::updateHollowPreview);
+    m_mouldPanel = new MouldPanel;
+    stackLayout->addWidget(m_mouldPanel);
+    m_mouldPanel->hide();
+    connect(m_mouldPanel, &MouldPanel::changed, this, &MainWindow::updateMouldPreview);
+    connect(m_mouldPanel, &MouldPanel::widestRequested, this, [this] {
+        if (m_mouldMode.active)
+            m_mouldPanel->setParting(mould::widest(m_mouldMode.part));
+    });
+    connect(m_mouldPanel, &MouldPanel::placeVentsRequested, this, [this] {
+        auto& mode = m_mouldMode;
+        if (!mode.active)
+            return;
+        const MouldFinish f = mouldSettings();
+        mode.vents.clear();
+        for (const Vec3& v : mould::highSpots(mode.part, f.parting, mode.spout, f.ventSize))
+            mode.vents.push_back(v);
+        updateMouldPreview();
+    });
+    connect(m_mouldPanel, &MouldPanel::removeLastRequested, this, [this] {
+        if (!m_mouldMode.vents.empty())
+            m_mouldMode.vents.pop_back();
+        updateMouldPreview();
+    });
+    connect(m_mouldPanel, &MouldPanel::clearRequested, this, [this] {
+        m_mouldMode.vents.clear();
+        updateMouldPreview();
+    });
+    connect(m_mouldPanel, &MouldPanel::applyRequested, this, &MainWindow::applyMould);
+    connect(m_mouldPanel, &MouldPanel::cancelRequested, this, &MainWindow::endMould);
     connect(m_hollowPanel, &HollowPanel::placeRequested, this, [this] {
         auto& mode = m_hollowMode;
         if (!mode.active)
@@ -2860,6 +2906,10 @@ void MainWindow::onViewportClicked(const QVector3D& origin, const QVector3D& dir
         hollowClick(origin, direction);
         return;
     }
+    if (m_mouldMode.active) {
+        mouldClick(origin, direction);
+        return;
+    }
     if (m_stampMode.active) {
         stampClick(origin, direction);
         return;
@@ -3037,7 +3087,7 @@ void MainWindow::onLeftPressed(const QVector3D& origin, const QVector3D& directi
     if (m_embossMode.active || m_edgesMode.active || m_holeMode.active || m_shellMode.active || m_followMode.active ||
         m_patternMode.active || m_threadMode.active || m_socketMode.active || m_joinMode.active ||
         m_maskMode.active || m_hollowMode.active || m_panelLineMode.active || m_poseFigureMode.active ||
-        m_paintMode.active || m_cutPartsMode.active)
+        m_paintMode.active || m_cutPartsMode.active || m_mouldMode.active)
         return;  // shapes stay put while the tool is open
 
     if (handle.valid() && multiSelection()) {
@@ -3943,6 +3993,7 @@ constexpr std::uint64_t kMeasureHoverItem = ~std::uint64_t{0} - 8;
 constexpr std::uint64_t kMeasureLineItem = ~std::uint64_t{0} - 9;
 constexpr std::uint64_t kMeasureCentreItem = ~std::uint64_t{0} - 10;
 constexpr std::uint64_t kMannequinItem = ~std::uint64_t{0} - 20;
+constexpr std::uint64_t kMouldItem = ~std::uint64_t{0} - 30;  // to - 33: the Make Mould helpers
 
 // Thin six-sided tubes along lines: how picked edges are drawn.
 std::shared_ptr<const Mesh> tubes(const std::vector<const std::vector<Vec3>*>& lines, float radius)
@@ -4976,7 +5027,7 @@ bool MainWindow::toolOpen() const
            m_socketMode.active || m_joinMode.active || m_maskMode.active || m_referenceMode.active ||
            m_hingeMode.active || m_poseMode.active || m_printCheckMode.active || m_mannequinOpen ||
            m_hollowMode.active || m_stampMode.active || m_panelLineMode.active || m_poseFigureMode.active ||
-           m_paintMode.active || m_cutPartsMode.active;
+           m_paintMode.active || m_cutPartsMode.active || m_mouldMode.active;
 }
 
 void MainWindow::startEmboss(ObjectId target, bool editing)
@@ -7380,6 +7431,8 @@ void MainWindow::refreshScene()
             endSocket();
         if (m_hollowMode.active && !m_doc.find(m_hollowMode.target))
             endHollow();
+        if (m_mouldMode.active && !m_doc.find(m_mouldMode.target))
+            endMould();
         if (m_poseFigureMode.active && !m_doc.find(m_poseFigureMode.target))
             endPoseFigure();
         if (m_stampMode.active && !m_doc.find(m_stampMode.target))
@@ -7405,6 +7458,8 @@ void MainWindow::refreshScene()
         for (ObjectId id : m_doc.topLevelIds()) {
             if (m_maskMode.active && id == m_maskMode.hidden)
                 continue;  // the other piece, while its mask is being changed
+            if (m_mouldMode.active && m_mouldMode.editing && id == m_mouldMode.other)
+                continue;  // the other half, while the mould is being changed
             DisplayItem item;
             item.id = id;
             try {
@@ -7417,6 +7472,10 @@ void MainWindow::refreshScene()
                 continue;
             }
             item.model = toQMatrix(m_doc.worldTransform(id));
+            if (m_mouldMode.active && m_mouldMode.editing && id == m_mouldMode.target && m_mouldMode.shownPart) {
+                item.mesh = m_mouldMode.shownPart;  // the part, inside the box being changed
+                item.model = toQMatrix(m_mouldMode.toPlate);
+            }
             if (!(m_paintMode.active && id == m_paintMode.object))
                 item.mesh = paintedMesh(id, item.mesh);  // painted: shown in its colours
             if (m_paintMode.active && id == m_paintMode.object && m_paintMode.shown) {
@@ -7650,6 +7709,30 @@ void MainWindow::refreshScene()
             marks.ghost = sunk;
             marks.helper = true;
             items.push_back(marks);
+        }
+        // Make Mould: the box see-through, the parting face yellow, the spout and vents red
+        // and the keys gold (seen through).
+        if (m_mouldMode.active) {
+            const QMatrix4x4 frame = toQMatrix(m_mouldMode.toPlate);
+            std::uint64_t next = kMouldItem;
+            const auto helper = [&](const std::shared_ptr<const Mesh>& mesh, QVector3D colour, float alpha, bool ghost) {
+                const std::uint64_t mine = next--;
+                if (!mesh || mesh->empty())
+                    return;
+                DisplayItem h;
+                h.id = mine;
+                h.mesh = mesh;
+                h.model = frame;
+                h.color = colour;
+                h.alpha = alpha;
+                h.ghost = ghost;
+                h.helper = true;
+                items.push_back(h);
+            };
+            helper(m_mouldMode.channels, QVector3D(0.9f, 0.15f, 0.1f), 1.0f, true);
+            helper(m_mouldMode.keys, QVector3D(0.9f, 0.68f, 0.18f), 1.0f, true);
+            helper(m_mouldMode.sheet, QVector3D(1.0f, 0.85f, 0.2f), 0.4f, false);
+            helper(m_mouldMode.box, QVector3D(0.55f, 0.62f, 0.72f), 0.22f, false);
         }
         // Hollow: where the drain holes go, red, seen through the shape.
         if (m_hollowMode.active && m_hollowMode.cut) {
@@ -7895,6 +7978,7 @@ void MainWindow::refreshScene()
     m_holeAction->setEnabled(m_selection.size() == 1 && allTopLevel && !rolled && !toolOpen());
     m_shellAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_hollowAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
+    m_mouldAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_poseFigureAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_paintAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_cutPartsAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
@@ -8068,6 +8152,7 @@ void MainWindow::editStep(ObjectId id)
     case BooleanOp::Thread: startThread(id, true); break;
     case BooleanOp::Socket: startSocket(id, true); break;
     case BooleanOp::Hollow: startHollow(id, true); break;
+    case BooleanOp::Mould: startMould(id, true); break;
     case BooleanOp::Posed: startPoseFigure(id, true); break;
     case BooleanOp::Paint: startPaint(id, true); break;
     case BooleanOp::Stamp: startStamp(id, true); break;
@@ -8256,6 +8341,7 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
                                                   op == BooleanOp::Hinge || op == BooleanOp::MaskSplit ||
                                                   op == BooleanOp::Hollow || op == BooleanOp::Stamp ||
                                                   op == BooleanOp::PanelLines || op == BooleanOp::Posed || op == BooleanOp::Paint ||
+                                                  op == BooleanOp::Mould ||
                                                   (op == BooleanOp::Split && m_doc.isTopLevel(id))));
         if (!opens) {
             // Nothing to open: show or hide what's inside, as a list does.
@@ -13318,6 +13404,191 @@ void MainWindow::endMannequin()
     QTimer::singleShot(0, this, [this] { resizeDocks({m_propsDock}, {m_propsDockWidth}, Qt::Horizontal); });
     statusBar()->clearMessage();
     refreshCommandState();
+}
+
+// ---- Make Mould -----------------------------------------------------------------------
+
+MouldFinish MainWindow::mouldSettings() const
+{
+    MouldFinish f = m_mouldPanel->settings();
+    f.spout = m_mouldMode.spout;
+    f.vents = m_mouldMode.vents;
+    return f;
+}
+
+void MainWindow::startMould(ObjectId target, bool editing)
+{
+    const Body* body = m_doc.find(target);
+    if (!body || toolOpen())
+        return;
+    if (m_dragState.kind != Drag::Kind::None)
+        cancelDrag();
+    MouldMode mode;
+    mode.active = true;
+    mode.editing = editing;
+    mode.target = target;
+    MouldFinish f;
+    try {
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        struct RestoreCursor {
+            ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
+        } restore;
+        mode.part = mouldPart(m_doc, target);
+        if (mode.part.empty())
+            throw std::invalid_argument("The shape has no surface to make a mould of.");
+        mode.partBounds = mode.part.bounds();
+        if (editing) {
+            f = mouldOf(m_doc, target);
+            mode.toPlate = m_doc.worldTransform(target);
+            MouldFinish pair = f;
+            pair.top = !f.top;
+            for (const Body& o : m_doc.bodies())
+                if (o.id != target && m_doc.isTopLevel(o.id) && o.isBoolean() && o.boolean->op == BooleanOp::Mould &&
+                    o.boolean->mould && *o.boolean->mould == pair) {
+                    mode.other = o.id;
+                    break;
+                }
+            mode.shownPart = together({mode.part});
+        } else {
+            f = mould::suggested(mode.part);
+        }
+    } catch (const std::exception& e) {
+        QMessageBox::information(this, tr("Forge3D"), QString::fromUtf8(e.what()));
+        return;
+    }
+    mode.spout = f.spout;
+    mode.vents = f.vents;
+    m_mouldMode = std::move(mode);
+    const QString name = QString::fromStdString(body->name);
+    const Bounds& pb = m_mouldMode.partBounds;
+    m_mouldPanel->start(editing ? tr("Change the mould '%1'").arg(name) : tr("Make a mould of '%1'").arg(name), editing,
+                        f, double(pb.min[2]) + 0.1, double(pb.max[2]) - 0.1);
+    m_propsDockWidth = m_propsDock->width();
+    m_properties->hide();
+    m_mouldPanel->show();
+    statusBar()->showMessage(tr("Make Mould: set where the halves meet, click the part to add air vents (or move the "
+                                "spout), then Apply. Esc cancels."));
+    updateMouldPreview();
+    refreshCommandState();
+}
+
+void MainWindow::endMould()
+{
+    if (!m_mouldMode.active)
+        return;
+    m_mouldMode = MouldMode{};
+    m_mouldPanel->hide();
+    m_properties->show();
+    QTimer::singleShot(0, this, [this] { resizeDocks({m_propsDock}, {m_propsDockWidth}, Qt::Horizontal); });
+    statusBar()->clearMessage();
+    refreshScene();
+    refreshCommandState();
+}
+
+void MainWindow::mouldClick(const QVector3D& origin, const QVector3D& direction)
+{
+    auto& mode = m_mouldMode;
+    const QVector3D d = direction.normalized();
+    std::optional<emboss::SurfacePoint> spot;
+    try {
+        spot = surfaceUnder(m_doc, mode.target, {origin.x(), origin.y(), origin.z()}, {d.x(), d.y(), d.z()}, 0.5);
+    } catch (const std::exception& e) {
+        m_mouldPanel->setStatus(QString::fromUtf8(e.what()), true);
+        return;
+    }
+    if (!spot) {
+        statusBar()->showMessage(tr("Make Mould: click on the part itself."), 4000);
+        return;
+    }
+    const Vec3 p = mode.toPlate.inverse().apply(spot->point);
+    const MouldFinish f = mouldSettings();
+    if (p[2] <= f.parting) {
+        m_mouldPanel->setStatus(tr("Click the part above the parting face (yellow): the spout and vents go up out of "
+                                   "the top half."),
+                                true);
+        return;
+    }
+    if (m_mouldPanel->clickSetsSpout()) {
+        mode.spout = p;
+    } else {
+        if (mode.vents.size() >= 20) {
+            m_mouldPanel->setStatus(tr("That's as many air vents as there can be (20)."), true);
+            return;
+        }
+        mode.vents.push_back(p);
+    }
+    updateMouldPreview();
+}
+
+void MainWindow::updateMouldPreview()
+{
+    auto& mode = m_mouldMode;
+    if (!mode.active)
+        return;
+    const MouldFinish f = mouldSettings();
+    const Bounds& pb = mode.partBounds;
+    mode.box = together({mould::boxMesh(mould::box(pb, f.wall))});
+    mode.sheet = together({mould::partingSheet(pb, f)});
+    mode.channels = together({mould::channels(pb, f)});
+    mode.keys = f.keys ? together({mould::keys(pb, f, false)}) : nullptr;
+    int vents = 0;
+    for (const auto& v : f.vents)
+        if (v[2] > f.parting)
+            ++vents;
+    m_mouldPanel->setVentCount(vents);
+    const bool spoutOk = f.spout[2] > f.parting;
+    if (!spoutOk)
+        m_mouldPanel->setStatus(tr("The spout is below the parting face: lower the parting face, or choose \"The "
+                                   "spout\" under Clicking the part places and click the part higher up."),
+                                true);
+    else if (f.keys && mould::keyRadius(f) <= 0.0)
+        m_mouldPanel->setStatus(tr("The walls are too thin for keys: make them thicker, or the halves won't line up "
+                                   "by themselves."),
+                                true);
+    else
+        m_mouldPanel->setStatus(tr("Apply makes the two halves (a few seconds on a big part), closed round the part. "
+                                   "Print the top half upside down; the bottom half as it sits."),
+                                false);
+    m_mouldPanel->setApplyEnabled(spoutOk);
+    refreshScene();
+}
+
+void MainWindow::applyMould()
+{
+    auto& mode = m_mouldMode;
+    if (!mode.active)
+        return;
+    const MouldFinish f = mouldSettings();
+    const ObjectId target = mode.target;
+    try {
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        struct RestoreCursor {
+            ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
+        } restore;
+        mould::check(f);
+        if (mode.editing) {
+            std::vector<Body> after = withMould(m_doc, target, f);
+            std::vector<Body> before;
+            for (const Body& b : after) {
+                m_doc.previewMesh(*b.boolean);  // worked out (and kept) before anything changes
+                before.push_back(*m_doc.find(b.id));
+            }
+            endMould();
+            run(std::make_unique<EditBodiesCommand>(std::move(before), std::move(after), "Change mould"));
+            setSelection(target);
+            return;
+        }
+        const std::vector<ObjectId> made = makeMould(m_stack, m_doc, target, f);
+        endMould();
+        qInfo().noquote() << "Command:" << QString::fromStdString(m_stack.undoLabel());
+        setSelection(made);
+    } catch (const std::exception& e) {
+        if (m_mouldMode.active)
+            m_mouldPanel->setStatus(tr("The mould couldn't be made: %1").arg(QString::fromUtf8(e.what())), true);
+        else
+            QMessageBox::warning(this, tr("Forge3D"),
+                                 tr("The mould couldn't be made:\n%1").arg(QString::fromUtf8(e.what())));
+    }
 }
 
 // ---- Hollow ---------------------------------------------------------------------------

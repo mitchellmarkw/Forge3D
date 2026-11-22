@@ -1541,3 +1541,19 @@ and sharp across edges.
   `cross(n, front)` (forward) and about the back-to-front line (side); right-side joints flip `side`, so equal
   numbers make a mirrored pair. `Choice::tilt` carries it into `cutIntoParts`; the app replans the preview when a
   joint's tilt changes (`CutPartsMode::plannedTilts`).
+
+## Make Mould (slice 69, 0.78.0)
+
+- `BooleanOp::Mould` with `MouldFinish` (which half, parting height, wall, keys, spout and vents, in the step's
+  coordinates), worked out by the mesh engine: `mould::apply` takes the part's box plus the wall, subtracts the part
+  (and, for the top, the spout, funnel and vents as round rods straight up), trims at the parting height, then adds
+  the key pegs (bottom) or cuts their holes, bigger by the fit (top). Keys sit in the box's corners, half way through
+  the wall, so they never reach the cavity.
+- `mould::widest` samples level outlines (signed area of the triangle-plane crossings) and takes the widest, nearest
+  the middle on a near tie; `highest` puts the spout in the middle of a flat top (a straight-down line onto the
+  part); `highSpots` keeps the top vertex in each cell of an XY grid that is the highest within a vent gap round it.
+- `makeMould` (one macro) gives two Mould steps, the top on a `duplicateTree` copy, lifted together so the bottom
+  half stands on the plate; `withMould` changes a half and its pair (same settings but `top`), keeping an upright
+  half's underside where it was when the wall changes. `mouldPart` gives the part in the step's coordinates for the
+  app, and `embossedPart` sends clicks on a half to the part inside.
+- File format 41.
