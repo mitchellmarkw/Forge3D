@@ -35,6 +35,13 @@ public:
     void setRange(const QString& text);
     void setPoses(const QStringList& names, int current);
     void setStatus(const QString& text, bool problem);
+    // Make Room: the angle to turn to (which of the joint's angles), what to cut it from,
+    // and the clearance.
+    double roomTarget() const;
+    int roomWhich() const;
+    bool roomFromTurning() const;
+    double roomClearance() const;
+    void setRoomBusy(bool busy);
 
 signals:
     void jointChosen(int index);
@@ -48,6 +55,7 @@ signals:
     void savePoseRequested();
     void deletePoseRequested();
     void doneRequested();
+    void makeRoomRequested();
 
 private:
     QListWidget* m_joints = nullptr;
@@ -63,6 +71,13 @@ private:
     QPushButton* m_deletePose = nullptr;
     QLabel* m_status = nullptr;
     pose::JointKind m_kind = pose::JointKind::Hinge;
+    QWidget* m_roomBox = nullptr;
+    QWidget* m_roomWhichRow = nullptr;
+    QComboBox* m_roomWhich = nullptr;
+    QDoubleSpinBox* m_roomTarget = nullptr;
+    QComboBox* m_roomFrom = nullptr;
+    QDoubleSpinBox* m_roomClearance = nullptr;
+    QPushButton* m_roomButton = nullptr;
 };
 
 }  // namespace forge::app

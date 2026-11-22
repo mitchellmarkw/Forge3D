@@ -10,6 +10,8 @@
 #include "forge/core/Pose.h"
 #include "forge/core/Socket.h"
 
+#include <cstdlib>
+
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
@@ -235,4 +237,64 @@ TEST_CASE("Pose: poses are saved by name, undone, and kept in the file", "[pose]
     CHECK(back[1] == stand);
     std::filesystem::remove(path);
     CHECK(file::posesFromJson(R"({"poses":[{"name":""},{"name":"A","joints":[{"step":3,"angles":[1,2,3]}]}]})").size() == 1);
+}
+
+TEST_CASE("Pose: making room for a joint to turn to an angle", "[pose]")
+{
+    for (bool fromTurning : {false, true}) {
+        Leg leg(5.0);
+        auto joints = pose::findJoints(leg.doc);
+        REQUIRE(joints.size() == 1);
+        pose::Rig rig = pose::build(joints, leg.sizes(), leg.bounds());
+        const auto before = pose::range(joints, rig, {}, 0, leg.parts());
+        REQUIRE(before[1] < 90.0);
+        const double thigh = meshkernel::volume(leg.doc.meshSolid(leg.thigh));
+        const double shin = meshkernel::volume(leg.doc.meshSolid(leg.shin));
+
+        const auto rooms = pose::room(joints, rig, {}, 0, 0, 90.0, leg.parts(), fromTurning, 0.3);
+        REQUIRE(rooms.size() == 1);
+        CHECK(rooms[0].part == (fromTurning ? leg.shin : leg.thigh));
+        CHECK(rooms[0].volume > 1.0);
+        const std::size_t count = leg.doc.bodies().size();
+        const auto made = makeRoom(leg.stack, leg.doc, rooms, "the knee to 90\xC2\xB0");
+        REQUIRE(made.size() == 1);
+        const Body* cut = leg.doc.find(made[0]);
+        REQUIRE(cut);
+        CHECK(cut->name == (fromTurning ? "Shin" : "Thigh"));
+        CHECK(cut->boolean->op == BooleanOp::Subtract);
+        // Only what was in the way went.
+        const double now = meshkernel::volume(leg.doc.meshSolid(made[0]));
+        CHECK_THAT((fromTurning ? shin : thigh) - now, WithinAbs(rooms[0].volume, rooms[0].volume * 0.02 + 0.01));
+
+        // The joint turns to 90° now, and a little past it.
+        joints = pose::findJoints(leg.doc);
+        REQUIRE(joints.size() == 1);
+        rig = pose::build(joints, leg.sizes(), leg.bounds());
+        const auto after = pose::range(joints, rig, {}, 0, leg.parts());
+        INFO("from turning " << fromTurning << " before " << before[0] << " " << before[1] << " after " << after[0]
+                             << " " << after[1]);
+        {
+            const auto moved = pose::transforms(joints, rig, {{joints[0].step, {after[1] + 2.0, 0, 0}}});
+            auto p = leg.parts();
+            for (auto& part : p)
+                if (moved.count(part.id))
+                    part.moved = moved.at(part.id);
+            for (const auto& h : pose::collisions(p))
+                UNSCOPED_INFO("hit " << leg.doc.find(h.a)->name << " / " << leg.doc.find(h.b)->name << " " << h.volume);
+        }
+        CHECK(after[1] >= 90.0);
+        if (!fromTurning)
+            CHECK(after[0] == before[0]);  // the other way's no different (the cut's on the thigh's front)
+
+        leg.stack.undo();
+        CHECK(leg.doc.bodies().size() == count);
+    }
+    Leg leg(5.0);
+    if (const char* out = std::getenv("FORGE_ROOM_DUMP"))
+        file::save(leg.doc, out, "test");
+    const auto joints = pose::findJoints(leg.doc);
+    const pose::Rig rig = pose::build(joints, leg.sizes(), leg.bounds());
+    // Already free that far: nothing to cut.
+    CHECK(pose::room(joints, rig, {}, 0, 0, 1.0, leg.parts(), false, 0.0).empty());
+    CHECK_THROWS_AS(pose::room(joints, rig, {}, 0, 0, 90.0, leg.parts(), false, 20.0), std::invalid_argument);
 }

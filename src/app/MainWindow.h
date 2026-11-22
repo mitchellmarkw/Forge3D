@@ -1110,6 +1110,8 @@ private:
     void choosePoseJoint(int index);
     void checkPoseHits();
     void findPoseRange();
+    // Make Room: cut what's in the way for the chosen joint to turn to the panel's angle.
+    void makePoseRoom();
     void poseClick(const QVector3D& origin, const QVector3D& direction);
     bool poseGrab(const QVector3D& origin, const QVector3D& direction);
     void poseDrag(const QVector3D& origin, const QVector3D& direction);

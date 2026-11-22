@@ -2017,6 +2017,7 @@ void MainWindow::createDocks()
             m_poseTimer->start();  // checked when it stops moving
     });
     connect(m_posePanel, &PosePanel::rangeRequested, this, &MainWindow::findPoseRange);
+    connect(m_posePanel, &PosePanel::makeRoomRequested, this, &MainWindow::makePoseRoom);
     connect(m_posePanel, &PosePanel::straightenRequested, this, [this] {
         auto& mode = m_poseMode;
         if (!mode.active || mode.joint < 0)
@@ -10920,6 +10921,76 @@ void MainWindow::findPoseRange()
                         tr("It hits almost straight away, both ways: the parts' ends are too close round the joint. "
                            "Round them off or bevel them (or move the parts apart a little) so they can swing."));
                 Q_UNUSED(generation);
+            },
+            Qt::QueuedConnection);
+    });
+}
+
+void MainWindow::makePoseRoom()
+{
+    auto& mode = m_poseMode;
+    if (mode.busy || mode.joint < 0)
+        return;
+    const std::size_t index = std::size_t(mode.joint);
+    const pose::Joint& j = mode.joints[index];
+    if (j.kind == pose::JointKind::Fixed)
+        return;
+    const double target = m_posePanel->roomTarget();
+    const int which = m_posePanel->roomWhich();
+    const bool fromTurning = m_posePanel->roomFromTurning();
+    const double clearance = m_posePanel->roomClearance();
+    const std::string what = j.name + " to " + QString::number(target, 'f', 0).toStdString() + "\xC2\xB0";
+    mode.busy = true;
+    m_posePanel->setRoomBusy(true);
+    m_posePanel->setStatus(tr("Turning it to %1° to see what's in the way...").arg(target, 0, 'f', 0), false);
+    auto parts = posedParts();
+    for (auto& p : parts)
+        p.moved = Transform{};
+    const int serial = m_docSerial;
+    QPointer<MainWindow> self(this);
+    QThreadPool::globalInstance()->start([self, serial, index, which, target, fromTurning, clearance, what,
+                                          joints = mode.joints, rig = mode.rig, angles = mode.angles,
+                                          parts = std::move(parts)] {
+        std::vector<pose::Room> rooms;
+        QString problem;
+        try {
+            rooms = pose::room(joints, rig, angles, index, which, target, parts, fromTurning, clearance);
+        } catch (const std::exception& e) {
+            problem = QString::fromUtf8(e.what());
+        }
+        QMetaObject::invokeMethod(
+            qApp,
+            [self, serial, rooms = std::move(rooms), problem, what] {
+                if (!self || !self->m_poseMode.active)
+                    return;
+                self->m_poseMode.busy = false;
+                self->m_posePanel->setRoomBusy(false);
+                if (self->m_docSerial != serial) {
+                    self->m_posePanel->setStatus(tr("The shapes changed meanwhile: try again."), true);
+                    return;
+                }
+                if (!problem.isEmpty()) {
+                    self->m_posePanel->setStatus(problem, true);
+                    return;
+                }
+                if (rooms.empty()) {
+                    self->m_posePanel->setStatus(tr("Nothing's in the way: it turns that far already."), false);
+                    return;
+                }
+                double volume = 0.0;
+                for (const auto& r : rooms)
+                    volume += r.volume;
+                try {
+                    makeRoom(self->m_stack, self->m_doc, rooms, what);
+                    qInfo().noquote() << "Command:" << QString::fromStdString(self->m_stack.undoLabel());
+                    self->m_posePanel->setStatus(tr("Made room: %1 mm³ cut away. Turn it to check; Undo puts it "
+                                                    "back.")
+                                                     .arg(volume, 0, 'f', volume < 10 ? 1 : 0),
+                                                 false);
+                } catch (const std::exception& e) {
+                    self->m_posePanel->setStatus(tr("Couldn't make room: %1").arg(QString::fromUtf8(e.what())),
+                                                 true);
+                }
             },
             Qt::QueuedConnection);
     });
