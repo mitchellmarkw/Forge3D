@@ -106,5 +106,29 @@ std::array<double, 2> range(const std::vector<Joint>& joints, const Rig& rig,
                             std::map<ObjectId, std::array<double, 3>> angles, std::size_t joint,
                             const std::vector<PosedPart>& parts, double smallest = 0.005);
 
+// Making room (slice 72): what to cut away so a joint turns to `target` degrees (angle
+// `which`: 0 a hinge's or swivel's turn, a ball's bend; 1 a ball's sideways bend; 2 its
+// twist) from where it is now, with `clearance` mm to spare at the end. The turning
+// parts are swept there (in steps, a little past it for the clearance); where they'd go
+// into a still part, that's cut from the still part, or (`fromTurning`) from the turning
+// part instead. Pairs that already touch as they are (a pin, a ball in its socket) are
+// left alone. Each cut is in its part's as-built coordinates (the plate's, unposed).
+struct Room {
+    ObjectId part = kInvalidId;
+    MeshSolid cut;
+    double volume = 0.0;
+};
+std::vector<Room> room(const std::vector<Joint>& joints, const Rig& rig,
+                       std::map<ObjectId, std::array<double, 3>> angles, std::size_t joint, int which,
+                       double target, const std::vector<PosedPart>& parts, bool fromTurning, double clearance);
+
 }  // namespace pose
+
+class CommandStack;
+// Cuts the rooms from their parts (top-level shapes) as one undo step: each cut a shape
+// of its own ("Room for <what>"), taken away from its part by a Subtract step that keeps
+// the part's name. Returns the parts' new ids (in the rooms' order).
+std::vector<ObjectId> makeRoom(CommandStack& stack, Document& doc, const std::vector<pose::Room>& rooms,
+                               const std::string& what);
+
 }  // namespace forge

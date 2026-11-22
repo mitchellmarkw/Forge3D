@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.81.0 Beta — Slice 72: Make Room (2026-11-22)
+
+- **Make Room** (Pose Test, under the chosen joint): cuts away just what's in the way so the joint turns as far as
+  you want, a 90° knee say. Give the angle to turn to (from straight; − the other way), the clearance to spare where
+  the parts meet, and which part loses the material: the part it hits, or the part that turns. For a ball joint,
+  choose which way: bend, bend sideways or twist.
+  - The turning parts are swept from where the joint is now to that angle (in steps small enough to leave a smooth
+    cut) and a little past it for the clearance. Pins and balls already in their sockets are left alone.
+  - Each cut is a shape of its own taken away from the part ("minus Room for Hinge in Thigh to 90°"), in one undo
+    step, so it shows in the part's history and Undo puts it back.
+  - It works out in the background; on big figure parts it can take a little while.
+
 ## 0.80.0 Beta — Slice 71: Make Hand (2026-11-22)
 
 - **Make Hand** (Sculpt tab): a hand at your figure's scale, standing on its wrist, ready to print or sculpt further.

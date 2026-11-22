@@ -90,6 +90,60 @@ PosePanel::PosePanel(QWidget* parent) : QWidget(parent)
     m_hits->setWordWrap(true);
     layout->addWidget(m_hits);
 
+    // Make Room: cut away just enough for the joint to turn to an angle.
+    auto* room = new QGroupBox(tr("Make room to turn further"));
+    m_roomBox = room;
+    auto* roomLayout = new QVBoxLayout(room);
+    auto* roomHelp = new QLabel(tr("Trims away just what's in the way, so this joint turns as far as you want (a "
+                                   "90° knee). It turns from where it is now."));
+    roomHelp->setWordWrap(true);
+    roomLayout->addWidget(roomHelp);
+    const auto labelled = [](const QString& text, QComboBox* box) {
+        auto* holder = new QWidget;
+        auto* column = new QVBoxLayout(holder);
+        column->setContentsMargins(0, 0, 0, 0);
+        column->setSpacing(0);
+        column->addWidget(new QLabel(text));
+        column->addWidget(box);
+        return holder;
+    };
+    m_roomWhich = new QComboBox;
+    m_roomWhich->addItem(tr("Bend"));
+    m_roomWhich->addItem(tr("Bend sideways"));
+    m_roomWhich->addItem(tr("Twist"));
+    m_roomWhichRow = labelled(tr("Which way:"), m_roomWhich);
+    roomLayout->addWidget(m_roomWhichRow);
+    auto* roomGrid = new QGridLayout;
+    roomGrid->addWidget(new QLabel(tr("Turn to:")), 0, 0);
+    m_roomTarget = new QDoubleSpinBox;
+    m_roomTarget->setRange(-180.0, 180.0);
+    m_roomTarget->setDecimals(0);
+    m_roomTarget->setSingleStep(5.0);
+    m_roomTarget->setSuffix(tr("°"));
+    m_roomTarget->setValue(90.0);
+    m_roomTarget->setToolTip(tr("The angle the joint should reach (from straight; − turns the other way)"));
+    roomGrid->addWidget(m_roomTarget, 0, 1);
+    roomGrid->addWidget(new QLabel(tr("Clearance:")), 1, 0);
+    m_roomClearance = new QDoubleSpinBox;
+    m_roomClearance->setRange(0.0, 2.0);
+    m_roomClearance->setDecimals(2);
+    m_roomClearance->setSingleStep(0.05);
+    m_roomClearance->setSuffix(tr(" mm"));
+    m_roomClearance->setValue(0.3);
+    m_roomClearance->setToolTip(tr("Room to spare where the parts meet at that angle"));
+    roomGrid->addWidget(m_roomClearance, 1, 1);
+    roomLayout->addLayout(roomGrid);
+    m_roomFrom = new QComboBox;
+    m_roomFrom->addItem(tr("The part it hits (it stays still)"));
+    m_roomFrom->addItem(tr("The part that turns"));
+    m_roomFrom->setToolTip(tr("Which part loses the material in the way"));
+    roomLayout->addWidget(labelled(tr("Cut it from:"), m_roomFrom));
+    m_roomButton = new QPushButton(tr("Make Room"));
+    m_roomButton->setToolTip(tr("Cuts the parts (one undo step); the cut shows in each part's history"));
+    roomLayout->addWidget(m_roomButton);
+    layout->addWidget(room);
+    connect(m_roomButton, &QPushButton::clicked, this, &PosePanel::makeRoomRequested);
+
     auto* holdRow = new QHBoxLayout;
     m_hold = new QLabel;
     m_hold->setWordWrap(true);
@@ -165,6 +219,10 @@ void PosePanel::showJoint(int index, pose::JointKind kind, const std::array<doub
     const bool turns = kind != pose::JointKind::Fixed;
     m_angleBox->setVisible(any && turns);
     m_range->setEnabled(any && (kind == pose::JointKind::Hinge || kind == pose::JointKind::Swivel));
+    m_roomBox->setVisible(any && turns);
+    m_roomWhichRow->setVisible(ball);
+    if (!ball)
+        m_roomWhich->setCurrentIndex(0);
     m_range->setToolTip(ball ? tr("A ball turns every way: turn it by hand to check it")
                              : tr("Turn the joint each way from straight until parts hit, and say how far it went"));
     m_angleLabels[0]->setText(ball ? tr("Bend:") : kind == pose::JointKind::Swivel ? tr("Turn:") : tr("Bend:"));
@@ -219,6 +277,32 @@ void PosePanel::setStatus(const QString& text, bool problem)
 {
     m_status->setText(text);
     m_status->setStyleSheet(problem ? QStringLiteral("color: #c0392b;") : QString());
+}
+
+double PosePanel::roomTarget() const
+{
+    return m_roomTarget->value();
+}
+
+int PosePanel::roomWhich() const
+{
+    return m_kind == pose::JointKind::Ball ? m_roomWhich->currentIndex() : 0;
+}
+
+bool PosePanel::roomFromTurning() const
+{
+    return m_roomFrom->currentIndex() == 1;
+}
+
+double PosePanel::roomClearance() const
+{
+    return m_roomClearance->value();
+}
+
+void PosePanel::setRoomBusy(bool busy)
+{
+    m_roomButton->setEnabled(!busy);
+    m_roomButton->setText(busy ? tr("Making Room...") : tr("Make Room"));
 }
 
 }  // namespace forge::app

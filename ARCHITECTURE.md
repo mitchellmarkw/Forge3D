@@ -1590,3 +1590,15 @@ and sharp across edges.
 - The wrist is made wide and long enough for the socket's room (`socketRadius`, `socketDepth`) plus a wall.
 - `hand::addHands` (one macro) adds the mesh (`hinge::pieceBody`), a Socket step at the wrist face (opening down) and,
   gripping, a Port grip step along the handle's line. No file-format change.
+
+## Make Room (slice 72, 0.81.0)
+
+- `pose::room` sweeps the parts a joint moves (as `range` finds them) from the joint's current angle to the target
+  on one of its angles, at steps small enough that the scallops between them are under 0.2 µm deep at the turning
+  parts' farthest reach (≤ 1°), then past it by the clearance's angle at the farthest overlap. At each step it
+  intersects each turning part with each still one (pairs already touching as built are skipped) and maps the
+  overlap back into the part to be cut (the still part's or the turning part's as-built frame); the overlaps are
+  merged per part.
+- `makeRoom` (one macro) adds each cut as a mesh shape and subtracts it from its part with a Subtract step that keeps
+  the part's name. The Pose Test panel runs it on the thread pool and applies the result if the document hasn't
+  changed meanwhile; the document change rebuilds the pose's joints.

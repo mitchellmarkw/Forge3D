@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "forge/core/Pose.h"
 
+#include "forge/core/CommandStack.h"
+#include "forge/core/Commands.h"
 #include "forge/core/Document.h"
 #include "forge/core/Emboss.h"
 #include "forge/core/Hinge.h"
@@ -448,4 +450,185 @@ std::array<double, 2> range(const std::vector<Joint>& joints, const Rig& rig,
     return out;
 }
 
+std::vector<Room> room(const std::vector<Joint>& joints, const Rig& rig,
+                       std::map<ObjectId, std::array<double, 3>> angles, std::size_t joint, int which,
+                       double target, const std::vector<PosedPart>& parts, bool fromTurning, double clearance)
+{
+    const Joint& j = joints.at(joint);
+    if (which < 0 || which > 2)
+        throw std::invalid_argument("Unknown angle to turn.");
+    if (!std::isfinite(target) || std::abs(target) > 360.0)
+        throw std::invalid_argument("The angle to turn to must be from -360° to 360°.");
+    if (!(clearance >= 0.0 && clearance <= 10.0))
+        throw std::invalid_argument("The clearance must be from 0 to 10 mm.");
+    // The parts this joint moves (as in range): those whose way back to the held part
+    // goes through it, and what rides with them.
+    std::set<ObjectId> moving;
+    for (const auto& [id, parent] : rig.parent) {
+        for (ObjectId at = id;;) {
+            const auto p = rig.parent.find(at);
+            if (p == rig.parent.end())
+                break;
+            if (rig.joint.at(at) == joint) {
+                moving.insert(id);
+                break;
+            }
+            at = p->second;
+        }
+    }
+    for (const auto& [id, with] : rig.rides)
+        if (moving.count(with))
+            moving.insert(id);
+    if (moving.empty())
+        throw std::invalid_argument("Nothing turns in this joint.");
+
+    std::array<double, 3> now = angles.count(j.step) ? angles[j.step] : std::array<double, 3>{0, 0, 0};
+    const double start = now[std::size_t(which)];
+    const auto posedAt = [&](double angle) {
+        std::array<double, 3> a = now;
+        a[std::size_t(which)] = angle;
+        angles[j.step] = a;
+        return transforms(joints, rig, angles);
+    };
+    const auto movedOf = [](const std::map<ObjectId, Transform>& moved, ObjectId id) {
+        const auto m = moved.find(id);
+        return m == moved.end() ? Transform{} : m->second;
+    };
+
+    // The pairs that touch already, as they are: left alone.
+    std::set<std::pair<ObjectId, ObjectId>> touching;
+    {
+        const auto moved = posedAt(start);
+        std::vector<PosedPart> posed = parts;
+        for (PosedPart& p : posed)
+            p.moved = movedOf(moved, p.id);
+        for (const Hit& h : collisions(posed))
+            touching.insert({std::min(h.a, h.b), std::max(h.a, h.b)});
+    }
+    std::vector<std::size_t> turning, still;
+    for (std::size_t i = 0; i < parts.size(); ++i)
+        (moving.count(parts[i].id) ? turning : still).push_back(i);
+
+    // Where the turning parts go into still ones, at each angle, mapped back to the part
+    // being cut.
+    std::map<ObjectId, std::vector<MeshSolid>> pieces;
+    double farthest = 0.0;  // from the pivot, of anything that went in
+    const auto sweep = [&](double angle) {
+        const auto moved = posedAt(angle);
+        std::vector<MeshSolid> placedStill(parts.size());
+        std::vector<Bounds> boxStill(parts.size());
+        for (std::size_t s : still) {
+            placedStill[s] = meshkernel::transformed(parts[s].solid, movedOf(moved, parts[s].id));
+            boxStill[s] = meshkernel::bounds(placedStill[s]);
+        }
+        for (std::size_t t : turning) {
+            const Transform tm = movedOf(moved, parts[t].id);
+            const MeshSolid placed = meshkernel::transformed(parts[t].solid, tm);
+            const Bounds box = meshkernel::bounds(placed);
+            for (std::size_t s : still) {
+                if (touching.count({std::min(parts[t].id, parts[s].id), std::max(parts[t].id, parts[s].id)}))
+                    continue;
+                bool apart = false;
+                for (std::size_t k = 0; k < 3; ++k)
+                    if (box.max[k] < boxStill[s].min[k] || boxStill[s].max[k] < box.min[k])
+                        apart = true;
+                if (apart)
+                    continue;
+                const MeshSolid overlap = meshkernel::intersected({placed, placedStill[s]});
+                if (meshkernel::isEmpty(overlap) || meshkernel::volume(overlap) < 1e-6)
+                    continue;
+                const Bounds ob = meshkernel::bounds(overlap);
+                for (int c = 0; c < 8; ++c) {
+                    const Vec3 corner{(c & 1) ? ob.max[0] : ob.min[0], (c & 2) ? ob.max[1] : ob.min[1],
+                                      (c & 4) ? ob.max[2] : ob.min[2]};
+                    const Vec3 d{corner[0] - j.pivot[0], corner[1] - j.pivot[1], corner[2] - j.pivot[2]};
+                    farthest = std::max(farthest, std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]));
+                }
+                if (fromTurning)
+                    pieces[parts[t].id].push_back(meshkernel::transformed(overlap, tm.inverse()));
+                else
+                    pieces[parts[s].id].push_back(
+                        meshkernel::transformed(overlap, movedOf(moved, parts[s].id).inverse()));
+            }
+        }
+    };
+    // Steps small enough that the scallops left between them are under a micron deep
+    // where the turning parts reach farthest from the pivot.
+    double reach = 1.0;
+    for (std::size_t t : turning) {
+        const Bounds b = meshkernel::bounds(parts[t].solid);
+        for (int c = 0; c < 8; ++c) {
+            const Vec3 d{((c & 1) ? b.max[0] : b.min[0]) - j.pivot[0], ((c & 2) ? b.max[1] : b.min[1]) - j.pivot[1],
+                         ((c & 4) ? b.max[2] : b.min[2]) - j.pivot[2]};
+            reach = std::max(reach, std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]));
+        }
+    }
+    const double stepDegrees = std::clamp(2.0 * std::sqrt(2.0 * 0.0002 / reach) * 180.0 / 3.14159265358979, 0.1, 1.0);
+    const double way = target >= start ? 1.0 : -1.0;
+    const double span = std::abs(target - start);
+    const int steps = std::max(1, int(std::ceil(span / stepDegrees)));
+    for (int i = 1; i <= steps; ++i)
+        sweep(start + way * span * i / steps);
+    // A little past it, so there's `clearance` to spare where the parts meet.
+    if (clearance > 0.0 && farthest > 0.0) {
+        const double extra = std::clamp(clearance / farthest * 180.0 / 3.14159265358979, 0.5, 20.0);
+        const int more = std::max(1, int(std::ceil(extra / stepDegrees)));
+        for (int i = 1; i <= more; ++i)
+            sweep(target + way * extra * i / more);
+    }
+
+    std::vector<Room> out;
+    for (auto& [id, list] : pieces) {
+        Room r;
+        r.part = id;
+        r.cut = list.size() == 1 ? list.front() : meshkernel::merged(list);
+        r.volume = meshkernel::volume(r.cut);
+        if (r.volume > 1e-6)
+            out.push_back(std::move(r));
+    }
+    return out;
+}
+
 }  // namespace forge::pose
+
+namespace forge {
+
+std::vector<ObjectId> makeRoom(CommandStack& stack, Document& doc, const std::vector<pose::Room>& rooms,
+                               const std::string& what)
+{
+    if (rooms.empty())
+        throw std::invalid_argument("Nothing is in the way: it turns that far already.");
+    for (const pose::Room& r : rooms)
+        if (!doc.find(r.part) || !doc.isTopLevel(r.part))
+            throw std::invalid_argument("A part to cut isn't on the plate any more.");
+    std::vector<ObjectId> made;
+    stack.beginMacro("Make room for " + what);
+    try {
+        for (const pose::Room& r : rooms) {
+            Mesh cut;
+            meshkernel::triangles(r.cut, cut.positions, cut.indices);
+            Body cutter = hinge::pieceBody(cut, "Room for " + what);
+            cutter.id = doc.allocateId();
+            stack.execute(std::make_unique<AddBodyCommand>(cutter));
+            BooleanSpec spec;
+            spec.op = BooleanOp::Subtract;
+            spec.operands = {r.part, cutter.id};
+            const auto preview = doc.previewResult(spec);
+            const auto c = preview.bounds.center();
+            spec.pivot = {c[0], c[1], c[2]};
+            Body result;
+            result.id = doc.allocateId();
+            result.name = doc.find(r.part)->name;
+            result.boolean = std::move(spec);
+            made.push_back(result.id);
+            stack.execute(std::make_unique<CombineCommand>(std::move(result)));
+        }
+    } catch (...) {
+        stack.abortMacro();
+        throw;
+    }
+    stack.endMacro();
+    return made;
+}
+
+}  // namespace forge
