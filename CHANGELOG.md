@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.77.2 Beta — Cut into Parts: turn each cut by hand (2026-11-21)
+
+- **Turn a cut by hand**: under Joint type, **Tip forward** tips the chosen joint's cut towards the front or back,
+  and **Tilt sideways** turns it round the line from front to back (at a shoulder: more for an arm hanging down,
+  less for one raised), −80° to 80°. The red disc follows as you change it, and Apply cuts that way.
+- With **Both sides together**, the other side gets the same numbers and turns as its mirror image.
+- **Straighten** puts the cut back the way Forge3D placed it. The summary shows each turned joint's angles.
+- A hinge in a turned cut turns with it (its pin stays across the cut).
+
 ## 0.77.1 Beta — Cut into Parts: cuts the body's way (2026-11-21)
 
 - **Shoulder cuts are upright** (square to the body's side), whichever way the arm hangs: an arm angled down no

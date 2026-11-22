@@ -887,6 +887,7 @@ private:
         rig::Points fitted{};              // as first placed (Place It Again)
         rig::Points points{};              // plate coordinates
         std::map<int, limbcut::Cut> cuts;  // planned, by rig::Joint
+        std::map<int, limbcut::Tilt> plannedTilts;  // what they were planned with
         std::vector<standards::Joint> standard;  // the joint standard's, as offered
         std::shared_ptr<const Mesh> skeleton, discs;
         int picked = -1;

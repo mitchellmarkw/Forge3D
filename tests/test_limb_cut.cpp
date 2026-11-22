@@ -178,6 +178,20 @@ TEST_CASE("Cut into Parts: arms angled down are still cut off square to the body
     CHECK(shoulder[0] < 22.0);
     CHECK_THAT(shoulder[2], WithinAbs(118.0 - (shoulder[0] - 12.0), 2.0));
 
+    // Turned by hand: tipped 30 degrees towards the front, then 20 round the front-back line.
+    const limbcut::Cut forward = limbcut::plan(figure, skeleton.points, Joint::LeftShoulder, {30.0, 0.0});
+    CHECK_THAT(forward.finish.normal[0], WithinAbs(std::cos(30.0 * 3.14159265358979 / 180.0), 1e-9));
+    CHECK_THAT(forward.finish.normal[1], WithinAbs(-0.5, 1e-9));  // towards the front (-Y)
+    // Tilted sideways: square to an arm hanging down, both sides alike for the same numbers.
+    const limbcut::Cut down = limbcut::plan(figure, skeleton.points, Joint::LeftShoulder, {0.0, 20.0});
+    CHECK_THAT(down.finish.normal[2], WithinAbs(-std::sin(20.0 * 3.14159265358979 / 180.0), 1e-9));
+    CHECK_THAT(down.finish.normal[1], WithinAbs(0.0, 1e-9));
+    const limbcut::Cut rightDown = limbcut::plan(figure, skeleton.points, Joint::RightShoulder, {0.0, 20.0});
+    CHECK_THAT(rightDown.finish.normal[2], WithinAbs(down.finish.normal[2], 1e-9));
+    CHECK_THAT(rightDown.finish.normal[0], WithinAbs(-down.finish.normal[0], 1e-9));
+    const Vec3 level = limbcut::tilted({0, 0, -1}, {});
+    CHECK(level == Vec3{0, 0, -1});
+
     LimbCutFinish limb = left.finish;
     limb.limb = true;
     const double arm = meshkernel::volume(limbcut::apply(solid, limb));

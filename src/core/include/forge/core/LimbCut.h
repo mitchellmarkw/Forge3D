@@ -30,9 +30,24 @@ struct Cut {
     LimbCutFinish finish;  // the plane, and the limb's reach (finish.limb, finish.gap unset)
     double limbRadius = 0.0;  // how thick the limb is at the cut (from its bone to its surface, typically)
 };
-Cut plan(const Mesh& figure, const rig::Points& points, rig::Joint joint);
+// A cut turned by hand from the way it would go (degrees): `forward` tips it towards the
+// front (round the line square to the cut and the front), `side` turns it round the line
+// from front to back (at the left shoulder, more tips it down, square to an arm hanging
+// down). The right side's joints turn the other way, so the same numbers make a mirrored
+// pair.
+struct Tilt {
+    double forward = 0.0;
+    double side = 0.0;
+    bool operator==(const Tilt&) const = default;
+};
+// The cut's direction turned by a tilt (the figure faces -Y).
+Vec3 tilted(const Vec3& normal, const Tilt& tilt);
+
+Cut plan(const Mesh& figure, const rig::Points& points, rig::Joint joint, const Tilt& tilt = {});
 // Every cut, sharing the work of finding which bone each part of the surface is nearest.
-std::vector<Cut> plan(const Mesh& figure, const rig::Points& points, const std::vector<rig::Joint>& joints);
+// `tilts`: one per joint, or none.
+std::vector<Cut> plan(const Mesh& figure, const rig::Points& points, const std::vector<rig::Joint>& joints,
+                      const std::vector<Tilt>& tilts = {});
 
 // Throws std::invalid_argument (in plain words) if it can't be used.
 void check(const LimbCutFinish& f);
@@ -56,6 +71,7 @@ enum class JointKind { Cut, Ball, Hinge };
 struct Choice {
     rig::Joint joint = rig::Joint::LeftShoulder;
     JointKind kind = JointKind::Cut;
+    Tilt tilt;           // the cut turned by hand
     SocketFinish ball;   // JointKind::Ball (the fit and printer included)
     HingeFinish hinge;   // JointKind::Hinge
 };

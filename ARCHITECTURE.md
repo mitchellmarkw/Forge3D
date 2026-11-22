@@ -1537,3 +1537,7 @@ and sharp across edges.
   the arm's line in from the elbow until the surface round it changes: much more, much less, or further off),
   hips at the crotch (the lowest surface on the middle line), and `centred` run again with a reach just past the
   limb's own surface so a neighbouring limb doesn't pull it.
+- 0.77.2: `limbcut::Tilt{forward, side}` turns a cut's normal by hand after the default: `tilted` turns it about
+  `cross(n, front)` (forward) and about the back-to-front line (side); right-side joints flip `side`, so equal
+  numbers make a mirrored pair. `Choice::tilt` carries it into `cutIntoParts`; the app replans the preview when a
+  joint's tilt changes (`CutPartsMode::plannedTilts`).

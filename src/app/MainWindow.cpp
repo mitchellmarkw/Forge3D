@@ -11619,6 +11619,7 @@ std::vector<limbcut::Choice> MainWindow::cutPartsChoices() const
             continue;
         limbcut::Choice c;
         c.joint = rig::Joint(joint);
+        c.tilt = {chosen.forward, chosen.side};
         const auto planned = mode.cuts.find(joint);
         const double radius = planned != mode.cuts.end() ? planned->second.limbRadius : 4.0;
         c.ball = limbcut::ballFor(radius);
@@ -11665,12 +11666,20 @@ void MainWindow::updateCutPartsPreview(bool replan)
         return;
     const double ball = std::max(0.3, 0.015 * rig::height(mode.points));
     try {
-        if (replan || mode.cuts.empty()) {
+        // Each joint's cut as turned by hand: planned again when a turn changes.
+        std::map<int, limbcut::Tilt> tilts;
+        for (const auto& [joint, chosen] : m_cutPartsPanel->choices())
+            tilts[joint] = {chosen.forward, chosen.side};
+        if (replan || mode.cuts.empty() || tilts != mode.plannedTilts) {
             mode.cuts.clear();
             const auto joints = limbcut::cuttable();
-            const auto planned = limbcut::plan(*mode.rest, mode.points, joints);
+            std::vector<limbcut::Tilt> turned;
+            for (rig::Joint j : joints)
+                turned.push_back(tilts[int(j)]);
+            const auto planned = limbcut::plan(*mode.rest, mode.points, joints, turned);
             for (std::size_t i = 0; i < joints.size(); ++i)
                 mode.cuts[int(joints[i])] = planned[i];
+            mode.plannedTilts = tilts;
         }
         m_cutPartsPanel->setStatus({}, false);
     } catch (const std::exception& e) {
