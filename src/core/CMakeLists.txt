@@ -40,6 +40,7 @@ add_library(forge_core STATIC
     src/JointStandard.cpp
     src/LimbCut.cpp
     src/Mould.cpp
+    src/Port.cpp
     src/Stamp.cpp
     src/PanelLines.cpp
     src/Kit.cpp

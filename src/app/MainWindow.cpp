@@ -29,6 +29,7 @@
 #include "MannequinPanel.h"
 #include "HollowPanel.h"
 #include "MouldPanel.h"
+#include "PortPanel.h"
 #include "PoseFigurePanel.h"
 #include "PaintPanel.h"
 #include "JointStandardsDialog.h"
@@ -41,6 +42,7 @@
 #include "Fits.h"
 #include "forge/core/Hollow.h"
 #include "forge/core/Mould.h"
+#include "forge/core/Port.h"
 #include "MaskPanel.h"
 #include "ReferencePanel.h"
 #include "ScaleCalculator.h"
@@ -637,6 +639,8 @@ void MainWindow::createActions()
             endHollow();
         else if (m_mouldMode.active)
             endMould();
+        else if (m_portMode.active)
+            endPort();
         else if (m_poseFigureMode.active)
             endPoseFigure();
         else if (m_paintMode.active)
@@ -1092,6 +1096,20 @@ void MainWindow::createActions()
         }
         startHollow(history::tip(m_doc, id), false);
     });
+    m_portAction = new QAction(tr("Hand Ports"), this);
+    m_portAction->setToolTip(tr("Hand Ports: a wrist peg on an arm for swappable hands, the socket for it in each "
+                                "hand, and grip holes through hands sized to weapons' handles"));
+    m_portAction->setStatusTip(m_portAction->toolTip());
+    connect(m_portAction, &QAction::triggered, this, [this] {
+        const ObjectId id = selectedOne();
+        if (id == kInvalidId || m_selection.size() != 1 || !m_doc.isTopLevel(id)) {
+            statusBar()->showMessage(tr("Hand Ports: select one shape on the plate first (an arm, a hand or an "
+                                        "accessory)."),
+                                     6000);
+            return;
+        }
+        startPort(id, false);
+    });
     m_mouldAction = new QAction(tr("Make Mould"), this);
     m_mouldAction->setToolTip(tr("Make Mould: a two-part mould box round the selected shape, for casting resin "
                                  "copies of a printed master, with registration keys, a pour spout and air vents"));
@@ -1519,6 +1537,7 @@ void MainWindow::createToolBar()
         {m_mannequinAction, "mannequin"},
         {m_hollowAction, "hollow"},
         {m_mouldAction, "mould"},
+        {m_portAction, "ports"},
         {m_poseFigureAction, "pose-figure"},
         {m_paintAction, "paint"},
         {m_cutPartsAction, "cut-parts"},
@@ -1668,7 +1687,7 @@ void MainWindow::createToolBar()
 
     Page features = page(tr("Features"), tr("Holes, threads, sockets, shells, grooves, patterns and edges"));
     group(features, tr("Holes and Joints"), {button(m_holeAction), button(m_threadAction), button(m_socketAction), button(m_hingeAction),
-                                       button(m_poseAction)});
+                                       button(m_portAction), button(m_poseAction)});
     group(features, tr("Surface"),
           {button(m_shellAction), button(m_hollowAction), button(m_followAction), button(m_panelLineAction),
            button(m_stampAction), button(m_edgesAction)});
@@ -2389,6 +2408,25 @@ void MainWindow::createDocks()
     stackLayout->addWidget(m_hollowPanel);
     m_hollowPanel->hide();
     connect(m_hollowPanel, &HollowPanel::changed, this, &MainWindow::updateHollowPreview);
+    m_portPanel = new PortPanel;
+    stackLayout->addWidget(m_portPanel);
+    m_portPanel->hide();
+    connect(m_portPanel, &PortPanel::changed, this, &MainWindow::updatePortPreview);
+    connect(m_portPanel, &PortPanel::straightRequested, this, [this] {
+        m_portMode.exit.reset();
+        updatePortPreview();
+    });
+    connect(m_portPanel, &PortPanel::applyRequested, this, &MainWindow::applyPort);
+    connect(m_portPanel, &PortPanel::cancelRequested, this, &MainWindow::endPort);
+    connect(m_portPanel->standardRow(), &StandardRow::chosen, this, [this](int index) {
+        if (index < 0 || index >= int(m_standardPorts.size()) || !m_standardPorts[std::size_t(index)].socket)
+            return;
+        m_portPanel->setFinish(port::fromSocket(*m_standardPorts[std::size_t(index)].socket, m_portPanel->finish()));
+    });
+    connect(m_portPanel->standardRow(), &StandardRow::saveRequested, this, [this] {
+        const SocketFinish joint = port::jointFor(m_portPanel->finish(), m_portPanel->resin());
+        saveToStandard(false, &joint);
+    });
     m_mouldPanel = new MouldPanel;
     stackLayout->addWidget(m_mouldPanel);
     m_mouldPanel->hide();
@@ -2925,6 +2963,10 @@ void MainWindow::onViewportClicked(const QVector3D& origin, const QVector3D& dir
         mouldClick(origin, direction);
         return;
     }
+    if (m_portMode.active) {
+        portClick(origin, direction);
+        return;
+    }
     if (m_stampMode.active) {
         stampClick(origin, direction);
         return;
@@ -3102,7 +3144,8 @@ void MainWindow::onLeftPressed(const QVector3D& origin, const QVector3D& directi
     if (m_embossMode.active || m_edgesMode.active || m_holeMode.active || m_shellMode.active || m_followMode.active ||
         m_patternMode.active || m_threadMode.active || m_socketMode.active || m_joinMode.active ||
         m_maskMode.active || m_hollowMode.active || m_panelLineMode.active || m_poseFigureMode.active ||
-        m_paintMode.active || m_cutPartsMode.active || m_mouldMode.active)
+        m_paintMode.active || m_cutPartsMode.active || m_mouldMode.active ||
+        m_portMode.active)
         return;  // shapes stay put while the tool is open
 
     if (handle.valid() && multiSelection()) {
@@ -4008,7 +4051,7 @@ constexpr std::uint64_t kMeasureHoverItem = ~std::uint64_t{0} - 8;
 constexpr std::uint64_t kMeasureLineItem = ~std::uint64_t{0} - 9;
 constexpr std::uint64_t kMeasureCentreItem = ~std::uint64_t{0} - 10;
 constexpr std::uint64_t kMannequinItem = ~std::uint64_t{0} - 20;
-constexpr std::uint64_t kMouldItem = ~std::uint64_t{0} - 30;  // to - 34: the Make Mould helpers
+constexpr std::uint64_t kMouldItem = ~std::uint64_t{0} - 30;  // to - 34: the Make Mould helpers; - 35: Hand Ports
 
 // Thin six-sided tubes along lines: how picked edges are drawn.
 std::shared_ptr<const Mesh> tubes(const std::vector<const std::vector<Vec3>*>& lines, float radius)
@@ -5042,7 +5085,7 @@ bool MainWindow::toolOpen() const
            m_socketMode.active || m_joinMode.active || m_maskMode.active || m_referenceMode.active ||
            m_hingeMode.active || m_poseMode.active || m_printCheckMode.active || m_mannequinOpen ||
            m_hollowMode.active || m_stampMode.active || m_panelLineMode.active || m_poseFigureMode.active ||
-           m_paintMode.active || m_cutPartsMode.active || m_mouldMode.active;
+           m_paintMode.active || m_cutPartsMode.active || m_mouldMode.active || m_portMode.active;
 }
 
 void MainWindow::startEmboss(ObjectId target, bool editing)
@@ -7448,6 +7491,8 @@ void MainWindow::refreshScene()
             endHollow();
         if (m_mouldMode.active && !m_doc.find(m_mouldMode.target))
             endMould();
+        if (m_portMode.active && !m_doc.find(m_portMode.target))
+            endPort();
         if (m_poseFigureMode.active && !m_doc.find(m_poseFigureMode.target))
             endPoseFigure();
         if (m_stampMode.active && !m_doc.find(m_stampMode.target))
@@ -7725,6 +7770,18 @@ void MainWindow::refreshScene()
             marks.helper = true;
             items.push_back(marks);
         }
+        // Hand Ports: the peg gold, a hole red, seen through.
+        if (m_portMode.active && m_portMode.shape && !m_portMode.shape->empty()) {
+            DisplayItem h;
+            h.id = kMouldItem - 5;
+            h.mesh = m_portMode.shape;
+            h.model = toQMatrix(m_portMode.toPlate);
+            h.color = m_portPanel->what() == PortPanel::What::Peg ? QVector3D(0.9f, 0.68f, 0.18f)
+                                                                   : QVector3D(0.9f, 0.15f, 0.1f);
+            h.ghost = true;
+            h.helper = true;
+            items.push_back(h);
+        }
         // Make Mould: the box see-through, the cuts yellow, the undercuts, spout and vents red
         // and the keys gold (seen through).
         if (m_mouldMode.active) {
@@ -7995,6 +8052,7 @@ void MainWindow::refreshScene()
     m_shellAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_hollowAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_mouldAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
+    m_portAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_poseFigureAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_paintAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_cutPartsAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
@@ -8169,6 +8227,7 @@ void MainWindow::editStep(ObjectId id)
     case BooleanOp::Socket: startSocket(id, true); break;
     case BooleanOp::Hollow: startHollow(id, true); break;
     case BooleanOp::Mould: startMould(id, true); break;
+    case BooleanOp::Port: startPort(id, true); break;
     case BooleanOp::Posed: startPoseFigure(id, true); break;
     case BooleanOp::Paint: startPaint(id, true); break;
     case BooleanOp::Stamp: startStamp(id, true); break;
@@ -8357,7 +8416,7 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
                                                   op == BooleanOp::Hinge || op == BooleanOp::MaskSplit ||
                                                   op == BooleanOp::Hollow || op == BooleanOp::Stamp ||
                                                   op == BooleanOp::PanelLines || op == BooleanOp::Posed || op == BooleanOp::Paint ||
-                                                  op == BooleanOp::Mould ||
+                                                  op == BooleanOp::Mould || op == BooleanOp::Port ||
                                                   (op == BooleanOp::Split && m_doc.isTopLevel(id))));
         if (!opens) {
             // Nothing to open: show or hide what's inside, as a list does.
@@ -11957,8 +12016,9 @@ void MainWindow::refreshStandardRows()
 {
     m_standardSockets.clear();
     m_standardHinges.clear();
+    m_standardPorts.clear();
     const auto standard = standardsfile::active();
-    QStringList sockets, hinges;
+    QStringList sockets, hinges, ports;
     if (standard)
         for (const auto& j : standard->joints) {
             const QString label = QStringLiteral("%1 (%2)").arg(QString::fromStdString(j.name),
@@ -11966,6 +12026,10 @@ void MainWindow::refreshStandardRows()
             if (j.socket) {
                 m_standardSockets.push_back(j);
                 sockets << label;
+                if (j.socket->kind != SocketKind::Magnet) {
+                    m_standardPorts.push_back(j);
+                    ports << label;
+                }
             } else if (j.hinge) {
                 m_standardHinges.push_back(j);
                 hinges << label;
@@ -11974,9 +12038,10 @@ void MainWindow::refreshStandardRows()
     const QString name = standard ? QString::fromStdString(standard->name) : QString();
     m_socketPanel->standardRow()->setJoints(name, sockets);
     m_hingePanel->standardRow()->setJoints(name, hinges);
+    m_portPanel->standardRow()->setJoints(name, ports);
 }
 
-void MainWindow::saveToStandard(bool hinge)
+void MainWindow::saveToStandard(bool hinge, const SocketFinish* socket)
 {
     std::vector<standards::Standard> list;
     try {
@@ -12015,8 +12080,9 @@ void MainWindow::saveToStandard(bool hinge)
             .trimmed();
     if (!ok || name.isEmpty())
         return;
-    const standards::Joint joint = hinge ? standards::jointFrom(name.toStdString(), m_hingePanel->finish())
-                                         : standards::jointFrom(name.toStdString(), m_socketPanel->finish());
+    const standards::Joint joint = hinge    ? standards::jointFrom(name.toStdString(), m_hingePanel->finish())
+                                   : socket ? standards::jointFrom(name.toStdString(), *socket)
+                                            : standards::jointFrom(name.toStdString(), m_socketPanel->finish());
     try {
         standards::check(joint);
     } catch (const std::exception& e) {
@@ -13420,6 +13486,189 @@ void MainWindow::endMannequin()
     QTimer::singleShot(0, this, [this] { resizeDocks({m_propsDock}, {m_propsDockWidth}, Qt::Horizontal); });
     statusBar()->clearMessage();
     refreshCommandState();
+}
+
+// ---- Hand Ports -----------------------------------------------------------------------
+
+PortFinish MainWindow::portSettings() const
+{
+    PortFinish f = m_portPanel->finish();
+    if (m_portMode.spot) {
+        f.point = m_portMode.spot->point;
+        f.direction = m_portMode.spot->normal;
+    }
+    if (f.kind == PortKind::Grip && m_portMode.exit) {
+        f.hasExit = true;
+        f.exit = *m_portMode.exit;
+    }
+    return f;
+}
+
+void MainWindow::startPort(ObjectId target, bool editing)
+{
+    const Body* body = m_doc.find(target);
+    if (!body || toolOpen())
+        return;
+    if (m_dragState.kind != Drag::Kind::None)
+        cancelDrag();
+    PortMode mode;
+    mode.active = true;
+    mode.editing = editing;
+    mode.target = target;
+    // A hand's name: the socket for the peg, to start.
+    PortPanel::What what = QString::fromStdString(body->name).contains(QStringLiteral("hand"), Qt::CaseInsensitive)
+                               ? PortPanel::What::Socket
+                               : PortPanel::What::Peg;
+    PortFinish f;
+    try {
+        if (editing) {
+            f = portOf(m_doc, target);
+            mode.toPlate = m_doc.worldTransform(target);
+            mode.spot = emboss::SurfacePoint{f.point, f.direction};
+            if (f.hasExit)
+                mode.exit = f.exit;
+            what = f.kind == PortKind::Grip ? PortPanel::What::Grip : PortPanel::What::Peg;
+        }
+        const Bounds b = m_doc.worldBounds(target);
+        const auto size = b.size();
+        mode.reach = std::sqrt(double(size[0]) * size[0] + double(size[1]) * size[1] + double(size[2]) * size[2]) + 2.0;
+    } catch (const std::exception& e) {
+        QMessageBox::information(this, tr("Forge3D"), QString::fromUtf8(e.what()));
+        return;
+    }
+    m_portMode = std::move(mode);
+    refreshStandardRows();
+    const QString name = QString::fromStdString(body->name);
+    m_portPanel->start(editing ? tr("Change the port on '%1'").arg(name) : tr("Hand Ports on '%1'").arg(name), editing,
+                       what, f);
+    m_propsDockWidth = m_propsDock->width();
+    m_properties->hide();
+    m_portPanel->show();
+    statusBar()->showMessage(tr("Hand Ports: click the shape where it goes, then Apply. Esc cancels."));
+    updatePortPreview();
+    refreshCommandState();
+}
+
+void MainWindow::endPort()
+{
+    if (!m_portMode.active)
+        return;
+    m_portMode = PortMode{};
+    m_portPanel->hide();
+    m_properties->show();
+    QTimer::singleShot(0, this, [this] { resizeDocks({m_propsDock}, {m_propsDockWidth}, Qt::Horizontal); });
+    statusBar()->clearMessage();
+    refreshScene();
+    refreshCommandState();
+}
+
+void MainWindow::portClick(const QVector3D& origin, const QVector3D& direction)
+{
+    auto& mode = m_portMode;
+    const QVector3D d = direction.normalized();
+    std::optional<emboss::SurfacePoint> spot;
+    try {
+        spot = surfaceUnder(m_doc, mode.target, {origin.x(), origin.y(), origin.z()}, {d.x(), d.y(), d.z()}, 0.3);
+    } catch (const std::exception& e) {
+        m_portPanel->setStatus(QString::fromUtf8(e.what()), true);
+        return;
+    }
+    if (!spot) {
+        statusBar()->showMessage(tr("Hand Ports: click on the shape itself."), 4000);
+        return;
+    }
+    const Transform back = mode.toPlate.inverse();
+    const Vec3 p = back.apply(spot->point);
+    const Vec3 tip = back.apply({spot->point[0] + spot->normal[0], spot->point[1] + spot->normal[1],
+                                 spot->point[2] + spot->normal[2]});
+    const emboss::SurfacePoint here{p, {tip[0] - p[0], tip[1] - p[1], tip[2] - p[2]}};
+    if (m_portPanel->clickSetsExit()) {
+        if (!mode.spot) {
+            m_portPanel->setStatus(tr("Set the way in first: choose \"The way in\" and click where the handle goes "
+                                      "in."),
+                                   true);
+            return;
+        }
+        mode.exit = here.point;
+    } else {
+        mode.spot = here;
+    }
+    updatePortPreview();
+}
+
+void MainWindow::updatePortPreview()
+{
+    auto& mode = m_portMode;
+    if (!mode.active)
+        return;
+    mode.shape.reset();
+    bool ok = false;
+    if (!mode.spot) {
+        m_portPanel->setStatus(tr("Click the shape where it goes."), false);
+    } else {
+        try {
+            const PortFinish f = portSettings();
+            if (m_portPanel->what() == PortPanel::What::Socket) {
+                const SocketFinish sf = port::socketFor(f, m_portPanel->fit(), m_portPanel->resin());
+                socket::check(sf);
+                mode.shape = together(socket::cutters(sf, mode.spot->point, mode.spot->normal));
+                m_portPanel->setStatus(tr("%1 for the peg. Apply cuts it.")
+                                           .arg(QString::fromStdString(socket::describe(sf))),
+                                       false);
+            } else {
+                port::check(f);
+                mode.shape = together({port::shape(f, mode.reach)});
+                m_portPanel->setStatus(QString::fromStdString(port::describe(f)) + tr(". Apply adds it."), false);
+            }
+            ok = true;
+        } catch (const std::exception& e) {
+            m_portPanel->setStatus(QString::fromUtf8(e.what()), true);
+        }
+    }
+    m_portPanel->setApplyEnabled(ok);
+    refreshScene();
+}
+
+void MainWindow::applyPort()
+{
+    auto& mode = m_portMode;
+    if (!mode.active || !mode.spot)
+        return;
+    const ObjectId target = mode.target;
+    const PortFinish f = portSettings();
+    try {
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        struct RestoreCursor {
+            ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
+        } restore;
+        if (mode.editing) {
+            Body after = withPort(m_doc, target, f);
+            m_doc.previewMesh(*after.boolean);  // worked out (and kept) before anything changes
+            const Body before = *m_doc.find(target);
+            endPort();
+            run(std::make_unique<EditBodyCommand>(before, std::move(after), "Change port"));
+            setSelection(target);
+            return;
+        }
+        Body r;
+        r.id = m_doc.allocateId();
+        r.name = m_doc.find(target)->name;
+        if (m_portPanel->what() == PortPanel::What::Socket)
+            r.boolean = socketSpec(m_doc, target, *mode.spot,
+                                   port::socketFor(f, m_portPanel->fit(), m_portPanel->resin()));
+        else
+            r.boolean = portSpec(m_doc, target, *mode.spot, f);
+        m_doc.previewMesh(*r.boolean);
+        const ObjectId id = r.id;
+        endPort();
+        run(std::make_unique<CombineCommand>(std::move(r)));
+        setSelection(id);
+    } catch (const std::exception& e) {
+        if (m_portMode.active)
+            m_portPanel->setStatus(tr("It couldn't be added: %1").arg(QString::fromUtf8(e.what())), true);
+        else
+            QMessageBox::warning(this, tr("Forge3D"), tr("It couldn't be added:\n%1").arg(QString::fromUtf8(e.what())));
+    }
 }
 
 // ---- Make Mould -----------------------------------------------------------------------

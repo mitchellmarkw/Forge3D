@@ -1565,3 +1565,15 @@ and sharp across edges.
   when it faces away from its piece's pull (by more than about 3°) or a line from it along the pull meets the part;
   a piece of a second cut may come away along either cut. `bestSplit` scores each axis at its widest place and at
   20–80% across. File format 42.
+
+## Hand Ports (slice 70, 0.79.0)
+
+- `BooleanOp::Port` with `PortFinish` (a peg or a grip hole, its sizes, the spot and outward direction, a grip's way
+  out; step coordinates), worked out by the mesh engine: `port::apply` merges a peg (a prism of rings round the
+  outward axis, starting inside the part so it joins a curved surface; a chamfer ring; or a neck and a ball as two
+  surfaces) or subtracts a round grip hole (2 mm out from the way in to 2 mm past the way out, or through the
+  part's whole reach).
+- The hand's socket is a Socket step (`port::socketFor`: a peg socket of the peg's shape, size, length and turn, or
+  a snap-in ball socket for a ball end), so Quick Socket changes it. `fromSocket` / `jointFor` turn a standard's
+  peg or ball joints into a peg or grip size and back; the Hand Ports panel's StandardRow offers them.
+- Port steps count as joints for "keep joint sizes" when scaling. File format 43.

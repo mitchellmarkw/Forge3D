@@ -213,6 +213,25 @@ void scaleInto(const Document& doc, ObjectId id, const Vec3& factors, const Vec3
         out.push_back(std::move(next));
         return;
     }
+    if (body->boolean->op == BooleanOp::Port && body->boolean->port) {
+        // The spot moves with the part; the peg or hole keeps its size if joints are kept
+        // (so it still fits the standard), else grows with an even scale.
+        Body next = *body;
+        PortFinish& p = *next.boolean->port;
+        const auto scalePoint = [&](std::array<double, 3>& q) {
+            for (std::size_t k = 0; k < 3; ++k)
+                q[k] = factors[k] * (q[k] - anchor[k]) + anchor[k];
+        };
+        scalePoint(p.point);
+        scalePoint(p.exit);
+        if (!keepJoints && even(factors)) {
+            p.size *= factors[0];
+            p.length *= factors[0];
+            p.ball *= factors[0];
+        }
+        out.push_back(std::move(next));
+        return;
+    }
     if (body->boolean->op == BooleanOp::Mould && body->boolean->mould) {
         // The parting face, spout and vents move with the mould; evenly scaled, the walls,
         // spout and vents grow too (the keys only if joints aren't kept).
@@ -555,7 +574,7 @@ void countJoints(const Document& doc, ObjectId id, int& n)
         return;
     const BooleanSpec& s = *b->boolean;
     if ((s.op == BooleanOp::Socket && s.socket) || (s.op == BooleanOp::Hinge && s.hinge) ||
-        (s.op == BooleanOp::Thread && s.thread))
+        (s.op == BooleanOp::Thread && s.thread) || (s.op == BooleanOp::Port && s.port))
         ++n;
     for (ObjectId part : s.operands)
         countJoints(doc, part, n);

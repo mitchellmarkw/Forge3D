@@ -89,7 +89,9 @@ namespace forge::file {
 //      spoutSize, spout, ventSize, vents [x, y, z])
 //  42  a mould's cut directions and second cut ("axis", "second", "axis2", "parting2",
 //      "secondIn", "side2" in "mould")
-inline constexpr int kFormatVersion = 42;
+//  43  Port steps (operation "port": kind peg / grip, shape, size, length, fit, end
+//      flat / chamfer / ball, ball, turn, point, direction, hasExit, exit)
+inline constexpr int kFormatVersion = 43;
 // The highest sculpt::Brush number a file may hold (Pattern).
 inline constexpr int kLastSculptBrush = 13;
 inline constexpr const char* kExtension = ".f3d";

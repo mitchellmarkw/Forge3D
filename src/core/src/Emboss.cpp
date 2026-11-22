@@ -625,7 +625,7 @@ ObjectId embossedPart(const Document& doc, ObjectId id)
                                 body->boolean->op == BooleanOp::Hinge || body->boolean->op == BooleanOp::Hollow ||
                                 body->boolean->op == BooleanOp::Stamp || body->boolean->op == BooleanOp::PanelLines ||
                                 body->boolean->op == BooleanOp::Posed || body->boolean->op == BooleanOp::Paint ||
-                                body->boolean->op == BooleanOp::Mould))
+                                body->boolean->op == BooleanOp::Mould || body->boolean->op == BooleanOp::Port))
         return body->boolean->operands.front();
     return id;
 }
