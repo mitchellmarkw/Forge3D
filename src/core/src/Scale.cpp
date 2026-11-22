@@ -213,6 +213,30 @@ void scaleInto(const Document& doc, ObjectId id, const Vec3& factors, const Vec3
         out.push_back(std::move(next));
         return;
     }
+    if (body->boolean->op == BooleanOp::Mould && body->boolean->mould) {
+        // The parting face, spout and vents move with the mould; evenly scaled, the walls,
+        // spout and vents grow too (the keys only if joints aren't kept).
+        Body next = *body;
+        MouldFinish& m = *next.boolean->mould;
+        const auto scalePoint = [&](std::array<double, 3>& p) {
+            for (std::size_t k = 0; k < 3; ++k)
+                p[k] = factors[k] * (p[k] - anchor[k]) + anchor[k];
+        };
+        m.parting = factors[2] * (m.parting - anchor[2]) + anchor[2];
+        scalePoint(m.spout);
+        for (auto& v : m.vents)
+            scalePoint(v);
+        if (even(factors)) {
+            if (!o.keepWalls)
+                m.wall *= factors[0];
+            m.spoutSize *= factors[0];
+            m.ventSize *= factors[0];
+            if (!keepJoints)
+                m.keySize *= factors[0];
+        }
+        out.push_back(std::move(next));
+        return;
+    }
     if (body->boolean->op == BooleanOp::LimbCut && body->boolean->limbCut) {
         // The cut moves and stretches with the figure; evenly scaled, the limb's reach and
         // the gap grow too.

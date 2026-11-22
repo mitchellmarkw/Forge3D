@@ -326,6 +326,7 @@ enum class BooleanOp {
     Posed,        // a figure bent at its joints by a simple skeleton inside it (see `posed`)
     Paint,        // colours brushed onto the surface (see `paint`; the shape stays as it was)
     LimbCut,      // a figure cut at a joint: the limb, or the rest (see `limbCut`)
+    Mould,        // one half of a two-part mould box round the part (see `mould`)
 };
 
 // What happens to the picked edges of a shape.
@@ -732,6 +733,26 @@ struct LimbCutFinish {
     bool operator==(const LimbCutFinish&) const = default;
 };
 
+// A Mould step: one half of a two-part box round the part, for casting copies of it.
+// The box is the part's box with `wall` all round, the part taken out, parted level at
+// height `parting`. Registration keys in the corners: pegs on the bottom half, holes
+// (bigger by `keyFit`) in the top. A pour spout from `spout` (where it meets the part,
+// near its top) and air vents from each of `vents` run straight up out of the top. In the
+// step's coordinates.
+struct MouldFinish {
+    bool top = false;       // this half is the top one (false: the bottom)
+    double parting = 0.0;   // the height of the flat face where the halves meet
+    double wall = 8.0;      // mm round the part
+    bool keys = true;
+    double keySize = 6.0;   // a key's diameter at the parting face
+    double keyFit = 0.2;    // added to a key hole's radius
+    double spoutSize = 6.0;
+    std::array<double, 3> spout{0.0, 0.0, 0.0};
+    double ventSize = 2.0;
+    std::vector<std::array<double, 3>> vents;
+    bool operator==(const MouldFinish&) const = default;
+};
+
 //   Merge:     everything in any part.
 //   Subtract:  the first part, minus all the others.
 //   Intersect: only what every part shares.
@@ -790,6 +811,8 @@ struct BooleanSpec {
     std::optional<PaintFinish> paint{};
     // Limb Cut: where, and which piece.
     std::optional<LimbCutFinish> limbCut{};
+    // Mould: which half, and the box's settings.
+    std::optional<MouldFinish> mould{};
     // Edges: what to do to which edges.
     std::optional<EdgeFinish> edges{};
     // Shell: how thick, and which faces are left open.

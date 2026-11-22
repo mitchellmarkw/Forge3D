@@ -5,6 +5,7 @@
 #include "forge/core/Stamp.h"
 #include "forge/core/PanelLines.h"
 #include "forge/core/LimbCut.h"
+#include "forge/core/Mould.h"
 #include "forge/core/Paint.h"
 #include "forge/core/Rig.h"
 #include "forge/core/Socket.h"
@@ -244,6 +245,7 @@ std::string describe(const Document& doc, ObjectId id)
     case BooleanOp::Posed: return spec.posed ? rig::describe(*spec.posed) : std::string();
     case BooleanOp::Paint: return spec.paint ? paint::describe(*spec.paint) : std::string();
     case BooleanOp::LimbCut: return spec.limbCut ? limbcut::describe(*spec.limbCut) : std::string();
+    case BooleanOp::Mould: return spec.mould ? mould::describe(*spec.mould) : std::string();
     case BooleanOp::Stamp: {
         if (!spec.stamp)
             return {};

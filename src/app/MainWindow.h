@@ -82,6 +82,7 @@ class PosePanel;
 class PrintCheckPanel;
 class MannequinPanel;
 class HollowPanel;
+class MouldPanel;
 class PoseFigurePanel;
 class PaintPanel;
 class JointStandardsDialog;
@@ -847,6 +848,30 @@ private:
     void hollowClick(const QVector3D& origin, const QVector3D& direction);
     void updateHollowPreview();
     void applyHollow();
+
+    // Make Mould: a two-part mould box round a part, for casting
+    QAction* m_mouldAction = nullptr;
+    MouldPanel* m_mouldPanel = nullptr;
+    struct MouldMode {
+        bool active = false;
+        bool editing = false;
+        ObjectId target = kInvalidId;  // the part, or the Mould step (a half) being changed
+        ObjectId other = kInvalidId;   // editing: the other half, if it changes too
+        Transform toPlate;             // the step's coordinates to the plate (new: none)
+        Mesh part;                     // the part's triangles, in the step's coordinates
+        Bounds partBounds;
+        std::array<double, 3> spout{0.0, 0.0, 0.0};  // step coordinates
+        std::vector<std::array<double, 3>> vents;
+        std::shared_ptr<const Mesh> shownPart;   // editing: the part, shown instead of the halves
+        std::shared_ptr<const Mesh> box, sheet, channels, keys;  // drawn helpers (step coordinates)
+    };
+    MouldMode m_mouldMode;
+    void startMould(ObjectId target, bool editing);
+    void endMould();
+    void mouldClick(const QVector3D& origin, const QVector3D& direction);
+    void updateMouldPreview();
+    void applyMould();
+    MouldFinish mouldSettings() const;
 
     // Pose Figure: bones in one sculpted figure, to bend it at its joints
     QAction* m_poseFigureAction = nullptr;

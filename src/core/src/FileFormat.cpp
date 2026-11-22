@@ -6,6 +6,7 @@
 #include "forge/core/Stamp.h"
 #include "forge/core/PanelLines.h"
 #include "forge/core/LimbCut.h"
+#include "forge/core/Mould.h"
 #include "forge/core/Paint.h"
 #include "forge/core/Rig.h"
 #include "forge/core/MeshKernel.h"
@@ -242,6 +243,7 @@ const char* opName(BooleanOp op)
     case BooleanOp::Posed: return "posed";
     case BooleanOp::Paint: return "paint";
     case BooleanOp::LimbCut: return "limbCut";
+    case BooleanOp::Mould: return "mould";
     }
     return "merge";
 }
@@ -413,6 +415,15 @@ json bodyToJson(const Body& b)
             j["stamp"] = json{{"kind", stamp::key(st->kind)}, {"size", st->size},   {"height", st->height},
                               {"sunk", st->sunk},              {"spin", st->spin},   {"spacing", st->spacing},
                               {"spots", std::move(spots)}};
+        }
+        if (const auto& mo = b.boolean->mould) {
+            json vents = json::array();
+            for (const auto& v : mo->vents)
+                vents.push_back(v);
+            j["mould"] = json{{"top", mo->top},           {"parting", mo->parting},     {"wall", mo->wall},
+                              {"keys", mo->keys},         {"keySize", mo->keySize},     {"keyFit", mo->keyFit},
+                              {"spoutSize", mo->spoutSize}, {"spout", mo->spout},       {"ventSize", mo->ventSize},
+                              {"vents", std::move(vents)}};
         }
         if (const auto& lc = b.boolean->limbCut) {
             json reach = json::array();
@@ -662,6 +673,8 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
             spec.op = BooleanOp::Paint;
         else if (op == "limbCut" && version >= 40)
             spec.op = BooleanOp::LimbCut;
+        else if (op == "mould" && version >= 41)
+            spec.op = BooleanOp::Mould;
         else
             damaged(where + ": unknown combine operation '" + op + "'");
         const auto operands = j.find("operands");
@@ -963,6 +976,35 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
                 damaged(where + ": " + e.what());
             }
             spec.stamp = std::move(st);
+        }
+        if (spec.op == BooleanOp::Mould) {
+            const auto mj = j.find("mould");
+            if (mj == j.end() || !mj->is_object())
+                damaged(where + ": missing the mould's settings");
+            MouldFinish m;
+            try {
+                m.top = mj->at("top").get<bool>();
+                m.parting = mj->at("parting").get<double>();
+                m.wall = mj->at("wall").get<double>();
+                m.keys = mj->value("keys", m.keys);
+                m.keySize = mj->value("keySize", m.keySize);
+                m.keyFit = mj->value("keyFit", m.keyFit);
+                m.spoutSize = mj->value("spoutSize", m.spoutSize);
+                for (std::size_t k = 0; k < 3; ++k)
+                    m.spout[k] = mj->at("spout").at(k).get<double>();
+                m.ventSize = mj->value("ventSize", m.ventSize);
+                if (const auto list = mj->find("vents"); list != mj->end() && list->is_array())
+                    for (const json& v : *list)
+                        m.vents.push_back({v.at(0).get<double>(), v.at(1).get<double>(), v.at(2).get<double>()});
+            } catch (const std::exception&) {
+                damaged(where + ": the mould's settings are broken");
+            }
+            try {
+                mould::check(m);
+            } catch (const std::exception& e) {
+                damaged(where + ": " + e.what());
+            }
+            spec.mould = std::move(m);
         }
         if (spec.op == BooleanOp::LimbCut) {
             const auto cj = j.find("limbCut");

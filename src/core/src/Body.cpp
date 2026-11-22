@@ -433,6 +433,7 @@ std::string toString(BooleanOp op)
     case BooleanOp::Posed: return "Pose Figure";
     case BooleanOp::Paint: return "Paint";
     case BooleanOp::LimbCut: return "Cut into Parts";
+    case BooleanOp::Mould: return "Mould";
     }
     return "Combine";
 }

@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.78.0 Beta — Slice 69: Make Mould (2026-11-21)
+
+- **Make Mould** (Print/Save tab): a two-part mould box round the selected shape, for casting resin copies of a
+  printed master, as one undo step.
+  - The box is the part's box with a wall all round (8 mm to start), the part taken out, parted level where the
+    part is widest (**Where It's Widest**), or at any height you set. The parting face shows yellow, the box
+    see-through round the part.
+  - **Registration keys** in the box's corners: pegs on the bottom half, holes (bigger by the key fit) in the top.
+  - A **pour spout** with a funnel runs from the part's top up out of the mould. **Air vents** go up from the other
+    high spots where air would be trapped: placed for you, or click the part to add one (or to move the spout).
+  - Two shapes come out, "… mould (top)" and "… mould (bottom)", closed round the part where it was, lifted if need
+    be so the bottom half stands on the plate. Double-click either to change the mould: both halves change together.
+- Saved files are now format 41 (Mould steps); older Forge3D versions can't open files with a mould in them.
+
 ## 0.77.2 Beta — Cut into Parts: turn each cut by hand (2026-11-21)
 
 - **Turn a cut by hand**: under Joint type, **Tip forward** tips the chosen joint's cut towards the front or back,

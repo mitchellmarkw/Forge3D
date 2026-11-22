@@ -62,6 +62,8 @@ add_executable(Forge3D WIN32
     MannequinPanel.cpp
     HollowPanel.h
     HollowPanel.cpp
+    MouldPanel.h
+    MouldPanel.cpp
     PoseFigurePanel.h
     PoseFigurePanel.cpp
     PaintPanel.h
