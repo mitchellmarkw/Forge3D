@@ -126,13 +126,18 @@ PosePanel::PosePanel(QWidget* parent) : QWidget(parent)
     pegs->setToolTip(tr("A hole for a stand's peg, straight up into the middle of each sole that touches the ground "
                         "(Quick Socket steps, with your printer's fit)"));
     standPeg->addWidget(pegs, 2, 0, 1, 2);
+    auto* base = new QPushButton(tr("Make a Display Base..."));
+    base->setToolTip(tr("A round, oval, square or hexagonal base for the figure as it's posed now, with a peg "
+                        "standing up right under each foot (or holes, if the feet have pegs)"));
     standLayout->addWidget(m_standBox);
+    standLayout->addWidget(base);
     layout->addWidget(stand);
     connect(m_showBalance, &QCheckBox::toggled, this, [this](bool on) {
         m_balance->setVisible(on);
         emit balanceToggled(on);
     });
     connect(pegs, &QPushButton::clicked, this, &PosePanel::standPegsRequested);
+    connect(base, &QPushButton::clicked, this, &PosePanel::displayBaseRequested);
     m_balance->hide();
 
     // Make Room: cut away just enough for the joint to turn to an angle.

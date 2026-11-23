@@ -35,6 +35,7 @@
 #include "PaintPanel.h"
 #include "JointStandardsDialog.h"
 #include "CutPartsPanel.h"
+#include "DisplayBaseDialog.h"
 #include "Standards.h"
 #include "StampPanel.h"
 #include "PanelLinePanel.h"
@@ -2044,6 +2045,7 @@ void MainWindow::createDocks()
         refreshScene();
     });
     connect(m_posePanel, &PosePanel::standPegsRequested, this, &MainWindow::addStandPegs);
+    connect(m_posePanel, &PosePanel::displayBaseRequested, this, &MainWindow::makeDisplayBase);
     connect(m_posePanel, &PosePanel::straightenRequested, this, [this] {
         auto& mode = m_poseMode;
         if (!mode.active || mode.joint < 0)
@@ -11254,30 +11256,88 @@ void MainWindow::addStandPegs()
         const Preferences prefs;
         peg.resin = prefs.value(QStringLiteral("ports/resin"), true).toBool();
         peg.fit = prefs.value(QStringLiteral("ports/socketFit"), peg.resin ? 0.1 : 0.2).toDouble();
-        std::vector<Body> holes;
-        for (const auto& s : spots) {
-            Body r;
-            r.id = m_doc.allocateId();
-            r.name = m_doc.find(s.part)->name;
-            r.boolean = socketSpec(m_doc, s.part, emboss::SurfacePoint{s.point, s.normal}, peg);
-            m_doc.previewMesh(*r.boolean);  // refuse before changing anything
-            holes.push_back(std::move(r));
-        }
-        m_stack.beginMacro(holes.size() == 1 ? "Stand peg hole" : "Stand peg holes");
+        m_stack.beginMacro(spots.size() == 1 ? "Stand peg hole" : "Stand peg holes");
+        std::size_t made = 0;
         try {
-            for (Body& r : holes)
-                m_stack.execute(std::make_unique<CombineCommand>(std::move(r)));
+            made = addFootHoles(m_stack, m_doc, spots, peg);
         } catch (...) {
             m_stack.abortMacro();
             throw;
         }
         m_stack.endMacro();
+        if (made == 0) {  // (an empty step isn't kept)
+            statusBar()->showMessage(tr("Every foot has its stand peg hole already."), 6000);
+            return;
+        }
         qInfo().noquote() << "Command:" << QString::fromStdString(m_stack.undoLabel());
         m_posePanel->setStatus(spots.size() == 1 ? tr("A stand peg hole in 1 foot.")
                                                  : tr("A stand peg hole in each of %1 feet.").arg(spots.size()),
                                false);
     } catch (const std::exception& e) {
-        m_posePanel->setBalance(tr("The peg holes couldn't be made: %1").arg(QString::fromUtf8(e.what())), true);
+        QMessageBox::warning(this, tr("Peg Hole in Each Foot"),
+                             tr("The peg holes couldn't be made: %1").arg(QString::fromUtf8(e.what())));
+    }
+}
+
+void MainWindow::makeDisplayBase()
+{
+    if (!m_poseMode.active)
+        return;
+    Preferences prefs;
+    displaybase::Settings start;
+    start.shape = displaybase::Shape(std::clamp(prefs.value(QStringLiteral("base/shape"), 0).toInt(), 0,
+                                                displaybase::kShapeCount - 1));
+    start.margin = prefs.value(QStringLiteral("base/margin"), start.margin).toDouble();
+    start.thickness = prefs.value(QStringLiteral("base/thickness"), start.thickness).toDouble();
+    start.bevel = prefs.value(QStringLiteral("base/bevel"), start.bevel).toDouble();
+    start.pegs = prefs.value(QStringLiteral("base/pegs"), true).toBool();
+    start.pegSize = m_posePanel->standPegSize();
+    start.pegHeight = prefs.value(QStringLiteral("base/pegHeight"),
+                                  std::max(0.5, m_posePanel->standPegDepth() - 0.5))
+                          .toDouble();
+    const bool resin = prefs.value(QStringLiteral("ports/resin"), true).toBool();
+    start.fit = prefs.value(QStringLiteral("ports/socketFit"), resin ? 0.1 : 0.2).toDouble();
+    DisplayBaseDialog dialog(start, prefs.value(QStringLiteral("base/holes"), true).toBool(),
+                             m_posePanel->standPegDepth(), this);
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+    const displaybase::Settings s = dialog.settings();
+    prefs.setValue(QStringLiteral("base/shape"), int(s.shape));
+    prefs.setValue(QStringLiteral("base/margin"), s.margin);
+    prefs.setValue(QStringLiteral("base/thickness"), s.thickness);
+    prefs.setValue(QStringLiteral("base/bevel"), s.bevel);
+    prefs.setValue(QStringLiteral("base/pegs"), s.pegs);
+    prefs.setValue(QStringLiteral("base/pegHeight"), s.pegHeight);
+    if (s.pegs)
+        prefs.setValue(QStringLiteral("base/holes"), dialog.holesInFeet());
+    std::optional<SocketFinish> holes;
+    if (dialog.holesInFeet()) {
+        SocketFinish peg;
+        peg.kind = SocketKind::Peg;
+        peg.size = s.pegSize;
+        peg.depth = dialog.holeDepth();
+        peg.resin = resin;
+        peg.fit = prefs.value(QStringLiteral("ports/socketFit"), resin ? 0.1 : 0.2).toDouble();
+        holes = peg;
+    }
+    try {
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        struct RestoreCursor {
+            ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
+        } restore;
+        const auto parts = posedParts();
+        const auto b = balance::of(parts);
+        const std::size_t feet = footSpots(b).size();
+        addDisplayBase(m_stack, m_doc, parts, s, holes);
+        qInfo().noquote() << "Command:" << QString::fromStdString(m_stack.undoLabel());
+        const QString what = s.pegs ? (feet == 1 ? tr("a peg under 1 foot") : tr("a peg under each of %1 feet").arg(feet))
+                                    : (feet == 1 ? tr("a hole under 1 foot") : tr("a hole under each of %1 feet").arg(feet));
+        const QString done = tr("A %1 display base, with %2.").arg(tr(displaybase::title(s.shape)).toLower(), what);
+        m_posePanel->setStatus(done, false);
+        statusBar()->showMessage(done, 8000);
+    } catch (const std::exception& e) {
+        QMessageBox::warning(this, tr("Make a Display Base"),
+                             tr("The base couldn't be made: %1").arg(QString::fromUtf8(e.what())));
     }
 }
 

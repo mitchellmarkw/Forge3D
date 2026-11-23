@@ -77,6 +77,8 @@ add_executable(Forge3D WIN32
     JointStandardsDialog.h
     JointStandardsDialog.cpp
     CutPartsPanel.h
+    DisplayBaseDialog.h
+    DisplayBaseDialog.cpp
     CutPartsPanel.cpp
     StampPanel.h
     StampPanel.cpp
