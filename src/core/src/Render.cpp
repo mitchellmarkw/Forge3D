@@ -8,6 +8,8 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
+#include <limits>
 #include <map>
 #include <numbers>
 #include <stdexcept>
@@ -619,12 +621,12 @@ std::vector<std::uint8_t> gif(const std::vector<Image>& frames, int delay, const
         const int key = ((r >> 3) << 10) | ((g >> 3) << 5) | (b >> 3);
         if (nearest[std::size_t(key)] < 0) {
             int best = 0;
-            long bestD = 1L << 40;
+            std::int64_t bestD = std::numeric_limits<std::int64_t>::max();
             const int cr = ((r >> 3) << 3) + 4, cg = ((g >> 3) << 3) + 4, cb = ((b >> 3) << 3) + 4;
             for (int i = 0; i < (clear ? int(see) : 256); ++i) {
-                const long dr = cr - colours[std::size_t(i)][0], dg = cg - colours[std::size_t(i)][1],
-                           db = cb - colours[std::size_t(i)][2];
-                const long d = dr * dr * 3 + dg * dg * 4 + db * db * 2;
+                const std::int64_t dr = cr - colours[std::size_t(i)][0], dg = cg - colours[std::size_t(i)][1],
+                                   db = cb - colours[std::size_t(i)][2];
+                const std::int64_t d = dr * dr * 3 + dg * dg * 4 + db * db * 2;
                 if (d < bestD) {
                     bestD = d;
                     best = i;
