@@ -1683,3 +1683,24 @@ and sharp across edges.
   leaders, and turning from straight out of the middle; the cheapest wins.
 - The app paints the picture and the balloons (vector) with QPainter onto a QPdfWriter at 200 dpi, then the parts
   list and notes, starting new pages as they fill.
+
+## Sewing patterns (slice 79, 0.88.0)
+
+- `sewing::fromPaint` colours the shape's triangles from its paint (`paint::triangleColours`, the shape welded),
+  places them as they stand on the plate, and calls `sewing::make` with the triangles of one colour.
+- `make`: unpainted patches enclosed by paint and under 5% of its area are filled in. The plane through the middle
+  of the region's bounds (normal +Y for front/back, +X for left/right) cuts it: triangles crossing it are clipped,
+  the points on it shared by both sides through an edge map. Each side's edge-connected parts are pieces (crumbs
+  under 0.5% dropped), named by side and ordered by X.
+- Each piece is thinned to at most 4000 triangles (`remesh::simplified`, open edges kept) and laid flat: the start
+  is the piece seen along its average facing, or Tutte's embedding (the longest edge loop round a circle by arc
+  length, uniform Laplacian) if more than a tenth of it folds that way; mirrored starts are flipped. Then up to
+  150 as-rigid-as-possible passes (Liu et al.: per triangle the closest rotation from the cotangent-weighted
+  covariance, then two cotangent-Laplacian solves with one point held), stopping when nothing moves more than
+  1e-4 of the size. The solves are Jacobi-preconditioned conjugate gradients on compressed rows.
+- Reported: the 95th-percentile and worst edge-length change, folds over 0.2% of the area. The piece is turned so
+  the area-weighted image of world +Z points up the page, moved to the origin, and its edge loops (outer first,
+  anticlockwise) smoothed twice and simplified (Douglas-Peucker, 0.05 mm).
+- The app makes the cutting line as the stitching path united with its stroke (twice the allowance wide, round
+  joins), lays pieces out in rows across the printable width after a 50 mm check square, and draws the same
+  QPainter code into the preview, a tiled QPdfWriter (600 dpi, mm units) and a QSvgGenerator (10 units per mm).

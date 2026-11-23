@@ -48,6 +48,7 @@
 #include "forge/core/Port.h"
 #include "forge/core/Hand.h"
 #include "forge/core/Balance.h"
+#include "forge/core/Sewing.h"
 #include "MaskPanel.h"
 #include "ReferencePanel.h"
 #include "ScaleCalculator.h"
@@ -55,6 +56,7 @@
 #include "KitDialog.h"
 #include "PartsListDialog.h"
 #include "InstructionSheetDialog.h"
+#include "SewingPatternDialog.h"
 #include "forge/core/Kit.h"
 #include "ToleranceDialog.h"
 #include "SocketPanel.h"
@@ -898,6 +900,12 @@ void MainWindow::createActions()
                                         "to go with a kit"));
     m_instructionsAction->setStatusTip(m_instructionsAction->toolTip());
     connect(m_instructionsAction, &QAction::triggered, this, &MainWindow::showInstructionSheet);
+    m_sewingAction = new QAction(tr("Sewing Pattern"), this);
+    m_sewingAction->setToolTip(tr("Sewing Pattern: the area of the selected shape painted one colour (a jacket, a "
+                                  "cape) cut into pieces and laid flat at full size, with a seam allowance, to cut "
+                                  "cloth from (PDF or SVG)"));
+    m_sewingAction->setStatusTip(m_sewingAction->toolTip());
+    connect(m_sewingAction, &QAction::triggered, this, &MainWindow::showSewingPattern);
     m_printCheckAction = new QAction(tr("Print Check"), this);
     m_printCheckAction->setToolTip(tr("Print Check: colour the places that are too thin to print well, and the "
                                       "faces that hang over the air the way the parts sit (they'll need "
@@ -1497,6 +1505,7 @@ void MainWindow::createMenus()
     partsList->setStatusTip(tr("Every part's size, volume, print weight and material cost, as a table to save or "
                                "print"));
     tools->addAction(m_instructionsAction);
+    tools->addAction(m_sewingAction);
 
     QMenu* help = menuBar()->addMenu(tr("&Help"));
     help->addAction(tr("Open &log folder"), this, [] {
@@ -1588,6 +1597,7 @@ void MainWindow::createToolBar()
         {m_standAction, "stand"},
         {m_variablesAction, "variables"},
         {m_instructionsAction, "instructions"},
+        {m_sewingAction, "sewing"},
         {m_poseFigureAction, "pose-figure"},
         {m_paintAction, "paint"},
         {m_cutPartsAction, "cut-parts"},
@@ -1767,7 +1777,7 @@ void MainWindow::createToolBar()
     group(print, tr("Prepare"), {button(m_splitToFit), menuButton(m_layOutMenu), button(m_mouldAction)});
     group(print, tr("Out"), {button(m_save), button(m_export), button(m_sendToSlicer)});
     group(print, tr("Library"), {button(m_saveCustomShape)});
-    group(print, tr("Kit"), {button(m_instructionsAction)});
+    group(print, tr("Kit"), {button(m_instructionsAction), button(m_sewingAction)});
     common(print);
 
     // Keep the tab you were on.
@@ -15835,6 +15845,36 @@ void MainWindow::showPartsList()
         ids = m_doc.topLevelIds();
     const QString title = m_filePath.isEmpty() ? tr("Untitled") : QFileInfo(m_filePath).completeBaseName();
     PartsListDialog dialog(title, [this, ids](const parts::Settings& s) { return parts::rows(m_doc, ids, s); }, this);
+    dialog.exec();
+}
+
+void MainWindow::showSewingPattern()
+{
+    // The selected shape (the whole of what's on the plate it's part of).
+    ObjectId shape = kInvalidId;
+    for (ObjectId id : m_selection) {
+        ObjectId top = id;
+        while (m_doc.parentOf(top) != kInvalidId)
+            top = m_doc.parentOf(top);
+        shape = top;
+        break;
+    }
+    if (shape == kInvalidId && m_doc.topLevelIds().size() == 1)
+        shape = m_doc.topLevelIds().front();
+    if (shape == kInvalidId) {
+        QMessageBox::information(this, tr("Sewing Pattern"),
+                                 tr("Select the painted figure first: the pattern is made from the area painted one "
+                                    "colour (paint the clothes on with Sculpt → Paint)."));
+        return;
+    }
+    if (sewing::paintedColours(m_doc, shape).empty()) {
+        QMessageBox::information(this, tr("Sewing Pattern"),
+                                 tr("%1 has no paint. Paint where the clothes go first (Sculpt → Paint): the pattern "
+                                    "is made from the area painted one colour.")
+                                     .arg(QString::fromStdString(m_doc.find(shape)->name)));
+        return;
+    }
+    SewingPatternDialog dialog(m_doc, shape, this);
     dialog.exec();
 }
 
