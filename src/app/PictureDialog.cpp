@@ -72,14 +72,29 @@ void checker(QPainter& p, const QRect& r)
 
 }  // namespace
 
+namespace {
+
+std::vector<render::Item> itemsWaiting(const Document& doc, const std::vector<ObjectId>& ids)
+{
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    struct Restore {
+        ~Restore() { QApplication::restoreOverrideCursor(); }
+    } restore;
+    return render::itemsOf(doc, ids);
+}
+
+}  // namespace
+
 PictureDialog::PictureDialog(const Document& doc, const std::vector<ObjectId>& ids, const QString& name, QWidget* parent)
-    : QDialog(parent), m_name(name)
+    : PictureDialog(itemsWaiting(doc, ids), name, parent)
+{
+}
+
+PictureDialog::PictureDialog(std::vector<render::Item> items, const QString& name, QWidget* parent)
+    : QDialog(parent), m_items(std::move(items)), m_name(name)
 {
     setWindowTitle(tr("Picture"));
     resize(980, 640);
-    QApplication::setOverrideCursor(Qt::WaitCursor);
-    m_items = render::itemsOf(doc, ids);
-    QApplication::restoreOverrideCursor();
 
     auto* layout = new QHBoxLayout(this);
     auto* left = new QVBoxLayout;

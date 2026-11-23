@@ -1772,3 +1772,9 @@ and sharp across edges.
   (share a point): along a line they do, across its middle they don't. Clipped triangles keep their source.
 - Each piece's points are copied per group of corners joined round them, so a line's middle opens even where the
   cloth joins round the other way (a sleeve becomes a strip).
+
+## Pictures of a pose (slice 86, 0.95.0)
+
+- `render::itemsOf(doc, ids, moved)` applies each shape's pose transform after its world transform (as Pose Test's
+  `moved`); `PictureDialog` takes ready-made items as well as shapes. Pose Test's button passes every top-level
+  shape with `m_poseMode.moved`.

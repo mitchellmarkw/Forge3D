@@ -26,6 +26,8 @@ class PictureDialog : public QDialog {
     Q_OBJECT
 public:
     PictureDialog(const Document& doc, const std::vector<ObjectId>& ids, const QString& name, QWidget* parent = nullptr);
+    // Of these, as they are (a pose, say).
+    PictureDialog(std::vector<render::Item> items, const QString& name, QWidget* parent = nullptr);
 
 protected:
     void resizeEvent(QResizeEvent* event) override;
