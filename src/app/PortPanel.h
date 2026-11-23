@@ -21,6 +21,8 @@ class PortPanel : public QWidget {
     Q_OBJECT
 
 public:
+    // Its boxes that can follow the design variables (slice 81).
+    void attachFormulas(class FormulaFields* fields);
     enum class What { Peg, Socket, Grip };
 
     explicit PortPanel(QWidget* parent = nullptr);

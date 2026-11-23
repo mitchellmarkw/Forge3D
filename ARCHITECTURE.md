@@ -1721,3 +1721,16 @@ and sharp across edges.
   with a decoder written the way browsers decode.
 - The app renders in a QThread (frames counted for a QProgressDialog, Stop between frames) and writes PNG through
   QImage.
+
+## Joint sizes from the variables (slice 81, 0.90.0)
+
+- `variables` gained step fields ("socket.size"... "port.ball") read and written through member pointers into the
+  step's `SocketFinish`, `HingeFinish` or `PortFinish` (`stepValue`). `variableChanges` checks each changed joint with
+  `socket::check` / `hinge::check` / `port::check`, and for a hinge with a partner remakes the partner from the half
+  with the lower id (`hinge::otherHalf`, `withHinge`, its half and link kept, its formulas kept).
+- App: `FormulaFields` gives a tool panel's spin boxes the = key and the context menu (several boxes may share a
+  field), tints them, and drops a field's formula when the user types or steps a number in one of its boxes (a box
+  the user touched, not programmatic changes). Each panel's `attachFormulas` registers its boxes; the main window
+  loads a step's formulas when editing it and stores the panel's on Apply (`withPanelFormulas` keeps the step's
+  other keys), on both hinge halves and a magnet's matching pocket, maps a peg's to a Hand Ports socket's, and gives
+  Add Matching Part's shape radius and length formulas.

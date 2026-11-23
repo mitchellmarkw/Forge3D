@@ -69,6 +69,7 @@ add_executable(forge_tests
     test_illustration.cpp
     test_sewing.cpp
     test_render.cpp
+    test_joint_variables.cpp
     test_stamp.cpp
     test_panel_lines.cpp
     test_kit.cpp

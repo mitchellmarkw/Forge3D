@@ -1127,6 +1127,12 @@ private:
     void makeDisplayBase();
     // Design variables (slice 77).
     void editVariables();
+    // Joint sizes following the variables (slice 81): the formula for one of a tool panel's
+    // boxes, asked for; and the step's formulas with the panel's put in.
+    void askFormula(class FormulaFields* fields, const QString& key, const QString& label, const QString& current);
+    std::map<std::string, std::string> withPanelFormulas(const std::map<std::string, std::string>& before,
+                                                         const class FormulaFields* fields,
+                                                         const std::string& prefix) const;
     // Instruction Sheet (slice 78).
     void showInstructionSheet();
     // Sewing Pattern (slice 79).
@@ -1140,6 +1146,9 @@ private:
     bool runEdit(const Body& before, Body after, const std::string& label);
     QAction* m_standAction = nullptr;
     QAction* m_variablesAction = nullptr;
+    class FormulaFields* m_socketFormulas = nullptr;
+    class FormulaFields* m_hingeFormulas = nullptr;
+    class FormulaFields* m_portFormulas = nullptr;
     QAction* m_instructionsAction = nullptr;
     QAction* m_sewingAction = nullptr;
     QAction* m_pictureAction = nullptr;

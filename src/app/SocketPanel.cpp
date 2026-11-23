@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "SocketPanel.h"
 
+#include "FormulaFields.h"
+
 #include "Standards.h"
 
 #include "Fits.h"
@@ -447,6 +449,17 @@ void SocketPanel::setStatus(const QString& text, bool problem)
 void SocketPanel::setApplyEnabled(bool on)
 {
     m_apply->setEnabled(on);
+}
+
+void SocketPanel::attachFormulas(FormulaFields* fields)
+{
+    fields->add(m_ballSize, QStringLiteral("socket.size"), tr("Ball size"));
+    fields->add(m_pegSize, QStringLiteral("socket.size"), tr("Peg size"));
+    fields->add(m_magnetDiameter, QStringLiteral("socket.size"), tr("Magnet diameter"));
+    fields->add(m_pegDepth, QStringLiteral("socket.depth"), tr("Peg depth"));
+    fields->add(m_magnetThickness, QStringLiteral("socket.depth"), tr("Magnet thickness"));
+    fields->add(m_fit, QStringLiteral("socket.fit"), tr("Fit"));
+    fields->add(m_cover, QStringLiteral("socket.cover"), tr("Cover"));
 }
 
 }  // namespace forge::app

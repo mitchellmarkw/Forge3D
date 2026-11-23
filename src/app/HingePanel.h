@@ -23,6 +23,8 @@ class HingePanel : public QWidget {
     Q_OBJECT
 
 public:
+    // Its boxes that can follow the design variables (slice 81).
+    void attachFormulas(class FormulaFields* fields);
     explicit HingePanel(QWidget* parent = nullptr);
 
     // `editing`: changing a hinge already made (its kind and other half stay as they are).
