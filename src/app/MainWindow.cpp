@@ -37,6 +37,7 @@
 #include "CutPartsPanel.h"
 #include "DisplayBaseDialog.h"
 #include "VariablesDialog.h"
+#include "FormulaFields.h"
 #include "Standards.h"
 #include "StampPanel.h"
 #include "PanelLinePanel.h"
@@ -2505,6 +2506,18 @@ void MainWindow::createDocks()
             saveToStandard(false, &*w);
     });
     m_portPanel = new PortPanel;
+    // Joint sizes can follow the design variables (slice 81).
+    m_socketFormulas = new FormulaFields(this);
+    m_socketPanel->attachFormulas(m_socketFormulas);
+    m_hingeFormulas = new FormulaFields(this);
+    m_hingePanel->attachFormulas(m_hingeFormulas);
+    m_portFormulas = new FormulaFields(this);
+    m_portPanel->attachFormulas(m_portFormulas);
+    for (FormulaFields* fields : {m_socketFormulas, m_hingeFormulas, m_portFormulas})
+        connect(fields, &FormulaFields::formulaRequested, this,
+                [this, fields](const QString& key, const QString& label, const QString& current) {
+                    askFormula(fields, key, label, current);
+                });
     stackLayout->addWidget(m_portPanel);
     m_portPanel->hide();
     connect(m_portPanel, &PortPanel::changed, this, &MainWindow::updatePortPreview);
@@ -10609,6 +10622,7 @@ void MainWindow::startSocket(ObjectId target, bool editing)
     m_socketPanel->start(editing ? tr("Change the socket in '%1'").arg(name) : tr("Socket in '%1'").arg(name),
                          editing);
     m_socketPanel->setFinish(finish);
+    m_socketFormulas->setFormulas(editing ? body->formulas : std::map<std::string, std::string>{});
     m_propsDockWidth = m_propsDock->width();
     m_properties->hide();
     m_socketPanel->show();
@@ -10748,6 +10762,7 @@ void MainWindow::applySocket()
         const Body before = *now;
         Body after = before;
         after.boolean = *spec;
+        after.formulas = withPanelFormulas(before.formulas, m_socketFormulas, "socket.");
         endSocket();
         run(std::make_unique<EditBodyCommand>(before, after, "Change socket"));
         setSelection(history::objectOf(m_doc, target));
@@ -10757,6 +10772,7 @@ void MainWindow::applySocket()
     result.id = m_doc.allocateId();
     result.name = m_doc.uniqueName("Socketed");
     result.boolean = *spec;
+    result.formulas = m_socketFormulas->formulas();
     const ObjectId id = result.id;
     // A magnet's matching pocket, in the part against the face.
     std::optional<Body> matching;
@@ -10770,6 +10786,7 @@ void MainWindow::applySocket()
             pocket.id = m_doc.allocateId();
             pocket.name = m_doc.uniqueName("Socketed");
             pocket.boolean = socketSpec(m_doc, otherTip, *facing, *spec->socket);
+            pocket.formulas = m_socketFormulas->formulas();
             m_doc.previewMesh(*pocket.boolean);
             matching = std::move(pocket);
         } catch (const std::exception& e) {
@@ -10822,6 +10839,30 @@ void MainWindow::addMatchingPart()
     try {
         body.spec = socket::matchingPart(f);
         body.hardware = true;  // keeps its size when the design is rescaled
+        // It follows the socket's formulas too (its radius half the size, its length the depth).
+        const auto& sf = m_socketFormulas->formulas();
+        const auto size = sf.find("socket.size"), depth = sf.find("socket.depth");
+        const auto half = [](const std::string& f) { return "(" + f + ") / 2"; };
+        if (std::holds_alternative<SphereSpec>(body.spec)) {
+            if (size != sf.end())
+                for (const char* k : {"radiusX", "radiusY", "radiusZ"})
+                    body.formulas[k] = half(size->second);
+        } else if (std::holds_alternative<CylinderSpec>(body.spec)) {
+            if (size != sf.end())
+                for (const char* k : {"radiusX", "radiusY"})
+                    body.formulas[k] = half(size->second);
+            if (depth != sf.end())
+                body.formulas["height"] = depth->second;
+        } else if (std::holds_alternative<BoxSpec>(body.spec)) {
+            if (size != sf.end())
+                for (const char* k : {"width", "depth"})
+                    body.formulas[k] = size->second;
+            if (depth != sf.end())
+                body.formulas["height"] = depth->second;
+        } else if (std::holds_alternative<PadSpec>(body.spec)) {
+            if (depth != sf.end())
+                body.formulas["length"] = depth->second;
+        }
     } catch (const std::exception& e) {
         m_socketPanel->setStatus(QString::fromUtf8(e.what()), true);
         return;
@@ -11428,6 +11469,39 @@ void MainWindow::editVariables()
     dialog.exec();
 }
 
+void MainWindow::askFormula(FormulaFields* fields, const QString& key, const QString& label, const QString& current)
+{
+    FormulaDialog dialog(label, current, m_doc.variables(), this);
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+    const QString formula = dialog.formula();
+    const variables::Values values = variables::compute(m_doc.variables());
+    try {
+        const double value = variables::evaluate(formula.toStdString(), [&](const std::string& n) -> std::optional<double> {
+            if (const auto v = values.value.find(n); v != values.value.end())
+                return v->second;
+            return std::nullopt;
+        });
+        fields->setFormula(key, formula, value);
+    } catch (const std::exception& e) {
+        QMessageBox::warning(this, tr("Use a Variable"), QString::fromUtf8(e.what()));
+    }
+}
+
+std::map<std::string, std::string> MainWindow::withPanelFormulas(const std::map<std::string, std::string>& before,
+                                                                 const FormulaFields* fields,
+                                                                 const std::string& prefix) const
+{
+    // The step's own (its position, say) kept; the panel's fields as the panel has them.
+    std::map<std::string, std::string> out;
+    for (const auto& [key, f] : before)
+        if (key.rfind(prefix, 0) != 0)
+            out[key] = f;
+    for (const auto& [key, f] : fields->formulas())
+        out[key] = f;
+    return out;
+}
+
 bool MainWindow::runEdit(const Body& before, Body after, const std::string& label)
 {
     // A size or position typed in by hand no longer follows the variables.
@@ -11816,6 +11890,7 @@ void MainWindow::startHinge(ObjectId target, bool editing)
     refreshStandardRows();
     m_hingePanel->start(editing ? tr("Change the joint in '%1'").arg(name) : tr("Joint in '%1'").arg(name), editing);
     m_hingePanel->setFinish(finish);
+    m_hingeFormulas->setFormulas(editing ? body->formulas : std::map<std::string, std::string>{});
     if (!editing)
         m_hingePanel->setOtherFromPart(Preferences().value(QStringLiteral("hinge/fromPart"), false).toBool());
     m_propsDockWidth = m_propsDock->width();
@@ -12018,6 +12093,7 @@ void MainWindow::applyHinge()
             m_stack.beginMacro("Change joint");
             Body after = *now;
             after.boolean = *spec;
+            after.formulas = withPanelFormulas(now->formulas, m_hingeFormulas, "hinge.");
             m_stack.execute(std::make_unique<EditBodyCommand>(*now, after, "Change joint"));
             if (partner != kInvalidId) {
                 // The other half follows: the same joint, from the new spot.
@@ -12025,7 +12101,8 @@ void MainWindow::applyHinge()
                 const hinge::Half h = hinge::otherHalf(f, spot.point, spot.normal);
                 HingeFinish g = h.finish;
                 g.half = other->boolean->hinge->half;
-                const Body moved = withHinge(m_doc, partner, {h.point, h.normal}, g);
+                Body moved = withHinge(m_doc, partner, {h.point, h.normal}, g);
+                moved.formulas = withPanelFormulas(other->formulas, m_hingeFormulas, "hinge.");
                 m_doc.previewMesh(*moved.boolean);
                 m_stack.execute(std::make_unique<EditBodyCommand>(*other, moved, "Change joint"));
             }
@@ -12062,6 +12139,7 @@ void MainWindow::applyHinge()
         result.id = m_doc.allocateId();
         result.name = m_doc.uniqueName("Hinged");
         result.boolean = *spec;
+        result.formulas = m_hingeFormulas->formulas();
         if (!m_doc.isTopLevel(target))
             m_stack.execute(std::make_unique<InsertStepCommand>(std::move(result), m_doc.parentOf(target)));
         else
@@ -12072,6 +12150,7 @@ void MainWindow::applyHinge()
             half.id = m_doc.allocateId();
             half.name = m_doc.uniqueName("Hinged");
             half.boolean = hingeSpec(m_doc, history::tip(m_doc, other), {h.point, h.normal}, h.finish);
+            half.formulas = m_hingeFormulas->formulas();
             m_doc.previewMesh(*half.boolean);
             m_stack.execute(std::make_unique<CombineCommand>(std::move(half)));
         }
@@ -14348,6 +14427,7 @@ void MainWindow::startPort(ObjectId target, bool editing)
     const QString name = QString::fromStdString(body->name);
     m_portPanel->start(editing ? tr("Change the port on '%1'").arg(name) : tr("Hand Ports on '%1'").arg(name), editing,
                        what, f);
+    m_portFormulas->setFormulas(editing ? m_doc.find(target)->formulas : std::map<std::string, std::string>{});
     m_propsDockWidth = m_propsDock->width();
     m_properties->hide();
     m_portPanel->show();
@@ -14450,6 +14530,7 @@ void MainWindow::applyPort()
         } restore;
         if (mode.editing) {
             Body after = withPort(m_doc, target, f);
+            after.formulas = withPanelFormulas(m_doc.find(target)->formulas, m_portFormulas, "port.");
             m_doc.previewMesh(*after.boolean);  // worked out (and kept) before anything changes
             const Body before = *m_doc.find(target);
             endPort();
@@ -14460,11 +14541,25 @@ void MainWindow::applyPort()
         Body r;
         r.id = m_doc.allocateId();
         r.name = m_doc.find(target)->name;
-        if (m_portPanel->what() == PortPanel::What::Socket)
+        if (m_portPanel->what() == PortPanel::What::Socket) {
             r.boolean = socketSpec(m_doc, target, *mode.spot,
                                    port::socketFor(f, m_portPanel->fit(), m_portPanel->resin()));
-        else
+            // The peg's formulas, as the socket's sizes (its size and depth, or its ball).
+            const auto& pf = m_portFormulas->formulas();
+            const auto has = [&](const char* k) { return pf.count(k) > 0; };
+            if (r.boolean->socket->kind == SocketKind::Ball) {
+                if (has("port.ball"))
+                    r.formulas["socket.size"] = pf.at("port.ball");
+            } else {
+                if (has("port.size"))
+                    r.formulas["socket.size"] = pf.at("port.size");
+                if (has("port.length"))
+                    r.formulas["socket.depth"] = pf.at("port.length");
+            }
+        } else {
             r.boolean = portSpec(m_doc, target, *mode.spot, f);
+            r.formulas = m_portFormulas->formulas();
+        }
         m_doc.previewMesh(*r.boolean);
         const ObjectId id = r.id;
         endPort();

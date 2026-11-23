@@ -81,6 +81,8 @@ add_executable(Forge3D WIN32
     DisplayBaseDialog.cpp
     VariablesDialog.h
     VariablesDialog.cpp
+    FormulaFields.h
+    FormulaFields.cpp
     InstructionSheetDialog.h
     InstructionSheetDialog.cpp
     SewingPatternDialog.h

@@ -49,8 +49,11 @@ Values compute(const std::vector<Variable>& table);
 void checkTable(const std::vector<Variable>& table);
 
 // ---- Fields a formula can drive ----
-// A primitive's lengths by their file key ("width", "radiusX"...) and the placement as
-// "at.x", "at.y", "at.z", "at.rotationX", "at.rotationY", "at.rotationZ".
+// A primitive's lengths by their file key ("width", "radiusX"...), the placement as
+// "at.x", "at.y", "at.z", "at.rotationX", "at.rotationY", "at.rotationZ", and a joint
+// step's sizes: "socket.size", "socket.depth", "socket.fit", "socket.cover",
+// "hinge.width", "hinge.barrel", "hinge.pinSize", "hinge.fit", "hinge.gap", "hinge.lip",
+// "port.size", "port.length", "port.fit", "port.ball".
 bool hasField(const Body& body, const std::string& key);
 double fieldValue(const Body& body, const std::string& key);
 void setFieldValue(Body& body, const std::string& key, double value);

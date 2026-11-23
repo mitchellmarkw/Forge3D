@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "HingePanel.h"
 
+#include "FormulaFields.h"
+
 #include "Standards.h"
 
 #include "Fits.h"
@@ -414,6 +416,16 @@ void HingePanel::setStatus(const QString& text, bool problem)
 void HingePanel::setApplyEnabled(bool on)
 {
     m_apply->setEnabled(on);
+}
+
+void HingePanel::attachFormulas(FormulaFields* fields)
+{
+    fields->add(m_width, QStringLiteral("hinge.width"), tr("Tab width"));
+    fields->add(m_barrel, QStringLiteral("hinge.barrel"), tr("Tab end"));
+    fields->add(m_gap, QStringLiteral("hinge.gap"), tr("Gap"));
+    fields->add(m_lip, QStringLiteral("hinge.lip"), tr("Lip"));
+    fields->add(m_pinSize, QStringLiteral("hinge.pinSize"), tr("Pin diameter"));
+    fields->add(m_fit, QStringLiteral("hinge.fit"), tr("Fit"));
 }
 
 }  // namespace forge::app

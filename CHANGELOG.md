@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.90.0 Beta — Slice 81: Joint sizes from the design variables (2026-11-23)
+
+- **Quick Socket, Quick Hinge and Hand Ports** sizes can follow the design variables, as sizes in Properties can:
+  press **=** in a box (or right-click it → Use a Variable...) and give a variable or a formula. The box turns blue;
+  Apply keeps the formula with the joint. Change the variable and every joint using it changes, in the same one
+  undo step as the shapes.
+  - Quick Socket: the ball, peg or magnet size, the peg depth or magnet thickness, the fit, the skin over a magnet.
+  - Quick Hinge: the tab width and end, the pin, the gap (double hinges), the lip (swivels), the fit. Both halves
+    of a hinge follow, and a double hinge's second fork moves out with a bigger gap.
+  - Hand Ports: the peg size and length, the ball end, the handle and its fit; a socket cut for a peg takes the
+    peg's size and length.
+  - **Add Matching Part** (the ball or peg for a socket) follows too: its radius half the socket's size, its length
+    the depth.
+  - A value a joint can't have (a pin wider than its tab) is refused, naming it, and nothing changes.
+  - Typing a number in a blue box, or right-click → Stop Following the Variables, makes it a plain size again.
+- Not yet: tabs, links, pegs and pins made as separate shapes by Quick Hinge keep their size (Add Joint Pieces again
+  after a change).
+
 ## 0.89.0 Beta — Slice 80: Pictures for sharing (2026-11-23)
 
 - **Picture** (Print/Save tab, Share; also in the Tools menu): a picture of the model for posts or a shop listing.

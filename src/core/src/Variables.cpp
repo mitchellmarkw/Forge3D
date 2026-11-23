@@ -221,6 +221,55 @@ const std::vector<PlacementField>& placementFields()
     return fields;
 }
 
+// A joint step's sizes (slice 81): Quick Socket, Quick Hinge and Hand Port steps.
+struct StepField {
+    const char* key;
+    const char* label;
+    double SocketFinish::*socket = nullptr;
+    double HingeFinish::*hinge = nullptr;
+    double PortFinish::*port = nullptr;
+};
+
+const std::vector<StepField>& stepFields()
+{
+    static const std::vector<StepField> fields{
+        {"socket.size", "Socket size", &SocketFinish::size, nullptr, nullptr},
+        {"socket.depth", "Socket depth", &SocketFinish::depth, nullptr, nullptr},
+        {"socket.fit", "Socket fit", &SocketFinish::fit, nullptr, nullptr},
+        {"socket.cover", "Cover over the magnet", &SocketFinish::cover, nullptr, nullptr},
+        {"hinge.width", "Tab width", nullptr, &HingeFinish::width, nullptr},
+        {"hinge.barrel", "Tab end", nullptr, &HingeFinish::barrel, nullptr},
+        {"hinge.pinSize", "Pin diameter", nullptr, &HingeFinish::pinSize, nullptr},
+        {"hinge.fit", "Hinge fit", nullptr, &HingeFinish::fit, nullptr},
+        {"hinge.gap", "Gap between the parts", nullptr, &HingeFinish::gap, nullptr},
+        {"hinge.lip", "Swivel lip", nullptr, &HingeFinish::lip, nullptr},
+        {"port.size", "Port size", nullptr, nullptr, &PortFinish::size},
+        {"port.length", "Peg length", nullptr, nullptr, &PortFinish::length},
+        {"port.fit", "Port fit", nullptr, nullptr, &PortFinish::fit},
+        {"port.ball", "Ball end", nullptr, nullptr, &PortFinish::ball},
+    };
+    return fields;
+}
+
+// The step field `key` names on this body, if it's that kind of step.
+double* stepValue(Body& body, const std::string& key)
+{
+    if (!body.isBoolean())
+        return nullptr;
+    for (const auto& f : stepFields()) {
+        if (key != f.key)
+            continue;
+        if (f.socket && body.boolean->socket)
+            return &(*body.boolean->socket.*f.socket);
+        if (f.hinge && body.boolean->hinge)
+            return &(*body.boolean->hinge.*f.hinge);
+        if (f.port && body.boolean->port)
+            return &(*body.boolean->port.*f.port);
+        return nullptr;
+    }
+    return nullptr;
+}
+
 std::optional<std::size_t> specIndex(const Body& body, const std::string& key)
 {
     if (body.isBoolean())
@@ -377,6 +426,8 @@ Values compute(const std::vector<Variable>& table)
 
 bool hasField(const Body& body, const std::string& key)
 {
+    if (stepValue(const_cast<Body&>(body), key))
+        return true;
     for (const auto& f : placementFields())
         if (key == f.key)
             return true;
@@ -385,6 +436,8 @@ bool hasField(const Body& body, const std::string& key)
 
 double fieldValue(const Body& body, const std::string& key)
 {
+    if (const double* v = stepValue(const_cast<Body&>(body), key))
+        return *v;
     for (const auto& f : placementFields())
         if (key == f.key)
             return body.placement.*f.member;
@@ -395,6 +448,10 @@ double fieldValue(const Body& body, const std::string& key)
 
 void setFieldValue(Body& body, const std::string& key, double value)
 {
+    if (double* v = stepValue(body, key)) {
+        *v = value;
+        return;
+    }
     for (const auto& f : placementFields())
         if (key == f.key) {
             body.placement.*f.member = value;
@@ -409,6 +466,9 @@ void setFieldValue(Body& body, const std::string& key, double value)
 
 std::string fieldLabel(const Body& body, const std::string& key)
 {
+    for (const auto& f : stepFields())
+        if (key == f.key)
+            return f.label;
     for (const auto& f : placementFields())
         if (key == f.key)
             return f.label;

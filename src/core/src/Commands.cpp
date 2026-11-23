@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "forge/core/Commands.h"
+#include "forge/core/Port.h"
+#include "forge/core/Hinge.h"
+#include "forge/core/Socket.h"
 
 #include "forge/core/Document.h"
 #include "forge/core/Transform.h"
@@ -395,12 +398,45 @@ VariableChanges variableChanges(const Document& doc, const std::vector<Variable>
         next = variables::applied(next, values);
         try {
             validate(next.spec);
+            // A joint's sizes checked as its panel checks them.
+            if (next.isBoolean() && next.boolean->socket)
+                socket::check(*next.boolean->socket);
+            if (next.isBoolean() && next.boolean->hinge)
+                hinge::check(*next.boolean->hinge);
+            if (next.isBoolean() && next.boolean->port)
+                port::check(*next.boolean->port);
         } catch (const std::exception& e) {
             throw std::invalid_argument("That would make " + body.name + " impossible: " + e.what());
         }
         if (!(next == body)) {
             out.before.push_back(body);
             out.after.push_back(std::move(next));
+        }
+    }
+    // A hinge's other half goes with it (a double hinge's second fork sits the gap out
+    // from the first): made again from the half with the lower number.
+    for (std::size_t i = 0; i < out.after.size(); ++i) {
+        const Body& changed = out.after[i];
+        if (!changed.isBoolean() || !changed.boolean->hinge || changed.boolean->hinge->link == 0)
+            continue;
+        const ObjectId partner = hingePartner(doc, changed.id);
+        if (partner == kInvalidId || partner < changed.id || !doc.find(partner))
+            continue;
+        const emboss::SurfacePoint spot = hingeSpot(doc, changed.id);
+        const hinge::Half h = hinge::otherHalf(*changed.boolean->hinge, spot.point, spot.normal);
+        const Body* other = doc.find(partner);
+        HingeFinish g = h.finish;
+        g.half = other->boolean->hinge->half;
+        g.link = other->boolean->hinge->link;
+        Body moved = withHinge(doc, partner, {h.point, h.normal}, g);
+        const auto already = std::find_if(out.before.begin(), out.before.end(),
+                                          [&](const Body& b) { return b.id == partner; });
+        if (already != out.before.end()) {
+            moved.formulas = out.after[std::size_t(already - out.before.begin())].formulas;
+            out.after[std::size_t(already - out.before.begin())] = std::move(moved);
+        } else if (!(moved == *other)) {
+            out.before.push_back(*other);
+            out.after.push_back(std::move(moved));
         }
     }
     return out;

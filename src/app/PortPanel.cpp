@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "PortPanel.h"
 
+#include "FormulaFields.h"
+
 #include "Standards.h"
 
 #include <QComboBox>
@@ -343,6 +345,15 @@ void PortPanel::fitHeight()
     const int needed = layout()->hasHeightForWidth() ? layout()->heightForWidth(width()) : sizeHint().height();
     if (needed > 0 && minimumHeight() != needed)
         setMinimumHeight(needed);
+}
+
+void PortPanel::attachFormulas(FormulaFields* fields)
+{
+    fields->add(m_size, QStringLiteral("port.size"), tr("Peg size"));
+    fields->add(m_handle, QStringLiteral("port.size"), tr("Handle diameter"));
+    fields->add(m_length, QStringLiteral("port.length"), tr("Peg length"));
+    fields->add(m_ball, QStringLiteral("port.ball"), tr("Ball diameter"));
+    fields->add(m_gripFit, QStringLiteral("port.fit"), tr("Grip fit"));
 }
 
 }  // namespace forge::app

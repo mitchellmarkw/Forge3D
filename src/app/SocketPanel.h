@@ -23,6 +23,8 @@ class SocketPanel : public QWidget {
     Q_OBJECT
 
 public:
+    // Its boxes that can follow the design variables (slice 81).
+    void attachFormulas(class FormulaFields* fields);
     explicit SocketPanel(QWidget* parent = nullptr);
 
     void start(const QString& title, bool editing);
