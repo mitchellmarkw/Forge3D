@@ -7,6 +7,7 @@
 
 #include <array>
 
+class QCheckBox;
 class QComboBox;
 class QDoubleSpinBox;
 class QLabel;
@@ -42,6 +43,13 @@ public:
     bool roomFromTurning() const;
     double roomClearance() const;
     void setRoomBusy(bool busy);
+    // Will it stand? Shown (the centre of weight, where it touches the ground), what it
+    // says, and the stand peg's size.
+    bool showBalance() const;
+    void setShowBalance(bool on);
+    void setBalance(const QString& text, bool problem);
+    double standPegSize() const;
+    double standPegDepth() const;
 
 signals:
     void jointChosen(int index);
@@ -56,6 +64,8 @@ signals:
     void deletePoseRequested();
     void doneRequested();
     void makeRoomRequested();
+    void balanceToggled(bool on);
+    void standPegsRequested();
 
 private:
     QListWidget* m_joints = nullptr;
@@ -78,6 +88,11 @@ private:
     QComboBox* m_roomFrom = nullptr;
     QDoubleSpinBox* m_roomClearance = nullptr;
     QPushButton* m_roomButton = nullptr;
+    QCheckBox* m_showBalance = nullptr;
+    QLabel* m_balance = nullptr;
+    QDoubleSpinBox* m_standPeg = nullptr;
+    QDoubleSpinBox* m_standDepth = nullptr;
+    QWidget* m_standBox = nullptr;
 };
 
 }  // namespace forge::app

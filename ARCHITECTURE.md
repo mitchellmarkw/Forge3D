@@ -1627,3 +1627,13 @@ and sharp across edges.
 - A problem (the source gone, the step off) leaves it empty with the problem noted. It's added with
   `AddBodyCommand` (CombineCommand needs parts); `withLinkPlane` moves the mirror; `unlinkMirror` swaps it (on the
   plate) for a mesh shape of its triangles. Scaling refuses it. File format 45.
+
+## Will it stand? (slice 75, 0.84.0)
+
+- `balance::of` takes the Pose Test parts (as-built solids, the pose on top): each part's volume and centre from
+  signed tetrahedra, weighted together into the centre of weight; the ground is the lowest posed point. Points within
+  0.4 mm of it are joined into patches along the surface's edges (union-find), each a `Foot` with its outline (convex
+  hull) and middle; the support is the hull of them all. The margin is the distance from the centre's foot to the
+  support's nearest edge (negative outside), and the lean `atan(margin / height)`.
+- `pegSpots` maps each patch's middle back through its part's pose into as-built coordinates, facing down; the app
+  makes a Peg Socket step at each in one macro. Pose Test redraws the balance whenever it rechecks for hits.
