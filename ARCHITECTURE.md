@@ -1778,3 +1778,15 @@ and sharp across edges.
 - `render::itemsOf(doc, ids, moved)` applies each shape's pose transform after its world transform (as Pose Test's
   `moved`); `PictureDialog` takes ready-made items as well as shapes. Pose Test's button passes every top-level
   shape with `m_poseMode.moved`.
+
+## Cut surfaces for Split by Mask (slice 87, 0.96.0)
+
+- `MaskSplitFinish` has `cut` (`MaskCut::Curved`, `Flat`, `Dome`) and `fit` (the socket's clearance), saved as the
+  mask's `"cut"` and `"fit"` (format 48).
+- `mask::split(..., cut)`: for Flat and Dome the mask's edge must be one loop. The plane goes through the loop's
+  middle, its normal the loop's area vector, turned out of the masked part. The refined surface is re-cut by the
+  plane (crossing edges shared through an edge map); the masked piece is the triangles on the masked side joined,
+  not across the plane, to ones whose middle is masked. The cap is made as before (a flat loop gives a flat cap).
+- Dome: `Pieces::dome` at the cap's key spot, foot radius 0.6 × the cap's room, height 0.45 × that (none under
+  1 mm of room). `mask::domed` merges the top of a ball (cut by a slab from just under the cut) onto the masked piece,
+  or subtracts the same ball grown by `fit` (and a slab grown by it) from the rest. Keys are off with a dome.

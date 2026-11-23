@@ -356,6 +356,11 @@ json bodyToJson(const Body& b)
             j["mask"] = json{{"piece", ms->masked ? "masked" : "rest"}, {"dabs", dabs}};
             if (ms->keys)
                 j["mask"]["keyFit"] = ms->keyFit;  // alignment keys on the cuts
+            if (ms->cut != MaskCut::Curved) {
+                j["mask"]["cut"] = ms->cut == MaskCut::Flat ? "flat" : "dome";
+                if (ms->cut == MaskCut::Dome)
+                    j["mask"]["fit"] = ms->fit;
+            }
         }
         if (const auto& so = b.boolean->socket) {
             static const char* shapes[] = {"round", "square", "hexagon", "octagon"};
@@ -911,6 +916,17 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
                 ms.keys = true;
                 ms.keyFit = std::clamp(kf->get<double>(), 0.0, 1.0);
             }
+            if (const auto c = mj->find("cut"); c != mj->end() && c->is_string()) {
+                const std::string name = c->get<std::string>();
+                if (name == "flat")
+                    ms.cut = MaskCut::Flat;
+                else if (name == "dome")
+                    ms.cut = MaskCut::Dome;
+                else if (name != "curved")
+                    damaged(where + ": the mask's cut is \"" + name + "\"");
+            }
+            if (const auto f = mj->find("fit"); f != mj->end() && f->is_number())
+                ms.fit = std::clamp(f->get<double>(), 0.0, 1.0);
             spec.maskSplit = std::move(ms);
         }
         if (spec.op == BooleanOp::Socket) {

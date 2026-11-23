@@ -17,6 +17,7 @@
 #include <QSettings>
 #include <QVBoxLayout>
 
+#include <algorithm>
 #include <utility>
 
 namespace forge::app {
@@ -96,6 +97,31 @@ MaskPanel::MaskPanel(QWidget* parent) : QWidget(parent)
     keepColumn->addWidget(m_keep);
     layout->addWidget(m_keepBox);
 
+    // The cut's surface: along the mask, flat, or flat with a ball and socket.
+    auto* cutColumn = new QVBoxLayout;
+    cutColumn->setSpacing(0);
+    cutColumn->addWidget(new QLabel(tr("Cut surface:")));
+    m_cut = new QComboBox;
+    m_cut->addItem(tr("Curved (follows the mask)"));
+    m_cut->addItem(tr("Flat"));
+    m_cut->addItem(tr("Ball and socket"));
+    m_cut->setToolTip(tr("Curved: the cut follows the mask's edge, a gently curved surface\n"
+                         "Flat: a flat cut through the middle of the mask's edge\n"
+                         "Ball and socket: a flat cut with a dome on the painted piece and a matching "
+                         "socket in the rest, so the pieces sit together one way and turn on it"));
+    cutColumn->addWidget(m_cut);
+    layout->addLayout(cutColumn);
+    auto* socketRow = new QFormLayout;
+    m_socketFit = new QDoubleSpinBox;
+    m_socketFit->setRange(0.0, 1.0);
+    m_socketFit->setDecimals(2);
+    m_socketFit->setSingleStep(0.05);
+    m_socketFit->setSuffix(tr(" mm"));
+    m_socketFit->setToolTip(tr("How much bigger the socket is than the dome, all round: 0.15 mm for resin, "
+                               "0.25 for filament"));
+    socketRow->addRow(tr("Socket fit:"), m_socketFit);
+    layout->addLayout(socketRow);
+
     // Alignment keys, so painted pieces glue back only one way.
     m_keys = new QCheckBox(tr("Alignment keys on the cut"));
     m_keys->setToolTip(tr("A three-sided peg on the painted piece and a matching hole in the rest, on each cut, so "
@@ -117,19 +143,25 @@ MaskPanel::MaskPanel(QWidget* parent) : QWidget(parent)
                               QStringLiteral("Forge3D"));
         m_keys->setChecked(prefs.value(QStringLiteral("mask/keys"), true).toBool());
         m_keyFit->setValue(prefs.value(QStringLiteral("mask/keyFit"), 0.1).toDouble());
+        m_cut->setCurrentIndex(std::clamp(prefs.value(QStringLiteral("mask/cut"), 0).toInt(), 0, 2));
+        m_socketFit->setValue(prefs.value(QStringLiteral("mask/socketFit"), 0.15).toDouble());
     }
-    m_keyFit->setEnabled(m_keys->isChecked());
+    showCut();
     const auto rememberKeys = [this] {
-        m_keyFit->setEnabled(m_keys->isChecked());
+        showCut();
         if (m_keys->property("editing").toBool())
             return;
         QSettings prefs(QSettings::NativeFormat, QSettings::UserScope, QStringLiteral("Forge3D"),
                         QStringLiteral("Forge3D"));
         prefs.setValue(QStringLiteral("mask/keys"), m_keys->isChecked());
         prefs.setValue(QStringLiteral("mask/keyFit"), m_keyFit->value());
+        prefs.setValue(QStringLiteral("mask/cut"), m_cut->currentIndex());
+        prefs.setValue(QStringLiteral("mask/socketFit"), m_socketFit->value());
     };
     connect(m_keys, &QCheckBox::toggled, this, rememberKeys);
     connect(m_keyFit, &QDoubleSpinBox::valueChanged, this, rememberKeys);
+    connect(m_cut, &QComboBox::currentIndexChanged, this, rememberKeys);
+    connect(m_socketFit, &QDoubleSpinBox::valueChanged, this, rememberKeys);
 
     auto* edit = new QHBoxLayout;
     m_undo = new QPushButton(tr("Undo Stroke"));
@@ -233,17 +265,19 @@ void MaskPanel::saveColours()
     emit coloursChanged();
 }
 
-void MaskPanel::start(const QString& title, bool editing, double keyFit)
+void MaskPanel::start(const QString& title, bool editing, double keyFit, MaskCut cut, double socketFit)
 {
     m_title->setText(title);
     m_keys->setProperty("editing", editing);
     if (editing) {
-        const QSignalBlocker a(m_keys), b(m_keyFit);
+        const QSignalBlocker a(m_keys), b(m_keyFit), c(m_cut), d(m_socketFit);
         m_keys->setChecked(keyFit >= 0.0);
         if (keyFit >= 0.0)
             m_keyFit->setValue(keyFit);
-        m_keyFit->setEnabled(m_keys->isChecked());
+        m_cut->setCurrentIndex(cut == MaskCut::Flat ? 1 : cut == MaskCut::Dome ? 2 : 0);
+        m_socketFit->setValue(socketFit);
     }
+    showCut();
     m_keepBox->setVisible(!editing);  // a step being changed keeps the pieces it has
     m_apply->setToolTip(editing ? tr("Cut along the changed mask") : tr("Cut the shape along the mask"));
     setStatus({}, false);
@@ -289,7 +323,30 @@ void MaskPanel::setApplyEnabled(bool on)
 
 double MaskPanel::keyFit() const
 {
-    return m_keys->isChecked() ? m_keyFit->value() : -1.0;
+    return m_keys->isChecked() && cut() != MaskCut::Dome ? m_keyFit->value() : -1.0;
+}
+
+MaskCut MaskPanel::cut() const
+{
+    switch (m_cut->currentIndex()) {
+    case 1: return MaskCut::Flat;
+    case 2: return MaskCut::Dome;
+    default: return MaskCut::Curved;
+    }
+}
+
+double MaskPanel::socketFit() const
+{
+    return m_socketFit->value();
+}
+
+void MaskPanel::showCut()
+{
+    // The ball and socket lines the pieces up itself: no keys with it.
+    const bool dome = cut() == MaskCut::Dome;
+    m_socketFit->setEnabled(dome);
+    m_keys->setEnabled(!dome);
+    m_keyFit->setEnabled(!dome && m_keys->isChecked());
 }
 
 }  // namespace forge::app

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.96.0 Beta — Slice 87: Cut surfaces for Split by Mask (2026-11-23)
+
+- **Split by Mask** has a **Cut surface** choice:
+  - **Curved (follows the mask)**: as before, the cut follows the paint's edge, a gently curved surface.
+  - **Flat**: a flat cut through the middle of the paint's edge, flat on both pieces.
+  - **Ball and socket**: the flat cut with a dome on the painted piece and a matching socket in the rest, so the
+    pieces sit together in one place and can turn on it. **Socket fit** sets how much bigger the socket is, all round.
+    Alignment keys aren't used with it (the dome lines the pieces up).
+- Flat and ball and socket need the paint's edge to go round the shape once (a hand, a head); a band painted round
+  the middle has two edges, so it says so and the curved cut is the one to use.
+- Changing the mask of a split keeps its cut surface, and you can change it there. Files are format 48.
+
 ## 0.95.0 Beta — Slice 86: Pictures of a pose (2026-11-23)
 
 - **Picture of This Pose...** (Pose Test, under Will it stand?): the Picture window with the figure as it's posed
