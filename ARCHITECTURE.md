@@ -1734,3 +1734,13 @@ and sharp across edges.
   loads a step's formulas when editing it and stores the panel's on Apply (`withPanelFormulas` keeps the step's
   other keys), on both hinge halves and a magnet's matching pocket, maps a peg's to a Hand Ports socket's, and gives
   Add Matching Part's shape radius and length formulas.
+
+## Hinge pieces that follow the hinge (slice 82, 0.91.0)
+
+- `Body::jointPiece` (`JointPiece{step, index, withTab, pinSpan, madeAt, label}`) marks a shape Quick Hinge made: its
+  place in `hinge::pieces`, the arguments it was made with, where it was put and the name it was given. Saved as a
+  body's "jointPiece" (format 47); `EditBodyCommand` carries it (`Document::setJointPiece`).
+- `refreshedPieces(doc, step, finish, spot)` remakes each piece of a step (pin spans no longer than the new reach),
+  moving a piece only if it's still where it was made (unturned), renaming one whose name still starts with its
+  label. `variableChanges` adds them for every changed hinge step; the app adds them (for the step and its partner)
+  to the Change joint macro.

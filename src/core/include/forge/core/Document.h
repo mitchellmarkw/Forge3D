@@ -101,6 +101,8 @@ public:
     // The sizes and positions that follow the design variables (Body::formulas). Only
     // records them: the values are set by setSpec / setPlacement.
     void setFormulas(ObjectId id, std::map<std::string, std::string> formulas);
+    // Which hinge piece it is (Body::jointPiece). Only records it.
+    void setJointPiece(ObjectId id, std::optional<JointPiece> piece);
     // The colour a body shows in, 0xRRGGBB: its own, else (a combined shape) its first
     // part's, else one of the default colours, picked by its id.
     std::uint32_t colourOf(ObjectId id) const;

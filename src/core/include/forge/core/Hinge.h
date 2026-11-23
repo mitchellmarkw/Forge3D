@@ -87,5 +87,10 @@ emboss::SurfacePoint hingeSpot(const Document& doc, ObjectId result);
 Body withHinge(const Document& doc, ObjectId result, const emboss::SurfacePoint& where, const HingeFinish& finish);
 // The other half of the same hinge (the step with the same link number), if any.
 ObjectId hingePartner(const Document& doc, ObjectId result);
+// The shapes made to go with the Hinge step `step` (its tab, link, peg, pins) remade for
+// `f` at `spot`: each as it should now be, those that change only. A piece left where it
+// was made moves with the joint; one that's been moved stays where it is.
+std::vector<Body> refreshedPieces(const Document& doc, ObjectId step, const HingeFinish& f,
+                                  const emboss::SurfacePoint& spot);
 
 }  // namespace forge

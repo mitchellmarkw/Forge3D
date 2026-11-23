@@ -110,7 +110,8 @@ Gate to Phase 2: a new user prints a customised part within 10 minutes.
 | 78 | Instruction sheets: an exploded view with numbered balloons, the parts list and notes, as a PDF | Done (0.87.0) |
 | 79 | Sewing patterns: a painted garment cut at seams and laid flat at full size, with seam allowance, as PDF or SVG | Done (0.88.0) |
 | 80 | Pictures for sharing: a studio-lit PNG of the model, or a turntable GIF | Done (0.89.0) |
-| 81 | Joint sizes from the design variables: Quick Socket, Quick Hinge and Hand Ports follow formulas | **Delivered for testing** |
+| 81 | Joint sizes from the design variables: Quick Socket, Quick Hinge and Hand Ports follow formulas | Done (0.90.0) |
+| 82 | Hinge pieces that follow the hinge: tabs, links, pegs and pins remade when its sizes change | **Delivered for testing** |
 
 Slices 39–41 close the gaps found in the [Phase 1 gate review](docs/PHASE1_GATE.md).
 

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.91.0 Beta — Slice 82: Hinge pieces that follow the hinge (2026-11-23)
+
+- The **tab, link, swivel peg and printed pins** Quick Hinge makes as shapes now go with their hinge: when its sizes
+  change (from the design variables, or when you change the joint in its panel), they're remade to match, in the
+  same one undo step.
+  - A piece left where it was made moves with the joint; one you've moved (laid out to print, say) stays where you
+    put it, at its new size.
+  - Its name follows too ("Hinge tab 3 × Ø5" becomes "Hinge tab 4 × Ø5"), unless you've renamed it.
+  - Add Joint Pieces while changing a joint makes pieces that follow it as well.
+- Saved files are now format 47.
+
 ## 0.90.0 Beta — Slice 81: Joint sizes from the design variables (2026-11-23)
 
 - **Quick Socket, Quick Hinge and Hand Ports** sizes can follow the design variables, as sizes in Properties can:
@@ -16,7 +27,7 @@
   - A value a joint can't have (a pin wider than its tab) is refused, naming it, and nothing changes.
   - Typing a number in a blue box, or right-click → Stop Following the Variables, makes it a plain size again.
 - Not yet: tabs, links, pegs and pins made as separate shapes by Quick Hinge keep their size (Add Joint Pieces again
-  after a change).
+  after a change). (They follow from 0.91.0.)
 
 ## 0.89.0 Beta — Slice 80: Pictures for sharing (2026-11-23)
 

@@ -13,7 +13,9 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include <algorithm>
 #include <cstdlib>
+#include <filesystem>
 #include <stdexcept>
 
 using namespace forge;
@@ -137,4 +139,73 @@ TEST_CASE("Joint variables: a hand port's peg", "[jointvars]")
     CHECK(b.doc.find(port)->boolean->port->size == 2.5);
     CHECK(b.doc.find(port)->boolean->port->length == 5.0);
     CHECK(variables::fieldLabel(*b.doc.find(port), "port.length") == "Peg length");
+}
+
+TEST_CASE("Hinge pieces: the tab and pin are remade when the hinge's sizes change", "[jointvars]")
+{
+    Bench b;
+    b.variables({{"Tab", "3", ""}, {"Pin", "2", ""}});
+    const ObjectId box = b.box(0);
+    HingeFinish f;
+    f.kind = HingeKind::Single;
+    f.width = 3;
+    f.pinSize = 2;
+    const ObjectId step =
+        b.step(hingeSpec(b.doc, box, kTop, f), {{"hinge.width", "Tab"}, {"hinge.pinSize", "Pin"}}, "Hinged");
+    // The pieces, as Quick Hinge makes them.
+    const std::array<double, 2> span{8.0, 8.0};
+    const auto pieces = hinge::pieces(f, kTop.point, kTop.normal, true, span);
+    REQUIRE(pieces.size() == 2);  // the tab and the pin
+    std::vector<ObjectId> ids;
+    for (std::size_t i = 0; i < pieces.size(); ++i) {
+        Body piece = hinge::pieceBody(pieces[i].mesh, pieces[i].name);
+        piece.id = b.doc.allocateId();
+        piece.hardware = true;
+        piece.jointPiece = JointPiece{step, int(i), true, span,
+                                      {piece.placement.x, piece.placement.y, piece.placement.z}, pieces[i].name};
+        if (i == 1)
+            piece.name += " 2";  // as when there's one of that name already
+        b.stack.execute(std::make_unique<AddBodyCommand>(piece));
+        ids.push_back(piece.id);
+    }
+    // The pin is laid out to print somewhere else.
+    {
+        Body moved = *b.doc.find(ids[1]);
+        moved.placement.x += 40.0;
+        b.stack.execute(std::make_unique<EditBodyCommand>(*b.doc.find(ids[1]), moved, "Move"));
+    }
+    const auto sizeOf = [&](ObjectId id) { return b.doc.worldBounds(id).size(); };
+    const auto tabBefore = sizeOf(ids[0]);
+    const double pinX = b.doc.find(ids[1])->placement.x;
+    const double tabZ = b.doc.find(ids[0])->placement.z;
+
+    b.variables({{"Tab", "4", ""}, {"Pin", "2.5", ""}});
+    CHECK(b.doc.find(step)->boolean->hinge->width == 4.0);
+    // The tab: thicker along the pin, left in place (so it moved with the joint).
+    const auto tabAfter = sizeOf(ids[0]);
+    CHECK(std::max({tabAfter[0], tabAfter[1]}) > std::max({tabBefore[0], tabBefore[1]}) - 1e-6);
+    CHECK(std::abs((tabAfter[0] + tabAfter[1]) - (tabBefore[0] + tabBefore[1])) > 0.5);
+    CHECK_THAT(b.doc.find(ids[0])->placement.z, WithinAbs(tabZ, 1.0));
+    CHECK(b.doc.find(ids[0])->name.rfind("Hinge tab 4", 0) == 0);
+    // The pin: fatter, but still where it was put, its " 2" kept.
+    const auto pinAfter = sizeOf(ids[1]);
+    CHECK_THAT(std::min({pinAfter[0], pinAfter[1], pinAfter[2]}), WithinAbs(2.5, 0.05));
+    CHECK(b.doc.find(ids[1])->placement.x == pinX);
+    CHECK(b.doc.find(ids[1])->name.find(" 2") != std::string::npos);
+    CHECK(b.doc.find(ids[1])->name.find("2.5") != std::string::npos);
+    // Saved and read back, it still knows its hinge.
+    {
+        const auto path = std::filesystem::temp_directory_path() / "forge3d-jointpiece.f3d";
+        file::save(b.doc, path, "test");
+        const auto loaded = file::load(path);
+        std::filesystem::remove(path);
+        const auto it = std::find_if(loaded.begin(), loaded.end(), [&](const Body& x) { return x.id == ids[1]; });
+        REQUIRE(it != loaded.end());
+        REQUIRE(it->jointPiece);
+        CHECK(*it->jointPiece == *b.doc.find(ids[1])->jointPiece);
+    }
+    // One undo step puts all of it back.
+    b.stack.undo();
+    CHECK(b.doc.find(step)->boolean->hinge->width == 3.0);
+    CHECK_THAT(std::min({sizeOf(ids[1])[0], sizeOf(ids[1])[1], sizeOf(ids[1])[2]}), WithinAbs(2.0, 0.05));
 }

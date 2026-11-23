@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cmath>
 #include <iomanip>
+#include <map>
 #include <memory>
 #include <numbers>
 #include <sstream>
@@ -661,6 +662,48 @@ ObjectId hingePartner(const Document& doc, ObjectId result)
             b.boolean->hinge->link == link)
             return b.id;
     return kInvalidId;
+}
+
+std::vector<Body> refreshedPieces(const Document& doc, ObjectId step, const HingeFinish& f,
+                                  const emboss::SurfacePoint& spot)
+{
+    std::vector<Body> out;
+    std::map<std::pair<bool, std::array<double, 2>>, std::vector<hinge::Piece>> made;
+    for (const Body& b : doc.bodies()) {
+        if (!b.jointPiece || b.jointPiece->step != step)
+            continue;
+        const JointPiece& jp = *b.jointPiece;
+        // The pin's span as made, no longer than the new joint reaches.
+        std::array<double, 2> span = jp.pinSpan;
+        if (span[0] > 0.0 && span[1] > 0.0)
+            span = {std::min(span[0], hinge::reachOf(f)), std::min(span[1], hinge::reachOf(f))};
+        const auto key = std::make_pair(jp.withTab, span);
+        auto found = made.find(key);
+        if (found == made.end())
+            found = made.emplace(key, hinge::pieces(f, spot.point, spot.normal, jp.withTab, span)).first;
+        const auto& pieces = found->second;
+        if (jp.index < 0 || std::size_t(jp.index) >= pieces.size())
+            continue;  // a piece this joint doesn't have any more (left as it is)
+        const Body fresh = hinge::pieceBody(pieces[std::size_t(jp.index)].mesh, pieces[std::size_t(jp.index)].name);
+        Body next = b;
+        next.spec = fresh.spec;
+        const bool still = std::abs(b.placement.x - jp.madeAt[0]) < 1e-6 && std::abs(b.placement.y - jp.madeAt[1]) < 1e-6 &&
+                           std::abs(b.placement.z - jp.madeAt[2]) < 1e-6 && b.placement.rotationX == 0.0 &&
+                           b.placement.rotationY == 0.0 && b.placement.rotationZ == 0.0;
+        if (still) {
+            next.placement.x = fresh.placement.x;
+            next.placement.y = fresh.placement.y;
+            next.placement.z = fresh.placement.z;
+        }
+        next.jointPiece->madeAt = {fresh.placement.x, fresh.placement.y, fresh.placement.z};
+        const std::string& label = pieces[std::size_t(jp.index)].name;
+        if (!jp.label.empty() && b.name.rfind(jp.label, 0) == 0)
+            next.name = label + b.name.substr(jp.label.size());  // any " 2" kept
+        next.jointPiece->label = label;
+        if (!(next == b))
+            out.push_back(std::move(next));
+    }
+    return out;
 }
 
 }  // namespace forge

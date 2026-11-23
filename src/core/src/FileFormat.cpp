@@ -263,6 +263,11 @@ json bodyToJson(const Body& b)
         j["hardware"] = true;
     if (!b.formulas.empty())
         j["formulas"] = b.formulas;
+    if (b.jointPiece) {
+        const JointPiece& p = *b.jointPiece;
+        j["jointPiece"] = json{{"step", p.step},         {"index", p.index},   {"withTab", p.withTab},
+                               {"pinSpan", p.pinSpan},   {"madeAt", p.madeAt}, {"label", p.label}};
+    }
     if (b.isBoolean()) {
         j["type"] = "combine";
         j["operation"] = opName(b.boolean->op);
@@ -631,6 +636,20 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
         b.colour = std::uint32_t(std::stoul(hex.substr(1), nullptr, 16));
     }
     b.hardware = j.value("hardware", false);
+    if (const auto piece = j.find("jointPiece"); piece != j.end() && piece->is_object()) {
+        JointPiece p;
+        try {
+            p.step = piece->at("step").get<ObjectId>();
+            p.index = piece->value("index", 0);
+            p.withTab = piece->value("withTab", false);
+            p.pinSpan = piece->value("pinSpan", std::array<double, 2>{0.0, 0.0});
+            p.madeAt = piece->value("madeAt", std::array<double, 3>{0.0, 0.0, 0.0});
+            p.label = piece->value("label", std::string());
+            b.jointPiece = p;
+        } catch (const json::exception&) {
+            damaged(where + ": jointPiece is not a hinge piece");
+        }
+    }
     if (const auto formulas = j.find("formulas"); formulas != j.end()) {
         if (!formulas->is_object())
             damaged(where + ": formulas is not a list of fields");
@@ -1722,6 +1741,7 @@ std::string resultKey(const Document& doc, ObjectId id)
         j.erase("colour");
         j.erase("hardware");  // nor does marking it a joint part
         j.erase("formulas");  // nor where its sizes come from
+        j.erase("jointPiece");  // nor which hinge it goes with
         if (part == id)
             j.erase("placement");  // nor does moving the whole thing
         text += "|" + j.dump();

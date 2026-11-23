@@ -539,6 +539,20 @@ enum class HingeHalf { Fork, Tab };
 enum class PinKind { Printed, Filament, Rod };
 // Which way a hinge can bend from straight: the slot is open deeper on that side.
 enum class HingeSwing { Both, Forward, Back };
+// Which piece of a hinge a shape is (slice 82): the Hinge step it goes with, its place
+// in hinge::pieces, how that was made (with a tab; the printed pin's span), where it was
+// put (if it's still there it moves with the hinge; if it's been moved it stays), and
+// the name it was given (a name still starting with it gets the new sizes).
+struct JointPiece {
+    ObjectId step = 0;
+    int index = 0;
+    bool withTab = false;
+    std::array<double, 2> pinSpan{0.0, 0.0};
+    std::array<double, 3> madeAt{0.0, 0.0, 0.0};
+    std::string label;
+    bool operator==(const JointPiece&) const = default;
+};
+
 struct HingeFinish {
     HingeKind kind = HingeKind::Single;
     HingeHalf half = HingeHalf::Fork;
@@ -916,6 +930,9 @@ struct Body {
     // Sizes and positions that follow the design variables (Variables.h): the field's key
     // ("width", "at.x"...) and its formula ("PegDia + 0.4").
     std::map<std::string, std::string> formulas;
+    // A piece Quick Hinge made to go with a Hinge step (a tab, link, peg or pin): remade
+    // when the hinge's sizes change (slice 82).
+    std::optional<JointPiece> jointPiece{};
 
     bool isBoolean() const { return boolean.has_value(); }
     bool isOff() const { return boolean.has_value() && (suppressed || rolledBack); }
