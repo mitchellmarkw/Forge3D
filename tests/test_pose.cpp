@@ -298,3 +298,54 @@ TEST_CASE("Pose: making room for a joint to turn to an angle", "[pose]")
     CHECK(pose::room(joints, rig, {}, 0, 0, 1.0, leg.parts(), false, 0.0).empty());
     CHECK_THROWS_AS(pose::room(joints, rig, {}, 0, 0, 90.0, leg.parts(), false, 20.0), std::invalid_argument);
 }
+
+namespace {
+
+// A ball of fine triangles (about 4 × n² of them).
+MeshSolid fineBall(const Vec3& centre, double r, int n)
+{
+    std::vector<float> p;
+    std::vector<std::uint32_t> idx;
+    const int around = 2 * n;
+    p.insert(p.end(), {float(centre[0]), float(centre[1]), float(centre[2] + r)});  // 0: the top
+    for (int i = 1; i < n; ++i)
+        for (int k = 0; k < around; ++k) {
+            const double t = 3.14159265358979 * i / n, f = 3.14159265358979 * k / n;
+            p.insert(p.end(), {float(centre[0] + r * std::sin(t) * std::cos(f)),
+                               float(centre[1] + r * std::sin(t) * std::sin(f)), float(centre[2] + r * std::cos(t))});
+        }
+    p.insert(p.end(), {float(centre[0]), float(centre[1]), float(centre[2] - r)});
+    const auto bottom = std::uint32_t(p.size() / 3 - 1);
+    const auto v = [&](int i, int k) { return std::uint32_t(1 + (i - 1) * around + (k % around)); };
+    for (int k = 0; k < around; ++k) {
+        idx.insert(idx.end(), {0, v(1, k), v(1, k + 1)});
+        idx.insert(idx.end(), {bottom, v(n - 1, k + 1), v(n - 1, k)});
+    }
+    for (int i = 1; i < n - 1; ++i)
+        for (int k = 0; k < around; ++k)
+            idx.insert(idx.end(), {v(i, k), v(i + 1, k), v(i + 1, k + 1), v(i, k), v(i + 1, k + 1), v(i, k + 1)});
+    return meshkernel::fromTriangles(p, idx);
+}
+
+}  // namespace
+
+TEST_CASE("Pose: making room on detailed parts (timing)", "[.bench]")
+{
+    Leg leg(5.0);
+    const auto joints = pose::findJoints(leg.doc);
+    const pose::Rig rig = pose::build(joints, leg.sizes(), leg.bounds());
+    auto parts = leg.parts();
+    // Each part made detailed away from the knee.
+    for (auto& part : parts) {
+        const Bounds b = meshkernel::bounds(part.solid);
+        const Vec3 far{(b.min[0] + b.max[0]) / 2, (b.min[1] + b.max[1]) / 2,
+                       part.id == leg.thigh ? b.min[2] : b.max[2]};  // half out of the far end
+        part.solid = meshkernel::merged({part.solid, fineBall(far, 2.0, 200)});
+    }
+    const auto t0 = std::chrono::steady_clock::now();
+    const auto rooms = pose::room(joints, rig, {}, 0, 0, 90.0, parts, false, 0.3);
+    const double s = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+    std::printf("room on detailed parts: %.2f s, %zu rooms, %.3f mm3\n", s, rooms.size(),
+                rooms.empty() ? 0.0 : rooms[0].volume);
+    REQUIRE(rooms.size() == 1);
+}
