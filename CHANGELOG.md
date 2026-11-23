@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.89.0 Beta — Slice 80: Pictures for sharing (2026-11-23)
+
+- **Picture** (Print/Save tab, Share; also in the Tools menu): a picture of the model for posts or a shop listing.
+  - Lit like a studio photo (smooth shading, a key light, a fill light and a rim light), in the shapes' colours and
+    their paint, with a soft shadow on the ground.
+  - Seen from any way round and from above or level, filling as much of the picture as you like.
+  - Backgrounds: white, light grey, dark, or clear (no background) to put it on your own.
+  - **PNG**: 1080 × 1080 for posts, 2000 × 2000 for a shop listing, 1080 × 1350 tall, 1920 × 1080 wide, or 800
+    square.
+  - **Turntable GIF**: going once round, 24 to 72 pictures in the turn, as long as you like (6 seconds to start
+    with), looping. One set of colours for every picture, so nothing flickers. "Turn the preview" spins it first.
+  - Made in the background with a progress bar (Stop to give up). The selected shapes, or everything.
+
 ## 0.88.0 Beta — Slice 79: Sewing patterns (2026-11-22)
 
 - **Sewing Pattern** (Print/Save tab, Kit; also in the Tools menu): cloth clothes for a figure. Paint the garment on

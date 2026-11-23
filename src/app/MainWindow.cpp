@@ -57,6 +57,7 @@
 #include "PartsListDialog.h"
 #include "InstructionSheetDialog.h"
 #include "SewingPatternDialog.h"
+#include "PictureDialog.h"
 #include "forge/core/Kit.h"
 #include "ToleranceDialog.h"
 #include "SocketPanel.h"
@@ -906,6 +907,11 @@ void MainWindow::createActions()
                                   "cloth from (PDF or SVG)"));
     m_sewingAction->setStatusTip(m_sewingAction->toolTip());
     connect(m_sewingAction, &QAction::triggered, this, &MainWindow::showSewingPattern);
+    m_pictureAction = new QAction(tr("Picture"), this);
+    m_pictureAction->setToolTip(tr("Picture: a clean, lit picture of the model for posts or a shop listing (PNG), or "
+                                   "a turntable GIF of it going once round. The selected shapes, or everything."));
+    m_pictureAction->setStatusTip(m_pictureAction->toolTip());
+    connect(m_pictureAction, &QAction::triggered, this, &MainWindow::showPicture);
     m_printCheckAction = new QAction(tr("Print Check"), this);
     m_printCheckAction->setToolTip(tr("Print Check: colour the places that are too thin to print well, and the "
                                       "faces that hang over the air the way the parts sit (they'll need "
@@ -1506,6 +1512,7 @@ void MainWindow::createMenus()
                                "print"));
     tools->addAction(m_instructionsAction);
     tools->addAction(m_sewingAction);
+    tools->addAction(m_pictureAction);
 
     QMenu* help = menuBar()->addMenu(tr("&Help"));
     help->addAction(tr("Open &log folder"), this, [] {
@@ -1598,6 +1605,7 @@ void MainWindow::createToolBar()
         {m_variablesAction, "variables"},
         {m_instructionsAction, "instructions"},
         {m_sewingAction, "sewing"},
+        {m_pictureAction, "picture"},
         {m_poseFigureAction, "pose-figure"},
         {m_paintAction, "paint"},
         {m_cutPartsAction, "cut-parts"},
@@ -1778,6 +1786,7 @@ void MainWindow::createToolBar()
     group(print, tr("Out"), {button(m_save), button(m_export), button(m_sendToSlicer)});
     group(print, tr("Library"), {button(m_saveCustomShape)});
     group(print, tr("Kit"), {button(m_instructionsAction), button(m_sewingAction)});
+    group(print, tr("Share"), {button(m_pictureAction)});
     common(print);
 
     // Keep the tab you were on.
@@ -15845,6 +15854,28 @@ void MainWindow::showPartsList()
         ids = m_doc.topLevelIds();
     const QString title = m_filePath.isEmpty() ? tr("Untitled") : QFileInfo(m_filePath).completeBaseName();
     PartsListDialog dialog(title, [this, ids](const parts::Settings& s) { return parts::rows(m_doc, ids, s); }, this);
+    dialog.exec();
+}
+
+void MainWindow::showPicture()
+{
+    if (m_doc.topLevelIds().empty()) {
+        statusBar()->showMessage(tr("Picture: there's nothing on the plate."), 5000);
+        return;
+    }
+    // The selected shapes, or everything.
+    std::vector<ObjectId> ids;
+    for (ObjectId id : m_selection) {
+        ObjectId top = id;
+        while (m_doc.parentOf(top) != kInvalidId)
+            top = m_doc.parentOf(top);
+        if (std::find(ids.begin(), ids.end(), top) == ids.end())
+            ids.push_back(top);
+    }
+    if (ids.empty())
+        ids = m_doc.topLevelIds();
+    const QString name = m_filePath.isEmpty() ? tr("Untitled") : QFileInfo(m_filePath).completeBaseName();
+    PictureDialog dialog(m_doc, ids, name, this);
     dialog.exec();
 }
 
