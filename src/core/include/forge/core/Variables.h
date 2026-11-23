@@ -60,6 +60,10 @@ void setFieldValue(Body& body, const std::string& key, double value);
 // "Width", "X position"...
 std::string fieldLabel(const Body& body, const std::string& key);
 
+// A size or position set by hand no longer follows the variables: the fields of `after`
+// that had a formula and now differ from `before` lose it. Returns their labels.
+std::vector<std::string> dropChanged(const Body& before, Body& after);
+
 // The body with each of its formulas worked out from `values` and put in. A formula that
 // doesn't work out leaves its field as it is (and is listed in `problems`, if given).
 Body applied(const Body& body, const Values& values, std::vector<std::string>* problems = nullptr);

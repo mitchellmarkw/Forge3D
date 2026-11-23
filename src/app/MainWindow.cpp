@@ -2842,8 +2842,9 @@ void MainWindow::createDocks()
     connect(m_properties, &PropertiesPanel::sitOnPlateRequested, this, [this](ObjectId id) {
         try {
             const Placement resting = sitOnPlate(m_doc, id);
-            if (!(resting == m_doc.find(id)->placement))
-                run(std::make_unique<SetPlacementCommand>(id, resting, /*mergeable=*/false));
+            std::vector<std::string> dropped;
+            if (!(resting == m_doc.find(id)->placement) && run(placementCommand(id, resting, dropped)))
+                tellDropped(dropped);
         } catch (const std::exception& e) {
             qWarning() << "Sit on plate failed:" << e.what();
         }
@@ -3697,11 +3698,15 @@ void MainWindow::onLeftReleased(bool wasDrag)
     if (!d.beforeAll.empty()) {
         // Resized a combined shape: one undo step for every body that changed.
         std::vector<Body> before, after;
+        std::vector<std::string> dropped;
         for (const Body& b : d.beforeAll) {
             const Body* now = m_doc.find(b.id);
             if (now && !(*now == b)) {
                 before.push_back(b);
                 after.push_back(*now);
+                // Dragged with a handle: no longer following the variables there.
+                const auto lost = variables::dropChanged(b, after.back());
+                dropped.insert(dropped.end(), lost.begin(), lost.end());
             }
         }
         if (before.empty())
@@ -3709,6 +3714,8 @@ void MainWindow::onLeftReleased(bool wasDrag)
         const char* label = !d.multi ? "Resize" : d.kind == Drag::Kind::Ring ? "Rotate" : "Move";
         if (!run(std::make_unique<EditBodiesCommand>(before, after, label)))
             previewAll(d.beforeAll);
+        else
+            tellDropped(dropped);
         return;
     }
 
@@ -3718,8 +3725,12 @@ void MainWindow::onLeftReleased(bool wasDrag)
     const QString label = d.kind == Drag::Kind::Ring   ? tr("Rotate")
                           : d.kind == Drag::Kind::Face ? tr("Resize")
                                                        : tr("Move");
-    if (!run(std::make_unique<EditBodyCommand>(d.before, *now, label.toStdString())))
+    Body after = *now;
+    const auto dropped = variables::dropChanged(d.before, after);  // dragged: no longer following
+    if (!run(std::make_unique<EditBodyCommand>(d.before, after, label.toStdString())))
         preview(d.before);
+    else
+        tellDropped(dropped);
 }
 
 void MainWindow::cancelDrag()
@@ -3906,14 +3917,16 @@ void MainWindow::alignSelected(AlignMode mode)
     }
 
     // One Undo step for the lot.
+    std::vector<std::string> dropped;
     m_stack.beginMacro(name.toStdString());
     try {
         for (const auto& [id, p] : moves)
-            m_stack.execute(std::make_unique<SetPlacementCommand>(id, p, /*mergeable=*/false));
+            m_stack.execute(placementCommand(id, p, dropped));
     } catch (const std::exception& e) {
         qWarning() << "Align stopped early:" << e.what();
     }
     m_stack.endMacro();
+    tellDropped(dropped);
     qInfo().noquote() << "Command:" << QString::fromStdString(m_stack.undoLabel());
     statusBar()->showMessage(tr("%1: moved %2 to '%3'.")
                                  .arg(name)
@@ -5581,17 +5594,19 @@ void MainWindow::sitSelectedOnPlate()
         statusBar()->showMessage(tr("Select the shapes to sit on the plate first."), 5000);
         return;
     }
+    std::vector<std::string> dropped;
     m_stack.beginMacro("Sit on Plate");
     try {
         for (ObjectId id : ids) {
             const Placement resting = sitOnPlate(m_doc, id);
             if (!(resting == m_doc.find(id)->placement))
-                m_stack.execute(std::make_unique<SetPlacementCommand>(id, resting, /*mergeable=*/false));
+                m_stack.execute(placementCommand(id, resting, dropped));
         }
     } catch (const std::exception& e) {
         qWarning() << "Sit on plate failed:" << e.what();
     }
     m_stack.endMacro();
+    tellDropped(dropped);
 }
 
 // ---- Sculpt -----------------------------------------------------------------------
@@ -11502,29 +11517,43 @@ std::map<std::string, std::string> MainWindow::withPanelFormulas(const std::map<
     return out;
 }
 
+void MainWindow::tellDropped(const std::vector<std::string>& dropped)
+{
+    if (dropped.empty())
+        return;
+    QStringList names;
+    for (const auto& d : dropped)
+        if (!names.contains(QString::fromStdString(d)))
+            names << QString::fromStdString(d);
+    statusBar()->showMessage(names.size() == 1
+                                 ? tr("%1 no longer follows the design variables.").arg(names.front())
+                                 : tr("%1 no longer follow the design variables.").arg(names.join(tr(" and "))),
+                             6000);
+}
+
+std::unique_ptr<Command> MainWindow::placementCommand(ObjectId id, const Placement& p,
+                                                      std::vector<std::string>& dropped) const
+{
+    const Body* body = m_doc.find(id);
+    if (body && !body->formulas.empty()) {
+        Body after = *body;
+        after.placement = p;
+        const auto lost = variables::dropChanged(*body, after);
+        if (!lost.empty()) {
+            dropped.insert(dropped.end(), lost.begin(), lost.end());
+            return std::make_unique<EditBodyCommand>(*body, after, "Move");
+        }
+    }
+    return std::make_unique<SetPlacementCommand>(id, p, /*mergeable=*/false);
+}
+
 bool MainWindow::runEdit(const Body& before, Body after, const std::string& label)
 {
     // A size or position typed in by hand no longer follows the variables.
-    std::vector<std::string> dropped;
-    for (auto it = after.formulas.begin(); it != after.formulas.end();) {
-        if (!variables::hasField(before, it->first) ||
-            variables::fieldValue(before, it->first) != variables::fieldValue(after, it->first)) {
-            dropped.push_back(variables::fieldLabel(before, it->first));
-            it = after.formulas.erase(it);
-        } else {
-            ++it;
-        }
-    }
+    const std::vector<std::string> dropped = variables::dropChanged(before, after);
     const bool ok = run(std::make_unique<EditBodyCommand>(before, after, label));
-    if (ok && !dropped.empty()) {
-        QStringList names;
-        for (const auto& d : dropped)
-            names << QString::fromStdString(d);
-        statusBar()->showMessage(names.size() == 1
-                                     ? tr("%1 no longer follows the design variables.").arg(names.front())
-                                     : tr("%1 no longer follow the design variables.").arg(names.join(tr(" and "))),
-                                 6000);
-    }
+    if (ok)
+        tellDropped(dropped);
     return ok;
 }
 

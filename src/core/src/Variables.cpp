@@ -477,6 +477,21 @@ std::string fieldLabel(const Body& body, const std::string& key)
     return key;
 }
 
+std::vector<std::string> dropChanged(const Body& before, Body& after)
+{
+    std::vector<std::string> dropped;
+    for (auto it = after.formulas.begin(); it != after.formulas.end();) {
+        const bool gone = !hasField(before, it->first) || !hasField(after, it->first);
+        if (gone || std::abs(fieldValue(before, it->first) - fieldValue(after, it->first)) > 1e-9) {
+            dropped.push_back(fieldLabel(before, it->first));
+            it = after.formulas.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    return dropped;
+}
+
 Body applied(const Body& body, const Values& values, std::vector<std::string>* problems)
 {
     Body out = body;

@@ -1144,6 +1144,10 @@ private:
     // `after` (a size or position typed in Properties) stops following the variables in
     // the fields it changes. Runs it as one step; returns false if that failed.
     bool runEdit(const Body& before, Body after, const std::string& label);
+    // Slice 83: moving or resizing by hand (handles, Align, Sit on Plate) stops a size or
+    // position following the variables, as typing a number does; said in the status bar.
+    void tellDropped(const std::vector<std::string>& dropped);
+    std::unique_ptr<Command> placementCommand(ObjectId id, const Placement& p, std::vector<std::string>& dropped) const;
     QAction* m_standAction = nullptr;
     QAction* m_variablesAction = nullptr;
     class FormulaFields* m_socketFormulas = nullptr;

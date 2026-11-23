@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.92.0 Beta — Slice 83: Moving by hand stops following the variables (2026-11-23)
+
+- A size or position that follows the design variables (a blue box) now stops following them when you change it by
+  hand any way, not only by typing a number: dragging a handle (move, turn or resize), **Align**, or **Sit on
+  Plate**. The status bar says which ("Z position no longer follows the design variables"), and Undo puts the
+  formula back with the old value. Before, the next change to the variables snapped it back.
+
 ## 0.91.0 Beta — Slice 82: Hinge pieces that follow the hinge (2026-11-23)
 
 - The **tab, link, swivel peg and printed pins** Quick Hinge makes as shapes now go with their hinge: when its sizes
@@ -89,6 +96,7 @@
   - With Round ticked, both radii follow it.
   - Typing a number in a blue box, or right-click → Stop Following the Variables, makes it a plain size again.
   - Moving or resizing with the handles doesn't change the formula: the variable puts it back next time it changes.
+    (From 0.92.0 it stops following instead.)
 - Variables are saved in the file. Saved files are now format 46.
 
 ## 0.85.0 Beta — Slice 76: Display bases (2026-11-22)
