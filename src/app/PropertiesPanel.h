@@ -63,9 +63,23 @@ signals:
     void simplifyKeepRequested(ObjectId id, double keep);
     // Smooth: how strongly (1..10).
     void smoothStrengthRequested(ObjectId id, int strength);
+    // A size or position to follow the design variables ("=" pressed in it, or its menu):
+    // its key ("width", "at.x"...) and its label.
+    void formulaRequested(ObjectId id, const QString& key, const QString& label);
+    // ... or to stop following them.
+    void formulaClearRequested(ObjectId id, const QString& key);
+
+protected:
+    bool eventFilter(QObject* watched, QEvent* event) override;
 
 private:
     QDoubleSpinBox* makeLength(const QString& tip);
+    // The field key of a size or position box ("width", "at.x"), empty if it has none
+    // now; and the label beside it.
+    QString keyOf(const QDoubleSpinBox* spin) const;
+    QString labelOf(const QDoubleSpinBox* spin) const;
+    QDoubleSpinBox* spinOf(QObject* watched) const;
+    void showFormulas();
     void commitName();
     void commitSpec(std::size_t field);
     void commitPlacement();

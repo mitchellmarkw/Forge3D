@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.86.0 Beta — Slice 77: Design variables (2026-11-22)
+
+- **Variables** (Build tab; also Tools → Variables): a table of named values used across many shapes, like FreeCAD's
+  spreadsheet. Each has a name, a value or a formula of the others, what it works out to, how many shapes use it
+  (directly or through other variables), and a note.
+  - Formulas: + - * / ^, brackets, pi, min( ), max( ), abs( ), sqrt( ), round( ), floor( ), ceil( ). A variable may
+    use others in any order. A mistake, a missing name or one that uses itself is shown in red, and OK waits until
+    it's put right.
+  - Change a value and every shape that uses it changes, in one undo step. A value that would make a shape impossible
+    (a negative radius) is refused, naming the shape.
+  - Renaming a variable carries over to everything that uses it. Deleting one that's in use asks first; those shapes
+    keep their sizes as they are, and stop following it.
+- **Using a variable** (Properties): press **=** in any size or position box of a shape (or right-click it → Use a
+  Variable...) and give a variable or a formula (PegDia / 2, Wall * 3). It shows what it works out to as you type.
+  The box turns blue and its tooltip shows the formula.
+  - With Round ticked, both radii follow it.
+  - Typing a number in a blue box, or right-click → Stop Following the Variables, makes it a plain size again.
+  - Moving or resizing with the handles doesn't change the formula: the variable puts it back next time it changes.
+- Variables are saved in the file. Saved files are now format 46.
+
 ## 0.85.0 Beta — Slice 76: Display bases (2026-11-22)
 
 - **Make a Display Base...** (Pose Test, under Will it stand?): a base for the figure in the pose it's in now, made

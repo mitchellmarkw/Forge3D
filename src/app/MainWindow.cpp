@@ -36,6 +36,7 @@
 #include "JointStandardsDialog.h"
 #include "CutPartsPanel.h"
 #include "DisplayBaseDialog.h"
+#include "VariablesDialog.h"
 #include "Standards.h"
 #include "StampPanel.h"
 #include "PanelLinePanel.h"
@@ -884,6 +885,12 @@ void MainWindow::createActions()
         if (m_poseMode.active)
             m_posePanel->setShowBalance(true);
     });
+    m_variablesAction = new QAction(tr("Variables"), this);
+    m_variablesAction->setToolTip(tr("Design Variables: named values (PegDia = 3) that sizes and positions can "
+                                     "follow, so changing one changes every shape that uses it. In Properties, press "
+                                     "= in a size to use one."));
+    m_variablesAction->setStatusTip(m_variablesAction->toolTip());
+    connect(m_variablesAction, &QAction::triggered, this, &MainWindow::editVariables);
     m_printCheckAction = new QAction(tr("Print Check"), this);
     m_printCheckAction->setToolTip(tr("Print Check: colour the places that are too thin to print well, and the "
                                       "faces that hang over the air the way the parts sit (they'll need "
@@ -1435,6 +1442,7 @@ void MainWindow::createMenus()
     m_viewMenu = view;  // the panels' show/hide entries are added in createDocks()
 
     QMenu* tools = menuBar()->addMenu(tr("&Tools"));
+    tools->addAction(m_variablesAction);
     QAction* scaleCalculator = tools->addAction(tr("&Scale Calculator..."), this, [this] {
         if (!m_scaleCalculator)
             m_scaleCalculator = new ScaleCalculator(this);
@@ -1570,6 +1578,7 @@ void MainWindow::createToolBar()
         {m_portAction, "ports"},
         {m_handAction, "hand"},
         {m_standAction, "stand"},
+        {m_variablesAction, "variables"},
         {m_poseFigureAction, "pose-figure"},
         {m_paintAction, "paint"},
         {m_cutPartsAction, "cut-parts"},
@@ -1691,6 +1700,7 @@ void MainWindow::createToolBar()
           {button(m_modeMove), button(m_modeRotate), button(m_modeResize), button(m_snapAction),
            button(m_uniformAction)});
     group(build, tr("Look"), {menuButton(m_colourMenu)});
+    group(build, tr("Variables"), {button(m_variablesAction)});
     group(build, tr("Remove"), {button(m_delete), button(m_clear)});
     common(build);
 
@@ -2733,8 +2743,17 @@ void MainWindow::createDocks()
         run(std::make_unique<RenameBodyCommand>(id, name.toStdString()));
     });
     connect(m_properties, &PropertiesPanel::specRequested, this, [this](ObjectId id, const PrimitiveSpec& spec) {
+        const Body* body = m_doc.find(id);
+        if (body && !body->formulas.empty()) {
+            Body after = *body;
+            after.spec = spec;
+            runEdit(*body, after, "Change size");
+            return;
+        }
         run(std::make_unique<SetSpecCommand>(id, spec));
     });
+    connect(m_properties, &PropertiesPanel::formulaRequested, this, &MainWindow::editFormula);
+    connect(m_properties, &PropertiesPanel::formulaClearRequested, this, &MainWindow::clearFormula);
     connect(m_properties, &PropertiesPanel::uniformChanged, m_uniformAction, &QAction::setChecked);
     connect(m_properties, &PropertiesPanel::separateRequested, this, &MainWindow::separateSelected);
     connect(m_properties, &PropertiesPanel::editCutRequested, this, [this] { startSplit(selectedOne(), true); });
@@ -2802,6 +2821,12 @@ void MainWindow::createDocks()
                     moved.placement.z = placement.z;
                     wanted = withRotation(moved, {placement.rotationX, placement.rotationY, placement.rotationZ},
                                           m_doc.visibleCentre(id));
+                }
+                if (body && !body->formulas.empty()) {
+                    Body after = *body;
+                    after.placement = wanted;
+                    runEdit(*body, after, "Move");
+                    return;
                 }
                 run(std::make_unique<SetPlacementCommand>(id, wanted, /*mergeable=*/false));
             });
@@ -6628,6 +6653,7 @@ void MainWindow::newDocument()
     m_doc.replaceAll({});
     m_doc.setReferences({});
     m_doc.setPoses({});
+    m_doc.setVariables({});
     m_doc.setMannequin(std::nullopt);
     m_stack.clear();
     m_selection.clear();
@@ -6655,6 +6681,7 @@ bool MainWindow::openFile(const QString& path)
         m_doc.replaceAll(std::move(bodies));
         m_doc.setReferences(file::loadReferences(toPath(path)));
         m_doc.setPoses(file::loadPoses(toPath(path)));
+        m_doc.setVariables(file::loadVariables(toPath(path)));
         m_doc.setMannequin(file::loadMannequin(toPath(path)));
         // The slow steps' results saved with the file: no need to work them out again.
         if (const std::size_t used = file::useSavedResults(m_doc, toPath(path)))
@@ -6910,6 +6937,7 @@ bool MainWindow::recoverFrom(const QString& backup)
         m_doc.replaceAll(std::move(bodies));
         m_doc.setReferences(file::loadReferences(toPath(backup)));
         m_doc.setPoses(file::loadPoses(toPath(backup)));
+        m_doc.setVariables(file::loadVariables(toPath(backup)));
         m_doc.setMannequin(file::loadMannequin(toPath(backup)));
         file::useSavedResults(m_doc, toPath(backup));
     } catch (const std::exception& e) {
@@ -11339,6 +11367,123 @@ void MainWindow::makeDisplayBase()
         QMessageBox::warning(this, tr("Make a Display Base"),
                              tr("The base couldn't be made: %1").arg(QString::fromUtf8(e.what())));
     }
+}
+
+void MainWindow::editVariables()
+{
+    VariablesDialog dialog(m_doc, this);
+    connect(&dialog, &VariablesDialog::applyRequested, this, [this, &dialog] {
+        const auto table = dialog.table();
+        const auto renames = dialog.renames();
+        if (table == m_doc.variables() && renames.empty()) {
+            dialog.applied({});
+            return;
+        }
+        try {
+            QApplication::setOverrideCursor(Qt::WaitCursor);
+            struct RestoreCursor {
+                ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
+            } restore;
+            const std::size_t shapes = variableChanges(m_doc, table, renames).after.size();
+            m_stack.execute(std::make_unique<SetVariablesCommand>(table, renames, "Design variables"));
+            qInfo().noquote() << "Command:" << QString::fromStdString(m_stack.undoLabel());
+            statusBar()->showMessage(shapes == 0   ? tr("Design variables changed.")
+                                     : shapes == 1 ? tr("Design variables changed: 1 shape changed with them.")
+                                                   : tr("Design variables changed: %1 shapes changed with them.").arg(shapes),
+                                     6000);
+            dialog.applied({});
+        } catch (const std::exception& e) {
+            dialog.applied(QString::fromUtf8(e.what()));
+        }
+    });
+    dialog.exec();
+}
+
+bool MainWindow::runEdit(const Body& before, Body after, const std::string& label)
+{
+    // A size or position typed in by hand no longer follows the variables.
+    std::vector<std::string> dropped;
+    for (auto it = after.formulas.begin(); it != after.formulas.end();) {
+        if (!variables::hasField(before, it->first) ||
+            variables::fieldValue(before, it->first) != variables::fieldValue(after, it->first)) {
+            dropped.push_back(variables::fieldLabel(before, it->first));
+            it = after.formulas.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    const bool ok = run(std::make_unique<EditBodyCommand>(before, after, label));
+    if (ok && !dropped.empty()) {
+        QStringList names;
+        for (const auto& d : dropped)
+            names << QString::fromStdString(d);
+        statusBar()->showMessage(names.size() == 1
+                                     ? tr("%1 no longer follows the design variables.").arg(names.front())
+                                     : tr("%1 no longer follow the design variables.").arg(names.join(tr(" and "))),
+                                 6000);
+    }
+    return ok;
+}
+
+void MainWindow::editFormula(ObjectId id, const QString& key, const QString& label)
+{
+    const Body* body = m_doc.find(id);
+    if (!body)
+        return;
+    const std::string k = key.toStdString();
+    const auto existing = body->formulas.find(k);
+    FormulaDialog dialog(label, existing != body->formulas.end() ? QString::fromStdString(existing->second) : QString(),
+                         m_doc.variables(), this);
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+    const std::string formula = dialog.formula().toStdString();
+    body = m_doc.find(id);
+    if (!body)
+        return;
+    Body after = *body;
+    after.formulas[k] = formula;
+    // While Round is ticked, the other radii of the same round part follow too.
+    if (!after.isBoolean() && m_keepRound) {
+        const auto& fields = specFields(after.spec);
+        int group = 0;
+        for (const auto& f : fields)
+            if (k == f.key)
+                group = f.roundGroup;
+        if (group != 0)
+            for (const auto& f : fields)
+                if (f.roundGroup == group)
+                    after.formulas[f.key] = formula;
+    }
+    std::vector<std::string> problems;
+    after = variables::applied(after, variables::compute(m_doc.variables()), &problems);
+    if (!problems.empty()) {
+        QMessageBox::warning(this, tr("Use a Variable"), QString::fromStdString(problems.front()));
+        return;
+    }
+    run(std::make_unique<EditBodyCommand>(*body, after, label.toStdString() + " = " + formula));
+}
+
+void MainWindow::clearFormula(ObjectId id, const QString& key)
+{
+    const Body* body = m_doc.find(id);
+    if (!body || !body->formulas.count(key.toStdString()))
+        return;
+    Body after = *body;
+    const std::string k = key.toStdString();
+    after.formulas.erase(k);
+    // While Round is ticked, the round part's other radii stop with it.
+    if (!after.isBoolean() && m_keepRound) {
+        const auto& fields = specFields(after.spec);
+        int group = 0;
+        for (const auto& f : fields)
+            if (k == f.key)
+                group = f.roundGroup;
+        if (group != 0)
+            for (const auto& f : fields)
+                if (f.roundGroup == group)
+                    after.formulas.erase(f.key);
+    }
+    run(std::make_unique<EditBodyCommand>(*body, after, "Stop following the variables"));
 }
 
 void MainWindow::makePoseRoom()

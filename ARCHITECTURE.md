@@ -1650,3 +1650,20 @@ and sharp across edges.
   the foot holes, in one macro. `addFootHoles` (shared with Peg Hole in Each Foot) skips a spot within 0.6 mm of
   an existing Socket step's plate point in that part's tree, checks each hole against the part first, then makes
   them, a second hole in the same part going into the step the first made.
+
+## Design variables (slice 77, 0.86.0)
+
+- `Variable{name, formula, note}`; the table is on the Document (`variables()`, `setVariables`, checked by
+  `variables::checkTable`, with its own listeners), saved as the root's "variables". `variables::evaluate` is a
+  small recursive-descent parser (+ - * / ^ right to left, unary minus, brackets, pi, min/max/abs/sqrt/round/floor/
+  ceil, names looked up); `compute` works the table out in any order, a loop or a broken one a problem without
+  spoiling the others.
+- `Body::formulas`: field key -> formula. Keys are a primitive's spec field keys ("width", "radiusX") and the
+  placement's "at.x" ... "at.rotationZ" (`hasField`, `fieldValue`, `setFieldValue`, `fieldLabel`). `applied` puts each
+  formula's value in. Saved per body as "formulas" (left out of the result key: it doesn't change the shape).
+  `EditBodyCommand` carries them (`Document::setFormulas`).
+- `SetVariablesCommand` changes the table and, through `variableChanges`, every body following it (renames carried
+  into their formulas, formulas naming a variable that's gone dropped, the new spec validated first) as one
+  EditBodies step. Setting a field's formula is an EditBodyCommand; the app drops a field's formula when a different
+  number is typed in it in Properties (`MainWindow::runEdit`). Other edits (handles, Align) leave formulas alone, so
+  the next table change puts the value back. File format 46.

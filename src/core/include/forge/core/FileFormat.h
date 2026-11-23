@@ -5,6 +5,7 @@
 #include "forge/core/Pose.h"
 #include "forge/core/Mannequin.h"
 #include "forge/core/Reference.h"
+#include "forge/core/Variables.h"
 
 #include <filesystem>
 #include <functional>
@@ -94,7 +95,9 @@ namespace forge::file {
 //  44  Pattern strokes turned ("turn") and pressed once as stamps ("once"); more built-in
 //      patterns (chainmail, twill, knit, leather, cracks, wood, pores)
 //  45  Linked mirrors (operation "linked", no parts; "link": source, point, normal)
-inline constexpr int kFormatVersion = 45;
+//  46  Design variables ("variables": name, formula, note) and the fields that follow them
+//      (a body's "formulas": field key -> formula)
+inline constexpr int kFormatVersion = 46;
 // The highest sculpt::Brush number a file may hold (Pattern).
 inline constexpr int kLastSculptBrush = 13;
 inline constexpr const char* kExtension = ".f3d";
@@ -117,6 +120,10 @@ std::vector<Body> load(const std::filesystem::path& path);
 // The poses saved in a file (none if it has none); a broken one is left out.
 std::vector<SavedPose> loadPoses(const std::filesystem::path& path);
 std::vector<SavedPose> posesFromJson(const std::string& json);
+
+// The design variables kept in a file (none if it has none); a broken one is left out.
+std::vector<Variable> loadVariables(const std::filesystem::path& path);
+std::vector<Variable> variablesFromJson(const std::string& json);
 
 // The figure guide kept in a file, if any (a broken one is left out).
 std::optional<Mannequin> loadMannequin(const std::filesystem::path& path);

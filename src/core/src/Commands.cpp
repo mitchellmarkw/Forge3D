@@ -187,6 +187,7 @@ void EditBodyCommand::apply(Document& doc, const Body& state)
         doc.setStepState(state.id, state.suppressed, state.rolledBack);
         doc.setPlacement(state.id, state.placement);
         doc.setHardware(state.id, state.hardware);
+        doc.setFormulas(state.id, state.formulas);
         if (doc.find(state.id) && doc.find(state.id)->name != state.name)
             doc.rename(state.id, state.name);
     } catch (...) {
@@ -366,6 +367,71 @@ bool SetReferencesCommand::mergeWith(const Command& next)
         return false;
     m_after = other->m_after;
     return true;
+}
+
+VariableChanges variableChanges(const Document& doc, const std::vector<Variable>& table,
+                                const std::map<std::string, std::string>& renames)
+{
+    variables::checkTable(table);
+    const variables::Values values = variables::compute(table);
+    std::set<std::string> names;
+    for (const Variable& v : table)
+        names.insert(v.name);
+    VariableChanges out;
+    for (const Body& body : doc.bodies()) {
+        if (body.formulas.empty())
+            continue;
+        Body next = body;
+        next.formulas.clear();
+        for (auto [key, formula] : body.formulas) {
+            for (const auto& [from, to] : renames)
+                formula = variables::renamed(formula, from, to);
+            bool known = true;
+            for (const std::string& n : variables::namesIn(formula))
+                known = known && names.count(n);
+            if (known && variables::hasField(body, key))
+                next.formulas[key] = formula;
+        }
+        next = variables::applied(next, values);
+        try {
+            validate(next.spec);
+        } catch (const std::exception& e) {
+            throw std::invalid_argument("That would make " + body.name + " impossible: " + e.what());
+        }
+        if (!(next == body)) {
+            out.before.push_back(body);
+            out.after.push_back(std::move(next));
+        }
+    }
+    return out;
+}
+
+SetVariablesCommand::SetVariablesCommand(std::vector<Variable> table, std::map<std::string, std::string> renames,
+                                         std::string label)
+    : m_after(std::move(table)), m_renames(std::move(renames)), m_label(std::move(label))
+{
+}
+
+void SetVariablesCommand::redo(Document& doc)
+{
+    if (!m_before) {
+        m_changes = variableChanges(doc, m_after, m_renames);  // throws before changing anything
+        m_before = doc.variables();
+    }
+    doc.setVariables(m_after);
+    try {
+        EditBodiesCommand(m_changes.before, m_changes.after, m_label).redo(doc);
+    } catch (...) {
+        doc.setVariables(*m_before);
+        throw;
+    }
+}
+
+void SetVariablesCommand::undo(Document& doc)
+{
+    EditBodiesCommand(m_changes.before, m_changes.after, m_label).undo(doc);
+    if (m_before)
+        doc.setVariables(*m_before);
 }
 
 SetPosesCommand::SetPosesCommand(std::vector<SavedPose> poses, std::string label)
