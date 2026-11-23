@@ -63,10 +63,15 @@ TEST_CASE("Parts list: sizes, volumes, weights and costs", "[parts]")
     rows = parts::rows(doc, {merged.id}, s);
     REQUIRE(rows.size() == 3);
     CHECK(rows[1].depth == 1);
+    // Numbered as pieces to print: the group listed with its parts isn't one.
+    CHECK(rows[0].number == 0);
+    CHECK(rows[1].number == 1);
+    CHECK(rows[2].number == 2);
+    CHECK(rows[2].id == cube);
     CHECK_THAT(parts::total(rows).volume, WithinRel(7000.0, 1e-6));
 
     const std::string table = parts::csv(rows, "$");
-    CHECK(table.find("\"  Head, big\"") != std::string::npos);  // a comma in a name is quoted
+    CHECK(table.find("2,\"  Head, big\"") != std::string::npos);  // a comma in a name is quoted
     CHECK(table.find("Total,,,,7.00") != std::string::npos);
     const std::string page = parts::html(rows, "$", "Kit <1>", "PLA");
     CHECK(page.find("Kit &lt;1&gt;") != std::string::npos);

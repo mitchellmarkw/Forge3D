@@ -1667,3 +1667,19 @@ and sharp across edges.
   EditBodies step. Setting a field's formula is an EditBodyCommand; the app drops a field's formula when a different
   number is typed in it in Properties (`MainWindow::runEdit`). Other edits (handles, Align) leave formulas alone, so
   the next table change puts the value back. File format 46.
+
+## Instruction sheets (slice 78, 0.87.0)
+
+- `parts::Row` gained `id` and `number`: rows numbered in order, skipping a joined shape that has its parts listed
+  after it (`inside`).
+- `illustrate::exploded` takes the numbered rows' world meshes (`meshSolid` through `worldTransform`) and moves each
+  by `spread` × (its bounds centre − the mean of the centres). `illustrate::render` is a software rasteriser: an
+  orthographic camera per view (Left looks from −X, as the view cube), a z-buffer and part-id buffer at 2× size,
+  flat shading of each triangle (two-sided, the part's colour lightened), outlines where the id changes (drawn on the
+  nearer part) or the depth jumps by more than 2% of the scene, averaged down with alpha.
+- Balloons: each part's anchor is the visible pixel (3 px in from its edge) nearest the middle of what shows. Of 24
+  directions, the nearest clear spot each way (the balloon and a ring round it off every part, apart from other
+  balloons, inside the picture) is scored by leader length, the length over other parts, crossings of earlier
+  leaders, and turning from straight out of the middle; the cheapest wins.
+- The app paints the picture and the balloons (vector) with QPainter onto a QPdfWriter at 200 dpi, then the parts
+  list and notes, starting new pages as they fill.

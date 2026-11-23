@@ -106,11 +106,12 @@ Gate to Phase 2: a new user prints a customised part within 10 minutes.
 | 74 | Linked left/right parts: a mirrored copy that keeps up with the original | Done (0.83.0) |
 | 75 | Will it stand?: the centre of weight against the feet as posed, and stand peg holes in the soles | Done (0.84.0) |
 | 76 | Display bases: a round, oval, square or hexagonal base for the figure as posed, with pegs under the feet | Done (0.85.0) |
-| 77 | Design variables: named values and formulas that shapes' sizes and positions follow | **Delivered for testing** |
+| 77 | Design variables: named values and formulas that shapes' sizes and positions follow | Done (0.86.0) |
+| 78 | Instruction sheets: an exploded view with numbered balloons, the parts list and notes, as a PDF | **Delivered for testing** |
 
 Slices 39–41 close the gaps found in the [Phase 1 gate review](docs/PHASE1_GATE.md).
 
-Waiting for a place: instruction sheets, sewing patterns, pictures for sharing, and more. See [docs/TODO.md](docs/TODO.md).
+Waiting for a place: sewing patterns, pictures for sharing, and more. See [docs/TODO.md](docs/TODO.md).
 
 ## Phase 2: Sculpt · Phase 3: Hybrid · Phase 4: Pro
 

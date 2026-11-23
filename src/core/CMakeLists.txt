@@ -45,6 +45,7 @@ add_library(forge_core STATIC
     src/Balance.cpp
     src/DisplayBase.cpp
     src/Variables.cpp
+    src/Illustration.cpp
     src/Stamp.cpp
     src/PanelLines.cpp
     src/Kit.cpp

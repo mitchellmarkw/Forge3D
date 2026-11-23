@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.87.0 Beta — Slice 78: Instruction sheets (2026-11-22)
+
+- **Instruction Sheet** (Print/Save tab, Kit; also in the Tools menu): a PDF to go with a kit.
+  - An exploded view: each part pulled out from the middle of them all (how far is up to you), drawn flat-shaded with
+    dark outlines like a kit's instructions, seen from the front, at three-quarters, from either side, the back or
+    the top.
+  - A numbered balloon on each part, its leader to a spot that can be seen, set clear of the parts and the other
+    balloons.
+  - The parts list under it (number, name and size) and your notes for putting it together, onto more pages if
+    needed. Letter or A4.
+  - The selected shapes, or everything. Tick "The parts inside joined shapes" for a kit or a merged shape, to number
+    each part in it.
+- **Parts List**: a **#** column, each piece's number (the same on an instruction sheet), also in the CSV and PDF. A
+  joined shape listed with its parts after it has no number; its parts do.
+
 ## 0.86.0 Beta — Slice 77: Design variables (2026-11-22)
 
 - **Variables** (Build tab; also Tools → Variables): a table of named values used across many shapes, like FreeCAD's
