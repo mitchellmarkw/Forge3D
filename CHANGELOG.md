@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.94.0 Beta — Slice 85: Seams you paint, for sewing patterns (2026-11-23)
+
+- **Sewing Pattern** can cut where you want the seams: paint thin lines across the clothes in another colour (under
+  each arm, down the back, round a sleeve), tick **Also cut along lines painted** and choose that colour.
+  - The pattern is cut along each line, the pieces meeting down its middle, so no cloth goes missing.
+  - With "One piece" it's cut only along your lines (a sleeve with one seam line unrolls into one piece); with the
+    side seams or the middle seam, along those too.
+  - A line only needs to be a brush stroke wide; one that doesn't touch the clothes changes nothing.
+
 ## 0.93.0 Beta — Slice 84: Faster Make Room (2026-11-23)
 
 - **Make Room** (Pose Test) is several times quicker on detailed parts: the same cut, worked out with less work.

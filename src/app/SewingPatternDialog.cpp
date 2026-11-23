@@ -4,6 +4,7 @@
 #include "forge/core/Document.h"
 
 #include <QApplication>
+#include <QCheckBox>
 #include <QComboBox>
 #include <QDialogButtonBox>
 #include <QDir>
@@ -125,6 +126,26 @@ SewingPatternDialog::SewingPatternDialog(const Document& doc, ObjectId shape, QW
                            "goes all the way round needs a split."));
     left->addWidget(labelled(tr("Seams:"), m_split));
 
+    // Seams where you want them: thin lines painted in another colour across the clothes.
+    m_useSeams = new QCheckBox(tr("Also cut along lines painted"));
+    m_useSeams->setToolTip(tr("Paint thin lines across the clothes in another colour where you want seams (under the "
+                              "arms, down the back); the pattern is cut along them too, the pieces meeting down the "
+                              "middle of each line. With \"One piece\", only there."));
+    left->addWidget(m_useSeams);
+    m_seamColour = new QComboBox;
+    for (std::uint32_t c : m_colours) {
+        QPixmap swatch(16, 16);
+        swatch.fill(QColor::fromRgb(c & 0xFFFFFFu));
+        m_seamColour->addItem(QIcon(swatch), colourName(c));
+    }
+    m_seamColour->setCurrentIndex(m_colours.size() > 1 ? 1 : 0);
+    m_seamColour->setToolTip(tr("The colour of the seam lines"));
+    auto* seamBox = labelled(tr("Seam lines' colour:"), m_seamColour);
+    left->addWidget(seamBox);
+    m_useSeams->setEnabled(m_colours.size() > 1);
+    seamBox->setEnabled(false);
+    connect(m_useSeams, &QCheckBox::toggled, seamBox, &QWidget::setEnabled);
+
     auto* form = new QFormLayout;
     m_allowance = new QDoubleSpinBox;
     m_allowance->setRange(0.0, 25.0);
@@ -167,6 +188,17 @@ SewingPatternDialog::SewingPatternDialog(const Document& doc, ObjectId shape, QW
         redraw();
     });
     connect(m_split, &QComboBox::currentIndexChanged, this, [this] {
+        rebuild();
+        redraw();
+    });
+    for (QComboBox* box : {m_seamColour})
+        connect(box, &QComboBox::currentIndexChanged, this, [this] {
+            if (!m_useSeams->isChecked())
+                return;
+            rebuild();
+            redraw();
+        });
+    connect(m_useSeams, &QCheckBox::toggled, this, [this] {
         rebuild();
         redraw();
     });
@@ -245,7 +277,15 @@ void SewingPatternDialog::rebuild()
     }
     QApplication::setOverrideCursor(Qt::WaitCursor);
     try {
-        m_pattern = sewing::fromPaint(m_doc, m_shape, m_colours[std::size_t(i)], sewing::Split(m_split->currentIndex()));
+        std::optional<std::uint32_t> seams;
+        QString note;
+        const int s = m_seamColour->currentIndex();
+        if (m_useSeams->isChecked() && s >= 0 && s != i)
+            seams = m_colours[std::size_t(s)];
+        else if (m_useSeams->isChecked())
+            note = tr("The seam lines need a colour of their own.");
+        m_pattern = sewing::fromPaint(m_doc, m_shape, m_colours[std::size_t(i)], sewing::Split(m_split->currentIndex()),
+                                      seams);
         double stretch = 0;
         for (const auto& p : m_pattern.pieces)
             stretch = std::max(stretch, p.stretch);
@@ -254,6 +294,8 @@ void SewingPatternDialog::rebuild()
             text += tr("; laid flat, most lengths are within %1% of the figure's.").arg(stretch * 100.0, 0, 'f', 1);
         if (!m_pattern.problem.empty())
             text += QLatin1Char('\n') + QString::fromStdString(m_pattern.problem);
+        if (!note.isEmpty())
+            text += QLatin1Char('\n') + note;
         m_status->setText(text);
     } catch (const std::exception& e) {
         m_status->setText(QString::fromUtf8(e.what()));
