@@ -1637,3 +1637,16 @@ and sharp across edges.
   support's nearest edge (negative outside), and the lean `atan(margin / height)`.
 - `pegSpots` maps each patch's middle back through its part's pose into as-built coordinates, facing down; the app
   makes a Peg Socket step at each in one macro. Pose Test redraws the balance whenever it rechecks for hits.
+
+## Display bases (slice 76, 0.85.0)
+
+- `displaybase::make` builds the base from a `balance::Balance` as posed: it reaches round the support, the centre of
+  weight and the peg spots (the posed middles of the feet, `footSpots`), by the margin. Round and hexagonal bases
+  are centred on the middle of that box and reach its farthest point; square ones are the box; ovals are the box's
+  half-widths × √2 (so they hold its corners). The plate is stacked outlines (bottom, the bevel's start, the inset
+  top) with its top at the ground; pegs are rods (their tops chamfered) merged on, holes rods subtracted (with the
+  fit).
+- `addDisplayBase` leaves out any earlier base (named "Display base..."), adds the base as a mesh shape and, if asked,
+  the foot holes, in one macro. `addFootHoles` (shared with Peg Hole in Each Foot) skips a spot within 0.6 mm of
+  an existing Socket step's plate point in that part's tree, checks each hole against the part first, then makes
+  them, a second hole in the same part going into the step the first made.

@@ -1124,6 +1124,7 @@ private:
     // Will it stand? Worked out for the pose as it is; peg holes for a stand in the feet.
     void updateBalance();
     void addStandPegs();
+    void makeDisplayBase();
     QAction* m_standAction = nullptr;
     void poseClick(const QVector3D& origin, const QVector3D& direction);
     bool poseGrab(const QVector3D& origin, const QVector3D& direction);

@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.85.0 Beta — Slice 76: Display bases (2026-11-22)
+
+- **Make a Display Base...** (Pose Test, under Will it stand?): a base for the figure in the pose it's in now, made
+  under its feet with its top where the feet touch the ground.
+  - Round, oval, square or hexagonal. It reaches beyond the feet (and the centre of weight) by the margin you set;
+    round and hexagonal bases are the same size every way, oval and square ones follow the stance. Set its thickness
+    and the bevel taken off its top edge.
+  - A peg stands up right under each foot that touches the ground (its diameter and height set in the window), or
+    choose holes going down, for feet that have pegs (with your printer's fit).
+  - With pegs, it can make the holes in the feet at the same time (as Peg Hole in Each Foot does), skipping any foot
+    that has its hole already. Undo takes the base and the holes away together.
+  - The base is made below the plate, under the figure. Sit it on the plate before printing.
+- Fixed: **Peg Hole in Each Foot** on a one-piece figure stopped after the first foot ("already part of another
+  shape"). The second hole now goes into the step the first one made.
+
 ## 0.84.0 Beta — Slice 75: Will it stand? (2026-11-22)
 
 - **Will It Stand?** (Design tab, Check; also in Pose Test as **Show the balance**): the centre of weight (gold, with

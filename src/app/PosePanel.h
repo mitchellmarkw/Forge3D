@@ -66,6 +66,7 @@ signals:
     void makeRoomRequested();
     void balanceToggled(bool on);
     void standPegsRequested();
+    void displayBaseRequested();
 
 private:
     QListWidget* m_joints = nullptr;
