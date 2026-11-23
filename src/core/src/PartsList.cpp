@@ -53,6 +53,7 @@ Row rowFor(const Document& doc, ObjectId id, int depth, const Settings& s)
 {
     const Body& b = *doc.find(id);
     Row r;
+    r.id = id;
     r.name = b.name;
     r.depth = depth;
     const Bounds box = doc.worldBounds(id);
@@ -97,6 +98,11 @@ std::vector<Row> rows(const Document& doc, const std::vector<ObjectId>& ids, con
                 if (doc.find(part))
                     out.push_back(rowFor(doc, part, 1, s));
     }
+    int next = 1;
+    for (std::size_t i = 0; i < out.size(); ++i) {
+        const bool hasParts = out[i].depth == 0 && i + 1 < out.size() && out[i + 1].depth > 0;
+        out[i].number = hasParts ? 0 : next++;
+    }
     return out;
 }
 
@@ -115,8 +121,9 @@ Row total(const std::vector<Row>& rows)
 
 std::string csv(const std::vector<Row>& rows, const std::string& currency)
 {
-    std::string out = "Part,Width (mm),Depth (mm),Height (mm),Volume (cm3),Weight (g),Cost (" + currency + ")\n";
+    std::string out = "#,Part,Width (mm),Depth (mm),Height (mm),Volume (cm3),Weight (g),Cost (" + currency + ")\n";
     const auto line = [&](const Row& r, bool sized) {
+        out += (r.number > 0 ? std::to_string(r.number) : std::string()) + ",";
         out += escapeCsv((r.depth > 0 ? "  " : "") + r.name) + ",";
         out += sized ? fixed(r.size[0], 1) + "," + fixed(r.size[1], 1) + "," + fixed(r.size[2], 1) + "," : ",,,";
         out += fixed(r.volume / 1000.0, 2) + "," + fixed(r.grams, 1) + "," + fixed(r.cost, 2) + "\n";
@@ -136,16 +143,17 @@ std::string html(const std::vector<Row>& rows, const std::string& currency, cons
     if (!note.empty())
         out += "<p>" + escapeHtml(note) + "</p>";
     out += "<table border=\"1\" cellspacing=\"0\" cellpadding=\"4\" style=\"border-collapse: collapse;\">"
-           "<tr><th align=\"left\">Part</th><th>Size (mm)</th><th>Volume (cm\xC2\xB3)</th><th>Weight (g)</th>"
+           "<tr><th>#</th><th align=\"left\">Part</th><th>Size (mm)</th><th>Volume (cm\xC2\xB3)</th><th>Weight (g)</th>"
            "<th>Cost</th></tr>";
     for (const Row& r : rows) {
-        out += "<tr><td>" + std::string(r.depth > 0 ? "&nbsp;&nbsp;&nbsp;&nbsp;" : "") + escapeHtml(r.name) +
+        out += "<tr><td align=\"right\">" + (r.number > 0 ? std::to_string(r.number) : std::string()) + "</td><td>" +
+               std::string(r.depth > 0 ? "&nbsp;&nbsp;&nbsp;&nbsp;" : "") + escapeHtml(r.name) +
                "</td><td align=\"center\">" + sizeText(r.size) + "</td><td align=\"right\">" +
                fixed(r.volume / 1000.0, 2) + "</td><td align=\"right\">" + fixed(r.grams, 1) +
                "</td><td align=\"right\">" + escapeHtml(currency) + fixed(r.cost, 2) + "</td></tr>";
     }
     const Row t = total(rows);
-    out += "<tr><td><b>Total</b></td><td></td><td align=\"right\"><b>" + fixed(t.volume / 1000.0, 2) +
+    out += "<tr><td></td><td><b>Total</b></td><td></td><td align=\"right\"><b>" + fixed(t.volume / 1000.0, 2) +
            "</b></td><td align=\"right\"><b>" + fixed(t.grams, 1) + "</b></td><td align=\"right\"><b>" +
            escapeHtml(currency) + fixed(t.cost, 2) + "</b></td></tr></table></body></html>";
     return out;

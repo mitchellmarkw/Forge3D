@@ -102,9 +102,10 @@ PartsListDialog::PartsListDialog(const QString& title, Lister lister, QWidget* p
     layout->addLayout(top);
 
     m_table = new QTableWidget;
-    m_table->setColumnCount(5);
-    m_table->setHorizontalHeaderLabels({tr("Part"), tr("Size (mm)"), tr("Volume (cm³)"), tr("Weight (g)"), tr("Cost")});
-    m_table->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
+    m_table->setColumnCount(6);
+    m_table->setHorizontalHeaderLabels({tr("#"), tr("Part"), tr("Size (mm)"), tr("Volume (cm³)"), tr("Weight (g)"), tr("Cost")});
+    m_table->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
+    m_table->setToolTip(tr("# is each piece's number, the same on an Instruction Sheet"));
     m_table->setEditTriggers(QAbstractItemView::NoEditTriggers);
     m_table->verticalHeader()->hide();
     layout->addWidget(m_table, 1);
@@ -227,25 +228,27 @@ void PartsListDialog::refresh()
     for (int r = 0; r < int(m_rows.size()); ++r) {
         const parts::Row& row = m_rows[std::size_t(r)];
         const QString name = (row.depth > 0 ? QStringLiteral("      ") : QString()) + QString::fromStdString(row.name);
-        m_table->setItem(r, 0, item(name, false));
-        m_table->setItem(r, 1, item(QStringLiteral("%1 × %2 × %3")
+        m_table->setItem(r, 0, item(row.number > 0 ? QString::number(row.number) : QString(), true));
+        m_table->setItem(r, 1, item(name, false));
+        m_table->setItem(r, 2, item(QStringLiteral("%1 × %2 × %3")
                                         .arg(row.size[0], 0, 'f', 1)
                                         .arg(row.size[1], 0, 'f', 1)
                                         .arg(row.size[2], 0, 'f', 1),
                                     true));
-        m_table->setItem(r, 2, item(QString::number(row.volume / 1000.0, 'f', 2), true));
-        m_table->setItem(r, 3, item(QString::number(row.grams, 'f', 1), true));
-        m_table->setItem(r, 4, item(money + QString::number(row.cost, 'f', 2), true));
+        m_table->setItem(r, 3, item(QString::number(row.volume / 1000.0, 'f', 2), true));
+        m_table->setItem(r, 4, item(QString::number(row.grams, 'f', 1), true));
+        m_table->setItem(r, 5, item(money + QString::number(row.cost, 'f', 2), true));
     }
     const parts::Row t = parts::total(m_rows);
     const int last = int(m_rows.size());
-    m_table->setItem(last, 0, item(tr("Total"), false, true));
-    m_table->setItem(last, 1, item(QString(), true));
-    m_table->setItem(last, 2, item(QString::number(t.volume / 1000.0, 'f', 2), true, true));
-    m_table->setItem(last, 3, item(QString::number(t.grams, 'f', 1), true, true));
-    m_table->setItem(last, 4, item(money + QString::number(t.cost, 'f', 2), true, true));
+    m_table->setItem(last, 0, item(QString(), true));
+    m_table->setItem(last, 1, item(tr("Total"), false, true));
+    m_table->setItem(last, 2, item(QString(), true));
+    m_table->setItem(last, 3, item(QString::number(t.volume / 1000.0, 'f', 2), true, true));
+    m_table->setItem(last, 4, item(QString::number(t.grams, 'f', 1), true, true));
+    m_table->setItem(last, 5, item(money + QString::number(t.cost, 'f', 2), true, true));
     m_table->resizeColumnsToContents();
-    m_table->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
+    m_table->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
     m_status->setText(note());
 }
 

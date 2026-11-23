@@ -33,6 +33,10 @@ struct Settings {
 };
 
 struct Row {
+    ObjectId id = kInvalidId;
+    // The part's number (1, 2...), the same on an instruction sheet: every row that's a
+    // piece to print, not a joined shape listed with its parts after it. 0: none.
+    int number = 0;
     std::string name;
     int depth = 0;                      // 0: a shape on the plate; 1: a part inside it
     std::array<double, 3> size{0, 0, 0};  // mm

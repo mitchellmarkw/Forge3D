@@ -1127,6 +1127,8 @@ private:
     void makeDisplayBase();
     // Design variables (slice 77).
     void editVariables();
+    // Instruction Sheet (slice 78).
+    void showInstructionSheet();
     void editFormula(ObjectId id, const QString& key, const QString& label);
     void clearFormula(ObjectId id, const QString& key);
     // `after` (a size or position typed in Properties) stops following the variables in
@@ -1134,6 +1136,7 @@ private:
     bool runEdit(const Body& before, Body after, const std::string& label);
     QAction* m_standAction = nullptr;
     QAction* m_variablesAction = nullptr;
+    QAction* m_instructionsAction = nullptr;
     void poseClick(const QVector3D& origin, const QVector3D& direction);
     bool poseGrab(const QVector3D& origin, const QVector3D& direction);
     void poseDrag(const QVector3D& origin, const QVector3D& direction);

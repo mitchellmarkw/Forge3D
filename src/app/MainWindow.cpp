@@ -54,6 +54,7 @@
 #include "RescaleDialog.h"
 #include "KitDialog.h"
 #include "PartsListDialog.h"
+#include "InstructionSheetDialog.h"
 #include "forge/core/Kit.h"
 #include "ToleranceDialog.h"
 #include "SocketPanel.h"
@@ -891,6 +892,12 @@ void MainWindow::createActions()
                                      "= in a size to use one."));
     m_variablesAction->setStatusTip(m_variablesAction->toolTip());
     connect(m_variablesAction, &QAction::triggered, this, &MainWindow::editVariables);
+    m_instructionsAction = new QAction(tr("Instruction Sheet"), this);
+    m_instructionsAction->setToolTip(tr("Instruction Sheet: an exploded view of the parts with numbered balloons (the "
+                                        "numbers of the Parts List), the parts list and your notes, saved as a PDF "
+                                        "to go with a kit"));
+    m_instructionsAction->setStatusTip(m_instructionsAction->toolTip());
+    connect(m_instructionsAction, &QAction::triggered, this, &MainWindow::showInstructionSheet);
     m_printCheckAction = new QAction(tr("Print Check"), this);
     m_printCheckAction->setToolTip(tr("Print Check: colour the places that are too thin to print well, and the "
                                       "faces that hang over the air the way the parts sit (they'll need "
@@ -1489,6 +1496,7 @@ void MainWindow::createMenus()
     QAction* partsList = tools->addAction(tr("&Parts List..."), this, &MainWindow::showPartsList);
     partsList->setStatusTip(tr("Every part's size, volume, print weight and material cost, as a table to save or "
                                "print"));
+    tools->addAction(m_instructionsAction);
 
     QMenu* help = menuBar()->addMenu(tr("&Help"));
     help->addAction(tr("Open &log folder"), this, [] {
@@ -1579,6 +1587,7 @@ void MainWindow::createToolBar()
         {m_handAction, "hand"},
         {m_standAction, "stand"},
         {m_variablesAction, "variables"},
+        {m_instructionsAction, "instructions"},
         {m_poseFigureAction, "pose-figure"},
         {m_paintAction, "paint"},
         {m_cutPartsAction, "cut-parts"},
@@ -1758,6 +1767,7 @@ void MainWindow::createToolBar()
     group(print, tr("Prepare"), {button(m_splitToFit), menuButton(m_layOutMenu), button(m_mouldAction)});
     group(print, tr("Out"), {button(m_save), button(m_export), button(m_sendToSlicer)});
     group(print, tr("Library"), {button(m_saveCustomShape)});
+    group(print, tr("Kit"), {button(m_instructionsAction)});
     common(print);
 
     // Keep the tab you were on.
@@ -15825,6 +15835,24 @@ void MainWindow::showPartsList()
         ids = m_doc.topLevelIds();
     const QString title = m_filePath.isEmpty() ? tr("Untitled") : QFileInfo(m_filePath).completeBaseName();
     PartsListDialog dialog(title, [this, ids](const parts::Settings& s) { return parts::rows(m_doc, ids, s); }, this);
+    dialog.exec();
+}
+
+void MainWindow::showInstructionSheet()
+{
+    if (m_doc.topLevelIds().empty()) {
+        statusBar()->showMessage(tr("Instruction Sheet: there's nothing on the plate."), 5000);
+        return;
+    }
+    // The selected shapes, or everything (as the Parts List).
+    std::vector<ObjectId> ids;
+    for (ObjectId id : m_selection)
+        if (m_doc.isTopLevel(id))
+            ids.push_back(id);
+    if (ids.empty())
+        ids = m_doc.topLevelIds();
+    const QString title = m_filePath.isEmpty() ? tr("Untitled") : QFileInfo(m_filePath).completeBaseName();
+    InstructionSheetDialog dialog(m_doc, ids, title, this);
     dialog.exec();
 }
 

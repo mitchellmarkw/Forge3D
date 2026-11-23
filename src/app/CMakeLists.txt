@@ -81,6 +81,8 @@ add_executable(Forge3D WIN32
     DisplayBaseDialog.cpp
     VariablesDialog.h
     VariablesDialog.cpp
+    InstructionSheetDialog.h
+    InstructionSheetDialog.cpp
     CutPartsPanel.cpp
     StampPanel.h
     StampPanel.cpp
