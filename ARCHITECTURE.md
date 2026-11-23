@@ -1744,3 +1744,11 @@ and sharp across edges.
   moving a piece only if it's still where it was made (unturned), renaming one whose name still starts with its
   label. `variableChanges` adds them for every changed hinge step; the app adds them (for the step and its partner)
   to the Change joint macro.
+
+## Moving by hand stops following the variables (slice 83, 0.92.0)
+
+- `variables::dropChanged(before, after)` removes the formulas of fields whose value changed and returns their
+  labels. The app uses it when a handle drag is committed (one body or a combined shape's parts), in `runEdit`, and
+  through `placementCommand` (an EditBodyCommand that drops them when a formula is affected, else the plain
+  SetPlacementCommand) for Align and Sit on Plate; `tellDropped` says so in the status bar. The variables' own
+  changes (SetVariablesCommand) don't go through it.

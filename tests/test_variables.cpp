@@ -191,3 +191,22 @@ TEST_CASE("Variables: saved and read back", "[variables]")
     std::error_code ec;
     fs::remove_all(dir, ec);
 }
+
+TEST_CASE("Variables: a size set by hand stops following", "[variables]")
+{
+    Body before;
+    before.spec = BoxSpec{12, 10, 10};
+    before.placement.x = 13;
+    before.formulas = {{"width", "PegDia * 4"}, {"at.x", "Gap + PegDia"}, {"height", "Wall"}};
+    Body after = before;
+    std::get<BoxSpec>(after.spec).width = 15;  // dragged with a handle
+    after.placement.z = 4;                     // sat on the plate (z has no formula)
+    const auto dropped = variables::dropChanged(before, after);
+    REQUIRE(dropped.size() == 1);
+    CHECK(dropped[0] == "Width (X)");
+    CHECK(after.formulas.count("width") == 0);
+    CHECK(after.formulas.count("at.x") == 1);
+    CHECK(after.formulas.count("height") == 1);
+    Body same = before;
+    CHECK(variables::dropChanged(before, same).empty());
+}
