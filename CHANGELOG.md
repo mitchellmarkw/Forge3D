@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.84.0 Beta — Slice 75: Will it stand? (2026-11-22)
+
+- **Will It Stand?** (Design tab, Check; also in Pose Test as **Show the balance**): the centre of weight (gold, with
+  a line down to the ground) against where the figure touches the ground (green if it stands, red if it tips), for
+  the pose it's in, kept up to date as you pose it.
+  - It says how far it can lean before it tips (and how far inside the edge the centre of weight is), or how far
+    outside it is when it would tip. A lean under 3° is shown as a warning.
+  - Every part counts, solid and equally heavy; the ground is the lowest point, and anything within 0.4 mm of it
+    touches. Each separate patch counts (a one-piece figure's two feet are two).
+- **Peg Hole in Each Foot**: a hole for a stand's peg (its diameter and depth set there) straight up into the middle
+  of each patch that touches the ground, made as Quick Socket steps with your printer's fit (from Hand Ports). It
+  works in the pose shown: the holes go where those soles are as built.
+
 ## 0.83.0 Beta — Slice 74: Linked left/right parts (2026-11-22)
 
 - **Mirror → Linked Copy on the Other Side...** (Design tab): a mirrored copy of the selected shape that keeps up

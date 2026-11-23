@@ -45,6 +45,7 @@
 #include "forge/core/Mould.h"
 #include "forge/core/Port.h"
 #include "forge/core/Hand.h"
+#include "forge/core/Balance.h"
 #include "MaskPanel.h"
 #include "ReferencePanel.h"
 #include "ScaleCalculator.h"
@@ -872,6 +873,16 @@ void MainWindow::createActions()
     m_measureAction->setToolTip(tr("Measure: click faces, edges, corners or points to see sizes, distances and "
                                    "angles"));
     connect(m_measureAction, &QAction::triggered, this, &MainWindow::startMeasure);
+    m_standAction = new QAction(tr("Will It Stand?"), this);
+    m_standAction->setToolTip(tr("Will It Stand?: the centre of weight against where the feet touch the ground, as "
+                                 "you pose it in Pose Test; and peg holes for a stand in the feet"));
+    m_standAction->setStatusTip(m_standAction->toolTip());
+    connect(m_standAction, &QAction::triggered, this, [this] {
+        if (!m_poseMode.active)
+            startPose();
+        if (m_poseMode.active)
+            m_posePanel->setShowBalance(true);
+    });
     m_printCheckAction = new QAction(tr("Print Check"), this);
     m_printCheckAction->setToolTip(tr("Print Check: colour the places that are too thin to print well, and the "
                                       "faces that hang over the air the way the parts sit (they'll need "
@@ -1557,6 +1568,7 @@ void MainWindow::createToolBar()
         {m_mouldAction, "mould"},
         {m_portAction, "ports"},
         {m_handAction, "hand"},
+        {m_standAction, "stand"},
         {m_poseFigureAction, "pose-figure"},
         {m_paintAction, "paint"},
         {m_cutPartsAction, "cut-parts"},
@@ -1654,7 +1666,7 @@ void MainWindow::createToolBar()
 
     // Check and Undo are on every tab.
     const auto common = [&](Page& p) {
-        group(p, tr("Check"), {button(m_measureAction), button(m_printCheckAction)});
+        group(p, tr("Check"), {button(m_measureAction), button(m_printCheckAction), button(m_standAction)});
         group(p, tr("Undo"), {shortButton(m_undo, tr("Undo")), shortButton(m_redo, tr("Redo"))});
         p.row->addStretch(1);
     };
@@ -2027,6 +2039,11 @@ void MainWindow::createDocks()
     });
     connect(m_posePanel, &PosePanel::rangeRequested, this, &MainWindow::findPoseRange);
     connect(m_posePanel, &PosePanel::makeRoomRequested, this, &MainWindow::makePoseRoom);
+    connect(m_posePanel, &PosePanel::balanceToggled, this, [this] {
+        updateBalance();
+        refreshScene();
+    });
+    connect(m_posePanel, &PosePanel::standPegsRequested, this, &MainWindow::addStandPegs);
     connect(m_posePanel, &PosePanel::straightenRequested, this, [this] {
         auto& mode = m_poseMode;
         if (!mode.active || mode.joint < 0)
@@ -7996,6 +8013,28 @@ void MainWindow::refreshScene()
             guide.fitted = true;
             items.push_back(guide);
         }
+        // Will it stand? The centre of weight gold, where it touches green or red.
+        if (m_poseMode.active && m_posePanel->showBalance()) {
+            if (m_poseMode.groundMesh) {
+                DisplayItem g;
+                g.id = kMouldItem - 7;
+                g.mesh = m_poseMode.groundMesh;
+                g.color = m_poseMode.stands ? QVector3D(0.15f, 0.75f, 0.3f) : QVector3D(0.95f, 0.2f, 0.1f);
+                g.alpha = 0.6f;
+                g.ghost = true;
+                g.helper = true;
+                items.push_back(g);
+            }
+            if (m_poseMode.weightMesh) {
+                DisplayItem w;
+                w.id = kMouldItem - 8;
+                w.mesh = m_poseMode.weightMesh;
+                w.color = QVector3D(0.95f, 0.72f, 0.15f);
+                w.ghost = true;
+                w.helper = true;
+                items.push_back(w);
+            }
+        }
         // Pose Test: where parts overlap, bright red, seen through the parts.
         if (m_poseMode.active && m_poseMode.hitMesh) {
             DisplayItem hit;
@@ -8246,6 +8285,7 @@ void MainWindow::refreshScene()
     m_hingeAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_poseAction->setEnabled(!toolOpen() && !m_doc.topLevelIds().empty());
     m_printCheckAction->setEnabled(!toolOpen() && !m_doc.topLevelIds().empty());
+    m_standAction->setEnabled((!toolOpen() || m_poseMode.active) && !m_doc.topLevelIds().empty());
     m_followAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_patternAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_clear->setEnabled(!m_doc.empty());
@@ -10966,6 +11006,7 @@ void MainWindow::checkPoseHits()
 {
     if (!m_poseMode.active)
         return;
+    updateBalance();
     if (m_poseMode.moved.empty()) {
         m_poseMode.hitParts.clear();
         m_poseMode.hitMesh.reset();
@@ -11067,6 +11108,177 @@ void MainWindow::findPoseRange()
             },
             Qt::QueuedConnection);
     });
+}
+
+namespace {
+
+// A ball, for the centre of weight.
+Mesh markerBall(const Vec3& c, double r)
+{
+    Mesh m;
+    constexpr int kAround = 24, kRings = 12;
+    const auto put = [&](double x, double y, double z) {
+        m.positions.insert(m.positions.end(), {float(c[0] + x), float(c[1] + y), float(c[2] + z)});
+    };
+    put(0, 0, -r);
+    for (int ring = 1; ring < kRings; ++ring) {
+        const double phi = 3.14159265358979 * ring / kRings;
+        for (int i = 0; i < kAround; ++i) {
+            const double a = 2.0 * 3.14159265358979 * i / kAround;
+            put(r * std::sin(phi) * std::cos(a), r * std::sin(phi) * std::sin(a), -r * std::cos(phi));
+        }
+    }
+    put(0, 0, r);
+    const auto top = std::uint32_t(m.positions.size() / 3 - 1);
+    const auto at = [](int ring, int i) { return std::uint32_t(1 + (ring - 1) * kAround + (i % kAround)); };
+    for (int i = 0; i < kAround; ++i) {
+        m.indices.insert(m.indices.end(), {0, at(1, i + 1), at(1, i)});
+        m.indices.insert(m.indices.end(), {top, at(kRings - 1, i), at(kRings - 1, i + 1)});
+    }
+    for (int ring = 1; ring + 1 < kRings; ++ring)
+        for (int i = 0; i < kAround; ++i)
+            m.indices.insert(m.indices.end(), {at(ring, i), at(ring, i + 1), at(ring + 1, i + 1), at(ring, i),
+                                               at(ring + 1, i + 1), at(ring + 1, i)});
+    return m;
+}
+
+// A thin upright rod from `a` down to `b`.
+Mesh markerRod(const Vec3& a, const Vec3& b, double r)
+{
+    Mesh m;
+    constexpr int kAround = 12;
+    for (int end = 0; end < 2; ++end)
+        for (int i = 0; i < kAround; ++i) {
+            const double t = 2.0 * 3.14159265358979 * i / kAround;
+            const Vec3& c = end == 0 ? a : b;
+            m.positions.insert(m.positions.end(),
+                               {float(c[0] + r * std::cos(t)), float(c[1] + r * std::sin(t)), float(c[2])});
+        }
+    for (std::uint32_t i = 0; i < kAround; ++i) {
+        const std::uint32_t j = (i + 1) % kAround;
+        m.indices.insert(m.indices.end(), {i, j, kAround + j, i, kAround + j, kAround + i});
+    }
+    return m;
+}
+
+// A thin flat plate over an outline (seen from above), at height z.
+Mesh flatOutline(const std::vector<std::array<double, 2>>& outline, double z, double thick)
+{
+    Mesh m;
+    if (outline.size() < 3)
+        return m;
+    const auto n = std::uint32_t(outline.size());
+    for (double h : {z, z + thick})
+        for (const auto& p : outline)
+            m.positions.insert(m.positions.end(), {float(p[0]), float(p[1]), float(h)});
+    for (std::uint32_t i = 1; i + 1 < n; ++i) {
+        m.indices.insert(m.indices.end(), {0, i + 1, i});
+        m.indices.insert(m.indices.end(), {n, n + i, n + i + 1});
+    }
+    for (std::uint32_t i = 0; i < n; ++i) {
+        const std::uint32_t j = (i + 1) % n;
+        m.indices.insert(m.indices.end(), {i, j, n + j, i, n + j, n + i});
+    }
+    return m;
+}
+
+}  // namespace
+
+void MainWindow::updateBalance()
+{
+    auto& mode = m_poseMode;
+    mode.weightMesh.reset();
+    mode.groundMesh.reset();
+    if (!mode.active || !m_posePanel->showBalance())
+        return;
+    try {
+        const auto b = balance::of(posedParts());
+        mode.stands = b.stands();
+        const double height = b.centre[2] - b.ground;
+        const double r = std::clamp(height * 0.025, 0.4, 3.0);
+        Mesh weight = markerBall(b.centre, r);
+        const Mesh rod = markerRod(b.centre, {b.centre[0], b.centre[1], b.ground}, r * 0.2);
+        const auto first = std::uint32_t(weight.positions.size() / 3);
+        weight.positions.insert(weight.positions.end(), rod.positions.begin(), rod.positions.end());
+        for (std::uint32_t i : rod.indices)
+            weight.indices.push_back(first + i);
+        const Mesh dot = markerBall({b.centre[0], b.centre[1], b.ground}, r * 0.6);
+        const auto second = std::uint32_t(weight.positions.size() / 3);
+        weight.positions.insert(weight.positions.end(), dot.positions.begin(), dot.positions.end());
+        for (std::uint32_t i : dot.indices)
+            weight.indices.push_back(second + i);
+        mode.weightMesh = together({weight});
+        Mesh ground = flatOutline(b.support, b.ground - 0.05, 0.1);
+        if (!ground.empty())
+            mode.groundMesh = together({ground});
+        const QString feet = b.feet.size() == 1 ? tr("It touches the ground in 1 place")
+                                                : tr("It touches the ground in %1 places").arg(b.feet.size());
+        if (b.stands())
+            m_posePanel->setBalance(tr("It stands: it can lean %1° before it tips (the centre of weight is %2 mm "
+                                       "inside the edge). %3.")
+                                        .arg(b.lean, 0, 'f', 0)
+                                        .arg(b.margin, 0, 'f', 1)
+                                        .arg(feet),
+                                    b.lean < 3.0);
+        else
+            m_posePanel->setBalance(tr("It tips over: the centre of weight is %1 mm outside where it touches the "
+                                       "ground. Move a foot under it, or it needs a stand. %2.")
+                                        .arg(-b.margin, 0, 'f', 1)
+                                        .arg(feet),
+                                    true);
+    } catch (const std::exception& e) {
+        m_posePanel->setBalance(QString::fromUtf8(e.what()), true);
+    }
+}
+
+void MainWindow::addStandPegs()
+{
+    if (!m_poseMode.active)
+        return;
+    try {
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        struct RestoreCursor {
+            ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
+        } restore;
+        const auto parts = posedParts();
+        const auto b = balance::of(parts);
+        const auto spots = balance::pegSpots(parts, b);
+        if (spots.empty()) {
+            m_posePanel->setBalance(tr("No foot touches the ground flat enough for a hole."), true);
+            return;
+        }
+        SocketFinish peg;
+        peg.kind = SocketKind::Peg;
+        peg.size = m_posePanel->standPegSize();
+        peg.depth = m_posePanel->standPegDepth();
+        const Preferences prefs;
+        peg.resin = prefs.value(QStringLiteral("ports/resin"), true).toBool();
+        peg.fit = prefs.value(QStringLiteral("ports/socketFit"), peg.resin ? 0.1 : 0.2).toDouble();
+        std::vector<Body> holes;
+        for (const auto& s : spots) {
+            Body r;
+            r.id = m_doc.allocateId();
+            r.name = m_doc.find(s.part)->name;
+            r.boolean = socketSpec(m_doc, s.part, emboss::SurfacePoint{s.point, s.normal}, peg);
+            m_doc.previewMesh(*r.boolean);  // refuse before changing anything
+            holes.push_back(std::move(r));
+        }
+        m_stack.beginMacro(holes.size() == 1 ? "Stand peg hole" : "Stand peg holes");
+        try {
+            for (Body& r : holes)
+                m_stack.execute(std::make_unique<CombineCommand>(std::move(r)));
+        } catch (...) {
+            m_stack.abortMacro();
+            throw;
+        }
+        m_stack.endMacro();
+        qInfo().noquote() << "Command:" << QString::fromStdString(m_stack.undoLabel());
+        m_posePanel->setStatus(spots.size() == 1 ? tr("A stand peg hole in 1 foot.")
+                                                 : tr("A stand peg hole in each of %1 feet.").arg(spots.size()),
+                               false);
+    } catch (const std::exception& e) {
+        m_posePanel->setBalance(tr("The peg holes couldn't be made: %1").arg(QString::fromUtf8(e.what())), true);
+    }
 }
 
 void MainWindow::makePoseRoom()

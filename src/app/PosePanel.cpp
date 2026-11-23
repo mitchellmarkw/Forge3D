@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "PosePanel.h"
 
+#include <QCheckBox>
 #include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QGridLayout>
@@ -89,6 +90,50 @@ PosePanel::PosePanel(QWidget* parent) : QWidget(parent)
     m_hits = new QLabel;
     m_hits->setWordWrap(true);
     layout->addWidget(m_hits);
+
+    // Will it stand? The centre of weight against where the feet touch, as posed.
+    auto* stand = new QGroupBox(tr("Will it stand?"));
+    auto* standLayout = new QVBoxLayout(stand);
+    m_showBalance = new QCheckBox(tr("Show the balance"));
+    m_showBalance->setToolTip(tr("The centre of weight (gold, with a line down to the ground) and where it touches "
+                                 "the ground: green if it stands, red if it tips, as you pose it"));
+    standLayout->addWidget(m_showBalance);
+    m_balance = new QLabel;
+    m_balance->setWordWrap(true);
+    standLayout->addWidget(m_balance);
+    m_standBox = new QWidget;
+    auto* standPeg = new QGridLayout(m_standBox);
+    standPeg->setContentsMargins(0, 0, 0, 0);
+    standPeg->addWidget(new QLabel(tr("Stand peg:")), 0, 0);
+    m_standPeg = new QDoubleSpinBox;
+    m_standPeg->setRange(0.5, 20.0);
+    m_standPeg->setDecimals(2);
+    m_standPeg->setSingleStep(0.1);
+    m_standPeg->setPrefix(tr("Ø "));
+    m_standPeg->setSuffix(tr(" mm"));
+    m_standPeg->setValue(3.0);
+    m_standPeg->setToolTip(tr("The diameter of the peg on the stand"));
+    standPeg->addWidget(m_standPeg, 0, 1);
+    standPeg->addWidget(new QLabel(tr("Hole depth:")), 1, 0);
+    m_standDepth = new QDoubleSpinBox;
+    m_standDepth->setRange(0.5, 40.0);
+    m_standDepth->setDecimals(1);
+    m_standDepth->setSingleStep(0.5);
+    m_standDepth->setSuffix(tr(" mm"));
+    m_standDepth->setValue(4.0);
+    standPeg->addWidget(m_standDepth, 1, 1);
+    auto* pegs = new QPushButton(tr("Peg Hole in Each Foot"));
+    pegs->setToolTip(tr("A hole for a stand's peg, straight up into the middle of each sole that touches the ground "
+                        "(Quick Socket steps, with your printer's fit)"));
+    standPeg->addWidget(pegs, 2, 0, 1, 2);
+    standLayout->addWidget(m_standBox);
+    layout->addWidget(stand);
+    connect(m_showBalance, &QCheckBox::toggled, this, [this](bool on) {
+        m_balance->setVisible(on);
+        emit balanceToggled(on);
+    });
+    connect(pegs, &QPushButton::clicked, this, &PosePanel::standPegsRequested);
+    m_balance->hide();
 
     // Make Room: cut away just enough for the joint to turn to an angle.
     auto* room = new QGroupBox(tr("Make room to turn further"));
@@ -303,6 +348,32 @@ void PosePanel::setRoomBusy(bool busy)
 {
     m_roomButton->setEnabled(!busy);
     m_roomButton->setText(busy ? tr("Making Room...") : tr("Make Room"));
+}
+
+bool PosePanel::showBalance() const
+{
+    return m_showBalance->isChecked();
+}
+
+void PosePanel::setShowBalance(bool on)
+{
+    m_showBalance->setChecked(on);
+}
+
+void PosePanel::setBalance(const QString& text, bool problem)
+{
+    m_balance->setText(text);
+    m_balance->setStyleSheet(problem ? QStringLiteral("color: #d04020;") : QString());
+}
+
+double PosePanel::standPegSize() const
+{
+    return m_standPeg->value();
+}
+
+double PosePanel::standPegDepth() const
+{
+    return m_standDepth->value();
 }
 
 }  // namespace forge::app

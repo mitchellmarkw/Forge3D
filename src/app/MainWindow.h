@@ -1094,6 +1094,10 @@ private:
         int joint = -1;                                    // chosen (index into joints)
         std::set<ObjectId> hitParts;
         std::shared_ptr<const Mesh> hitMesh;  // where parts overlap (plate coordinates)
+        // Will it stand? The centre of weight and its line down, where it touches the
+        // ground (green standing, red tipping).
+        std::shared_ptr<const Mesh> weightMesh, groundMesh;
+        bool stands = true;
         int generation = 0;                   // the pose's version: late answers are dropped
         bool busy = false;                    // finding a range
         int savedPose = -1;                   // the saved pose being shown
@@ -1117,6 +1121,10 @@ private:
     void findPoseRange();
     // Make Room: cut what's in the way for the chosen joint to turn to the panel's angle.
     void makePoseRoom();
+    // Will it stand? Worked out for the pose as it is; peg holes for a stand in the feet.
+    void updateBalance();
+    void addStandPegs();
+    QAction* m_standAction = nullptr;
     void poseClick(const QVector3D& origin, const QVector3D& direction);
     bool poseGrab(const QVector3D& origin, const QVector3D& direction);
     void poseDrag(const QVector3D& origin, const QVector3D& direction);
