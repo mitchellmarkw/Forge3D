@@ -3,6 +3,7 @@
 
 #include "forge/core/PrintSplit.h"
 #include "forge/core/Split.h"
+#include "forge/core/SplitJoint.h"
 
 #include <QWidget>
 
@@ -14,6 +15,10 @@ class QLabel;
 class QPushButton;
 class QRadioButton;
 class QSlider;
+
+namespace forge::app {
+class JointAtCutBox;
+}
 
 namespace forge::app {
 
@@ -42,6 +47,8 @@ public:
     void setKeyOptions(const KeyOptions& options);
     // The settings as set (keys: the tick box, whatever is kept), for remembering.
     KeyOptions keySettings() const;
+    // The joint to put in at the cut (kind None: none; only when both halves are kept).
+    splitjoint::Options joint() const;
     // Moves the plane (as if typed); emits planeChanged.
     void setOffset(double offset);
 
@@ -77,6 +84,8 @@ private:
     QDoubleSpinBox* m_taper = nullptr;
     QDoubleSpinBox* m_clearance = nullptr;
     QLabel* m_lengthLabel = nullptr;
+    QGroupBox* m_jointGroup = nullptr;
+    JointAtCutBox* m_joint = nullptr;
     void updateKeys();
     double m_min = -10.0;
     double m_max = 10.0;

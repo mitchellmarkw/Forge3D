@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "SplitPanel.h"
 
+#include "JointAtCutBox.h"
+
 #include <QCheckBox>
 #include <QDoubleSpinBox>
 #include <QFormLayout>
@@ -147,6 +149,17 @@ SplitPanel::SplitPanel(QWidget* parent) : QWidget(parent)
     layout->addWidget(m_keysGroup);
     setKeyOptions(KeyOptions{});
 
+    // A joint where the halves meet (instead of pegs).
+    m_jointGroup = new QGroupBox(tr("Joint"));
+    auto* jointLayout = new QVBoxLayout(m_jointGroup);
+    m_joint = new JointAtCutBox(QStringLiteral("split"));
+    jointLayout->addWidget(m_joint);
+    layout->insertWidget(layout->indexOf(m_keysGroup), m_jointGroup);  // above the pegs it replaces
+    connect(m_joint, &JointAtCutBox::changed, this, [this] {
+        updateKeys();
+        emit keysChanged();
+    });
+
     auto* buttons = new QHBoxLayout;
     m_apply = new QPushButton(tr("Split"));
     m_apply->setDefault(true);
@@ -183,8 +196,13 @@ SplitPanel::SplitPanel(QWidget* parent) : QWidget(parent)
 void SplitPanel::updateKeys()
 {
     const bool both = !m_keepGroup->isHidden() && m_keepBoth->isChecked();
+    const bool joint = m_joint && m_joint->wanted();
     m_keysGroup->setVisible(!m_keepGroup->isHidden());
-    m_keysGroup->setEnabled(both);
+    m_keysGroup->setEnabled(both && !joint);  // the joint lines the halves up
+    if (m_jointGroup) {
+        m_jointGroup->setVisible(!m_keepGroup->isHidden());
+        m_jointGroup->setEnabled(both);
+    }
     const bool on = m_keys->isChecked();
     for (QWidget* w : {static_cast<QWidget*>(m_pegs), static_cast<QWidget*>(m_pins),
                        static_cast<QWidget*>(m_diameter), static_cast<QWidget*>(m_length),
@@ -196,12 +214,20 @@ void SplitPanel::updateKeys()
 KeyOptions SplitPanel::keyOptions() const
 {
     KeyOptions o;
-    o.keys = m_keys->isChecked() && !m_keepGroup->isHidden() && m_keepBoth->isChecked();
+    o.keys = m_keys->isChecked() && !m_keepGroup->isHidden() && m_keepBoth->isChecked() && !m_joint->wanted();
     o.loosePins = m_pins->isChecked();
     o.diameter = m_diameter->value();
     o.length = m_length->value();
     o.taper = m_taper->value();
     o.clearance = m_clearance->value();
+    return o;
+}
+
+splitjoint::Options SplitPanel::joint() const
+{
+    splitjoint::Options o = m_joint->options();
+    if (m_keepGroup->isHidden() || !m_keepBoth->isChecked())
+        o.kind = splitjoint::Kind::None;
     return o;
 }
 

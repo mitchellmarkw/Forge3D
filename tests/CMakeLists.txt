@@ -45,6 +45,7 @@ add_executable(forge_tests
     test_socket.cpp
     test_join.cpp
     test_mask_split.cpp
+    test_split_joint.cpp
     test_reference.cpp
     test_hinge.cpp
     test_pose.cpp

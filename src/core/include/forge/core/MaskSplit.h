@@ -48,7 +48,8 @@ struct KeySpot {
     Vec3 point{0, 0, 0};
     Vec3 normal{0, 0, 1};
     Vec3 across{1, 0, 0};
-    double room = 0.0;
+    double room = 0.0;   // to the cap's nearest edge
+    double reach = 0.0;  // to its farthest
 };
 
 // A dome on a flat cut (Ball and socket): a slice of a ball standing `height` out of the

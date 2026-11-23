@@ -4594,6 +4594,26 @@ void MainWindow::applySplit()
     }
     std::vector<ObjectId> made;
     const KeyOptions keys = m_splitPanel->keyOptions();
+    const splitjoint::Options joint = m_splitPanel->joint();
+    if (joint.kind != splitjoint::Kind::None) {
+        splitjoint::Made jointed;
+        try {
+            QApplication::setOverrideCursor(Qt::WaitCursor);
+            struct RestoreCursor {
+                ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
+            } restore;
+            jointed = splitjoint::splitWithJoint(m_stack, m_doc, m_splitMode.target, plane, joint, newJointLink());
+        } catch (const std::exception& e) {
+            QMessageBox::warning(this, tr("Forge3D"),
+                                 tr("Split did not work:\n%1").arg(QString::fromUtf8(e.what())));
+            return;
+        }
+        qInfo().noquote() << "Command:" << QString::fromStdString(m_stack.undoLabel());
+        endSplit();
+        setSelection(jointed.pieces.front());
+        statusBar()->showMessage(tr("Split, with a %1 at the cut.").arg(jointTitle(joint.kind)), 10000);
+        return;
+    }
     int keyed = 0;
     try {
         QApplication::setOverrideCursor(Qt::WaitCursor);
@@ -4648,6 +4668,27 @@ void MainWindow::applySplit()
         if (box.clickedButton() == undo)
             m_stack.undo();
     });
+}
+
+std::uint32_t MainWindow::newJointLink()
+{
+    // Both halves of a hinge share a number (to find each other); any but 0.
+    std::uint32_t link = 0;
+    while (link == 0)
+        link = QRandomGenerator::global()->generate() & 0x3FFFFFFFu;
+    return link;
+}
+
+QString MainWindow::jointTitle(splitjoint::Kind kind)
+{
+    switch (kind) {
+    case splitjoint::Kind::Ball: return tr("ball joint");
+    case splitjoint::Kind::Hinge: return tr("hinge");
+    case splitjoint::Kind::DoubleHinge: return tr("double hinge");
+    case splitjoint::Kind::Swivel: return tr("swivel");
+    case splitjoint::Kind::Magnets: return tr("pair of magnet pockets");
+    default: return tr("joint");
+    }
 }
 
 KeyOptions MainWindow::savedKeyOptions() const
@@ -12546,8 +12587,13 @@ void MainWindow::applyMask()
             setSelection(history::objectOf(m_doc, target));
             return;
         }
-        made = splitByMask(m_stack, m_doc, target, dabs, m_maskPanel->keep(), m_maskPanel->keyFit(),
-                           m_maskPanel->cut(), m_maskPanel->socketFit());
+        if (const splitjoint::Options joint = m_maskPanel->joint(); joint.kind != splitjoint::Kind::None)
+            made = splitjoint::splitByMaskWithJoint(m_stack, m_doc, target, dabs, m_maskPanel->cut(), joint,
+                                                    newJointLink())
+                       .pieces;
+        else
+            made = splitByMask(m_stack, m_doc, target, dabs, m_maskPanel->keep(), m_maskPanel->keyFit(),
+                               m_maskPanel->cut(), m_maskPanel->socketFit());
     } catch (const std::exception& e) {
         m_maskPanel->setStatus(QString::fromUtf8(e.what()), true);
         return;
@@ -12852,10 +12898,7 @@ void MainWindow::applyCutParts()
         struct RestoreCursor {
             ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
         } restore;
-        std::uint32_t link = 0;
-        while (link == 0)
-            link = QRandomGenerator::global()->generate() & 0x3FFFFFFFu;
-        made = limbcut::cutIntoParts(m_stack, m_doc, target, points, choices, link);
+        made = limbcut::cutIntoParts(m_stack, m_doc, target, points, choices, newJointLink());
     } catch (const std::exception& e) {
         m_cutPartsPanel->setStatus(tr("It couldn't be cut: %1").arg(QString::fromUtf8(e.what())), true);
         refreshScene();

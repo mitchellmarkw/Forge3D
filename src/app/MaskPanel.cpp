@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "MaskPanel.h"
 
+#include "JointAtCutBox.h"
+
 #include <QColorDialog>
 #include <QComboBox>
 #include <QCheckBox>
@@ -121,6 +123,11 @@ MaskPanel::MaskPanel(QWidget* parent) : QWidget(parent)
                                "0.25 for filament"));
     socketRow->addRow(tr("Socket fit:"), m_socketFit);
     layout->addLayout(socketRow);
+
+    // A joint where the pieces meet (a new split only).
+    m_joint = new JointAtCutBox(QStringLiteral("mask"));
+    layout->addWidget(m_joint);
+    connect(m_joint, &JointAtCutBox::changed, this, [this] { showCut(); });
 
     // Alignment keys, so painted pieces glue back only one way.
     m_keys = new QCheckBox(tr("Alignment keys on the cut"));
@@ -279,6 +286,8 @@ void MaskPanel::start(const QString& title, bool editing, double keyFit, MaskCut
     }
     showCut();
     m_keepBox->setVisible(!editing);  // a step being changed keeps the pieces it has
+    m_joint->setVisible(!editing);   // a joint is put in once, when splitting
+    showCut();
     m_apply->setToolTip(editing ? tr("Cut along the changed mask") : tr("Cut the shape along the mask"));
     setStatus({}, false);
 }
@@ -323,7 +332,16 @@ void MaskPanel::setApplyEnabled(bool on)
 
 double MaskPanel::keyFit() const
 {
-    return m_keys->isChecked() && cut() != MaskCut::Dome ? m_keyFit->value() : -1.0;
+    return m_keys->isChecked() && cut() != MaskCut::Dome && joint().kind == splitjoint::Kind::None ? m_keyFit->value()
+                                                                                                    : -1.0;
+}
+
+splitjoint::Options MaskPanel::joint() const
+{
+    splitjoint::Options o = m_joint->options();
+    if (m_joint->isHidden() || cut() == MaskCut::Dome || keep() != SplitKeep::Both)
+        o.kind = splitjoint::Kind::None;
+    return o;
 }
 
 MaskCut MaskPanel::cut() const
@@ -344,9 +362,12 @@ void MaskPanel::showCut()
 {
     // The ball and socket lines the pieces up itself: no keys with it.
     const bool dome = cut() == MaskCut::Dome;
+    const bool joint = m_joint && !m_joint->isHidden() && m_joint->wanted() && !dome;
     m_socketFit->setEnabled(dome);
-    m_keys->setEnabled(!dome);
-    m_keyFit->setEnabled(!dome && m_keys->isChecked());
+    if (m_joint)
+        m_joint->setEnabled(!dome);
+    m_keys->setEnabled(!dome && !joint);
+    m_keyFit->setEnabled(!dome && !joint && m_keys->isChecked());
 }
 
 }  // namespace forge::app

@@ -116,7 +116,8 @@ Gate to Phase 2: a new user prints a customised part within 10 minutes.
 | 84 | Faster Make Room: still parts placed once, both sides trimmed to what's in reach, steps on all cores | Done (0.93.0) |
 | 85 | Seams you paint for sewing patterns: lines in another colour cut along, pieces meeting down their middles | Done (0.94.0) |
 | 86 | Pictures of a pose: the Picture window straight from Pose Test | Done (0.95.0) |
-| 87 | Split by Mask cut surfaces: curved, flat, or ball and socket (a dome and a socket with a fit) | **Delivered for testing** |
+| 87 | Split by Mask cut surfaces: curved, flat, or ball and socket (a dome and a socket with a fit) | Done (0.96.0) |
+| 88 | A joint at a split (plane or mask): ball joint, hinge, double hinge, swivel or magnets | **Delivered for testing** |
 
 Slices 39–41 close the gaps found in the [Phase 1 gate review](docs/PHASE1_GATE.md).
 

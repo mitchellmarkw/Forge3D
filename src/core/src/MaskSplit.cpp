@@ -470,10 +470,13 @@ Pieces split(const std::vector<float>& positions, const std::vector<std::uint32_
         for (std::size_t t = 0; t + 2 < tris.size(); t += 3)
             way = add(way, cross3(sub(points[tris[t + 1]], points[tris[t]]), sub(points[tris[t + 2]], points[tris[t]])));
         spot.normal = unit3(way, {0, 0, 1});
-        double room = 1e300;
-        for (std::uint32_t v : loop)
+        double room = 1e300, reach = 0.0;
+        for (std::uint32_t v : loop) {
             room = std::min(room, std::sqrt(dist2(points[v], spot.point)));
+            reach = std::max(reach, std::sqrt(dist2(points[v], spot.point)));
+        }
         spot.room = room;
+        spot.reach = reach;
         const Vec3 toEdge = sub(points[loop.front()], spot.point);
         spot.across = unit3(sub(toEdge, mul(spot.normal, dot3(toEdge, spot.normal))), {1, 0, 0});
         keySpots.push_back(spot);
