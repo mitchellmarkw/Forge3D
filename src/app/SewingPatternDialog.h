@@ -10,6 +10,7 @@
 
 #include <vector>
 
+class QCheckBox;
 class QComboBox;
 class QDoubleSpinBox;
 class QLabel;
@@ -60,6 +61,8 @@ private:
     QString m_name;
     QComboBox* m_colour = nullptr;
     QComboBox* m_split = nullptr;
+    QCheckBox* m_useSeams = nullptr;  // also cut along lines painted another colour
+    QComboBox* m_seamColour = nullptr;
     QDoubleSpinBox* m_allowance = nullptr;
     QComboBox* m_page = nullptr;
     QLabel* m_preview = nullptr;

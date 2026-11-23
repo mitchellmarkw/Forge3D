@@ -1763,3 +1763,12 @@ and sharp across edges.
   pulling step numbers from an atomic counter, each keeping its own pieces and farthest reach, merged after (a
   thread's exception is rethrown). The clearance sweep goes the same way.
 - A hidden benchmark: `forge_tests "[.bench]" -s` ("making room on detailed parts").
+
+## Seams you paint (slice 85, 0.94.0)
+
+- `sewing::make` takes `seams` (per triangle). Seam triangles are kept with the cloth (not holes), and each takes the
+  cloth triangle it's reached from, out from the cloth a ring at a time (`source`); seam paint not reached is
+  dropped. Two triangles side by side join (into a piece, and at their shared points) only if their sources touch
+  (share a point): along a line they do, across its middle they don't. Clipped triangles keep their source.
+- Each piece's points are copied per group of corners joined round them, so a line's middle opens even where the
+  cloth joins round the other way (a sleeve becomes a strip).

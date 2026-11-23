@@ -6,6 +6,7 @@
 
 #include <array>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -45,15 +46,18 @@ struct Pattern {
 };
 
 // The triangles marked `chosen` (one per triangle) cut apart by `split` and laid flat.
-// Positions in mm, the figure standing (+Z up, facing -Y). Throws std::invalid_argument if
-// nothing is chosen.
+// Positions in mm, the figure standing (+Z up, facing -Y). `seams` (per triangle, may be
+// empty): painted seam lines, cut along too (the pieces meeting down their middles).
+// Throws std::invalid_argument if nothing is chosen.
 Pattern make(const std::vector<float>& positions, const std::vector<std::uint32_t>& indices,
-             const std::vector<bool>& chosen, Split split);
+             const std::vector<bool>& chosen, Split split, const std::vector<bool>& seams = {});
 
 // The colours painted on a shape (as Paint lists them).
 std::vector<std::uint32_t> paintedColours(const Document& doc, ObjectId top);
 // The pattern of the area of `top` painted `colour`, as it stands on the plate.
-Pattern fromPaint(const Document& doc, ObjectId top, std::uint32_t colour, Split split);
+// `seamColour`: lines painted that colour are cut along as well.
+Pattern fromPaint(const Document& doc, ObjectId top, std::uint32_t colour, Split split,
+                  std::optional<std::uint32_t> seamColour = std::nullopt);
 
 }  // namespace sewing
 }  // namespace forge

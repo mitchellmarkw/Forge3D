@@ -223,3 +223,46 @@ TEST_CASE("Sewing: a shirt painted on a T-posed body: a front and a back with sl
         CHECK(piece.stretch < 0.12);
     }
 }
+
+TEST_CASE("Sewing: a painted seam line opens a tube, and no cloth goes missing", "[sewing]")
+{
+    const double r = 10, h = 30;
+    const int around = 72, up = 12;
+    const Grid g = tube(r, h, around, up);
+    const std::size_t count = g.indices.size() / 3;
+    // A seam line down one side: the triangles of one column (about 0.9 mm wide).
+    const auto column = [&](std::size_t t) { return int((t / 2) % std::size_t(around)); };
+    std::vector<bool> chosen(count), seams(count);
+    for (std::size_t t = 0; t < count; ++t) {
+        seams[t] = column(t) == 0;
+        chosen[t] = !seams[t];
+    }
+    const auto one = sewing::make(g.positions, g.indices, chosen, sewing::Split::None, seams);
+    REQUIRE(one.pieces.size() == 1);
+    CHECK(one.problem.empty());
+    const auto& piece = one.pieces[0];
+    CHECK(piece.stretch < 0.02);
+    CHECK_THAT(piece.height, WithinAbs(h, 0.5));
+    // All the way round (the seam line's own cloth shared out, none lost).
+    CHECK_THAT(area(piece), WithinRel(2 * std::numbers::pi * r * h, 0.02));
+    CHECK_THAT(piece.width, WithinRel(2 * std::numbers::pi * r, 0.03));
+
+    // Two seam lines, opposite: two halves.
+    for (std::size_t t = 0; t < count; ++t) {
+        seams[t] = column(t) == 0 || column(t) == around / 2;
+        chosen[t] = !seams[t];
+    }
+    const auto two = sewing::make(g.positions, g.indices, chosen, sewing::Split::None, seams);
+    REQUIRE(two.pieces.size() == 2);
+    for (const auto& p : two.pieces)
+        CHECK_THAT(area(p), WithinRel(std::numbers::pi * r * h, 0.03));
+
+    // With a seam down the middle front and back too (the lines are at the sides): four.
+    const auto four = sewing::make(g.positions, g.indices, chosen, sewing::Split::LeftRight, seams);
+    CHECK(four.pieces.size() == 4);
+
+    // Seam paint off on its own (not touching the cloth) changes nothing.
+    std::vector<bool> stray(count, false);
+    const auto plain = sewing::make(g.positions, g.indices, std::vector<bool>(count, true), sewing::Split::FrontBack, stray);
+    CHECK(plain.pieces.size() == 2);
+}

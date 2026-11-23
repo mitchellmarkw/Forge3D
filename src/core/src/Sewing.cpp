@@ -92,6 +92,7 @@ constexpr std::size_t kMostTriangles = 4000;  // in a piece, to lay it flat
 struct Part {
     std::vector<V3> points;
     std::vector<std::array<std::uint32_t, 3>> tris;
+    std::vector<int> source;  // each triangle's cloth (painted seams), while it's being made
     int side = 0;
     double area = 0.0;
     V3 centre{0, 0, 0};
@@ -472,12 +473,17 @@ const char* title(Split s)
 }
 
 Pattern make(const std::vector<float>& positions, const std::vector<std::uint32_t>& indices,
-             const std::vector<bool>& chosen, Split split)
+             const std::vector<bool>& chosen, Split split, const std::vector<bool>& seams)
 {
+    // Painted seam lines are part of the cloth (shared out below), not holes in it.
+    const auto onSeam = [&](std::size_t t) { return t < seams.size() && seams[t] && !(t < chosen.size() && chosen[t]); };
     // Little gaps in the paint (between dabs) count as painted: unpainted patches, each
     // much smaller than what's painted, would be holes in the cloth.
     std::vector<bool> marked = chosen;
     marked.resize(indices.size() / 3, false);
+    for (std::size_t t = 0; t < marked.size(); ++t)
+        if (onSeam(t))
+            marked[t] = true;
     {
         const std::size_t count = indices.size() / 3;
         std::unordered_map<std::uint64_t, std::vector<std::uint32_t>> byEdge;
@@ -531,6 +537,7 @@ Pattern make(const std::vector<float>& positions, const std::vector<std::uint32_
     std::vector<V3> pts;
     std::unordered_map<std::uint32_t, std::uint32_t> remap;
     std::vector<std::array<std::uint32_t, 3>> tris;
+    std::vector<bool> seamTri;  // per kept triangle: on a painted seam line
     for (std::size_t t = 0; t * 3 + 2 < indices.size(); ++t) {
         if (!marked[t])
             continue;
@@ -543,11 +550,63 @@ Pattern make(const std::vector<float>& positions, const std::vector<std::uint32_
                                positions[std::size_t(v) * 3 + 2]});
             tri[std::size_t(k)] = it->second;
         }
-        if (tri[0] != tri[1] && tri[1] != tri[2] && tri[0] != tri[2])
+        if (tri[0] != tri[1] && tri[1] != tri[2] && tri[0] != tri[2]) {
             tris.push_back(tri);
+            seamTri.push_back(onSeam(t));
+        }
     }
-    if (tris.empty())
+    if (std::none_of(seamTri.begin(), seamTri.end(), [](bool b) { return !b; }))
         throw std::invalid_argument("Nothing is painted that colour.");
+
+    // Painted seams: each seam line's triangles go to the cloth they're nearest (the one
+    // each was reached from, out from the cloth a ring at a time), so the pieces meet down
+    // the line's middle and no cloth goes missing. Two triangles side by side join only if
+    // the cloth they came from touches: across a line's middle it doesn't, so it's cut.
+    std::vector<int> source(tris.size());
+    std::iota(source.begin(), source.end(), 0);
+    const std::vector<std::array<std::uint32_t, 3>> cloth = tris;  // as kept, for `source`
+    if (std::any_of(seamTri.begin(), seamTri.end(), [](bool b) { return b; })) {
+        std::unordered_map<std::uint64_t, std::vector<std::uint32_t>> byEdge;
+        for (std::size_t t = 0; t < tris.size(); ++t)
+            for (int k = 0; k < 3; ++k)
+                byEdge[edgeKey(tris[t][std::size_t(k)], tris[t][std::size_t((k + 1) % 3)])].push_back(std::uint32_t(t));
+        std::vector<std::uint32_t> front;
+        for (std::size_t t = 0; t < tris.size(); ++t)
+            if (seamTri[t])
+                source[t] = -1;
+            else
+                front.push_back(std::uint32_t(t));
+        while (!front.empty()) {
+            std::vector<std::uint32_t> ring;
+            for (std::uint32_t t : front)
+                for (int k = 0; k < 3; ++k)
+                    for (std::uint32_t o : byEdge[edgeKey(tris[t][std::size_t(k)], tris[t][std::size_t((k + 1) % 3)])])
+                        if (seamTri[o] && source[o] < 0) {
+                            source[o] = source[t];
+                            ring.push_back(o);
+                        }
+            front = std::move(ring);
+        }
+        // Seam paint that touches no cloth isn't part of it.
+        std::vector<std::array<std::uint32_t, 3>> keptTris;
+        std::vector<int> keptSource;
+        for (std::size_t t = 0; t < tris.size(); ++t)
+            if (source[t] >= 0) {
+                keptTris.push_back(tris[t]);
+                keptSource.push_back(source[t]);
+            }
+        tris = std::move(keptTris);
+        source = std::move(keptSource);
+    }
+    const auto touch = [&](int a, int b) {
+        if (a == b)
+            return true;
+        for (std::uint32_t u : cloth[std::size_t(a)])
+            for (std::uint32_t v : cloth[std::size_t(b)])
+                if (u == v)
+                    return true;
+        return false;
+    };
 
     // Cut along the plane through the middle (real cuts through the triangles).
     V3 lo{1e300, 1e300, 1e300}, hi{-1e300, -1e300, -1e300};
@@ -558,8 +617,10 @@ Pattern make(const std::vector<float>& positions, const std::vector<std::uint32_
         }
     const V3 mid{(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2};
     std::vector<std::array<std::uint32_t, 3>> sideTris[2];
+    std::vector<int> sideLabel[2];  // each one's `source`
     if (split == Split::None) {
         sideTris[0] = tris;
+        sideLabel[0] = source;
     } else {
         const V3 normal = split == Split::FrontBack ? V3{0, 1, 0} : V3{1, 0, 0};
         std::vector<double> d(pts.size());
@@ -582,7 +643,8 @@ Pattern make(const std::vector<float>& positions, const std::vector<std::uint32_
             cutPoint[key] = id;
             return id;
         };
-        for (const auto& t : tris) {
+        for (std::size_t ti = 0; ti < tris.size(); ++ti) {
+            const auto& t = tris[ti];
             bool anyNeg = false, anyPos = false;
             for (std::uint32_t v : t) {
                 anyNeg = anyNeg || d[v] < 0;
@@ -590,10 +652,12 @@ Pattern make(const std::vector<float>& positions, const std::vector<std::uint32_
             }
             if (!anyPos) {
                 sideTris[0].push_back(t);
+                sideLabel[0].push_back(source[ti]);
                 continue;
             }
             if (!anyNeg) {
                 sideTris[1].push_back(t);
+                sideLabel[1].push_back(source[ti]);
                 continue;
             }
             for (int side = 0; side < 2; ++side) {
@@ -607,8 +671,10 @@ Pattern make(const std::vector<float>& positions, const std::vector<std::uint32_
                         poly.push_back(onPlane(a, b));
                 }
                 for (std::size_t k = 1; k + 1 < poly.size(); ++k)
-                    if (poly[0] != poly[k] && poly[k] != poly[k + 1] && poly[0] != poly[k + 1])
+                    if (poly[0] != poly[k] && poly[k] != poly[k + 1] && poly[0] != poly[k + 1]) {
                         sideTris[side].push_back({poly[0], poly[k], poly[k + 1]});
+                        sideLabel[side].push_back(source[ti]);
+                    }
             }
         }
     }
@@ -625,15 +691,16 @@ Pattern make(const std::vector<float>& positions, const std::vector<std::uint32_
                 i = parent[i] = parent[parent[i]];
             return i;
         };
-        std::unordered_map<std::uint64_t, std::size_t> firstWith;
+        std::unordered_map<std::uint64_t, std::vector<std::size_t>> withEdge;
         for (std::size_t t = 0; t < st.size(); ++t)
-            for (int k = 0; k < 3; ++k) {
-                const auto key = edgeKey(st[t][std::size_t(k)], st[t][std::size_t((k + 1) % 3)]);
-                if (const auto f = firstWith.find(key); f != firstWith.end())
-                    parent[root(t)] = root(f->second);
-                else
-                    firstWith[key] = t;
-            }
+            for (int k = 0; k < 3; ++k)
+                withEdge[edgeKey(st[t][std::size_t(k)], st[t][std::size_t((k + 1) % 3)])].push_back(t);
+        for (const auto& [key, list] : withEdge)
+            for (std::size_t i = 0; i < list.size(); ++i)
+                for (std::size_t k = i + 1; k < list.size(); ++k)
+                    // Not across a painted seam's middle.
+                    if (touch(sideLabel[side][list[i]], sideLabel[side][list[k]]))
+                        parent[root(list[i])] = root(list[k]);
         std::map<std::size_t, std::size_t> partOf;
         for (std::size_t t = 0; t < st.size(); ++t) {
             const std::size_t r = root(t);
@@ -643,19 +710,46 @@ Pattern make(const std::vector<float>& positions, const std::vector<std::uint32_
                 parts.back().side = side;
             }
             Part& p = parts[it->second];
-            std::array<std::uint32_t, 3> tri{};
-            for (int k = 0; k < 3; ++k) {
-                // The part's own copy of each point (a seam's points go to both sides).
-                tri[std::size_t(k)] = st[t][std::size_t(k)];
-            }
-            p.tris.push_back(tri);
+            p.tris.push_back(st[t]);
+            p.source.push_back(sideLabel[side][t]);
         }
     }
     for (Part& p : parts) {
-        std::unordered_map<std::uint32_t, std::uint32_t> own;
-        for (auto& t : p.tris)
-            for (auto& v : t) {
-                auto [it, fresh] = own.try_emplace(v, std::uint32_t(p.points.size()));
+        // The part's own copy of each point (a seam's points go to both sides), and where a
+        // painted seam's middle goes through a point, a copy for each side of it.
+        std::unordered_map<std::uint64_t, std::vector<std::size_t>> withEdge;
+        for (std::size_t t = 0; t < p.tris.size(); ++t)
+            for (int k = 0; k < 3; ++k)
+                withEdge[edgeKey(p.tris[t][std::size_t(k)], p.tris[t][std::size_t((k + 1) % 3)])].push_back(t);
+        std::vector<std::size_t> corner(p.tris.size() * 3);  // (triangle, corner) -> its group at that point
+        std::iota(corner.begin(), corner.end(), 0);
+        const std::function<std::size_t(std::size_t)> group = [&](std::size_t i) {
+            while (corner[i] != i)
+                i = corner[i] = corner[corner[i]];
+            return i;
+        };
+        for (const auto& [key, list] : withEdge) {
+            const auto a = std::uint32_t(key >> 32), b = std::uint32_t(key & 0xFFFFFFFFu);
+            for (std::size_t i = 0; i < list.size(); ++i)
+                for (std::size_t k = i + 1; k < list.size(); ++k) {
+                    if (!touch(p.source[list[i]], p.source[list[k]]))
+                        continue;  // across a seam's middle
+                    for (std::uint32_t v : {a, b}) {
+                        const auto at = [&](std::size_t t) {
+                            for (int c = 0; c < 3; ++c)
+                                if (p.tris[t][std::size_t(c)] == v)
+                                    return t * 3 + std::size_t(c);
+                            return t * 3;
+                        };
+                        corner[group(at(list[i]))] = group(at(list[k]));
+                    }
+                }
+        }
+        std::map<std::pair<std::uint32_t, std::size_t>, std::uint32_t> own;
+        for (std::size_t t = 0; t < p.tris.size(); ++t)
+            for (int k = 0; k < 3; ++k) {
+                std::uint32_t& v = p.tris[t][std::size_t(k)];
+                const auto [it, fresh] = own.try_emplace({v, group(t * 3 + std::size_t(k))}, std::uint32_t(p.points.size()));
                 if (fresh)
                     p.points.push_back(pts[v]);
                 v = it->second;
@@ -837,7 +931,8 @@ std::vector<std::uint32_t> paintedColours(const Document& doc, ObjectId top)
     return paint::colours(paint::objectPaint(doc, top));
 }
 
-Pattern fromPaint(const Document& doc, ObjectId top, std::uint32_t colour, Split split)
+Pattern fromPaint(const Document& doc, ObjectId top, std::uint32_t colour, Split split,
+                  std::optional<std::uint32_t> seamColour)
 {
     const std::vector<PaintDab> dabs = paint::objectPaint(doc, top);
     if (dabs.empty())
@@ -847,9 +942,14 @@ Pattern fromPaint(const Document& doc, ObjectId top, std::uint32_t colour, Split
     m = sculpt::welded(m, 1e-4);
     const paint::Field field(dabs);
     const std::vector<std::uint32_t> colours = paint::triangleColours(m.positions, m.indices, field);
-    std::vector<bool> chosen(colours.size());
+    std::vector<bool> chosen(colours.size()), seams;
     for (std::size_t t = 0; t < colours.size(); ++t)
         chosen[t] = colours[t] != paint::kOwnColour && (colours[t] & 0xFFFFFFu) == (colour & 0xFFFFFFu);
+    if (seamColour) {
+        seams.resize(colours.size());
+        for (std::size_t t = 0; t < colours.size(); ++t)
+            seams[t] = colours[t] != paint::kOwnColour && (colours[t] & 0xFFFFFFu) == (*seamColour & 0xFFFFFFu);
+    }
     // Standing as it is on the plate (which way is up and front).
     const Transform world = doc.worldTransform(top);
     std::vector<float> placed(m.positions.size());
@@ -859,7 +959,7 @@ Pattern fromPaint(const Document& doc, ObjectId top, std::uint32_t colour, Split
         placed[i + 1] = float(p[1]);
         placed[i + 2] = float(p[2]);
     }
-    return make(placed, m.indices, chosen, split);
+    return make(placed, m.indices, chosen, split, seams);
 }
 
 }  // namespace forge::sewing
