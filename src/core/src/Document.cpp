@@ -605,6 +605,15 @@ void Document::setFormulas(ObjectId id, std::map<std::string, std::string> formu
     notify(ChangeKind::Modified, id);
 }
 
+void Document::setJointPiece(ObjectId id, std::optional<JointPiece> piece)
+{
+    Body& body = require(id);
+    if (body.jointPiece == piece)
+        return;
+    body.jointPiece = std::move(piece);
+    notify(ChangeKind::Modified, id);
+}
+
 void Document::setVariables(std::vector<Variable> table)
 {
     variables::checkTable(table);

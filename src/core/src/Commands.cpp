@@ -191,6 +191,7 @@ void EditBodyCommand::apply(Document& doc, const Body& state)
         doc.setPlacement(state.id, state.placement);
         doc.setHardware(state.id, state.hardware);
         doc.setFormulas(state.id, state.formulas);
+        doc.setJointPiece(state.id, state.jointPiece);
         if (doc.find(state.id) && doc.find(state.id)->name != state.name)
             doc.rename(state.id, state.name);
     } catch (...) {
@@ -437,6 +438,19 @@ VariableChanges variableChanges(const Document& doc, const std::vector<Variable>
         } else if (!(moved == *other)) {
             out.before.push_back(*other);
             out.after.push_back(std::move(moved));
+        }
+    }
+    // The tabs, links and pins made with a changed hinge, remade to match.
+    const std::size_t steps = out.after.size();
+    for (std::size_t i = 0; i < steps; ++i) {
+        const Body changed = out.after[i];
+        if (!changed.isBoolean() || !changed.boolean->hinge)
+            continue;
+        for (Body& piece : refreshedPieces(doc, changed.id, *changed.boolean->hinge, hingeSpot(doc, changed.id))) {
+            if (std::any_of(out.before.begin(), out.before.end(), [&](const Body& b) { return b.id == piece.id; }))
+                continue;
+            out.before.push_back(*doc.find(piece.id));
+            out.after.push_back(std::move(piece));
         }
     }
     return out;

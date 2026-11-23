@@ -11999,9 +11999,20 @@ std::vector<Body> MainWindow::hingePieceBodies(const HingeFinish& f, const embos
 {
     const auto span = hingePinSpan(f, spot, forkPart);
     std::vector<Body> out;
+    int index = 0;
     for (const hinge::Piece& piece : hinge::pieces(f, spot.point, spot.normal, withTab, span)) {
         out.push_back(hinge::pieceBody(piece.mesh, piece.name));
         out.back().hardware = true;  // a tab, link or pin: keeps its size when the design is rescaled
+        // Which piece of the joint it is, so it's remade when the joint's sizes change (the
+        // step it goes with is filled in once it has a number).
+        JointPiece jp;
+        jp.step = kInvalidId;
+        jp.index = index++;
+        jp.withTab = withTab;
+        jp.pinSpan = span;
+        jp.madeAt = {out.back().placement.x, out.back().placement.y, out.back().placement.z};
+        jp.label = piece.name;
+        out.back().jointPiece = jp;
     }
     return out;
 }
@@ -12106,6 +12117,19 @@ void MainWindow::applyHinge()
                 m_doc.previewMesh(*moved.boolean);
                 m_stack.execute(std::make_unique<EditBodyCommand>(*other, moved, "Change joint"));
             }
+            // The tab, link and pins made with it, remade to match.
+            for (ObjectId id : {target, partner}) {
+                const Body* step = id == kInvalidId ? nullptr : m_doc.find(id);
+                if (!step || !step->isBoolean() || !step->boolean->hinge)
+                    continue;
+                std::vector<Body> after = refreshedPieces(m_doc, id, *step->boolean->hinge, hingeSpot(m_doc, id));
+                if (after.empty())
+                    continue;
+                std::vector<Body> before;
+                for (const Body& b : after)
+                    before.push_back(*m_doc.find(b.id));
+                m_stack.execute(std::make_unique<EditBodiesCommand>(before, after, "Change joint"));
+            }
             m_stack.endMacro();
         } catch (const std::exception& e) {
             m_stack.abortMacro();
@@ -12140,6 +12164,9 @@ void MainWindow::applyHinge()
         result.name = m_doc.uniqueName("Hinged");
         result.boolean = *spec;
         result.formulas = m_hingeFormulas->formulas();
+        const ObjectId stepId = result.id;
+        for (Body& piece : pieces)
+            piece.jointPiece->step = stepId;
         if (!m_doc.isTopLevel(target))
             m_stack.execute(std::make_unique<InsertStepCommand>(std::move(result), m_doc.parentOf(target)));
         else
@@ -12191,6 +12218,12 @@ void MainWindow::addHingePieces()
         const ObjectId part = m_hingeMode.editing ? m_doc.find(m_hingeMode.target)->boolean->operands.front()
                                                   : m_hingeMode.target;
         pieces = hingePieceBodies(f, *m_hingeMode.spot, true, part);
+        for (Body& piece : pieces) {
+            if (m_hingeMode.editing)
+                piece.jointPiece->step = m_hingeMode.target;  // it follows this joint
+            else
+                piece.jointPiece.reset();  // no joint yet to follow
+        }
         m_stack.beginMacro("Add joint pieces");
         for (Body& piece : pieces) {
             piece.id = m_doc.allocateId();
