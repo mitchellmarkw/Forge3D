@@ -1752,3 +1752,14 @@ and sharp across edges.
   through `placementCommand` (an EditBodyCommand that drops them when a formula is affected, else the plain
   SetPlacementCommand) for Align and Sit on Plate; `tellDropped` says so in the status bar. The variables' own
   changes (SetVariablesCommand) don't go through it.
+
+## Faster Make Room (slice 84, 0.93.0)
+
+- `pose::room`: still parts are placed once (the joint doesn't move them) and cut to the box the turning parts'
+  boxes sweep through (their corners turned at 73 angles from the start to 20° past the target, grown by the most a
+  turn between two of those can bulge a corner); turning parts are cut, in their own coordinates, to the box the
+  still parts' remaining boxes map back to at those angles. Every solid is evaluated before sharing.
+- The steps' transforms are worked out first (they share the angles map); the booleans run on up to 8 threads
+  pulling step numbers from an atomic counter, each keeping its own pieces and farthest reach, merged after (a
+  thread's exception is rethrown). The clearance sweep goes the same way.
+- A hidden benchmark: `forge_tests "[.bench]" -s` ("making room on detailed parts").

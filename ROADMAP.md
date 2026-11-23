@@ -113,6 +113,7 @@ Gate to Phase 2: a new user prints a customised part within 10 minutes.
 | 81 | Joint sizes from the design variables: Quick Socket, Quick Hinge and Hand Ports follow formulas | Done (0.90.0) |
 | 82 | Hinge pieces that follow the hinge: tabs, links, pegs and pins remade when its sizes change | **Delivered for testing** |
 | 83 | Moving by hand (handles, Align, Sit on Plate) stops a size following the variables | **Delivered for testing** |
+| 84 | Faster Make Room: still parts placed once, both sides trimmed to what's in reach, steps on all cores | **Delivered for testing** |
 
 Slices 39–41 close the gaps found in the [Phase 1 gate review](docs/PHASE1_GATE.md).
 

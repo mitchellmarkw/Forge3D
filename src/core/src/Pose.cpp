@@ -10,10 +10,14 @@
 #include "forge/core/Socket.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <deque>
+#include <exception>
+#include <mutex>
 #include <numbers>
 #include <set>
+#include <thread>
 
 namespace forge::pose {
 namespace {
@@ -509,49 +513,6 @@ std::vector<Room> room(const std::vector<Joint>& joints, const Rig& rig,
     for (std::size_t i = 0; i < parts.size(); ++i)
         (moving.count(parts[i].id) ? turning : still).push_back(i);
 
-    // Where the turning parts go into still ones, at each angle, mapped back to the part
-    // being cut.
-    std::map<ObjectId, std::vector<MeshSolid>> pieces;
-    double farthest = 0.0;  // from the pivot, of anything that went in
-    const auto sweep = [&](double angle) {
-        const auto moved = posedAt(angle);
-        std::vector<MeshSolid> placedStill(parts.size());
-        std::vector<Bounds> boxStill(parts.size());
-        for (std::size_t s : still) {
-            placedStill[s] = meshkernel::transformed(parts[s].solid, movedOf(moved, parts[s].id));
-            boxStill[s] = meshkernel::bounds(placedStill[s]);
-        }
-        for (std::size_t t : turning) {
-            const Transform tm = movedOf(moved, parts[t].id);
-            const MeshSolid placed = meshkernel::transformed(parts[t].solid, tm);
-            const Bounds box = meshkernel::bounds(placed);
-            for (std::size_t s : still) {
-                if (touching.count({std::min(parts[t].id, parts[s].id), std::max(parts[t].id, parts[s].id)}))
-                    continue;
-                bool apart = false;
-                for (std::size_t k = 0; k < 3; ++k)
-                    if (box.max[k] < boxStill[s].min[k] || boxStill[s].max[k] < box.min[k])
-                        apart = true;
-                if (apart)
-                    continue;
-                const MeshSolid overlap = meshkernel::intersected({placed, placedStill[s]});
-                if (meshkernel::isEmpty(overlap) || meshkernel::volume(overlap) < 1e-6)
-                    continue;
-                const Bounds ob = meshkernel::bounds(overlap);
-                for (int c = 0; c < 8; ++c) {
-                    const Vec3 corner{(c & 1) ? ob.max[0] : ob.min[0], (c & 2) ? ob.max[1] : ob.min[1],
-                                      (c & 4) ? ob.max[2] : ob.min[2]};
-                    const Vec3 d{corner[0] - j.pivot[0], corner[1] - j.pivot[1], corner[2] - j.pivot[2]};
-                    farthest = std::max(farthest, std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]));
-                }
-                if (fromTurning)
-                    pieces[parts[t].id].push_back(meshkernel::transformed(overlap, tm.inverse()));
-                else
-                    pieces[parts[s].id].push_back(
-                        meshkernel::transformed(overlap, movedOf(moved, parts[s].id).inverse()));
-            }
-        }
-    };
     // Steps small enough that the scallops left between them are under a micron deep
     // where the turning parts reach farthest from the pivot.
     double reach = 1.0;
@@ -567,14 +528,191 @@ std::vector<Room> room(const std::vector<Joint>& joints, const Rig& rig,
     const double way = target >= start ? 1.0 : -1.0;
     const double span = std::abs(target - start);
     const int steps = std::max(1, int(std::ceil(span / stepDegrees)));
+    // As far as it could go: the sweep, and the most the clearance could add.
+    const double most = start + way * (span + 20.0);
+    std::vector<double> sweepAngles;
     for (int i = 1; i <= steps; ++i)
-        sweep(start + way * span * i / steps);
+        sweepAngles.push_back(start + way * span * i / steps);
+
+    const auto corners = [](const Bounds& b) {
+        std::array<Vec3, 8> out;
+        for (int c = 0; c < 8; ++c)
+            out[std::size_t(c)] = {(c & 1) ? b.max[0] : b.min[0], (c & 2) ? b.max[1] : b.min[1], (c & 4) ? b.max[2] : b.min[2]};
+        return out;
+    };
+    const auto boxSolid = [](const Bounds& b) {
+        std::vector<float> p;
+        for (int c = 0; c < 8; ++c)
+            p.insert(p.end(), {float((c & 1) ? b.max[0] : b.min[0]), float((c & 2) ? b.max[1] : b.min[1]),
+                               float((c & 4) ? b.max[2] : b.min[2])});
+        const std::vector<std::uint32_t> idx{0, 2, 1, 1, 2, 3, 4, 5, 6, 5, 7, 6, 0, 1, 4, 1, 5, 4,
+                                             2, 6, 3, 3, 6, 7, 0, 4, 2, 2, 4, 6, 1, 3, 5, 3, 7, 5};
+        return meshkernel::fromTriangles(p, idx);
+    };
+    const auto grow = [](Bounds b, double by) {
+        for (std::size_t k = 0; k < 3; ++k) {
+            b.min[k] -= float(by);
+            b.max[k] += float(by);
+        }
+        return b;
+    };
+    const auto overlaps = [](const Bounds& a, const Bounds& b) {
+        for (std::size_t k = 0; k < 3; ++k)
+            if (a.max[k] < b.min[k] || b.max[k] < a.min[k])
+                return false;
+        return true;
+    };
+    // The angles to look at for how far things could go (the ends, and every few degrees).
+    std::vector<double> coarse;
+    for (int i = 0; i <= 72; ++i)
+        coarse.push_back(start + (most - start) * i / 72.0);
+
+    // The still parts don't move as this joint turns: placed once, and cut down to where
+    // the turning parts ever get to (their boxes, turned all the way).
+    const auto firstMoved = posedAt(start);
+    std::vector<MeshSolid> placedStill(parts.size());
+    std::vector<Bounds> boxStill(parts.size());
+    std::vector<bool> stillReached(parts.size(), false), turningNear(parts.size(), false);
+    Bounds swept;
+    bool anySwept = false;
+    for (double a : coarse) {
+        const auto moved = posedAt(a);
+        for (std::size_t t : turning) {
+            const Transform tm = movedOf(moved, parts[t].id);
+            for (const Vec3& c : corners(meshkernel::bounds(parts[t].solid))) {
+                const Vec3 w = tm.apply(c);
+                swept.expand(float(w[0]), float(w[1]), float(w[2]));
+                anySwept = true;
+            }
+        }
+    }
+    // Turning a box's corners by a few degrees between the looks can bulge past them:
+    // a margin for that.
+    const double bulge = reach * (1.0 - std::cos((std::abs(most - start) / 72.0) * 3.14159265358979 / 180.0)) + 0.2;
+    swept = grow(swept, bulge);
+    for (std::size_t s : still) {
+        MeshSolid placed = meshkernel::transformed(parts[s].solid, movedOf(firstMoved, parts[s].id));
+        const Bounds box = meshkernel::bounds(placed);
+        if (anySwept && overlaps(box, swept)) {
+            Bounds keep;
+            for (std::size_t k = 0; k < 3; ++k) {
+                keep.min[k] = std::max(box.min[k], swept.min[k]);
+                keep.max[k] = std::min(box.max[k], swept.max[k]);
+            }
+            keep.valid = true;
+            placed = meshkernel::intersected({placed, boxSolid(grow(keep, 0.01))});
+            if (!meshkernel::isEmpty(placed)) {
+                placedStill[s] = placed;
+                boxStill[s] = meshkernel::bounds(placed);  // (worked out now, before the threads share it)
+                stillReached[s] = true;
+            }
+        }
+    }
+    // Likewise the turning parts: only what comes near the still parts that are left.
+    Bounds stillBox;
+    for (std::size_t s : still)
+        if (stillReached[s])
+            for (const Vec3& c : corners(boxStill[s]))
+                stillBox.expand(float(c[0]), float(c[1]), float(c[2]));
+    std::vector<MeshSolid> turningSolid(parts.size());
+    for (std::size_t t : turning) {
+        Bounds near;
+        if (stillBox.valid)
+            for (double a : coarse) {
+                const Transform back = movedOf(posedAt(a), parts[t].id).inverse();
+                for (const Vec3& c : corners(stillBox)) {
+                    const Vec3 w = back.apply(c);
+                    near.expand(float(w[0]), float(w[1]), float(w[2]));
+                }
+            }
+        if (!near.valid)
+            continue;
+        turningSolid[t] = meshkernel::intersected({parts[t].solid, boxSolid(grow(near, bulge))});
+        if (!meshkernel::isEmpty(turningSolid[t])) {
+            (void)meshkernel::bounds(turningSolid[t]);  // worked out now, before the threads share it
+            turningNear[t] = true;
+        }
+    }
+
+    // Where the turning parts go into still ones, at each angle, mapped back to the part
+    // being cut: the angles shared among the processor's cores.
+    struct Found {
+        std::map<ObjectId, std::vector<MeshSolid>> pieces;
+        double farthest = 0.0;  // from the pivot, of anything that went in
+    };
+    const auto sweepOne = [&](double angle, const std::map<ObjectId, Transform>& moved, Found& found) {
+        for (std::size_t t : turning) {
+            if (!turningNear[t])
+                continue;
+            const Transform tm = movedOf(moved, parts[t].id);
+            const MeshSolid placed = meshkernel::transformed(turningSolid[t], tm);
+            const Bounds box = meshkernel::bounds(placed);
+            for (std::size_t s : still) {
+                if (touching.count({std::min(parts[t].id, parts[s].id), std::max(parts[t].id, parts[s].id)}))
+                    continue;
+                if (!stillReached[s] || !overlaps(box, boxStill[s]))
+                    continue;
+                const MeshSolid overlap = meshkernel::intersected({placed, placedStill[s]});
+                if (meshkernel::isEmpty(overlap) || meshkernel::volume(overlap) < 1e-6)
+                    continue;
+                for (const Vec3& corner : corners(meshkernel::bounds(overlap))) {
+                    const Vec3 d{corner[0] - j.pivot[0], corner[1] - j.pivot[1], corner[2] - j.pivot[2]};
+                    found.farthest = std::max(found.farthest, std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]));
+                }
+                if (fromTurning)
+                    found.pieces[parts[t].id].push_back(meshkernel::transformed(overlap, tm.inverse()));
+                else
+                    found.pieces[parts[s].id].push_back(
+                        meshkernel::transformed(overlap, movedOf(moved, parts[s].id).inverse()));
+            }
+        }
+        (void)angle;
+    };
+    std::map<ObjectId, std::vector<MeshSolid>> pieces;
+    double farthest = 0.0;
+    const auto sweepAll = [&](const std::vector<double>& angles) {
+        // The joints' transforms worked out here (they share the angles map), the
+        // booleans in the threads.
+        std::vector<std::map<ObjectId, Transform>> moves;
+        for (double a : angles)
+            moves.push_back(posedAt(a));
+        const unsigned cores = std::max(1u, std::min(8u, std::thread::hardware_concurrency()));
+        std::vector<Found> found(cores);
+        std::atomic<std::size_t> next{0};
+        std::exception_ptr failed;
+        std::mutex failing;
+        const auto work = [&](unsigned w) {
+            try {
+                for (std::size_t i = next++; i < angles.size(); i = next++)
+                    sweepOne(angles[i], moves[i], found[w]);
+            } catch (...) {
+                const std::lock_guard<std::mutex> lock(failing);
+                failed = std::current_exception();
+            }
+        };
+        std::vector<std::thread> threads;
+        for (unsigned w = 1; w < cores; ++w)
+            threads.emplace_back(work, w);
+        work(0);
+        for (auto& th : threads)
+            th.join();
+        if (failed)
+            std::rethrow_exception(failed);
+        for (Found& f : found) {
+            farthest = std::max(farthest, f.farthest);
+            for (auto& [id, list] : f.pieces)
+                pieces[id].insert(pieces[id].end(), list.begin(), list.end());
+        }
+    };
+    sweepAll(sweepAngles);
     // A little past it, so there's `clearance` to spare where the parts meet.
     if (clearance > 0.0 && farthest > 0.0) {
         const double extra = std::clamp(clearance / farthest * 180.0 / 3.14159265358979, 0.5, 20.0);
         const int more = std::max(1, int(std::ceil(extra / stepDegrees)));
+        std::vector<double> past;
         for (int i = 1; i <= more; ++i)
-            sweep(target + way * extra * i / more);
+            past.push_back(target + way * extra * i / more);
+        sweepAll(past);
     }
 
     std::vector<Room> out;

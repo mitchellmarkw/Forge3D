@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.93.0 Beta — Slice 84: Faster Make Room (2026-11-23)
+
+- **Make Room** (Pose Test) is several times quicker on detailed parts: the same cut, worked out with less work.
+  - The parts that stay still are placed once rather than at every step of the turn, and only the bit of them the
+    turning parts can reach is looked at; likewise only the bit of the turning parts that comes near them.
+  - The steps of the turn are shared among all the computer's cores.
+  - On a test leg with about 80,000 triangles a part it went from 6.3 s to 1.3 s on two cores, the cut exactly the
+    same.
+
 ## 0.92.0 Beta — Slice 83: Moving by hand stops following the variables (2026-11-23)
 
 - A size or position that follows the design variables (a blue box) now stops following them when you change it by
