@@ -65,6 +65,7 @@ add_executable(forge_tests
     test_linked.cpp
     test_balance.cpp
     test_display_base.cpp
+    test_variables.cpp
     test_stamp.cpp
     test_panel_lines.cpp
     test_kit.cpp

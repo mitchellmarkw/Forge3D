@@ -596,6 +596,38 @@ void Document::setHardware(ObjectId id, bool hardware)
     notify(ChangeKind::Modified, id);
 }
 
+void Document::setFormulas(ObjectId id, std::map<std::string, std::string> formulas)
+{
+    Body& body = require(id);
+    if (body.formulas == formulas)
+        return;
+    body.formulas = std::move(formulas);
+    notify(ChangeKind::Modified, id);
+}
+
+void Document::setVariables(std::vector<Variable> table)
+{
+    variables::checkTable(table);
+    if (table == m_variables)
+        return;
+    m_variables = std::move(table);
+    const auto listeners = m_variableListeners;
+    for (const auto& [handle, listener] : listeners)
+        listener();
+}
+
+int Document::addVariableListener(std::function<void()> listener)
+{
+    const int handle = m_nextListener++;
+    m_variableListeners.emplace(handle, std::move(listener));
+    return handle;
+}
+
+void Document::removeVariableListener(int handle)
+{
+    m_variableListeners.erase(handle);
+}
+
 std::uint32_t Document::colourOf(ObjectId id) const
 {
     for (int depth = 0; depth < 1000; ++depth) {

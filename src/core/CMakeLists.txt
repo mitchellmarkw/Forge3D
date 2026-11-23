@@ -44,6 +44,7 @@ add_library(forge_core STATIC
     src/Hand.cpp
     src/Balance.cpp
     src/DisplayBase.cpp
+    src/Variables.cpp
     src/Stamp.cpp
     src/PanelLines.cpp
     src/Kit.cpp

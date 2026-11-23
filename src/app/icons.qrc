@@ -74,6 +74,7 @@
     <file alias="ports.svg">icons/ports.svg</file>
     <file alias="hand.svg">icons/hand.svg</file>
     <file alias="stand.svg">icons/stand.svg</file>
+    <file alias="variables.svg">icons/variables.svg</file>
     <file alias="stamp.svg">icons/stamp.svg</file>
     <file alias="panel-lines.svg">icons/panel-lines.svg</file>
     <file alias="thread.svg">icons/thread.svg</file>

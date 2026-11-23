@@ -78,6 +78,14 @@ pins come out beside them. Pose Test turns them at their joints.</p>
 in the line takes the same joints. In Quick Socket or Quick Hinge, set a joint up and click <b>Save to Standard</b>;
 next time pick it from the list at the top to start from its sizes. The fit stays with your printer. Export a standard
 to share it or back it up; Import adds one.</p>
+<h3>Design Variables</h3>
+<p class='where'>Build tab → Variables (or Tools → Variables)</p>
+<p>Named values used across many shapes (<b>PegDia = 3</b>, <b>Fit = 0.1</b>, <b>Hole = PegDia + 2 * Fit</b>), so
+changing one changes every shape that uses it. In Properties, press <b>=</b> in a size or position (or right-click it →
+Use a Variable...) and give a variable or a formula; that box turns blue. Typing a number in it, or right-click → Stop
+Following the Variables, makes it a plain size again. Formulas may use + - * / ^, brackets, pi, min, max, abs, sqrt,
+round, floor and ceil. Renaming a variable carries over to everything that uses it. Deleting one leaves those sizes as
+they are. Joint sizes in Quick Socket, Quick Hinge and Hand Ports still come from Joint Standards.</p>
 <h3>Tolerance Test Print</h3>
 <p class='where'>Tools → Tolerance Test Print</p>
 <p>Print it once: holes, cups and pin holes at stepped fits. The fit that works best becomes where Quick Socket and

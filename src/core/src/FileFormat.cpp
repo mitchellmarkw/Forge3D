@@ -261,6 +261,8 @@ json bodyToJson(const Body& b)
     }
     if (b.hardware)
         j["hardware"] = true;
+    if (!b.formulas.empty())
+        j["formulas"] = b.formulas;
     if (b.isBoolean()) {
         j["type"] = "combine";
         j["operation"] = opName(b.boolean->op);
@@ -629,6 +631,13 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
         b.colour = std::uint32_t(std::stoul(hex.substr(1), nullptr, 16));
     }
     b.hardware = j.value("hardware", false);
+    if (const auto formulas = j.find("formulas"); formulas != j.end()) {
+        if (!formulas->is_object())
+            damaged(where + ": formulas is not a list of fields");
+        for (const auto& [key, f] : formulas->items())
+            if (f.is_string() && !f.get<std::string>().empty())
+                b.formulas[key] = f.get<std::string>();
+    }
 
     const auto placement = j.find("placement");
     if (placement == j.end() || !placement->is_object())
@@ -1533,6 +1542,16 @@ std::string toJson(const Document& doc, const std::string& createdBy)
         root["mannequin"] = {{"height", m->height}, {"heads", m->heads}, {"x", m->x},      {"y", m->y},
                              {"turn", m->turn},     {"shown", m->shown}, {"joints", joints}};
     }
+    if (!doc.variables().empty()) {
+        json table = json::array();
+        for (const Variable& v : doc.variables()) {
+            json entry{{"name", v.name}, {"formula", v.formula}};
+            if (!v.note.empty())
+                entry["note"] = v.note;
+            table.push_back(std::move(entry));
+        }
+        root["variables"] = std::move(table);
+    }
     if (!doc.poses().empty()) {
         json poses = json::array();
         for (const SavedPose& p : doc.poses()) {
@@ -1702,6 +1721,7 @@ std::string resultKey(const Document& doc, ObjectId id)
         j.erase("name");  // renaming doesn't change the shape
         j.erase("colour");
         j.erase("hardware");  // nor does marking it a joint part
+        j.erase("formulas");  // nor where its sizes come from
         if (part == id)
             j.erase("placement");  // nor does moving the whole thing
         text += "|" + j.dump();
@@ -1923,6 +1943,37 @@ std::vector<SavedPose> posesFromJson(const std::string& text)
     return out;
 }
 
+std::vector<Variable> variablesFromJson(const std::string& text)
+{
+    std::vector<Variable> out;
+    json root;
+    try {
+        root = json::parse(text);
+    } catch (const json::parse_error&) {
+        return out;
+    }
+    if (!root.is_object())
+        return out;
+    const auto list = root.find("variables");
+    if (list == root.end() || !list->is_array())
+        return out;
+    for (const json& j : *list) {
+        try {
+            Variable v;
+            v.name = j.at("name").get<std::string>();
+            v.formula = j.value("formula", std::string("0"));
+            v.note = j.value("note", std::string());
+            std::vector<Variable> with = out;
+            with.push_back(v);
+            variables::checkTable(with);  // a broken or repeated name is left out
+            out.push_back(std::move(v));
+        } catch (const std::exception&) {
+            continue;
+        }
+    }
+    return out;
+}
+
 std::optional<Mannequin> mannequinFromJson(const std::string& text)
 {
     json root;
@@ -1970,6 +2021,27 @@ std::optional<Mannequin> loadMannequin(const std::filesystem::path& path)
     size_t size = 0;
     if (void* data = mz_zip_reader_extract_file_to_heap(&zip, kDocumentEntry, &size, 0)) {
         out = mannequinFromJson(std::string(static_cast<const char*>(data), size));
+        mz_free(data);
+    }
+    mz_zip_reader_end(&zip);
+    return out;
+}
+
+std::vector<Variable> loadVariables(const std::filesystem::path& path)
+{
+    std::string bytes;
+    try {
+        bytes = readWholeFile(path);
+    } catch (const std::exception&) {
+        return {};
+    }
+    mz_zip_archive zip{};
+    if (!mz_zip_reader_init_mem(&zip, bytes.data(), bytes.size(), 0))
+        return {};
+    std::vector<Variable> out;
+    size_t size = 0;
+    if (void* data = mz_zip_reader_extract_file_to_heap(&zip, kDocumentEntry, &size, 0)) {
+        out = variablesFromJson(std::string(static_cast<const char*>(data), size));
         mz_free(data);
     }
     mz_zip_reader_end(&zip);

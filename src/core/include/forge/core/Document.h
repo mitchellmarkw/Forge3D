@@ -8,6 +8,7 @@
 #include "forge/core/Reference.h"
 #include "forge/core/Mannequin.h"
 #include "forge/core/Transform.h"
+#include "forge/core/Variables.h"
 
 #include <TopoDS_Shape.hxx>
 
@@ -97,6 +98,9 @@ public:
     void setColour(ObjectId id, std::optional<std::uint32_t> colour);
     // Marks a joint part (Body::hardware). Doesn't change its shape.
     void setHardware(ObjectId id, bool hardware);
+    // The sizes and positions that follow the design variables (Body::formulas). Only
+    // records them: the values are set by setSpec / setPlacement.
+    void setFormulas(ObjectId id, std::map<std::string, std::string> formulas);
     // The colour a body shows in, 0xRRGGBB: its own, else (a combined shape) its first
     // part's, else one of the default colours, picked by its id.
     std::uint32_t colourOf(ObjectId id) const;
@@ -215,6 +219,15 @@ public:
     void setPoses(std::vector<SavedPose> poses);
     int addPoseListener(std::function<void()> listener);
 
+    // ---- Design variables ----
+    // Named values that sizes can follow (Variables.h). Throws std::invalid_argument
+    // (variables::checkTable) and changes nothing on a problem. Only the table: shapes
+    // are changed with it by SetVariablesCommand.
+    const std::vector<Variable>& variables() const { return m_variables; }
+    void setVariables(std::vector<Variable> table);
+    int addVariableListener(std::function<void()> listener);
+    void removeVariableListener(int handle);
+
     // ---- Figure guide ----
     // The posable mannequin to build to (see Mannequin.h), or none. Not part of the
     // model. Throws std::invalid_argument (mannequin::validate) and changes nothing.
@@ -275,6 +288,8 @@ private:
     std::map<int, std::function<void()>> m_referenceListeners;
     std::vector<SavedPose> m_poses;
     std::map<int, std::function<void()>> m_poseListeners;
+    std::vector<Variable> m_variables;
+    std::map<int, std::function<void()>> m_variableListeners;
     std::optional<Mannequin> m_mannequin;
     std::map<int, std::function<void()>> m_mannequinListeners;
 };

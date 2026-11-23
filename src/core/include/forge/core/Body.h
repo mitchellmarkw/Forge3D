@@ -7,6 +7,7 @@
 #include <memory>
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <optional>
 #include <string>
 #include <variant>
@@ -912,6 +913,9 @@ struct Body {
     // stand-in magnet): Rescale with "keep joint sizes" moves it with the design but
     // leaves its size alone.
     bool hardware = false;
+    // Sizes and positions that follow the design variables (Variables.h): the field's key
+    // ("width", "at.x"...) and its formula ("PegDia + 0.4").
+    std::map<std::string, std::string> formulas;
 
     bool isBoolean() const { return boolean.has_value(); }
     bool isOff() const { return boolean.has_value() && (suppressed || rolledBack); }

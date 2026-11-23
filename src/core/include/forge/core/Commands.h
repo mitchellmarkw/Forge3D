@@ -5,8 +5,10 @@
 #include "forge/core/Pose.h"
 #include "forge/core/Mannequin.h"
 #include "forge/core/Reference.h"
+#include "forge/core/Variables.h"
 
 #include <cstddef>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -244,6 +246,33 @@ private:
     std::optional<std::vector<ReferenceImage>> m_before;
     std::string m_label;
     bool m_mergeable;
+};
+
+// What changing the design variables to `table` does to the shapes that follow them
+// (`renames`: old name -> new, carried into their formulas): each shape's state before
+// and after, only those that change. A formula naming a variable that's gone is dropped
+// (the size stays as it is). Throws std::invalid_argument naming the shape if a new
+// value makes it impossible.
+struct VariableChanges {
+    std::vector<Body> before, after;
+};
+VariableChanges variableChanges(const Document& doc, const std::vector<Variable>& table,
+                                const std::map<std::string, std::string>& renames = {});
+
+// Changes the design variables table, and every shape that follows it, in one step.
+class SetVariablesCommand final : public Command {
+public:
+    SetVariablesCommand(std::vector<Variable> table, std::map<std::string, std::string> renames, std::string label);
+    std::string label() const override { return m_label; }
+    void redo(Document& doc) override;
+    void undo(Document& doc) override;
+
+private:
+    std::vector<Variable> m_after;
+    std::map<std::string, std::string> m_renames;
+    std::optional<std::vector<Variable>> m_before;
+    VariableChanges m_changes;
+    std::string m_label;
 };
 
 // Changes the saved poses (all of them at once).

@@ -1,11 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "PropertiesPanel.h"
 
+#include "forge/core/Variables.h"
+
 #include "WordsEditor.h"
 #include "forge/core/Text.h"
 
 #include <QCheckBox>
 #include <QDoubleSpinBox>
+#include <QContextMenuEvent>
+#include <QMenu>
+#include <QKeyEvent>
 #include <QFormLayout>
 #include <QGroupBox>
 #include <QLabel>
@@ -293,7 +298,100 @@ PropertiesPanel::PropertiesPanel(QWidget* parent) : QWidget(parent)
             emit sitOnPlateRequested(m_body->id);
     });
 
+    // Sizes and positions can follow the design variables: press = in one, or right-click it.
+    for (QDoubleSpinBox* spin : {m_sizeFields[0], m_sizeFields[1], m_sizeFields[2], m_sizeFields[3], m_sizeFields[4],
+                                 m_x, m_y, m_z, m_rotX, m_rotY, m_rotZ}) {
+        spin->installEventFilter(this);
+        if (auto* edit = spin->findChild<QLineEdit*>())
+            edit->installEventFilter(this);
+    }
+
     setBody(nullptr);
+}
+
+QDoubleSpinBox* PropertiesPanel::spinOf(QObject* watched) const
+{
+    for (QDoubleSpinBox* spin : {m_sizeFields[0], m_sizeFields[1], m_sizeFields[2], m_sizeFields[3], m_sizeFields[4],
+                                 m_x, m_y, m_z, m_rotX, m_rotY, m_rotZ})
+        if (watched == spin || (watched && watched->parent() == spin))
+            return spin;
+    return nullptr;
+}
+
+QString PropertiesPanel::keyOf(const QDoubleSpinBox* spin) const
+{
+    if (!m_body)
+        return {};
+    const std::array<std::pair<const QDoubleSpinBox*, const char*>, 6> placed{
+        {{m_x, "at.x"}, {m_y, "at.y"}, {m_z, "at.z"}, {m_rotX, "at.rotationX"}, {m_rotY, "at.rotationY"},
+         {m_rotZ, "at.rotationZ"}}};
+    for (const auto& [s, key] : placed)
+        if (s == spin)
+            return QString::fromLatin1(key);
+    if (m_body->isBoolean())
+        return {};
+    const auto& fields = specFields(m_body->spec);
+    for (std::size_t i = 0; i < m_sizeFields.size() && i < fields.size(); ++i)
+        if (m_sizeFields[i] == spin)
+            return QString::fromLatin1(fields[i].key);
+    return {};
+}
+
+QString PropertiesPanel::labelOf(const QDoubleSpinBox* spin) const
+{
+    return m_body ? QString::fromStdString(variables::fieldLabel(*m_body, keyOf(spin).toStdString())) : QString();
+}
+
+bool PropertiesPanel::eventFilter(QObject* watched, QEvent* event)
+{
+    if (event->type() != QEvent::KeyPress && event->type() != QEvent::ContextMenu)
+        return QWidget::eventFilter(watched, event);
+    QDoubleSpinBox* spin = spinOf(watched);
+    const QString key = spin ? keyOf(spin) : QString();
+    if (!spin || key.isEmpty() || !m_body)
+        return QWidget::eventFilter(watched, event);
+    const ObjectId id = m_body->id;
+    if (event->type() == QEvent::KeyPress) {
+        if (static_cast<QKeyEvent*>(event)->text() != QLatin1String("="))
+            return QWidget::eventFilter(watched, event);
+        emit formulaRequested(id, key, labelOf(spin));
+        return true;
+    }
+    const bool following = m_body->formulas.count(key.toStdString()) > 0;
+    QMenu menu;
+    QAction* use = menu.addAction(following ? tr("Change the Formula... (=)") : tr("Use a Variable... (=)"));
+    QAction* stop = following ? menu.addAction(tr("Stop Following the Variables")) : nullptr;
+    QAction* chosen = menu.exec(static_cast<QContextMenuEvent*>(event)->globalPos());
+    if (chosen == use)
+        emit formulaRequested(id, key, labelOf(spin));
+    else if (chosen && chosen == stop)
+        emit formulaClearRequested(id, key);
+    return true;
+}
+
+void PropertiesPanel::showFormulas()
+{
+    for (QDoubleSpinBox* spin : {m_sizeFields[0], m_sizeFields[1], m_sizeFields[2], m_sizeFields[3], m_sizeFields[4],
+                                 m_x, m_y, m_z, m_rotX, m_rotY, m_rotZ}) {
+        if (!spin->property("baseTip").isValid() || spin->property("tipFrom").toString() != spin->toolTip())
+            spin->setProperty("baseTip", spin->toolTip());
+        const QString base = spin->property("baseTip").toString();
+        const QString key = keyOf(spin);
+        const auto found = m_body && !key.isEmpty() ? m_body->formulas.find(key.toStdString())
+                                                    : decltype(m_body->formulas)::const_iterator{};
+        const bool following = m_body && !key.isEmpty() && found != m_body->formulas.end();
+        QString tip = base;
+        if (following)
+            tip = tr("= %1 (from the design variables). Press = to change it; type a number to stop following "
+                     "it.\n\n%2")
+                      .arg(QString::fromStdString(found->second), base);
+        else if (!key.isEmpty())
+            tip = base + tr("\n\nPress = to make it follow the design variables.");
+        spin->setToolTip(tip);
+        spin->setProperty("tipFrom", tip);
+        spin->setStyleSheet(following ? QStringLiteral("QDoubleSpinBox { background-color: rgba(52, 120, 246, 0.12); }")
+                                      : QString());
+    }
 }
 
 QDoubleSpinBox* PropertiesPanel::makeLength(const QString& tip)
@@ -484,6 +582,7 @@ void PropertiesPanel::setBody(const Body* body, const QString& context, bool isP
     m_rotX->setValue(body->placement.rotationX);
     m_rotY->setValue(body->placement.rotationY);
     m_rotZ->setValue(body->placement.rotationZ);
+    showFormulas();
 }
 
 void PropertiesPanel::commitName()
