@@ -1704,3 +1704,20 @@ and sharp across edges.
 - The app makes the cutting line as the stitching path united with its stroke (twice the allowance wide, round
   joins), lays pieces out in rows across the printable width after a 50 mm check square, and draws the same
   QPainter code into the preview, a tiled QPdfWriter (600 dpi, mm units) and a QSvgGenerator (10 units per mm).
+
+## Pictures for sharing (slice 80, 0.89.0)
+
+- `render::itemsOf` takes the shapes' world meshes, colours and per-triangle paint (`paint::triangleColours`).
+  `render::picture` is a software renderer: a perspective camera (28° high) on the bounding sphere's middle,
+  distance radius / (sin(half the narrower view) × fill), so every turn frames the same; corner normals smoothed
+  between faces under 40° apart (sharp edges stay), the points welded at 1e-4 mm; a z-buffer of 1/depth with
+  perspective-correct normals at `smooth`× size; per sample a hemisphere ambient, key, fill and rim lights fixed
+  to the camera, and a Blinn highlight, in squared (near-linear) colour; one-sample cracks closed from a side.
+- The ground's shadow: the model's lowest point over a 256² grid round it, exp(-height / (0.35 × radius)), three
+  box blurs; background samples whose ray meets the ground plane darken by it (as see-through black when clear).
+- `render::gif`: one median-cut palette (255 colours and a see-through one if any pixel is) from up to 300k
+  samples of every frame, nearest colours cached by 15-bit colour, a 4×4 Bayer dither of ±8, LZW with a
+  stamped 4096×256 table (no clearing), the NETSCAPE2.0 loop block and a delay per frame. The test reads it back
+  with a decoder written the way browsers decode.
+- The app renders in a QThread (frames counted for a QProgressDialog, Stop between frames) and writes PNG through
+  QImage.

@@ -1131,6 +1131,8 @@ private:
     void showInstructionSheet();
     // Sewing Pattern (slice 79).
     void showSewingPattern();
+    // Picture (slice 80).
+    void showPicture();
     void editFormula(ObjectId id, const QString& key, const QString& label);
     void clearFormula(ObjectId id, const QString& key);
     // `after` (a size or position typed in Properties) stops following the variables in
@@ -1140,6 +1142,7 @@ private:
     QAction* m_variablesAction = nullptr;
     QAction* m_instructionsAction = nullptr;
     QAction* m_sewingAction = nullptr;
+    QAction* m_pictureAction = nullptr;
     void poseClick(const QVector3D& origin, const QVector3D& direction);
     bool poseGrab(const QVector3D& origin, const QVector3D& direction);
     void poseDrag(const QVector3D& origin, const QVector3D& direction);
