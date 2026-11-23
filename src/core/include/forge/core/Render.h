@@ -3,9 +3,11 @@
 
 #include "forge/core/Body.h"
 #include "forge/core/Mesh.h"
+#include "forge/core/Transform.h"
 
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -48,8 +50,10 @@ struct Image {
 // the same for every turn (a turntable doesn't jump).
 Image picture(const std::vector<Item>& items, const Settings& s);
 
-// The shapes as they are in the document (world coordinates, colours and paint).
-std::vector<Item> itemsOf(const Document& doc, const std::vector<ObjectId>& ids);
+// The shapes as they are in the document (world coordinates, colours and paint), each
+// then moved by `moved` if it's there (as Pose Test has them posed).
+std::vector<Item> itemsOf(const Document& doc, const std::vector<ObjectId>& ids,
+                          const std::map<ObjectId, Transform>& moved = {});
 
 // ---- GIF ----
 // An animated GIF of `frames` (all the same size), each shown `delay` hundredths of a

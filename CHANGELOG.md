@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.95.0 Beta — Slice 86: Pictures of a pose (2026-11-23)
+
+- **Picture of This Pose...** (Pose Test, under Will it stand?): the Picture window with the figure as it's posed
+  now, in its own colours and paint (not Pose Test's), for a still PNG or a turntable GIF of the pose. The pose
+  doesn't need keeping first; everything on the plate is in it (a display base too).
+
 ## 0.94.0 Beta — Slice 85: Seams you paint, for sewing patterns (2026-11-23)
 
 - **Sewing Pattern** can cut where you want the seams: paint thin lines across the clothes in another colour (under

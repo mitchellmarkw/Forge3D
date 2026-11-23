@@ -67,6 +67,7 @@ signals:
     void balanceToggled(bool on);
     void standPegsRequested();
     void displayBaseRequested();
+    void pictureRequested();
 
 private:
     QListWidget* m_joints = nullptr;

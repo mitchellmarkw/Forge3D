@@ -2086,6 +2086,23 @@ void MainWindow::createDocks()
     });
     connect(m_posePanel, &PosePanel::standPegsRequested, this, &MainWindow::addStandPegs);
     connect(m_posePanel, &PosePanel::displayBaseRequested, this, &MainWindow::makeDisplayBase);
+    connect(m_posePanel, &PosePanel::pictureRequested, this, [this] {
+        if (!m_poseMode.active)
+            return;
+        // Everything on the plate, the figure as it's posed now.
+        std::vector<render::Item> items;
+        {
+            QApplication::setOverrideCursor(Qt::WaitCursor);
+            struct Restore {
+                ~Restore() { QApplication::restoreOverrideCursor(); }
+            } restore;
+            items = render::itemsOf(m_doc, m_doc.topLevelIds(), m_poseMode.moved);
+        }
+        const QString name = (m_filePath.isEmpty() ? tr("Untitled") : QFileInfo(m_filePath).completeBaseName()) +
+                             tr(" posed");
+        PictureDialog dialog(std::move(items), name, this);
+        dialog.exec();
+    });
     connect(m_posePanel, &PosePanel::straightenRequested, this, [this] {
         auto& mode = m_poseMode;
         if (!mode.active || mode.joint < 0)

@@ -296,3 +296,28 @@ TEST_CASE("Render: shapes from the document, painted", "[render]")
             .write(reinterpret_cast<const char*>(g.data()), std::streamsize(g.size()));
     }
 }
+
+TEST_CASE("Render: shapes as posed", "[render]")
+{
+    Document doc;
+    CommandStack stack{doc};
+    Body arm;
+    arm.id = doc.allocateId();
+    arm.name = "Arm";
+    arm.spec = BoxSpec{4, 4, 20};
+    stack.execute(std::make_unique<AddBodyCommand>(arm));
+    const auto top = [](const render::Item& it) {
+        float z = -1e9f;
+        for (std::size_t i = 2; i < it.mesh.positions.size(); i += 3)
+            z = std::max(z, it.mesh.positions[i]);
+        return z;
+    };
+    const auto still = render::itemsOf(doc, {arm.id});
+    REQUIRE(still.size() == 1);
+    CHECK(std::abs(top(still[0]) - 20.0f) < 1e-4f);
+    // Turned flat about the X axis at the bottom (as Pose Test would turn it at a joint).
+    const std::map<ObjectId, Transform> moved{{arm.id, Transform::rotationXYZ(90, 0, 0)}};
+    const auto posed = render::itemsOf(doc, {arm.id}, moved);
+    CHECK(top(posed[0]) < 3.0f);
+    CHECK(posed[0].mesh.indices == still[0].mesh.indices);
+}

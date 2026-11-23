@@ -396,7 +396,8 @@ Image picture(const std::vector<Item>& items, const Settings& s)
     return out;
 }
 
-std::vector<Item> itemsOf(const Document& doc, const std::vector<ObjectId>& ids)
+std::vector<Item> itemsOf(const Document& doc, const std::vector<ObjectId>& ids,
+                          const std::map<ObjectId, Transform>& moved)
 {
     std::vector<Item> out;
     for (ObjectId id : ids) {
@@ -408,7 +409,9 @@ std::vector<Item> itemsOf(const Document& doc, const std::vector<ObjectId>& ids)
         const std::vector<PaintDab> dabs = paint::objectPaint(doc, id);
         if (!dabs.empty())
             it.painted = paint::triangleColours(it.mesh.positions, it.mesh.indices, paint::Field(dabs));
-        const Transform world = doc.worldTransform(id);
+        Transform world = doc.worldTransform(id);
+        if (const auto m = moved.find(id); m != moved.end())
+            world = m->second * world;  // posed: moved on the plate after it's placed
         for (std::size_t i = 0; i + 2 < it.mesh.positions.size(); i += 3) {
             const Vec3 p = world.apply({it.mesh.positions[i], it.mesh.positions[i + 1], it.mesh.positions[i + 2]});
             it.mesh.positions[i] = float(p[0]);

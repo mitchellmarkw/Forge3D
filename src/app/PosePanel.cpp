@@ -131,6 +131,10 @@ PosePanel::PosePanel(QWidget* parent) : QWidget(parent)
                         "standing up right under each foot (or holes, if the feet have pegs)"));
     standLayout->addWidget(m_standBox);
     standLayout->addWidget(base);
+    auto* picture = new QPushButton(tr("Picture of This Pose..."));
+    picture->setToolTip(tr("A clean picture (PNG) or a turntable (GIF) of the figure as it's posed now, without "
+                           "keeping the pose"));
+    standLayout->addWidget(picture);
     layout->addWidget(stand);
     connect(m_showBalance, &QCheckBox::toggled, this, [this](bool on) {
         m_balance->setVisible(on);
@@ -138,6 +142,7 @@ PosePanel::PosePanel(QWidget* parent) : QWidget(parent)
     });
     connect(pegs, &QPushButton::clicked, this, &PosePanel::standPegsRequested);
     connect(base, &QPushButton::clicked, this, &PosePanel::displayBaseRequested);
+    connect(picture, &QPushButton::clicked, this, &PosePanel::pictureRequested);
     m_balance->hide();
 
     // Make Room: cut away just enough for the joint to turn to an angle.
