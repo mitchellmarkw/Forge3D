@@ -76,6 +76,7 @@
     <file alias="stand.svg">icons/stand.svg</file>
     <file alias="variables.svg">icons/variables.svg</file>
     <file alias="instructions.svg">icons/instructions.svg</file>
+    <file alias="sewing.svg">icons/sewing.svg</file>
     <file alias="stamp.svg">icons/stamp.svg</file>
     <file alias="panel-lines.svg">icons/panel-lines.svg</file>
     <file alias="thread.svg">icons/thread.svg</file>

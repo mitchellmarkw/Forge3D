@@ -46,6 +46,7 @@ add_library(forge_core STATIC
     src/DisplayBase.cpp
     src/Variables.cpp
     src/Illustration.cpp
+    src/Sewing.cpp
     src/Stamp.cpp
     src/PanelLines.cpp
     src/Kit.cpp

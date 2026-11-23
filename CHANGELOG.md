@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.88.0 Beta — Slice 79: Sewing patterns (2026-11-22)
+
+- **Sewing Pattern** (Print/Save tab, Kit; also in the Tools menu): cloth clothes for a figure. Paint the garment on
+  in one colour (Paint), select the figure, and it's turned into flat pattern pieces at full size.
+  - Seams: front and back (side seams), left and right (a seam down the middle), or one piece (a cape, a panel).
+    Two sleeves or two legs on one side are two pieces ("Front 1", "Front 2").
+  - Each piece is laid flat so lengths stay as they are on the figure (it says how close: "most lengths are within
+    2%"), turned so the figure's up is up the page, with a grain arrow.
+  - A place that can't lie flat (a tight corner) is pointed out, and so is a piece that goes all the way round.
+    Little unpainted gaps inside the painted area count as painted.
+  - The cutting line (with a seam allowance you set) solid, the stitching line dashed, each piece named.
+  - **Save as PDF** at full size on Letter or A4, over as many pages as it needs, with a 50 mm square to check the
+    printer's scale. **Save as SVG** in millimetres, for a cutting machine.
+
 ## 0.87.0 Beta — Slice 78: Instruction sheets (2026-11-22)
 
 - **Instruction Sheet** (Print/Save tab, Kit; also in the Tools menu): a PDF to go with a kit.
