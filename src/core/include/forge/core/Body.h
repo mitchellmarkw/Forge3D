@@ -643,9 +643,18 @@ struct PanelLineFinish {
     bool operator==(const PanelLineFinish&) const = default;
 };
 
+// How Split by Mask's cut surface is made (slice 87).
+enum class MaskCut {
+    Curved,  // a smooth surface spanning the mask's edge (as the mask runs round the shape)
+    Flat,    // a flat cut through where the mask's edge runs
+    Dome,    // flat, with a dome on the masked piece and a socket for it in the rest
+};
+
 struct MaskSplitFinish {
     std::vector<MaskDab> dabs;
     bool masked = true;  // this piece is the masked part (false: the rest)
+    MaskCut cut = MaskCut::Curved;
+    double fit = 0.15;   // Dome: the socket this much bigger all round
     // Alignment keys on each cut, so the pieces only go back together one way: a
     // three-sided peg on the masked piece, a hole `keyFit` bigger all round in the rest.
     bool keys = false;

@@ -1530,8 +1530,11 @@ MeshSolid Document::combineMeshes(const BooleanSpec& spec) const
         std::vector<float> pos;
         std::vector<std::uint32_t> idx;
         meshkernel::triangles(parts.front(), pos, idx);
-        const mask::Pieces pieces = mask::split(pos, idx, spec.maskSplit->dabs);
+        const mask::Pieces pieces = mask::split(pos, idx, spec.maskSplit->dabs, spec.maskSplit->cut);
         const Mesh& piece = spec.maskSplit->masked ? pieces.masked : pieces.rest;
+        if (spec.maskSplit->cut == MaskCut::Dome && pieces.dome)
+            return mask::domed(meshkernel::fromTriangles(piece.positions, piece.indices), *pieces.dome,
+                               spec.maskSplit->masked, spec.maskSplit->fit);
         if (spec.maskSplit->keys)
             return mask::keyed(piece, pieces.keySpots, spec.maskSplit->masked, spec.maskSplit->keyFit);
         return meshkernel::fromTriangles(piece.positions, piece.indices);

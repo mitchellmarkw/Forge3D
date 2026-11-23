@@ -111,11 +111,12 @@ Gate to Phase 2: a new user prints a customised part within 10 minutes.
 | 79 | Sewing patterns: a painted garment cut at seams and laid flat at full size, with seam allowance, as PDF or SVG | Done (0.88.0) |
 | 80 | Pictures for sharing: a studio-lit PNG of the model, or a turntable GIF | Done (0.89.0) |
 | 81 | Joint sizes from the design variables: Quick Socket, Quick Hinge and Hand Ports follow formulas | Done (0.90.0) |
-| 82 | Hinge pieces that follow the hinge: tabs, links, pegs and pins remade when its sizes change | **Delivered for testing** |
-| 83 | Moving by hand (handles, Align, Sit on Plate) stops a size following the variables | **Delivered for testing** |
-| 84 | Faster Make Room: still parts placed once, both sides trimmed to what's in reach, steps on all cores | **Delivered for testing** |
-| 85 | Seams you paint for sewing patterns: lines in another colour cut along, pieces meeting down their middles | **Delivered for testing** |
-| 86 | Pictures of a pose: the Picture window straight from Pose Test | **Delivered for testing** |
+| 82 | Hinge pieces that follow the hinge: tabs, links, pegs and pins remade when its sizes change | Done (0.91.0) |
+| 83 | Moving by hand (handles, Align, Sit on Plate) stops a size following the variables | Done (0.92.0) |
+| 84 | Faster Make Room: still parts placed once, both sides trimmed to what's in reach, steps on all cores | Done (0.93.0) |
+| 85 | Seams you paint for sewing patterns: lines in another colour cut along, pieces meeting down their middles | Done (0.94.0) |
+| 86 | Pictures of a pose: the Picture window straight from Pose Test | Done (0.95.0) |
+| 87 | Split by Mask cut surfaces: curved, flat, or ball and socket (a dome and a socket with a fit) | **Delivered for testing** |
 
 Slices 39–41 close the gaps found in the [Phase 1 gate review](docs/PHASE1_GATE.md).
 

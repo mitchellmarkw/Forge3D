@@ -51,16 +51,34 @@ struct KeySpot {
     double room = 0.0;
 };
 
+// A dome on a flat cut (Ball and socket): a slice of a ball standing `height` out of the
+// cut at `centre`, `radius` across at its foot, toward `normal` (out of the masked piece).
+struct Dome {
+    Vec3 centre{0, 0, 0};
+    Vec3 normal{0, 0, 1};
+    double radius = 0.0;
+    double height = 0.0;
+};
+
 // The two pieces of a closed triangle surface cut along the mask's edge, each closed
-// with the same smooth cap (facing opposite ways), so they fit back together.
+// with the same cap (facing opposite ways), so they fit back together.
 struct Pieces {
     Mesh masked, rest;  // positions and indices only
     int caps = 0;       // how many cut edges (loops) were capped
     std::vector<KeySpot> keySpots;  // one per cap
+    std::optional<Dome> dome;       // MaskCut::Dome (if there's room for one)
 };
+// `cut`: Curved caps follow the mask's edge; Flat and Dome cut through the plane that
+// best fits it (only where the masked part is: the shape isn't cut anywhere else) and
+// need the mask's edge to go round the shape just once.
 // Throws std::invalid_argument (in plain words) if either piece would be empty.
 Pieces split(const std::vector<float>& positions, const std::vector<std::uint32_t>& indices,
-             const std::vector<MaskDab>& dabs);
+             const std::vector<MaskDab>& dabs, MaskCut cut = MaskCut::Curved);
+// "Curved", "Flat", "Ball and socket"
+const char* title(MaskCut cut);
+// The piece with the dome on it (masked) or its socket in it (the rest, `fit` bigger all
+// round and deeper).
+MeshSolid domed(const MeshSolid& piece, const Dome& dome, bool masked, double fit);
 
 // "the masked part (240 dabs)" / "the rest"
 std::string describe(const MaskSplitFinish& f);
@@ -78,15 +96,17 @@ MeshSolid keyed(const Mesh& piece, const std::vector<KeySpot>& spots, bool maske
 // The Split by Mask step for `target` (dabs in plate coordinates), keeping the masked
 // piece or the rest. Just its recipe.
 // `keyFit` < 0: no alignment keys.
+// `cut`, `fit`: the cut surface (MaskSplitFinish).
 BooleanSpec maskSplitSpec(const Document& doc, ObjectId target, const std::vector<MaskDab>& dabs, bool masked,
-                          double keyFit = -1.0);
+                          double keyFit = -1.0, MaskCut cut = MaskCut::Curved, double fit = 0.15);
 
 // Cuts shape `id` (on the plate) along the mask as one undo step: Both gives two
 // shapes ("Arm (masked)" and "Arm (rest)", the second made from a copy), Front keeps the
 // masked piece, Back the rest. Throws (changing nothing) if the mask leaves either
 // piece empty.
 std::vector<ObjectId> splitByMask(CommandStack& stack, Document& doc, ObjectId id, const std::vector<MaskDab>& dabs,
-                                  SplitKeep keep, double keyFit = -1.0);
+                                  SplitKeep keep, double keyFit = -1.0, MaskCut cut = MaskCut::Curved,
+                                  double fit = 0.15);
 
 // A Split by Mask step's dabs, in plate coordinates.
 std::vector<MaskDab> maskDabs(const Document& doc, ObjectId result);
@@ -94,7 +114,9 @@ std::vector<MaskDab> maskDabs(const Document& doc, ObjectId result);
 // on the plate with the same mask (so they keep fitting together). The caller records
 // them (EditBodiesCommand).
 // `keyFit`: as for maskSplitSpec; unset keeps the keys as they are.
+// `cut`: a new cut surface and fit; unset keeps them.
 std::vector<Body> withMask(const Document& doc, ObjectId result, const std::vector<MaskDab>& dabs,
-                           std::optional<double> keyFit = std::nullopt);
+                           std::optional<double> keyFit = std::nullopt,
+                           std::optional<std::pair<MaskCut, double>> cut = std::nullopt);
 
 }  // namespace forge

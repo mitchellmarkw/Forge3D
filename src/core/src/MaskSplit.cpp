@@ -6,6 +6,7 @@
 #include "forge/core/Document.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <numbers>
 #include <stdexcept>
@@ -185,7 +186,7 @@ void refineNearEdge(std::vector<Vec3>& points, std::vector<std::uint32_t>& tris,
 }  // namespace
 
 Pieces split(const std::vector<float>& positions, const std::vector<std::uint32_t>& indices,
-             const std::vector<MaskDab>& dabs)
+             const std::vector<MaskDab>& dabs, MaskCut cut)
 {
     const Field field(dabs);
     std::vector<Vec3> points(positions.size() / 3);
@@ -252,38 +253,161 @@ Pieces split(const std::vector<float>& positions, const std::vector<std::uint32_
     }
 
     // The masked piece's open edges, chained into loops (each edge as the piece runs it).
-    std::unordered_set<std::uint64_t> directed;
-    for (std::size_t t = 0; t + 2 < inTris.size(); t += 3)
-        for (int k = 0; k < 3; ++k)
-            directed.insert(std::uint64_t(inTris[t + std::size_t(k)]) << 32 | inTris[t + std::size_t((k + 1) % 3)]);
-    std::unordered_map<std::uint32_t, std::uint32_t> next;
-    for (std::uint64_t e : directed) {
-        const auto u = std::uint32_t(e >> 32), w = std::uint32_t(e & 0xFFFFFFFFu);
-        if (!directed.count(std::uint64_t(w) << 32 | u))
-            next[u] = w;
-    }
-    std::vector<std::vector<std::uint32_t>> loops;
-    std::unordered_set<std::uint32_t> seen;
-    std::vector<std::uint32_t> starts;
-    for (const auto& [u, w] : next)
-        starts.push_back(u);
-    std::sort(starts.begin(), starts.end());  // the same caps every time
-    for (std::uint32_t start : starts) {
-        if (seen.count(start))
-            continue;
-        std::vector<std::uint32_t> loop;
-        std::uint32_t at = start;
-        do {
-            if (!seen.insert(at).second)
-                throw std::invalid_argument("The mask's edge couldn't be followed round (it may cross itself).");
-            loop.push_back(at);
-            const auto f = next.find(at);
-            if (f == next.end())
-                throw std::invalid_argument("The mask's edge couldn't be followed round.");
-            at = f->second;
-        } while (at != start);
-        if (loop.size() >= 3)
-            loops.push_back(std::move(loop));
+    const auto loopsOf = [&](const std::vector<std::uint32_t>& piece) {
+        std::unordered_set<std::uint64_t> directed;
+        for (std::size_t t = 0; t + 2 < piece.size(); t += 3)
+            for (int k = 0; k < 3; ++k)
+                directed.insert(std::uint64_t(piece[t + std::size_t(k)]) << 32 | piece[t + std::size_t((k + 1) % 3)]);
+        std::unordered_map<std::uint32_t, std::uint32_t> next;
+        for (std::uint64_t e : directed) {
+            const auto u = std::uint32_t(e >> 32), w = std::uint32_t(e & 0xFFFFFFFFu);
+            if (!directed.count(std::uint64_t(w) << 32 | u))
+                next[u] = w;
+        }
+        std::vector<std::vector<std::uint32_t>> found;
+        std::unordered_set<std::uint32_t> seen;
+        std::vector<std::uint32_t> starts;
+        for (const auto& [u, w] : next)
+            starts.push_back(u);
+        std::sort(starts.begin(), starts.end());  // the same caps every time
+        for (std::uint32_t start : starts) {
+            if (seen.count(start))
+                continue;
+            std::vector<std::uint32_t> loop;
+            std::uint32_t at = start;
+            do {
+                if (!seen.insert(at).second)
+                    throw std::invalid_argument("The mask's edge couldn't be followed round (it may cross itself).");
+                loop.push_back(at);
+                const auto f = next.find(at);
+                if (f == next.end())
+                    throw std::invalid_argument("The mask's edge couldn't be followed round.");
+                at = f->second;
+            } while (at != start);
+            if (loop.size() >= 3)
+                found.push_back(std::move(loop));
+        }
+        return found;
+    };
+    std::vector<std::vector<std::uint32_t>> loops = loopsOf(inTris);
+
+    if (cut != MaskCut::Curved) {
+        // Flat: through the plane that best fits the mask's edge, the masked side being
+        // only what joins the masked part on that side (nothing else of the shape is cut).
+        if (loops.size() != 1)
+            throw std::invalid_argument("A flat cut needs the mask's edge to go round the shape just once (this one "
+                                        "goes round " + std::to_string(loops.size()) +
+                                        " times): paint one end off, or use the curved cut.");
+        const auto& edge = loops.front();
+        Vec3 c{0, 0, 0};
+        for (std::uint32_t v : edge)
+            c = add(c, points[v]);
+        c = mul(c, 1.0 / double(edge.size()));
+        Vec3 area{0, 0, 0};
+        for (std::size_t i = 0; i < edge.size(); ++i)
+            area = add(area, cross3(sub(points[edge[i]], c), sub(points[edge[(i + 1) % edge.size()]], c)));
+        // Out of the masked part: the way its own triangles' middle isn't.
+        Vec3 n = unit3(area, {0, 0, 1});
+        Vec3 maskedMiddle{0, 0, 0};
+        double weight = 0;
+        for (std::size_t t = 0; t + 2 < inTris.size(); t += 3) {
+            const Vec3 a = points[inTris[t]], b = points[inTris[t + 1]], d = points[inTris[t + 2]];
+            const double w = std::sqrt(dist2(cross3(sub(b, a), sub(d, a)), {0, 0, 0}));
+            maskedMiddle = add(maskedMiddle, mul(add(add(a, b), d), w / 3.0));
+            weight += w;
+        }
+        if (weight > 0 && dot3(sub(mul(maskedMiddle, 1.0 / weight), c), n) > 0)
+            n = mul(n, -1.0);
+
+        // Start again from the surface before the mask's cut, and cut it by the plane.
+        points.resize(n0);
+        cuts.clear();
+        std::vector<double> d(n0);
+        for (std::size_t v = 0; v < n0; ++v) {
+            d[v] = dot3(sub(points[v], c), n);
+            if (std::abs(d[v]) < 1e-9)
+                d[v] = 0.0;
+        }
+        const auto onPlane = [&](std::uint32_t a, std::uint32_t b) {
+            const std::uint64_t k = edgeKey(a, b);
+            if (const auto f = cuts.find(k); f != cuts.end())
+                return f->second;
+            const double t = d[a] / (d[a] - d[b]);
+            const auto id = std::uint32_t(points.size());
+            points.push_back(add(points[a], mul(sub(points[b], points[a]), t)));
+            d.push_back(0.0);
+            cuts.emplace(k, id);
+            return id;
+        };
+        std::vector<std::array<std::uint32_t, 3>> below, above;  // the masked side; the other
+        for (std::size_t t = 0; t + 2 < refined.size(); t += 3) {
+            const std::uint32_t v[3] = {refined[t], refined[t + 1], refined[t + 2]};
+            bool neg = false, pos = false;
+            for (std::uint32_t x : v) {
+                neg = neg || d[x] < 0;
+                pos = pos || d[x] > 0;
+            }
+            if (!pos) {
+                below.push_back({v[0], v[1], v[2]});
+                continue;
+            }
+            if (!neg) {
+                above.push_back({v[0], v[1], v[2]});
+                continue;
+            }
+            for (int side = 0; side < 2; ++side) {
+                std::vector<std::uint32_t> poly;
+                for (int k = 0; k < 3; ++k) {
+                    const std::uint32_t a = v[k], b = v[(k + 1) % 3];
+                    if (side == 0 ? d[a] <= 0 : d[a] >= 0)
+                        poly.push_back(a);
+                    if ((d[a] < 0 && d[b] > 0) || (d[a] > 0 && d[b] < 0))
+                        poly.push_back(onPlane(a, b));
+                }
+                for (std::size_t k = 1; k + 1 < poly.size(); ++k)
+                    if (poly[0] != poly[k] && poly[k] != poly[k + 1] && poly[0] != poly[k + 1])
+                        (side == 0 ? below : above).push_back({poly[0], poly[k], poly[k + 1]});
+            }
+        }
+        // The masked side's triangles joined (not across the plane) to masked ones.
+        std::unordered_map<std::uint64_t, std::vector<std::uint32_t>> byEdge;
+        for (std::size_t t = 0; t < below.size(); ++t)
+            for (int k = 0; k < 3; ++k)
+                byEdge[edgeKey(below[t][std::size_t(k)], below[t][std::size_t((k + 1) % 3)])].push_back(std::uint32_t(t));
+        std::vector<char> keep(below.size(), 0);
+        std::vector<std::uint32_t> stack;
+        for (std::size_t t = 0; t < below.size(); ++t) {
+            const Vec3 mid = mul(add(add(points[below[t][0]], points[below[t][1]]), points[below[t][2]]), 1.0 / 3.0);
+            if (field.masked(mid)) {
+                keep[t] = 1;
+                stack.push_back(std::uint32_t(t));
+            }
+        }
+        if (stack.empty())
+            throw std::invalid_argument("The flat cut leaves nothing of the masked part: paint a little further in.");
+        while (!stack.empty()) {
+            const std::uint32_t t = stack.back();
+            stack.pop_back();
+            for (int k = 0; k < 3; ++k) {
+                const std::uint32_t a = below[t][std::size_t(k)], b = below[t][std::size_t((k + 1) % 3)];
+                if (d[a] == 0.0 && d[b] == 0.0)
+                    continue;  // along the plane: not across it
+                for (std::uint32_t o : byEdge[edgeKey(a, b)])
+                    if (!keep[o]) {
+                        keep[o] = 1;
+                        stack.push_back(o);
+                    }
+            }
+        }
+        inTris.clear();
+        outTris.clear();
+        for (std::size_t t = 0; t < below.size(); ++t)
+            (keep[t] ? inTris : outTris).insert(keep[t] ? inTris.end() : outTris.end(), below[t].begin(), below[t].end());
+        for (const auto& t : above)
+            outTris.insert(outTris.end(), t.begin(), t.end());
+        if (outTris.empty())
+            throw std::invalid_argument("The flat cut leaves nothing of the rest.");
+        loops = loopsOf(inTris);
     }
 
     // A cap for each loop: rings drawn in to the loop's middle, then smoothed like a
@@ -381,8 +505,99 @@ Pieces split(const std::vector<float>& positions, const std::vector<std::uint32_
     out.masked = build(inTris, false);
     out.rest = build(outTris, true);
     out.caps = int(loops.size());
+    if (cut == MaskCut::Dome && !keySpots.empty() && keySpots.front().room >= 1.0) {
+        // A dome on the cut's middle: well inside its edge, a little under half as high as
+        // it is across at its foot.
+        const KeySpot& spot = keySpots.front();
+        Dome dome;
+        dome.centre = spot.point;
+        dome.normal = spot.normal;
+        dome.radius = 0.6 * spot.room;
+        dome.height = 0.45 * dome.radius;
+        out.dome = dome;
+    }
     out.keySpots = std::move(keySpots);
     return out;
+}
+
+const char* title(MaskCut cut)
+{
+    switch (cut) {
+    case MaskCut::Flat: return "Flat";
+    case MaskCut::Dome: return "Ball and socket";
+    default: return "Curved";
+    }
+}
+
+namespace {
+
+// A ball of triangles, about `segments` round.
+MeshSolid ball(const Vec3& centre, double r, int segments)
+{
+    const int rings = std::max(4, segments / 2), around = std::max(8, segments);
+    std::vector<float> p;
+    std::vector<std::uint32_t> idx;
+    p.insert(p.end(), {float(centre[0]), float(centre[1]), float(centre[2] + r)});
+    for (int i = 1; i < rings; ++i)
+        for (int k = 0; k < around; ++k) {
+            const double t = std::numbers::pi * i / rings, f = 2.0 * std::numbers::pi * k / around;
+            p.insert(p.end(), {float(centre[0] + r * std::sin(t) * std::cos(f)),
+                               float(centre[1] + r * std::sin(t) * std::sin(f)), float(centre[2] + r * std::cos(t))});
+        }
+    p.insert(p.end(), {float(centre[0]), float(centre[1]), float(centre[2] - r)});
+    const auto bottom = std::uint32_t(p.size() / 3 - 1);
+    const auto v = [&](int i, int k) { return std::uint32_t(1 + (i - 1) * around + (k % around)); };
+    for (int k = 0; k < around; ++k) {
+        idx.insert(idx.end(), {0, v(1, k), v(1, k + 1)});
+        idx.insert(idx.end(), {bottom, v(rings - 1, k + 1), v(rings - 1, k)});
+    }
+    for (int i = 1; i < rings - 1; ++i)
+        for (int k = 0; k < around; ++k)
+            idx.insert(idx.end(), {v(i, k), v(i + 1, k), v(i + 1, k + 1), v(i, k), v(i + 1, k + 1), v(i, k + 1)});
+    return meshkernel::fromTriangles(p, idx);
+}
+
+// A box in a frame: X, Y from -half to half, Z from z0 to z1.
+MeshSolid slab(const Transform& frame, double half, double z0, double z1)
+{
+    std::vector<float> p;
+    for (int c = 0; c < 8; ++c) {
+        const Vec3 q = frame.apply(Vec3{(c & 1) ? half : -half, (c & 2) ? half : -half, (c & 4) ? z1 : z0});
+        p.insert(p.end(), {float(q[0]), float(q[1]), float(q[2])});
+    }
+    const std::vector<std::uint32_t> idx{0, 2, 1, 1, 2, 3, 4, 5, 6, 5, 7, 6, 0, 1, 4, 1, 5, 4,
+                                         2, 6, 3, 3, 6, 7, 0, 4, 2, 2, 4, 6, 1, 3, 5, 3, 7, 5};
+    return meshkernel::fromTriangles(p, idx);
+}
+
+}  // namespace
+
+MeshSolid domed(const MeshSolid& piece, const Dome& dome, bool masked, double fit)
+{
+    // The ball the dome is a slice of: its foot `radius` across where it meets the cut.
+    const double h = dome.height, r = dome.radius;
+    const double big = (r * r + h * h) / (2.0 * h);
+    const Vec3 n = unit3(dome.normal, {0, 0, 1});
+    const Vec3 x = unit3(cross3(std::abs(n[2]) < 0.9 ? Vec3{0, 0, 1} : Vec3{1, 0, 0}, n), {1, 0, 0});
+    const Vec3 y = cross3(n, x);
+    Transform frame;
+    for (int row = 0; row < 3; ++row) {
+        frame.m[row][0] = x[std::size_t(row)];
+        frame.m[row][1] = y[std::size_t(row)];
+        frame.m[row][2] = n[std::size_t(row)];
+        frame.m[row][3] = dome.centre[std::size_t(row)];
+    }
+    const int segments = std::clamp(int(big * 24.0), 48, 160);
+    if (masked) {
+        // Standing out of the cut: the ball's top, from a hair under the cut (so it joins).
+        const MeshSolid cap = meshkernel::intersected(
+            {ball(add(dome.centre, mul(n, h - big)), big, segments), slab(frame, r + 0.5, -0.02, h + 0.5)});
+        return meshkernel::merged({piece, cap});
+    }
+    const double g = big + fit;
+    const MeshSolid hollow = meshkernel::intersected(
+        {ball(add(dome.centre, mul(n, h - big)), g, segments), slab(frame, r + fit + 0.5, -0.5, h + fit + 0.5)});
+    return meshkernel::subtracted(piece, {hollow});
 }
 
 double keySize(double room)
@@ -432,7 +647,8 @@ std::string describe(const MaskSplitFinish& f)
 {
     const std::size_t n = f.dabs.size();
     return std::string(f.masked ? "the masked part" : "the rest") + " (" + std::to_string(n) +
-           (n == 1 ? " dab" : " dabs") + (f.keys ? ", keyed)" : ")");
+           (n == 1 ? " dab" : " dabs") + (f.cut == MaskCut::Flat ? ", flat" : f.cut == MaskCut::Dome ? ", ball and socket" : "") +
+           (f.keys ? ", keyed)" : ")");
 }
 
 }  // namespace mask
@@ -458,7 +674,7 @@ std::vector<MaskDab> moved(const std::vector<MaskDab>& dabs, const Transform& t)
 }  // namespace
 
 BooleanSpec maskSplitSpec(const Document& doc, ObjectId target, const std::vector<MaskDab>& dabs, bool masked,
-                          double keyFit)
+                          double keyFit, MaskCut cut, double fit)
 {
     if (!doc.find(target))
         throw std::out_of_range("No body with id " + std::to_string(target));
@@ -470,7 +686,11 @@ BooleanSpec maskSplitSpec(const Document& doc, ObjectId target, const std::vecto
     spec.op = BooleanOp::MaskSplit;
     spec.operands = {target};
     spec.maskSplit = MaskSplitFinish{moved(dabs, toStep), masked};
-    if (keyFit >= 0.0) {
+    if (!(fit >= 0.0 && fit <= 1.0))
+        throw std::invalid_argument("The socket's fit must be from 0 to 1 mm.");
+    spec.maskSplit->cut = cut;
+    spec.maskSplit->fit = fit;
+    if (keyFit >= 0.0 && cut != MaskCut::Dome) {  // the dome lines them up
         if (keyFit > 1.0)
             throw std::invalid_argument("The keys' fit must be from 0 to 1 mm.");
         spec.maskSplit->keys = true;
@@ -483,7 +703,7 @@ BooleanSpec maskSplitSpec(const Document& doc, ObjectId target, const std::vecto
 }
 
 std::vector<ObjectId> splitByMask(CommandStack& stack, Document& doc, ObjectId id, const std::vector<MaskDab>& dabs,
-                                  SplitKeep keep, double keyFit)
+                                  SplitKeep keep, double keyFit, MaskCut cut, double fit)
 {
     const Body* body = doc.find(id);
     if (!body)
@@ -491,7 +711,8 @@ std::vector<ObjectId> splitByMask(CommandStack& stack, Document& doc, ObjectId i
     if (!doc.isTopLevel(id))
         throw std::invalid_argument("Only a shape on the plate can be split");
     // Both pieces worked out first: refuse before changing anything.
-    BooleanSpec front = maskSplitSpec(doc, id, dabs, true, keyFit), back = maskSplitSpec(doc, id, dabs, false, keyFit);
+    BooleanSpec front = maskSplitSpec(doc, id, dabs, true, keyFit, cut, fit),
+                back = maskSplitSpec(doc, id, dabs, false, keyFit, cut, fit);
     const Document::Preview frontShape = doc.previewResult(front), backShape = doc.previewResult(back);
     if (frontShape.empty || backShape.empty)
         throw std::invalid_argument("The mask doesn't cut '" + body->name + "' in two.");
@@ -539,7 +760,7 @@ std::vector<MaskDab> maskDabs(const Document& doc, ObjectId result)
 }
 
 std::vector<Body> withMask(const Document& doc, ObjectId result, const std::vector<MaskDab>& dabs,
-                           std::optional<double> keyFit)
+                           std::optional<double> keyFit, std::optional<std::pair<MaskCut, double>> cut)
 {
     const Body& b = maskStep(doc, result);
     if (dabs.empty())
@@ -548,10 +769,16 @@ std::vector<Body> withMask(const Document& doc, ObjectId result, const std::vect
     std::vector<Body> out;
     if (keyFit && *keyFit > 1.0)
         throw std::invalid_argument("The keys' fit must be from 0 to 1 mm.");
-    const auto setKeys = [&keyFit](MaskSplitFinish& f) {
+    if (cut && !(cut->second >= 0.0 && cut->second <= 1.0))
+        throw std::invalid_argument("The socket's fit must be from 0 to 1 mm.");
+    const auto setKeys = [&keyFit, &cut](MaskSplitFinish& f) {
+        if (cut) {
+            f.cut = cut->first;
+            f.fit = cut->second;
+        }
         if (!keyFit)
             return;
-        f.keys = *keyFit >= 0.0;
+        f.keys = *keyFit >= 0.0 && f.cut != MaskCut::Dome;
         if (f.keys)
             f.keyFit = *keyFit;
     };

@@ -12373,8 +12373,14 @@ void MainWindow::startMask(ObjectId target, bool editing)
     double keyFit = -1.0;
     if (editing && body->boolean && body->boolean->maskSplit && body->boolean->maskSplit->keys)
         keyFit = body->boolean->maskSplit->keyFit;
+    MaskCut cut = MaskCut::Curved;
+    double socketFit = 0.15;
+    if (editing && body->boolean && body->boolean->maskSplit) {
+        cut = body->boolean->maskSplit->cut;
+        socketFit = body->boolean->maskSplit->fit;
+    }
     m_maskPanel->start(editing ? tr("Change the mask of '%1'").arg(name) : tr("Split '%1' by mask").arg(name), editing,
-                       keyFit);
+                       keyFit, cut, socketFit);
     m_maskPanel->setPaintColours(
         paint::colours(paint::objectPaint(m_doc, history::objectOf(m_doc, m_maskMode.part))));
     m_propsDockWidth = m_propsDock->width();
@@ -12526,7 +12532,8 @@ void MainWindow::applyMask()
             ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
         } restore;
         if (mode.editing) {
-            const std::vector<Body> after = withMask(m_doc, target, dabs, m_maskPanel->keyFit());
+            const std::vector<Body> after = withMask(m_doc, target, dabs, m_maskPanel->keyFit(),
+                                                      std::pair{m_maskPanel->cut(), m_maskPanel->socketFit()});
             std::vector<Body> before;
             for (const Body& b : after)
                 before.push_back(*m_doc.find(b.id));
@@ -12539,7 +12546,8 @@ void MainWindow::applyMask()
             setSelection(history::objectOf(m_doc, target));
             return;
         }
-        made = splitByMask(m_stack, m_doc, target, dabs, m_maskPanel->keep(), m_maskPanel->keyFit());
+        made = splitByMask(m_stack, m_doc, target, dabs, m_maskPanel->keep(), m_maskPanel->keyFit(),
+                           m_maskPanel->cut(), m_maskPanel->socketFit());
     } catch (const std::exception& e) {
         m_maskPanel->setStatus(QString::fromUtf8(e.what()), true);
         return;

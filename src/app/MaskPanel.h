@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "forge/core/Body.h"
 #include "forge/core/Split.h"
 
 #include <QColor>
@@ -26,9 +27,13 @@ public:
     explicit MaskPanel(QWidget* parent = nullptr);
 
     // `keyFit`: the step's keys when changing one (negative: none).
-    void start(const QString& title, bool editing, double keyFit = -1.0);
+    // `cut`, `socketFit`: the step's cut surface when changing one.
+    void start(const QString& title, bool editing, double keyFit = -1.0, MaskCut cut = MaskCut::Curved,
+               double socketFit = 0.15);
     // The alignment keys' fit, or negative for no keys.
     double keyFit() const;
+    MaskCut cut() const;     // the cut's surface
+    double socketFit() const;  // ball and socket: the socket's clearance, mm
     double brushSize() const;  // the brush's radius, mm
     void setBrushSize(double radius);
     SplitKeep keep() const;
@@ -59,6 +64,9 @@ private:
     QDoubleSpinBox* m_size = nullptr;
     QWidget* m_keepBox = nullptr;
     QComboBox* m_keep = nullptr;
+    void showCut();
+    QComboBox* m_cut = nullptr;
+    QDoubleSpinBox* m_socketFit = nullptr;
     QCheckBox* m_keys = nullptr;
     QDoubleSpinBox* m_keyFit = nullptr;
     QPushButton* m_undo = nullptr;

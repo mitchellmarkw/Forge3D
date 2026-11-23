@@ -231,3 +231,107 @@ TEST_CASE("Mask: alignment keys on the cut, so the pieces go back one way", "[ma
     CHECK_FALSE(plain[0].boolean->maskSplit->keys);
     CHECK_FALSE(plain[1].boolean->maskSplit->keys);
 }
+
+// Slice 87: the cut's surface.
+TEST_CASE("Mask: a flat cut, and a ball and socket", "[mask]")
+{
+    Document doc;
+    CommandStack stack(doc);
+    const ObjectId arm = add(stack, doc, CylinderSpec{6, 40});
+    // The hand end painted off with a lopsided edge (higher on one side).
+    std::vector<MaskDab> dabs;
+    for (int i = 0; i <= 10; ++i)
+        dabs.push_back({{1.5, 0, 40.0 - i}, 9.0, false});
+    const double whole = volumeOf(doc, arm);
+    std::vector<float> pos;
+    std::vector<std::uint32_t> idx;
+    meshkernel::triangles(doc.meshSolid(arm), pos, idx);
+
+    const mask::Pieces flat = mask::split(pos, idx, dabs, MaskCut::Flat);
+    REQUIRE(flat.caps == 1);
+    CHECK_FALSE(flat.dome);
+    // The cap is flat: every point of the masked piece's cut lies on one plane.
+    REQUIRE(flat.keySpots.size() == 1);
+    const mask::KeySpot& s = flat.keySpots.front();
+    CHECK(s.normal[2] < -0.9);
+    const Mesh& m = flat.masked;
+    const auto along = [&](std::uint32_t v) {
+        return (m.positions[3 * v] - s.point[0]) * s.normal[0] + (m.positions[3 * v + 1] - s.point[1]) * s.normal[1] +
+               (m.positions[3 * v + 2] - s.point[2]) * s.normal[2];
+    };
+    double lowest = 0.0, worst = 0.0, capArea = 0.0;
+    for (std::uint32_t v = 0; v < m.positions.size() / 3; ++v)
+        lowest = std::max(lowest, along(v));  // nothing of the masked piece past the cut
+    for (std::size_t t = 0; t + 2 < m.indices.size(); t += 3) {
+        const float* p0 = &m.positions[3 * m.indices[t]];
+        const float* p1 = &m.positions[3 * m.indices[t + 1]];
+        const float* p2 = &m.positions[3 * m.indices[t + 2]];
+        const Vec3 e1{p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]}, e2{p2[0] - p0[0], p2[1] - p0[1], p2[2] - p0[2]};
+        const Vec3 c{e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]};
+        const double len = std::hypot(c[0], c[1], c[2]);
+        if (len < 1e-12)
+            continue;
+        if ((c[0] * s.normal[0] + c[1] * s.normal[1] + c[2] * s.normal[2]) / len > 0.999) {  // facing the rest
+            capArea += 0.5 * len;
+            for (int k = 0; k < 3; ++k)
+                worst = std::max(worst, std::abs(along(m.indices[t + std::size_t(k)])));
+        }
+    }
+    CHECK(lowest < 1e-3);
+    CHECK(worst < 1e-3);
+    CHECK(capArea > 0.8 * std::numbers::pi * 36.0);  // the whole cross-section, tilted a little
+    const double a = meshkernel::volume(meshkernel::fromTriangles(flat.masked.positions, flat.masked.indices));
+    const double b = meshkernel::volume(meshkernel::fromTriangles(flat.rest.positions, flat.rest.indices));
+    CHECK_THAT(a + b, WithinRel(whole, 1e-5));
+    CHECK(a > 0.1 * whole);
+
+    // Ball and socket: a dome on the masked piece, a socket a little bigger in the rest.
+    const mask::Pieces domed = mask::split(pos, idx, dabs, MaskCut::Dome);
+    REQUIRE(domed.dome);
+    const mask::Dome& d = *domed.dome;
+    CHECK(d.radius > 2.0);
+    CHECK(d.radius < s.room);
+    const double cap = std::numbers::pi * d.height / 6.0 * (3 * d.radius * d.radius + d.height * d.height);
+    const MeshSolid withBall = mask::domed(meshkernel::fromTriangles(domed.masked.positions, domed.masked.indices), d,
+                                           true, 0.15);
+    const MeshSolid withSocket =
+        mask::domed(meshkernel::fromTriangles(domed.rest.positions, domed.rest.indices), d, false, 0.15);
+    CHECK_THAT(meshkernel::volume(withBall) - a, WithinRel(cap, 0.05));
+    const double hole = b - meshkernel::volume(withSocket);
+    CHECK(hole > cap * 1.05);
+    CHECK(hole < cap * 1.8);
+
+    // On the plate: saved, read back, and changed back to curved.
+    const auto made = splitByMask(stack, doc, arm, dabs, SplitKeep::Both, 0.1, MaskCut::Dome, 0.2);
+    REQUIRE(made.size() == 2);
+    CHECK_FALSE(doc.find(made[0])->boolean->maskSplit->keys);  // the ball lines them up
+    CHECK(history::describe(doc, made[0]) == "the masked part (11 dabs, ball and socket)");
+    CHECK_THAT(volumeOf(doc, made[0]) - a, WithinRel(cap, 0.05));
+    CHECK(doc.worldBounds(made[0]).min[2] < s.point[2] - d.height + 0.05);
+    Document reread;
+    reread.replaceAll(file::fromJson(file::toJson(doc, "test")));
+    CHECK(reread.find(made[1])->boolean->maskSplit == doc.find(made[1])->boolean->maskSplit);
+    CHECK(reread.find(made[1])->boolean->maskSplit->cut == MaskCut::Dome);
+    CHECK_THAT(reread.find(made[1])->boolean->maskSplit->fit, WithinAbs(0.2, 1e-9));
+    const auto curved = withMask(doc, made[0], maskDabs(doc, made[0]), std::nullopt, std::pair{MaskCut::Curved, 0.2});
+    REQUIRE(curved.size() == 2);
+    CHECK(curved[0].boolean->maskSplit->cut == MaskCut::Curved);
+    CHECK(curved[1].boolean->maskSplit->cut == MaskCut::Curved);
+}
+
+TEST_CASE("Mask: a flat cut needs one edge", "[mask]")
+{
+    Document doc;
+    CommandStack stack(doc);
+    const ObjectId cyl = add(stack, doc, CylinderSpec{5, 30});
+    std::vector<float> pos;
+    std::vector<std::uint32_t> idx;
+    meshkernel::triangles(doc.meshSolid(cyl), pos, idx);
+    std::vector<MaskDab> dabs;
+    for (int i = 0; i <= 64; ++i) {
+        const double a = 2.0 * std::numbers::pi * i / 64.0;
+        dabs.push_back({{5 * std::cos(a), 5 * std::sin(a), 15}, 3.0, false});
+    }
+    CHECK_THROWS_AS(mask::split(pos, idx, dabs, MaskCut::Flat), std::invalid_argument);  // a band: two edges
+    CHECK_NOTHROW(mask::split(pos, idx, dabs, MaskCut::Curved));
+}
