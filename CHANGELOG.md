@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.102.0 Beta — Slice 94: A joint at a split follows its cut (2026-11-23)
+
+- A **joint at the cut** (ball joint, hinge, double hinge, swivel or magnets, put in by Split or Split by Mask) now
+  follows the cut. **Move the cut** or **change the mask**, and the joint is taken out and put in again in the middle
+  of the new cut, sized to fit it again if it was "Fit the cut". One undo puts it all back.
+- With a plane split, moving either piece's cut moves the other's with it (a joint only works where the pieces meet).
+  **Move the cut...** now works on a split inside a shape's history when it has a joint at it.
+- Changing the mask of a jointed split now changes both pieces (before, the piece wrapped in the joint was left as it
+  was).
+- A joint you've taken out by hand isn't put back when the cut moves.
+- Files are now format 49.
+
 ## 0.101.0 Beta — Slice 93: Faster Split by Mask (2026-11-23)
 
 - **Split by Mask** is much quicker on painted figures, and makes far lighter pieces:
