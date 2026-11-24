@@ -423,7 +423,8 @@ void PropertiesPanel::setBody(const Body* body, const QString& context, bool isP
     m_context->setVisible(!context.isEmpty());
     m_separateButton->setVisible(body->isBoolean() && !isPart);
     const bool split = body->isBoolean() && body->boolean->op == BooleanOp::Split;
-    m_editCutButton->setVisible(split && !isPart);
+    // (A cut with a joint at it can be moved from inside the shape's history: slice 94.)
+    m_editCutButton->setVisible(split && (!isPart || body->boolean->cutJoint.has_value()));
     const bool embossed = body->isBoolean() && body->boolean->op == BooleanOp::Emboss;
     m_editEmbossButton->setVisible(embossed && !isPart);
     if (auto* editEmboss = qobject_cast<QPushButton*>(m_editEmbossButton); embossed && editEmboss) {

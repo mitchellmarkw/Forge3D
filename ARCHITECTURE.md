@@ -1857,3 +1857,17 @@ and sharp across edges.
   is behind), so a cap costs about (n + 96 × rings) triangles rather than n × rings, and the 300 smoothing passes run on
   far fewer points.
 - A hidden benchmark test, `[maskbench]`, times a dense-stroke split.
+
+## A joint at a split follows its cut (slice 94, 0.102.0)
+
+- `BooleanSpec::cutJoint` (`CutJoint{kind, size, fit, link, first}`) on both pieces' Split / MaskSplit steps;
+  `Body::jointFor` (= link) on everything `addJoint` makes (its Socket / Hinge / Merge / Subtract steps, the ball, the
+  gap disc, hinge pieces). Format 49; both are left out of the results-cache key.
+- `splitjoint::joinCut(first, second)` puts the joint in from the cut as it is: a plane's spot from `planeSpot` on the
+  first step's operand, the second's plane set to the first's (back by the gap); a mask's spot from `mask::split` on
+  the operand's plate triangles with the step's dabs moved to the plate.
+- `removeJoint(link)`: the tagged steps newest first (Separate if on the plate, RemoveStep if inside a history), then
+  the tagged loose shapes. `moveCut` / `changeMask` run remove → the edit (both pieces) → `joinCut` in one macro, only
+  re-adding if something was removed.
+- App: Move cut / Change mask go through these when the step has a `cutJoint`; a jointed split can be edited from
+  inside a history (startSplit and the Properties button allow it).

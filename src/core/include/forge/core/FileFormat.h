@@ -99,7 +99,8 @@ namespace forge::file {
 //      (a body's "formulas": field key -> formula)
 //  47  Hinge pieces (a body's "jointPiece": step, index, withTab, pinSpan, madeAt, label)
 //  48  Mask split cut styles (a mask split's "cut": flat / dome, and the socket's "fit")
-inline constexpr int kFormatVersion = 48;
+//  49  Joints that follow their cut (a split's "cutJoint"; a body's "jointFor")
+inline constexpr int kFormatVersion = 49;
 // The highest sculpt::Brush number a file may hold (Pattern).
 inline constexpr int kLastSculptBrush = 13;
 inline constexpr const char* kExtension = ".f3d";

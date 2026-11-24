@@ -268,6 +268,12 @@ json bodyToJson(const Body& b)
         j["jointPiece"] = json{{"step", p.step},         {"index", p.index},   {"withTab", p.withTab},
                                {"pinSpan", p.pinSpan},   {"madeAt", p.madeAt}, {"label", p.label}};
     }
+    if (b.jointFor != 0)
+        j["jointFor"] = b.jointFor;
+    if (b.isBoolean() && b.boolean->cutJoint) {
+        const CutJoint& c = *b.boolean->cutJoint;
+        j["cutJoint"] = json{{"kind", c.kind}, {"size", c.size}, {"fit", c.fit}, {"link", c.link}, {"first", c.first}};
+    }
     if (b.isBoolean()) {
         j["type"] = "combine";
         j["operation"] = opName(b.boolean->op);
@@ -641,6 +647,8 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
         b.colour = std::uint32_t(std::stoul(hex.substr(1), nullptr, 16));
     }
     b.hardware = j.value("hardware", false);
+    if (const auto jf = j.find("jointFor"); jf != j.end() && jf->is_number_unsigned())
+        b.jointFor = jf->get<std::uint32_t>();
     if (const auto piece = j.find("jointPiece"); piece != j.end() && piece->is_object()) {
         JointPiece p;
         try {
@@ -1401,6 +1409,19 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
         }
         spec.throughAll = j.value("throughAll", false);
         b.boolean = std::move(spec);
+        if (const auto c = j.find("cutJoint"); c != j.end() && c->is_object()) {
+            try {
+                CutJoint cj;
+                cj.kind = std::clamp(c->at("kind").get<int>(), 0, 5);
+                cj.size = std::clamp(c->value("size", 0.0), 0.0, 100.0);
+                cj.fit = std::clamp(c->value("fit", 0.1), 0.0, 1.0);
+                cj.link = c->at("link").get<std::uint32_t>();
+                cj.first = c->value("first", true);
+                b.boolean->cutJoint = cj;
+            } catch (const json::exception&) {
+                damaged(where + ": cutJoint is not a joint at a cut");
+            }
+        }
         b.suppressed = j.value("suppressed", false);
         b.rolledBack = j.value("rolledBack", false);
         if (b.name.empty())
@@ -1758,6 +1779,8 @@ std::string resultKey(const Document& doc, ObjectId id)
         j.erase("hardware");  // nor does marking it a joint part
         j.erase("formulas");  // nor where its sizes come from
         j.erase("jointPiece");  // nor which hinge it goes with
+        j.erase("jointFor");    // nor which cut's joint made it
+        j.erase("cutJoint");    // nor the joint a cut keeps
         if (part == id)
             j.erase("placement");  // nor does moving the whole thing
         text += "|" + j.dump();

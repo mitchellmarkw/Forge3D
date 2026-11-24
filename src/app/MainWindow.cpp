@@ -4428,7 +4428,10 @@ QMatrix4x4 planeFrame(const Vec3& point, const Vec3& normal, float s)
 void MainWindow::startSplit(ObjectId target, bool editing)
 {
     const Body* body = m_doc.find(target);
-    if (!body || !m_doc.isTopLevel(target))
+    // A split inside a shape's history can be moved when it has a joint at it (the joint
+    // comes out, the cut moves, and the joint goes in again: slice 94).
+    const bool jointed = body && editing && body->isBoolean() && body->boolean->cutJoint;
+    if (!body || (!m_doc.isTopLevel(target) && !jointed))
         return;
     if (m_dragState.kind != Drag::Kind::None)
         cancelDrag();
@@ -4601,6 +4604,25 @@ void MainWindow::applySplit()
         const Body* now = m_doc.find(m_splitMode.target);
         if (!now)
             return endSplit();
+        if (now->isBoolean() && now->boolean->cutJoint) {
+            // A joint at this cut: the other piece's cut goes with it, and the joint is put
+            // in again at the new cut.
+            const ObjectId id = now->id;
+            try {
+                QApplication::setOverrideCursor(Qt::WaitCursor);
+                struct RestoreCursor {
+                    ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
+                } restore;
+                splitjoint::moveCut(m_stack, m_doc, id, plane);
+            } catch (const std::exception& e) {
+                QMessageBox::warning(this, tr("Forge3D"), QString::fromUtf8(e.what()));
+                return;  // stay in the tool so the plane can be fixed
+            }
+            qInfo().noquote() << "Command:" << QString::fromStdString(m_stack.undoLabel());
+            endSplit();
+            setSelection(history::objectOf(m_doc, id));
+            return;
+        }
         Body after;
         try {
             after = withSplitPlane(m_doc, m_splitMode.target, plane);
@@ -8701,7 +8723,7 @@ void MainWindow::editStep(ObjectId id)
     case BooleanOp::Emboss: startEmboss(id, true); break;
     case BooleanOp::Sculpt: startSculpt(id, true); break;
     case BooleanOp::Split:
-        if (m_doc.isTopLevel(id))
+        if (m_doc.isTopLevel(id) || body->boolean->cutJoint)
             startSplit(id, true);
         break;
     default: break;  // Properties shows it; right-click to change the kind of combine
@@ -12665,6 +12687,16 @@ void MainWindow::applyMask()
         struct RestoreCursor {
             ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
         } restore;
+        if (const Body* step = m_doc.find(target);
+            mode.editing && step && step->isBoolean() && step->boolean->cutJoint) {
+            // A joint at this cut: put in again at the new cut, with the mask, as one step.
+            splitjoint::changeMask(m_stack, m_doc, target, dabs, m_maskPanel->keyFit(),
+                                   std::pair{m_maskPanel->cut(), m_maskPanel->socketFit()});
+            qInfo().noquote() << "Command:" << QString::fromStdString(m_stack.undoLabel());
+            endMask();
+            setSelection(history::objectOf(m_doc, target));
+            return;
+        }
         if (mode.editing) {
             const std::vector<Body> after = withMask(m_doc, target, dabs, m_maskPanel->keyFit(),
                                                       std::pair{m_maskPanel->cut(), m_maskPanel->socketFit()});

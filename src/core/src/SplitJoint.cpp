@@ -80,12 +80,14 @@ Mesh disc(const Vec3& a, const Vec3& axis, double radius, double height)
     return m;
 }
 
-// The step `spec` on `of`, keeping its name; the new step's id.
-ObjectId step(CommandStack& stack, Document& doc, BooleanSpec spec, ObjectId of)
+// The step `spec` on `of`, keeping its name; the new step's id. `link`: the cut's joint
+// it's part of (so it can be taken out and put in again).
+ObjectId step(CommandStack& stack, Document& doc, BooleanSpec spec, ObjectId of, std::uint32_t link)
 {
     Body s;
     s.id = doc.allocateId();
     s.name = doc.find(of)->name;
+    s.jointFor = link;
     s.boolean = std::move(spec);
     const ObjectId id = s.id;
     stack.execute(std::make_unique<CombineCommand>(std::move(s)));
@@ -94,11 +96,12 @@ ObjectId step(CommandStack& stack, Document& doc, BooleanSpec spec, ObjectId of)
 
 // `op` of `piece` with a shape made from a closed surface (plate coordinates).
 ObjectId withShape(CommandStack& stack, Document& doc, ObjectId piece, const Mesh& mesh, const std::string& name,
-                   BooleanOp op)
+                   BooleanOp op, std::uint32_t link)
 {
     Body shape = hinge::pieceBody(mesh, name);
     shape.id = doc.allocateId();
     shape.hardware = true;  // keeps its size when rescaled
+    shape.jointFor = link;
     const ObjectId shapeId = shape.id;
     stack.execute(std::make_unique<AddBodyCommand>(std::move(shape)));
     BooleanSpec spec;
@@ -109,7 +112,7 @@ ObjectId withShape(CommandStack& stack, Document& doc, ObjectId piece, const Mes
         throw std::invalid_argument("The joint left nothing of '" + doc.find(piece)->name + "'.");
     const auto c = preview.bounds.center();
     spec.pivot = {c[0], c[1], c[2]};
-    return step(stack, doc, std::move(spec), piece);
+    return step(stack, doc, std::move(spec), piece, link);
 }
 
 // Distance from p to the segment a-b (2D).
@@ -214,21 +217,16 @@ Spot planeSpot(const Document& doc, ObjectId id, const SplitPlane& plane)
     return s;
 }
 
-Spot maskSpot(const Document& doc, ObjectId id, const std::vector<MaskDab>& dabs, MaskCut cut)
+namespace {
+
+// The spot on a mask's cut through these triangles (plate coordinates): on its main cap
+// (the biggest; small gaps and specks in the paint make little ones).
+Spot maskSpotOf(std::vector<float> pos, const std::vector<std::uint32_t>& idx, const std::vector<MaskDab>& dabs,
+                MaskCut cut)
 {
-    std::vector<float> pos;
-    std::vector<std::uint32_t> idx;
-    meshkernel::triangles(doc.meshSolid(id), pos, idx);
-    const Transform toPlate = doc.worldTransform(id);
-    for (std::size_t i = 0; i + 2 < pos.size(); i += 3) {
-        const Vec3 p = toPlate.apply(Vec3{pos[i], pos[i + 1], pos[i + 2]});
-        for (std::size_t k = 0; k < 3; ++k)
-            pos[i + k] = float(p[k]);
-    }
     const mask::Pieces pieces = mask::split(pos, idx, dabs, cut == MaskCut::Dome ? MaskCut::Flat : cut);
     if (pieces.keySpots.empty())
         throw std::invalid_argument("The mask has no edge to put a joint on.");
-    // On the main cut: the biggest (small gaps and specks in the paint make little ones).
     const mask::KeySpot& k =
         *std::max_element(pieces.keySpots.begin(), pieces.keySpots.end(),
                           [](const mask::KeySpot& a, const mask::KeySpot& b) { return a.reach < b.reach; });
@@ -238,6 +236,28 @@ Spot maskSpot(const Document& doc, ObjectId id, const std::vector<MaskDab>& dabs
     s.room = k.room;
     s.reach = k.reach;
     return s;
+}
+
+// A shape's solid triangles in plate coordinates.
+void plateTriangles(const Document& doc, ObjectId id, std::vector<float>& pos, std::vector<std::uint32_t>& idx)
+{
+    meshkernel::triangles(doc.meshSolid(id), pos, idx);
+    const Transform toPlate = doc.worldTransform(id);
+    for (std::size_t i = 0; i + 2 < pos.size(); i += 3) {
+        const Vec3 p = toPlate.apply(Vec3{pos[i], pos[i + 1], pos[i + 2]});
+        for (std::size_t k = 0; k < 3; ++k)
+            pos[i + k] = float(p[k]);
+    }
+}
+
+}  // namespace
+
+Spot maskSpot(const Document& doc, ObjectId id, const std::vector<MaskDab>& dabs, MaskCut cut)
+{
+    std::vector<float> pos;
+    std::vector<std::uint32_t> idx;
+    plateTriangles(doc, id, pos, idx);
+    return maskSpotOf(std::move(pos), idx, dabs, cut);
 }
 
 SocketFinish ballFor(const Options& o, double room)
@@ -316,8 +336,9 @@ Made addJoint(CommandStack& stack, Document& doc, ObjectId first, ObjectId secon
             throw std::invalid_argument("The cut is too small for a " + mm(f.size) + " mm ball joint: it needs " +
                                         mm(2 * (seat.radius + 0.6)) + " mm across, and has " + mm(2 * room) +
                                         ". Choose a smaller ball.");
-        first = step(stack, doc, socketSpec(doc, first, {firstAt, out}, f), first);
-        second = withShape(stack, doc, second, limbcut::ballOnNeck(f, firstAt, out, secondAt), "Ball", BooleanOp::Merge);
+        first = step(stack, doc, socketSpec(doc, first, {firstAt, out}, f), first, link);
+        second = withShape(stack, doc, second, limbcut::ballOnNeck(f, firstAt, out, secondAt), "Ball", BooleanOp::Merge,
+                           link);
         break;
     }
     case Kind::Hinge:
@@ -340,13 +361,14 @@ Made addJoint(CommandStack& stack, Document& doc, ObjectId first, ObjectId secon
             throw std::invalid_argument("The cut is too thin for a " + mm(f.width) + " mm hinge. Choose a thinner one.");
         hinge::check(f);
         const hinge::Half other = hinge::otherHalf(f, secondAt, n);
-        second = step(stack, doc, hingeSpec(doc, second, {secondAt, n}, f), second);
-        first = step(stack, doc, hingeSpec(doc, first, {other.point, other.normal}, other.finish), first);
+        second = step(stack, doc, hingeSpec(doc, second, {secondAt, n}, f), second, link);
+        first = step(stack, doc, hingeSpec(doc, first, {other.point, other.normal}, other.finish), first, link);
         const double span = std::max(0.95 * room, 0.5 * f.width + 0.5);
         for (const hinge::Piece& piece : hinge::pieces(f, secondAt, n, false, {span, span})) {
             Body extra = hinge::pieceBody(piece.mesh, piece.name);
             extra.id = doc.allocateId();
             extra.hardware = true;
+            extra.jointFor = link;
             made.extras.push_back(extra.id);
             stack.execute(std::make_unique<AddBodyCommand>(std::move(extra)));
         }
@@ -357,13 +379,91 @@ Made addJoint(CommandStack& stack, Document& doc, ObjectId first, ObjectId secon
         socket::check(f);
         if (f.size / 2.0 + f.fit + 0.4 > room)
             throw std::invalid_argument("The cut is too small for " + mm(f.size) + " mm magnets. Choose smaller ones.");
-        first = step(stack, doc, socketSpec(doc, first, {firstAt, out}, f), first);
-        second = step(stack, doc, socketSpec(doc, second, {secondAt, n}, f), second);
+        first = step(stack, doc, socketSpec(doc, first, {firstAt, out}, f), first, link);
+        second = step(stack, doc, socketSpec(doc, second, {secondAt, n}, f), second, link);
         break;
     }
     }
     made.pieces = {first, second};
     return made;
+}
+
+Options optionsOf(const CutJoint& c)
+{
+    Options o;
+    o.kind = Kind(std::clamp(c.kind, 0, 5));
+    o.size = c.size;
+    o.fit = c.fit;
+    return o;
+}
+
+namespace {
+
+// Marks a cut's piece as having a joint at it.
+void markCut(CommandStack& stack, Document& doc, ObjectId id, const Options& o, std::uint32_t link, bool first)
+{
+    const Body before = *doc.find(id);
+    Body after = before;
+    CutJoint c;
+    c.kind = int(o.kind);
+    c.size = o.size;
+    c.fit = o.fit;
+    c.link = link;
+    c.first = first;
+    after.boolean->cutJoint = c;
+    stack.execute(std::make_unique<EditBodyCommand>(before, after, "Joint at the cut"));
+}
+
+std::string lower(std::string t)
+{
+    if (!t.empty())
+        t[0] = char(std::tolower(static_cast<unsigned char>(t[0])));
+    return t;
+}
+
+}  // namespace
+
+Made joinCut(CommandStack& stack, Document& doc, ObjectId first, ObjectId second, const Options& o,
+             std::uint32_t link)
+{
+    const Body& f = *doc.find(first);
+    if (!f.isBoolean() || f.boolean->operands.empty())
+        throw std::invalid_argument("Not a cut piece.");
+    Spot spot;
+    double gap = 0.0;
+    if (f.boolean->op == BooleanOp::Split) {
+        // Where the first piece is cut now; the other's cut brought to meet it (back by
+        // the gap), so the two always agree.
+        const SplitPlane plane = splitPlaneOf(doc, first);
+        const Vec3 n = unit(plane.normal);
+        spot = planeSpot(doc, f.boolean->operands.front(), plane);
+        gap = gapFor(o, spot.room);
+        const SplitPlane own = splitPlaneOf(doc, second);
+        const Body before = *doc.find(second);
+        const Body after = withSplitPlane(doc, second, {sub(plane.point, mul(n, gap)), own.normal});
+        if (!(after == before))
+            stack.execute(std::make_unique<EditBodyCommand>(before, after, "Move cut"));
+    } else if (f.boolean->op == BooleanOp::MaskSplit && f.boolean->maskSplit) {
+        if (f.boolean->maskSplit->cut == MaskCut::Dome)
+            throw std::invalid_argument("A ball and socket cut already joins the pieces: choose a flat or curved cut "
+                                        "for a joint.");
+        std::vector<float> pos;
+        std::vector<std::uint32_t> idx;
+        plateTriangles(doc, f.boolean->operands.front(), pos, idx);
+        std::vector<MaskDab> dabs = f.boolean->maskSplit->dabs;  // the step's coordinates
+        const Transform toPlate = doc.worldTransform(first);
+        for (MaskDab& d : dabs)
+            d.centre = toPlate.apply(Vec3{d.centre[0], d.centre[1], d.centre[2]});
+        spot = maskSpotOf(std::move(pos), idx, dabs, f.boolean->maskSplit->cut);
+        gap = gapFor(o, spot.room);
+        if (gap > 0.0)  // the rest's face cut back round the joint
+            second = withShape(stack, doc, second,
+                               disc(sub(spot.point, mul(spot.normal, 0.01)), spot.normal, spot.reach + 0.5, gap + 0.01),
+                               "Gap", BooleanOp::Subtract, link);
+    } else {
+        throw std::invalid_argument("Not a cut piece.");
+    }
+    return addJoint(stack, doc, first, second, spot, gap, o, link);
 }
 
 Made splitWithJoint(CommandStack& stack, Document& doc, ObjectId id, const SplitPlane& plane, const Options& o,
@@ -372,27 +472,15 @@ Made splitWithJoint(CommandStack& stack, Document& doc, ObjectId id, const Split
     const Body* body = doc.find(id);
     if (!body)
         throw std::out_of_range("No body with id " + std::to_string(id));
-    const Spot spot = planeSpot(doc, id, plane);
-    const double gap = gapFor(o, spot.room);
     const std::string name = body->name;
     Made made;
-    stack.beginMacro("Split " + name + " with a " + [&] {
-        std::string t = title(o.kind);
-        t[0] = char(std::tolower(static_cast<unsigned char>(t[0])));
-        return t;
-    }());
+    stack.beginMacro("Split " + name + " with a " + lower(title(o.kind)));
     try {
         const std::vector<ObjectId> halves = splitBody(stack, doc, id, plane, SplitKeep::Both);
         const ObjectId front = halves.at(0), back = halves.at(1);
-        if (gap > 0.0) {
-            // The other side cut back, for the ball's neck to tilt (or the link to sit).
-            const Vec3 n = unit(plane.normal);
-            const Body before = *doc.find(back);
-            const SplitPlane own = splitPlaneOf(doc, back);  // facing the back's way
-            const Body after = withSplitPlane(doc, back, {sub(plane.point, mul(n, gap)), own.normal});
-            stack.execute(std::make_unique<EditBodyCommand>(before, after, "Move cut"));
-        }
-        made = addJoint(stack, doc, front, back, spot, gap, o, link);
+        markCut(stack, doc, front, o, link, true);
+        markCut(stack, doc, back, o, link, false);
+        made = joinCut(stack, doc, front, back, o, link);
     } catch (...) {
         stack.abortMacro();
         throw;
@@ -410,25 +498,123 @@ Made splitByMaskWithJoint(CommandStack& stack, Document& doc, ObjectId id, const
     if (cut == MaskCut::Dome)
         throw std::invalid_argument("A ball and socket cut already joins the pieces: choose a flat or curved cut for a "
                                     "joint.");
-    const Spot spot = maskSpot(doc, id, dabs, cut);
-    const double gap = gapFor(o, spot.room);
     const std::string name = body->name;
     Made made;
     stack.beginMacro("Split " + name + " by mask with a joint");
     try {
         const std::vector<ObjectId> pieces = splitByMask(stack, doc, id, dabs, SplitKeep::Both, -1.0, cut);
-        ObjectId masked = pieces.at(0), rest = pieces.at(1);
-        if (gap > 0.0)  // the rest's face cut back round the joint
-            rest = withShape(stack, doc, rest, disc(sub(spot.point, mul(spot.normal, 0.01)), spot.normal,
-                                                    spot.reach + 0.5, gap + 0.01),
-                             "Gap", BooleanOp::Subtract);
-        made = addJoint(stack, doc, masked, rest, spot, gap, o, link);
+        markCut(stack, doc, pieces.at(0), o, link, true);
+        markCut(stack, doc, pieces.at(1), o, link, false);
+        made = joinCut(stack, doc, pieces.at(0), pieces.at(1), o, link);
     } catch (...) {
         stack.abortMacro();
         throw;
     }
     stack.endMacro();
     return made;
+}
+
+std::vector<ObjectId> cutPieces(const Document& doc, std::uint32_t link)
+{
+    ObjectId first = kInvalidId, second = kInvalidId;
+    for (const Body& b : doc.bodies())
+        if (b.isBoolean() && b.boolean->cutJoint && b.boolean->cutJoint->link == link)
+            (b.boolean->cutJoint->first ? first : second) = b.id;
+    if (first == kInvalidId || second == kInvalidId)
+        return {};
+    return {first, second};
+}
+
+bool removeJoint(CommandStack& stack, Document& doc, std::uint32_t link)
+{
+    if (link == 0)
+        return false;
+    std::vector<ObjectId> steps, loose;
+    for (const Body& b : doc.bodies())
+        if (b.jointFor == link)
+            (b.isBoolean() ? steps : loose).push_back(b.id);
+    if (steps.empty() && loose.empty())
+        return false;
+    // The steps the joint added, newest (outermost) first: each piece takes its step's place,
+    // and the ball or gap shape it used goes back on the plate.
+    std::sort(steps.rbegin(), steps.rend());
+    for (ObjectId id : steps)
+        if (doc.find(id)) {
+            // A step on the plate is separated (its parts go back on the plate where they
+            // were); one inside a shape's history is deleted from it.
+            if (doc.isTopLevel(id))
+                stack.execute(std::make_unique<SeparateCommand>(id));
+            else
+                stack.execute(std::make_unique<RemoveStepCommand>(id));
+        }
+    // Then the shapes it made (the ball, the gap, pins and links), if they're still loose.
+    for (const Body& b : std::vector<Body>(doc.bodies().begin(), doc.bodies().end()))
+        if (b.jointFor == link && !b.isBoolean() && doc.isTopLevel(b.id))
+            stack.execute(std::make_unique<RemoveBodyCommand>(b.id));
+    return true;
+}
+
+namespace {
+
+// Out with the joint, `change` the cut, and the joint put in again where the cut is now:
+// one undo step. Without a joint (or with it taken out by hand), just the change.
+template <typename Change>
+void withJointRemade(CommandStack& stack, Document& doc, ObjectId cutStep, const std::string& label, Change change)
+{
+    const Body* b = doc.find(cutStep);
+    if (!b || !b->isBoolean() || !b->boolean->cutJoint) {
+        change();
+        return;
+    }
+    const CutJoint cj = *b->boolean->cutJoint;
+    stack.beginMacro(label);
+    try {
+        const bool had = removeJoint(stack, doc, cj.link);
+        change();
+        const std::vector<ObjectId> pieces = cutPieces(doc, cj.link);
+        if (had && pieces.size() == 2)
+            joinCut(stack, doc, pieces[0], pieces[1], optionsOf(cj), cj.link);
+    } catch (...) {
+        stack.abortMacro();
+        throw;
+    }
+    stack.endMacro();
+}
+
+}  // namespace
+
+void moveCut(CommandStack& stack, Document& doc, ObjectId splitStep, const SplitPlane& plane)
+{
+    withJointRemade(stack, doc, splitStep, "Move cut", [&] {
+        const Body before = *doc.find(splitStep);
+        const Body after = withSplitPlane(doc, splitStep, plane);
+        stack.execute(std::make_unique<EditBodyCommand>(before, after, "Move cut"));
+        // With a joint, the other piece's cut goes with it (joinCut sets it exactly).
+        if (before.boolean->cutJoint) {
+            for (ObjectId other : cutPieces(doc, before.boolean->cutJoint->link))
+                if (other != splitStep) {
+                    const Body was = *doc.find(other);
+                    const Body now = withSplitPlane(doc, other, {plane.point, mul(unit(plane.normal), -1.0)});
+                    if (!(now == was))
+                        stack.execute(std::make_unique<EditBodyCommand>(was, now, "Move cut"));
+                }
+        }
+    });
+}
+
+void changeMask(CommandStack& stack, Document& doc, ObjectId maskStep, const std::vector<MaskDab>& dabs,
+                std::optional<double> keyFit, std::optional<std::pair<MaskCut, double>> cut)
+{
+    withJointRemade(stack, doc, maskStep, "Change mask", [&] {
+        const std::vector<Body> after = withMask(doc, maskStep, dabs, keyFit, cut);
+        std::vector<Body> before;
+        for (const Body& b : after)
+            before.push_back(*doc.find(b.id));
+        for (const Body& b : after)
+            if (doc.previewResult(*b.boolean).empty)
+                throw std::invalid_argument("The mask doesn't cut the shape in two.");
+        stack.execute(std::make_unique<EditBodiesCommand>(before, after, "Change mask"));
+    });
 }
 
 }  // namespace splitjoint

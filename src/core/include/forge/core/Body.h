@@ -525,6 +525,17 @@ struct SocketFinish {
     bool operator==(const SocketFinish&) const = default;
 };
 
+// A joint put in where a split's two pieces meet (slice 88), kept on both pieces (their
+// Split or MaskSplit steps) so it's put in again when the cut moves (slice 94).
+struct CutJoint {
+    int kind = 0;            // splitjoint::Kind
+    double size = 0.0;       // 0: to fit the cut
+    double fit = 0.1;
+    std::uint32_t link = 0;  // the same on both pieces, and on what the joint made (Body::jointFor)
+    bool first = true;       // this piece takes the socket (fork, bore); the other the ball (tab, peg)
+    bool operator==(const CutJoint&) const = default;
+};
+
 // A Quick Hinge: one half of a hinge or swivel joint at a spot (the step's planePoint,
 // on the fork's surface, facing out of the fork along planeNormal). Sizes in mm.
 //  - Single hinge: a fork (a slot with a pin hole across it) and a tab with a rounded
@@ -902,6 +913,8 @@ struct BooleanSpec {
     // Subtract: straight tools (box, cylinder, tube, text) are stretched along their own
     // height to go right through the first part, whatever its size ("through all").
     bool throughAll = false;
+    // Split, MaskSplit: a joint put in at the cut (slice 94).
+    std::optional<CutJoint> cutJoint{};
 
     bool operator==(const BooleanSpec&) const = default;
 };
@@ -942,6 +955,9 @@ struct Body {
     // A piece Quick Hinge made to go with a Hinge step (a tab, link, peg or pin): remade
     // when the hinge's sizes change (slice 82).
     std::optional<JointPiece> jointPiece{};
+    // Made by a joint at a split (a step, the ball, a gap, a pin): its CutJoint's link, so
+    // it's taken out and put in again when the cut moves (slice 94). 0: not.
+    std::uint32_t jointFor = 0;
 
     bool isBoolean() const { return boolean.has_value(); }
     bool isOff() const { return boolean.has_value() && (suppressed || rolledBack); }

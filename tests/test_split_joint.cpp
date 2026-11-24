@@ -4,6 +4,7 @@
 #include "forge/core/Commands.h"
 #include "forge/core/Document.h"
 #include "forge/core/FileFormat.h"
+#include "forge/core/History.h"
 #include "forge/core/MeshKernel.h"
 #include "forge/core/SplitJoint.h"
 
@@ -13,6 +14,8 @@
 #include <cmath>
 #include <filesystem>
 #include <numbers>
+#include <optional>
+#include <utility>
 
 using namespace forge;
 using Catch::Matchers::WithinAbs;
@@ -170,3 +173,116 @@ TEST_CASE("Split joint: a ball joint at a mask split", "[splitjoint]")
     CHECK(doc.isTopLevel(arm));
 }
 
+
+// Slice 94: the joint follows its cut.
+namespace {
+
+// The highest point of what's merged onto the bottom piece: the ball's top.
+double topOf(const Document& doc, ObjectId id)
+{
+    return doc.worldBounds(id).max[2];
+}
+
+int countJointFor(const Document& doc, std::uint32_t link)
+{
+    int n = 0;
+    for (const Body& b : doc.bodies())
+        n += b.jointFor == link ? 1 : 0;
+    return n;
+}
+
+}  // namespace
+
+TEST_CASE("Split joint: moving the cut moves the joint", "[splitjoint]")
+{
+    Document doc;
+    CommandStack stack(doc);
+    const ObjectId arm = add(stack, doc, CylinderSpec{6, 40});
+    const auto b = doc.worldBounds(arm);
+    const double cx = (b.min[0] + b.max[0]) / 2, cy = (b.min[1] + b.max[1]) / 2, mid = (b.min[2] + b.max[2]) / 2;
+    splitjoint::Options o;
+    o.kind = splitjoint::Kind::Ball;
+    const std::uint32_t link = 4242;
+    const splitjoint::Made made = splitjoint::splitWithJoint(stack, doc, arm, {{cx, cy, mid}, {0, 0, 1}}, o, link);
+    const std::vector<ObjectId> cut = splitjoint::cutPieces(doc, link);
+    REQUIRE(cut.size() == 2);
+    CHECK(doc.find(cut[0])->boolean->cutJoint->first);
+    CHECK_FALSE(doc.find(cut[1])->boolean->cutJoint->first);
+    const int tagged = countJointFor(doc, link);
+    CHECK(tagged >= 3);  // the socket step, the merge step and the ball
+    const double ballTop = topOf(doc, made.pieces[1]);
+    CHECK(ballTop > mid + 1.0);
+
+    // Saved and read back: still knows its joint.
+    {
+        const auto path = std::filesystem::temp_directory_path() / "cutjoint.f3d";
+        file::save(doc, path, "test");
+        Document reread;
+        reread.replaceAll(file::load(path));
+        CHECK(reread.find(cut[0])->boolean->cutJoint == doc.find(cut[0])->boolean->cutJoint);
+        CHECK(countJointFor(reread, link) == tagged);
+    }
+
+    // The top piece's cut moved up 6 mm: the bottom's goes with it, and the ball too.
+    const std::size_t steps = stack.index();
+    splitjoint::moveCut(stack, doc, cut[0], {{cx, cy, mid + 6.0}, {0, 0, 1}});
+    CHECK(stack.index() == steps + 1);  // one undo step
+    CHECK(stack.undoLabel() == "Move cut");
+    CHECK(countJointFor(doc, link) == tagged);  // the old joint gone, a new one in its place
+    const std::vector<ObjectId> now = splitjoint::cutPieces(doc, link);
+    REQUIRE(now.size() == 2);
+    const ObjectId topObject = history::objectOf(doc, now[0]), bottomObject = history::objectOf(doc, now[1]);
+    CHECK(doc.isTopLevel(topObject));
+    CHECK(doc.isTopLevel(bottomObject));
+    CHECK_THAT(doc.worldBounds(topObject).min[2], WithinAbs(mid + 6.0, 1e-3));
+    CHECK_THAT(topOf(doc, bottomObject), WithinAbs(ballTop + 6.0, 0.05));
+    CHECK(doc.worldBounds(bottomObject).min[2] < b.min[2] + 1e-3);
+
+    // One undo puts it all back.
+    stack.undo();
+    CHECK_THAT(topOf(doc, made.pieces[1]), WithinAbs(ballTop, 1e-6));
+    CHECK_THAT(doc.worldBounds(made.pieces[0]).min[2], WithinAbs(mid, 1e-3));
+
+    // A joint taken out by hand isn't put back when the cut moves.
+    CHECK(splitjoint::removeJoint(stack, doc, link));
+    CHECK(countJointFor(doc, link) == 0);
+    CHECK(doc.isTopLevel(cut[0]));
+    CHECK(doc.isTopLevel(cut[1]));
+    splitjoint::moveCut(stack, doc, cut[0], {{cx, cy, mid + 3.0}, {0, 0, 1}});
+    CHECK(countJointFor(doc, link) == 0);
+    CHECK(doc.isTopLevel(cut[0]));
+}
+
+TEST_CASE("Split joint: changing the mask moves the joint", "[splitjoint]")
+{
+    Document doc;
+    CommandStack stack(doc);
+    const ObjectId arm = add(stack, doc, CylinderSpec{6, 40});
+    const auto paint = [](double from) {
+        std::vector<MaskDab> dabs;
+        for (double z = from; z <= 40.0; z += 1.0)
+            dabs.push_back({{0, 0, z}, 9.0, false});
+        return dabs;
+    };
+    splitjoint::Options o;
+    o.kind = splitjoint::Kind::Magnets;
+    const std::uint32_t link = 77;
+    splitjoint::splitByMaskWithJoint(stack, doc, arm, paint(30.0), MaskCut::Flat, o, link);
+    std::vector<ObjectId> cut = splitjoint::cutPieces(doc, link);
+    REQUIRE(cut.size() == 2);
+    const double before = doc.worldBounds(history::objectOf(doc, cut[0])).min[2];
+    // The paint's edge 8 mm lower: both pieces cut there, magnets in again.
+    std::vector<MaskDab> lower = paint(22.0);
+    splitjoint::changeMask(stack, doc, cut[0], lower, std::nullopt, std::pair{MaskCut::Flat, 0.15});
+    CHECK(stack.undoLabel() == "Change mask");
+    cut = splitjoint::cutPieces(doc, link);
+    REQUIRE(cut.size() == 2);
+    const ObjectId hand = history::objectOf(doc, cut[0]), rest = history::objectOf(doc, cut[1]);
+    CHECK(doc.isTopLevel(hand));
+    CHECK(doc.isTopLevel(rest));
+    CHECK(doc.worldBounds(hand).min[2] < before - 6.0);
+    CHECK(doc.worldBounds(rest).max[2] < before - 6.0);  // the rest changed too
+    CHECK(countJointFor(doc, link) == 2);                // a magnet pocket in each
+    stack.undo();
+    CHECK_THAT(doc.worldBounds(history::objectOf(doc, cut[0])).min[2], WithinAbs(before, 1e-3));
+}
