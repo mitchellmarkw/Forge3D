@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.103.0 Beta — Slice 95: Make Part from paint (2026-11-24)
+
+- **Make Part** (Figure Design tab): paint where armor, a glove, a boot or a belt goes on a shape, and a new
+  separate part is made there that follows the body's surface and the edge of the paint.
+  - **Sits on top of the body** (the default): the part lies over the body with a **Fit** gap, like real armor.
+  - **Set into the body (flush)**: the body is cut back under the part, so the outline stays the same and the
+    part sits flush, with the fit at its sides and underneath (a removable plate or chest piece).
+  - **Thickness** sets how thick it is (about 1 mm for clothes, 1.5 to 2 for armor).
+- The new part is a shape of its own: sculpt it, paint it, or hold it on with magnets or a peg. One undo takes it
+  away. (To pull an existing detail off as its own piece, use Split by Mask.)
+
 ## 0.102.0 Beta — Slice 94: A joint at a split follows its cut (2026-11-23)
 
 - A **joint at the cut** (ball joint, hinge, double hinge, swivel or magnets, put in by Split or Split by Mask) now

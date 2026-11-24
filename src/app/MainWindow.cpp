@@ -17,6 +17,7 @@
 #include "SectionPanel.h"
 #include "forge/core/Layout.h"
 #include "forge/core/ShapeLibrary.h"
+#include "forge/core/MakePart.h"
 #include "forge/core/MaskSplit.h"
 #include "forge/core/Hinge.h"
 #include "forge/core/Socket.h"
@@ -1221,6 +1222,17 @@ void MainWindow::createActions()
         }
         startMask(id, false);
     });
+    m_makePartAction = new QAction(tr("Make Part"), this);
+    m_makePartAction->setToolTip(tr("Make Part: paint where armor, a glove or a belt goes on the selected shape, and "
+                                    "a new part is made there that follows the body: sitting on top, or set into it"));
+    connect(m_makePartAction, &QAction::triggered, this, [this] {
+        const ObjectId id = selectedOne();
+        if (id == kInvalidId || m_selection.size() != 1 || !m_doc.isTopLevel(id)) {
+            statusBar()->showMessage(tr("Make Part: select one shape on the plate first."), 6000);
+            return;
+        }
+        startMask(id, false, true);
+    });
     m_joinAction = new QAction(tr("Join Parts"), this);
     m_joinAction->setToolTip(tr("Join Parts: move one part so it joins another: a peg into its socket, a ball "
                                 "into its cup, a face flat against a face. Click the place on each part."));
@@ -1573,6 +1585,7 @@ void MainWindow::createToolBar()
         {m_alignMenu->menuAction(), "align"},
         {m_joinAction, "join"},
         {m_maskAction, "split-mask"},
+        {m_makePartAction, "make-part"},
         {m_mirrorMenu->menuAction(), "mirror"},
         {m_patternAction, "pattern"},
         {m_group, "group"},
@@ -1767,7 +1780,7 @@ void MainWindow::createToolBar()
     common(design);
 
     Page figure = page(tr("Figure Design"), tr("Action figures: cut into parts, hands, posing and the figure guide"));
-    group(figure, tr("Figure"), {button(m_cutPartsAction), button(m_handAction)});
+    group(figure, tr("Figure"), {button(m_cutPartsAction), button(m_handAction), button(m_makePartAction)});
     group(figure, tr("Position"), {button(m_poseFigureAction), named(m_mannequinAction, tr("Figure Guide"))});
     common(figure);
 
@@ -8500,6 +8513,7 @@ void MainWindow::refreshScene()
     m_alignMenu->menuAction()->setEnabled(m_selection.size() >= 2 && allTopLevel);
     m_joinAction->setEnabled(m_doc.bodyCount() >= 2 && !toolOpen());
     m_maskAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
+    m_makePartAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     for (QAction* a : {m_duplicate, m_copy, m_cut, m_saveCustomShape})
         a->setEnabled(anySelected && allTopLevel && !toolOpen());
     m_mirrorMenu->menuAction()->setEnabled(anySelected && allTopLevel && !toolOpen() && !rolled);
@@ -12468,7 +12482,7 @@ std::uint64_t maskCellKey(std::int64_t i, std::int64_t j, std::int64_t k)
 
 }  // namespace
 
-void MainWindow::startMask(ObjectId target, bool editing)
+void MainWindow::startMask(ObjectId target, bool editing, bool makingPart)
 {
     const Body* body = m_doc.find(target);
     if (!body || toolOpen())
@@ -12478,6 +12492,7 @@ void MainWindow::startMask(ObjectId target, bool editing)
     MaskMode mode;
     mode.active = true;
     mode.editing = editing;
+    mode.makingPart = makingPart && !editing;
     mode.target = target;
     mode.object = history::objectOf(m_doc, target);
     try {
@@ -12537,13 +12552,18 @@ void MainWindow::startMask(ObjectId target, bool editing)
     }
     m_maskPanel->start(editing ? tr("Change the mask of '%1'").arg(name) : tr("Split '%1' by mask").arg(name), editing,
                        keyFit, cut, socketFit);
+    if (m_maskMode.makingPart)
+        m_maskPanel->startPart(tr("Make a part on '%1'").arg(name));
     m_maskPanel->setPaintColours(
         paint::colours(paint::objectPaint(m_doc, history::objectOf(m_doc, m_maskMode.part))));
     m_propsDockWidth = m_propsDock->width();
     m_properties->hide();
     m_maskPanel->show();
-    statusBar()->showMessage(tr("Split by Mask: drag over the shape to paint the part to cut off (Ctrl rubs it out), "
-                                "then Apply. Esc cancels."));
+    statusBar()->showMessage(m_maskMode.makingPart
+                                 ? tr("Make Part: drag over the shape to paint where the part goes (Ctrl rubs it out), "
+                                      "then Make Part. Esc cancels.")
+                                 : tr("Split by Mask: drag over the shape to paint the part to cut off (Ctrl rubs it "
+                                      "out), then Apply. Esc cancels."));
     repaintMask();
     refreshScene();
     refreshCommandState();
@@ -12676,11 +12696,39 @@ void MainWindow::applyMask()
     if (!mode.active)
         return;
     if (mode.dabs.empty()) {
-        m_maskPanel->setStatus(tr("Paint over the part to cut off first."), true);
+        m_maskPanel->setStatus(mode.makingPart ? tr("Paint where the part goes first.")
+                                               : tr("Paint over the part to cut off first."),
+                               true);
         return;
     }
     const ObjectId target = mode.target;
     const std::vector<MaskDab> dabs = mode.dabs;
+    if (mode.makingPart) {
+        const MaskPanel::PartOptions po = m_maskPanel->partOptions();
+        makepart::Options o;
+        o.setIn = po.setIn;
+        o.thickness = po.thickness;
+        o.fit = po.fit;
+        makepart::Made made;
+        try {
+            QApplication::setOverrideCursor(Qt::WaitCursor);
+            struct RestoreCursor {
+                ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
+            } restore;
+            made = makepart::makePart(m_stack, m_doc, target, dabs, o);
+        } catch (const std::exception& e) {
+            m_maskPanel->setStatus(QString::fromUtf8(e.what()), true);  // stay, to paint again
+            return;
+        }
+        qInfo().noquote() << "Command:" << QString::fromStdString(m_stack.undoLabel());
+        endMask();
+        setSelection(made.part);
+        statusBar()->showMessage(tr("Made '%1'. It's a shape of its own: sculpt it, paint it, or add magnets or a peg "
+                                    "to hold it on.")
+                                     .arg(QString::fromStdString(m_doc.find(made.part)->name)),
+                                 10000);
+        return;
+    }
     std::vector<ObjectId> made;
     try {
         QApplication::setOverrideCursor(Qt::WaitCursor);

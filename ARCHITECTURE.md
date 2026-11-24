@@ -1871,3 +1871,16 @@ and sharp across edges.
   re-adding if something was removed.
 - App: Move cut / Change mask go through these when the step has a `cutJoint`; a jointed split can be edited from
   inside a history (startSplit and the Properties button allow it).
+
+## Make Part from paint (slice 95, 0.103.0)
+
+- `mask::Pieces::surface`: the masked piece's own triangles, without caps (the painted patch, cut cleanly along the
+  paint's edge by the mask split's refinement).
+- `makepart::slab(patch, inner, outer, shrink)`: a closed shell between two offsets of the patch along its vertex
+  normals (area-weighted, evened with neighbours 3 times), the outer layer facing out, the inner reversed, and a wall
+  on each rim edge. `shrink` moves the rim's points in along the surface (n x edge). Refuses a patch whose rim touches
+  itself at a point.
+- `makePart`: on top = slab(fit, fit + thickness), a new mesh body. Set in = slab(-thickness, 0, shrink fit), and the
+  body a Subtract step of slab(-(thickness + fit), +0.5) (hardware). One macro.
+- App: the mask painting mode with `makingPart`; `MaskPanel::startPart` hides the split options and shows the part's
+  (placement, thickness, fit; remembered under part/...). On the Figure Design tab.

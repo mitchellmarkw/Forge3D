@@ -121,9 +121,10 @@ Gate to Phase 2: a new user prints a customised part within 10 minutes.
 | 89 | Rotate for Best Print: fastest, best quality or strongest, from the shape's overhangs, height and length | Done (0.98.0) |
 | 90 | Flat mask cuts with uneven paint: the main edge only (gaps and specks ignored) | Done (0.98.1) |
 | 91 | A tidier ribbon: Figure Design and Tools tabs, Undo alone on every tab, Manage Library, American spelling | Done (0.99.0) |
-| 92 | Rotate for Best Print for resin printers, and turned to take the least room on the plate | **Delivered for testing** |
-| 93 | Faster Split by Mask: finer only where the paint's edge is, lighter caps | **Delivered for testing** |
-| 94 | A joint at a split follows its cut (moving the cut or changing the mask puts it in again) | **Delivered for testing** |
+| 92 | Rotate for Best Print for resin printers, and turned to take the least room on the plate | Done (0.100.0) |
+| 93 | Faster Split by Mask: finer only where the paint's edge is, lighter caps | Done (0.101.0) |
+| 94 | A joint at a split follows its cut (moving the cut or changing the mask puts it in again) | Done (0.102.0) |
+| 95 | Make Part from paint: a part over a painted area (armor, gloves, belts), on top or set in | **Delivered for testing** |
 
 Slices 39–41 close the gaps found in the [Phase 1 gate review](docs/PHASE1_GATE.md).
 
