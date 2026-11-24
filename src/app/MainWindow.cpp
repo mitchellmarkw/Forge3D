@@ -20,6 +20,7 @@
 #include "forge/core/MaskSplit.h"
 #include "forge/core/Hinge.h"
 #include "forge/core/Socket.h"
+#include "forge/core/PrintOrient.h"
 #include "forge/core/PrintSplit.h"
 #include "Theme.h"
 #include "JoinPanel.h"
@@ -70,6 +71,7 @@
 #include "SculptPanel.h"
 #include "CustomShapesDialog.h"
 #include "FitPanel.h"
+#include "RotateForPrintDialog.h"
 #include "SplitPanel.h"
 #include "Tour.h"
 #include "Viewport.h"
@@ -622,6 +624,10 @@ void MainWindow::createActions()
     m_sitOnPlate = new QAction(tr("Sit on Plate"), this);
     m_sitOnPlate->setToolTip(tr("Sit on Plate: move the selected shapes straight down (or up) to rest on the plate"));
     connect(m_sitOnPlate, &QAction::triggered, this, &MainWindow::sitSelectedOnPlate);
+    m_bestPrint = new QAction(tr("Rotate for Best Print"), this);
+    m_bestPrint->setToolTip(tr("Rotate for Best Print: turn the selected shapes the best way up to print, for the "
+                               "fastest print, the best quality or the strongest part"));
+    connect(m_bestPrint, &QAction::triggered, this, &MainWindow::rotateForBestPrint);
 
     m_deselect = new QAction(tr("Select &None"), this);
     m_deselect->setShortcut(Qt::Key_Escape);
@@ -1588,6 +1594,7 @@ void MainWindow::createToolBar()
         {m_poseAction, "pose"},
         {m_layFlat, "lay-on-face"},
         {m_sitOnPlate, "sit-on-plate"},
+        {m_bestPrint, "best-print"},
         {m_export, "export"},
         {m_sendToSlicer, "send-to-slicer"},
         {m_navOrbit, "orbit"},
@@ -1752,7 +1759,8 @@ void MainWindow::createToolBar()
         group(design, tr("Sketch"), {sketchButton});
     }
     group(design, tr("Change"), {button(m_split), button(m_maskAction), button(m_emboss)});
-    group(design, tr("Place"), {button(m_layFlat), button(m_sitOnPlate), button(m_extrudeDownAction)});
+    group(design, tr("Place"),
+          {button(m_layFlat), button(m_sitOnPlate), button(m_bestPrint), button(m_extrudeDownAction)});
     common(design);
 
     Page features = page(tr("Features"), tr("Holes, threads, sockets, shells, grooves, patterns and edges"));
@@ -1783,7 +1791,8 @@ void MainWindow::createToolBar()
     common(viewPage);
 
     Page print = page(tr("Print/Save"), tr("Save it, or get it to the printer"));
-    group(print, tr("Prepare"), {button(m_splitToFit), menuButton(m_layOutMenu), button(m_mouldAction)});
+    group(print, tr("Prepare"),
+          {button(m_bestPrint), button(m_splitToFit), menuButton(m_layOutMenu), button(m_mouldAction)});
     group(print, tr("Out"), {button(m_save), button(m_export), button(m_sendToSlicer)});
     group(print, tr("Library"), {button(m_saveCustomShape)});
     group(print, tr("Kit"), {button(m_instructionsAction), button(m_sewingAction)});
@@ -5667,6 +5676,68 @@ void MainWindow::sitSelectedOnPlate()
     tellDropped(dropped);
 }
 
+void MainWindow::rotateForBestPrint()
+{
+    std::vector<ObjectId> ids;
+    for (ObjectId id : m_selection)
+        if (m_doc.isTopLevel(id))
+            ids.push_back(id);
+    if (ids.empty()) {
+        statusBar()->showMessage(tr("Select the shapes to turn first."), 5000);
+        return;
+    }
+    // The facts for each shape, worked out once per goal.
+    std::map<int, std::vector<std::pair<Placement, orient::Choice>>> worked;
+    const auto work = [&](orient::Goal goal) -> std::vector<std::pair<Placement, orient::Choice>>& {
+        auto& w = worked[int(goal)];
+        if (w.empty())
+            for (ObjectId id : ids) {
+                orient::Choice c;
+                const Placement p = orient::bestPlacement(m_doc, id, goal, &c);
+                w.emplace_back(p, c);
+            }
+        return w;
+    };
+    RotateForPrintDialog dialog(int(ids.size()),
+                                [&](orient::Goal goal) {
+                                    orient::Choice sum;
+                                    bool turned = false;
+                                    for (const auto& [p, c] : work(goal)) {
+                                        turned = turned || !(c.now.down == c.best.down);
+                                        for (orient::Facts* f : {&sum.now, &sum.best}) {
+                                            const orient::Facts& g = f == &sum.now ? c.now : c.best;
+                                            f->height = std::max(f->height, g.height);
+                                            f->supportVolume += g.supportVolume;
+                                            f->overhangArea += g.overhangArea;
+                                            f->baseArea += g.baseArea;
+                                            f->staircase += g.staircase;
+                                            f->alongLength = std::max(f->alongLength, g.alongLength);
+                                            f->score += g.score;
+                                        }
+                                    }
+                                    sum.now.down = {0, 0, -1};
+                                    sum.best.down = turned ? Vec3{0, 0, 1} : Vec3{0, 0, -1};  // turned if any is
+                                    return sum;
+                                },
+                                this);
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+    std::vector<std::string> dropped;
+    m_stack.beginMacro("Rotate for Best Print");
+    try {
+        const auto& w = work(dialog.goal());
+        for (std::size_t i = 0; i < ids.size(); ++i)
+            if (!(w[i].first == m_doc.find(ids[i])->placement))
+                m_stack.execute(placementCommand(ids[i], w[i].first, dropped));
+    } catch (const std::exception& e) {
+        qWarning() << "Rotate for Best Print failed:" << e.what();
+    }
+    m_stack.endMacro();
+    tellDropped(dropped);
+    qInfo().noquote() << "Command:" << QString::fromStdString(m_stack.undoLabel()) << "-"
+                      << orient::title(dialog.goal());
+}
+
 // ---- Sculpt -----------------------------------------------------------------------
 
 namespace {
@@ -8405,6 +8476,7 @@ void MainWindow::refreshScene()
     if (!m_layFlat->isEnabled() && m_layFlat->isChecked())
         m_layFlat->setChecked(false);
     m_sitOnPlate->setEnabled(!m_selection.empty() && !toolOpen());
+    m_bestPrint->setEnabled(!m_selection.empty() && !toolOpen());
     m_sculptAction->setEnabled(m_selection.size() == 1 && m_doc.isTopLevel(m_selection.front()) && !toolOpen());
     m_simplifyAction->setEnabled(m_sculptAction->isEnabled());
     m_smoothAction->setEnabled(m_sculptAction->isEnabled());

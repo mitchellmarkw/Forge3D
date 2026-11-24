@@ -1804,3 +1804,18 @@ and sharp across edges.
   then a disc of the gap's thickness subtracted from the rest round the joint. One macro each; nothing new in the file.
 - App: `JointAtCutBox` (kind, labelled on top; size with "Fit the cut" at 0; fit), remembered under split/... and
   mask/...; it turns the pegs or keys off while a joint is chosen.
+
+## Rotate for Best Print (slice 89, 0.98.0)
+
+- `orient` (PrintOrient.h): `facts(mesh, down, goal)` measures a way down: height along it; overhang area (faces
+  facing down more than the overhang angle allows, not on the plate) and support volume (their area × how much they
+  face down × height above the plate); base area (flat faces within 0.2 mm of the plate); staircase area (faces 30° to
+  80° from upright); and `alongLength`, the main axis's (area-weighted surface PCA) share standing up, times how
+  elongated the part is.
+- Scores (lower better, in mm-like units using a typical width √(area/6)): Fastest height + support volume / width²;
+  Quality (3 × overhang + staircase) / area × width + a little height; Strongest 4 × width × alongLength + support.
+  All add a penalty when under 2% of the surface rests on the plate.
+- `best` tries the 26 cube directions, the 24 biggest flat-face directions and 200 spread round a sphere, keeping the
+  current way unless one is better by 2%. `bestPlacement` works in plate coordinates and turns with `laidOnFace`.
+- App: `RotateForPrintDialog` (goal labelled on top, a Now / Turned table), work cached per goal; applied with
+  `placementCommand` in one macro, as Sit on Plate.

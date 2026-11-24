@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.98.0 Beta — Slice 89: Rotate for Best Print (2026-11-23)
+
+- **Rotate for Best Print** (Print/Save tab, and Design → Place): turns the selected shapes the best way up to print
+  and rests them on the plate. Choose what matters:
+  - **Fastest Print**: the fewest layers (lowest height) and the least support, standing steady.
+  - **Best Quality**: the least surface marked by supports and the least gently sloping surface (where layer lines
+    show most), even if it's taller.
+  - **Strongest Print**: lying along its length, so the layers run along it (a limb or blade printed standing up
+    snaps between layers), then on a steady base with little support.
+- It tries the shape's flat faces, its sides and the turns between, and directions all round, and shows how the best
+  compares with how it sits now: height, support needed, surface supports touch, flat area on the plate, sloping
+  surface and how much of its length stands up. One undo step; the choice is remembered.
+
 ## 0.97.0 Beta — Slice 88: A joint at a split (2026-11-23)
 
 - **Split** and **Split by Mask** have **Joint at the cut**, as well as alignment pegs: put a joint in where the two

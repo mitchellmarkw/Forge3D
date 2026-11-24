@@ -18,8 +18,10 @@ add_executable(Forge3D WIN32
     PropertiesPanel.cpp
     SplitPanel.h
     JointAtCutBox.h
+    RotateForPrintDialog.h
     SplitPanel.cpp
     JointAtCutBox.cpp
+    RotateForPrintDialog.cpp
     FitPanel.cpp
     CustomShapesDialog.h
     CustomShapesDialog.cpp

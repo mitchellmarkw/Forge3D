@@ -54,6 +54,7 @@
     <file alias="shape-wedge.svg">icons/shape-wedge.svg</file>
     <file alias="shell.svg">icons/shell.svg</file>
     <file alias="sit-on-plate.svg">icons/sit-on-plate.svg</file>
+    <file alias="best-print.svg">icons/best-print.svg</file>
     <file alias="sketch.svg">icons/sketch.svg</file>
     <file alias="snap.svg">icons/snap.svg</file>
     <file alias="split.svg">icons/split.svg</file>

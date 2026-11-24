@@ -216,6 +216,7 @@ private:
     // Lay on Face: the next click on a shape turns it onto that face.
     void layFlatClick(const QVector3D& origin, const QVector3D& direction);
     void sitSelectedOnPlate();
+    void rotateForBestPrint();
     std::optional<BooleanSpec> currentEmbossSpec() const;
     bool toolOpen() const;  // Split, Emboss or Edges
 
@@ -495,6 +496,7 @@ private:
     QNetworkAccessManager* m_network = nullptr;
     QAction* m_checkAtStart = nullptr;
     QAction* m_sitOnPlate = nullptr;
+    QAction* m_bestPrint = nullptr;
     EmbossPanel* m_embossPanel = nullptr;
     struct EmbossMode {
         bool active = false;
