@@ -1884,3 +1884,16 @@ and sharp across edges.
   body a Subtract step of slab(-(thickness + fit), +0.5) (hardware). One macro.
 - App: the mask painting mode with `makingPart`; `MaskPanel::startPart` hides the split options and shows the part's
   (placement, thickness, fit; remembered under part/...). On the Figure Design tab.
+
+## Toy joint recipes (slice 96, 0.104.0)
+
+- `limbcut::Recipe` (Butterfly, DropHip, AnkleRocker, AbCrunch) on a `Choice`; `recipeFits` limits each to its joints.
+- `cutIntoParts`: after a recipe's cut, a second Limb Cut on the rest makes the block: the plane moved back in by
+  1.4 x the limb's radius (3 to 20 mm), its reach one rod round the joint (1.2 x the radius) from there to past the
+  cut face. The block owns no bones (named "<joint> block"; ids tracked through later steps).
+- Joints: `join(a, b, kind, ..., pinWant)` (the old hinge / ball code, with the pin's direction projected into the
+  cut): parent to block is a single hinge (Butterfly upright pin; DropHip and AnkleRocker left to right) or a swivel
+  (AbCrunch); block to limb is the choice's kind (a ball, or a hinge front to back for AnkleRocker, left to right for
+  AbCrunch).
+- App: four recipe types in CutPartsPanel's list before the joint standard's (each enabled only where it fits), and
+  a Super Poseable preset.

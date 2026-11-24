@@ -12881,6 +12881,16 @@ std::vector<limbcut::Choice> MainWindow::cutPartsChoices() const
         case CutPartsPanel::Hinge: hinge(HingeKind::Single); break;
         case CutPartsPanel::DoubleHinge: hinge(HingeKind::Double); break;
         case CutPartsPanel::Swivel: hinge(HingeKind::Swivel); break;
+        case CutPartsPanel::Butterfly:
+        case CutPartsPanel::DropHip:
+            c.kind = limbcut::JointKind::Ball;
+            c.recipe = CutPartsPanel::recipeOf(chosen.type);
+            break;
+        case CutPartsPanel::AnkleRocker:
+        case CutPartsPanel::AbCrunch:
+            hinge(HingeKind::Single);
+            c.recipe = CutPartsPanel::recipeOf(chosen.type);
+            break;
         default: {
             const int k = chosen.type - CutPartsPanel::FirstStandard;
             if (k < 0 || k >= int(mode.standard.size()))

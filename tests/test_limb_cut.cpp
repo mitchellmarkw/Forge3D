@@ -288,3 +288,67 @@ TEST_CASE("Cut into Parts: the usual figure (timing)", "[.bench][limbcut]")
     WARN("pieces: " << made.pieces.size() << ", "
                     << std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count() << " s");
 }
+
+// Slice 96: toy joint recipes.
+TEST_CASE("Cut into Parts: toy joint recipes", "[limbcut][recipes]")
+{
+    CHECK(limbcut::recipeFits(limbcut::Recipe::Butterfly, Joint::LeftShoulder));
+    CHECK_FALSE(limbcut::recipeFits(limbcut::Recipe::Butterfly, Joint::LeftHip));
+    CHECK(limbcut::recipeFits(limbcut::Recipe::AbCrunch, Joint::Waist));
+    CHECK(limbcut::recipeFits(limbcut::Recipe::AnkleRocker, Joint::RightAnkle));
+    CHECK(limbcut::recipeFits(limbcut::Recipe::DropHip, Joint::RightHip));
+
+    Document doc;
+    CommandStack stack(doc);
+    const ObjectId figure = addFigure(stack, doc, trianglesOf(tFigure()));
+    const PosedFinish skeleton = rig::fit(onPlate(doc, figure));
+    const double whole = meshkernel::volume(doc.meshSolid(figure));
+
+    std::vector<limbcut::Choice> choices;
+    const auto add = [&](Joint j, limbcut::JointKind kind, limbcut::Recipe recipe, double radius) {
+        limbcut::Choice c;
+        c.joint = j;
+        c.kind = kind;
+        c.recipe = recipe;
+        c.ball = limbcut::ballFor(radius);
+        c.hinge = limbcut::hingeFor(radius, HingeKind::Single);
+        choices.push_back(c);
+    };
+    add(Joint::LeftShoulder, limbcut::JointKind::Ball, limbcut::Recipe::Butterfly, 4.5);
+    add(Joint::RightHip, limbcut::JointKind::Ball, limbcut::Recipe::DropHip, 6.0);
+    add(Joint::LeftAnkle, limbcut::JointKind::Hinge, limbcut::Recipe::AnkleRocker, 3.5);
+    add(Joint::Waist, limbcut::JointKind::Hinge, limbcut::Recipe::AbCrunch, 10.0);
+    const limbcut::Made made = limbcut::cutIntoParts(stack, doc, figure, skeleton.points, choices, 200);
+
+    std::set<std::string> names;
+    double sum = 0.0;
+    for (ObjectId id : made.pieces) {
+        REQUIRE(doc.isTopLevel(id));
+        names.insert(doc.find(id)->name);
+        const double v = meshkernel::volume(doc.meshSolid(id));
+        CHECK(v > 10.0);
+        sum += v;
+    }
+    for (const char* block : {"Left shoulder block", "Right hip block", "Left ankle block", "Waist block"})
+        CHECK(names.count(block) == 1);
+    CHECK(made.pieces.size() == 1 + 4 + 4);  // the figure, four cuts, four blocks
+    // Pins: the butterfly's, the drop hip's, the rocker's two, the crunch's hinge (the swivel's peg too).
+    CHECK(made.extras.size() >= 5);
+    CHECK(sum < whole * 1.02);
+    CHECK(sum > whole * 0.85);
+    // Each block is small, and next to its joint.
+    for (ObjectId id : made.pieces)
+        if (doc.find(id)->name == "Left shoulder block") {
+            const Bounds b = doc.worldBounds(id);
+            CHECK(b.size()[0] < 25.0);
+            CHECK(b.center()[0] > 0.0);  // on the figure's left (+X)
+        }
+    stack.undo();
+    CHECK(doc.topLevelIds() == std::vector<ObjectId>{figure});
+
+    // A recipe at the wrong joint is refused.
+    choices = {};
+    add(Joint::LeftKnee, limbcut::JointKind::Ball, limbcut::Recipe::Butterfly, 5.0);
+    CHECK_THROWS_AS(limbcut::cutIntoParts(stack, doc, figure, skeleton.points, choices, 300), std::invalid_argument);
+    CHECK(doc.topLevelIds() == std::vector<ObjectId>{figure});
+}
