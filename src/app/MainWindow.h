@@ -17,6 +17,7 @@
 #include "forge/core/Sculpt.h"
 #include "forge/core/Sketch.h"
 #include "forge/core/Split.h"
+#include "forge/core/SplitJoint.h"
 #include "forge/core/Transform.h"
 #include "forge/core/Scale.h"
 #include "forge/core/Tolerance.h"
@@ -189,6 +190,8 @@ private:
     QMenu* m_layOutMenu = nullptr;  // Lay Out: flattest side down, or as they are
     // Lays out the selected shapes on the plates (all the shapes if none are selected).
     void layOutShapes(bool turnOver);
+    static std::uint32_t newJointLink();
+    static QString jointTitle(splitjoint::Kind kind);
     KeyOptions savedKeyOptions() const;
     void saveKeyOptions(const KeyOptions& options);
     std::array<double, 3> printerVolume() const;

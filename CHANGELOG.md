@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.97.0 Beta — Slice 88: A joint at a split (2026-11-23)
+
+- **Split** and **Split by Mask** have **Joint at the cut**, as well as alignment pegs: put a joint in where the two
+  pieces meet.
+  - **Ball joint**: a snap-in socket in one piece, the ball on a neck on the other; that piece is cut back a little so
+    the ball can tilt.
+  - **Hinge** and **Double hinge**: the fork in one piece, the other's end made into the tab (or a link between two
+    forks), with the pin.
+  - **Swivel**: a peg turning in a bore. **Magnets**: a magnet pocket in each face.
+- It goes at the middle of the cut (the spot farthest from its edges), sized to fit the cut unless you give a size;
+  **Joint fit** is the room round the moving parts. Too big a joint for the cut is refused, saying how much room it needs.
+- With a plane split the socket goes in the side the arrow points to; with a mask, in the painted piece. Alignment
+  pegs aren't used with a joint, and a ball-and-socket mask cut doesn't take one (it's already a joint).
+
 ## 0.96.0 Beta — Slice 87: Cut surfaces for Split by Mask (2026-11-23)
 
 - **Split by Mask** has a **Cut surface** choice:

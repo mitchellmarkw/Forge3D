@@ -73,6 +73,7 @@ add_library(forge_core STATIC
     src/PrintSplit.cpp
     src/Scale.cpp
     src/Split.cpp
+    src/SplitJoint.cpp
     src/Tessellator.cpp
     src/Sketch.cpp
     src/SketchEdit.cpp

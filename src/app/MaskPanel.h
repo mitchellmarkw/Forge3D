@@ -3,6 +3,7 @@
 
 #include "forge/core/Body.h"
 #include "forge/core/Split.h"
+#include "forge/core/SplitJoint.h"
 
 #include <QColor>
 #include <QWidget>
@@ -34,6 +35,8 @@ public:
     double keyFit() const;
     MaskCut cut() const;     // the cut's surface
     double socketFit() const;  // ball and socket: the socket's clearance, mm
+    // The joint to put in at the cut (kind None: none).
+    splitjoint::Options joint() const;
     double brushSize() const;  // the brush's radius, mm
     void setBrushSize(double radius);
     SplitKeep keep() const;
@@ -65,6 +68,7 @@ private:
     QWidget* m_keepBox = nullptr;
     QComboBox* m_keep = nullptr;
     void showCut();
+    class JointAtCutBox* m_joint = nullptr;
     QComboBox* m_cut = nullptr;
     QDoubleSpinBox* m_socketFit = nullptr;
     QCheckBox* m_keys = nullptr;

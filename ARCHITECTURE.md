@@ -1790,3 +1790,17 @@ and sharp across edges.
 - Dome: `Pieces::dome` at the cap's key spot, foot radius 0.6 × the cap's room, height 0.45 × that (none under
   1 mm of room). `mask::domed` merges the top of a ball (cut by a slab from just under the cut) onto the masked piece,
   or subtracts the same ball grown by `fit` (and a slab grown by it) from the rest. Keys are off with a dome.
+
+## A joint at a split (slice 88, 0.97.0)
+
+- `splitjoint` (SplitJoint.h): `planeSpot` finds the point of a plane's section (`sectionLoops`) farthest from its
+  edges (a grid, then finer grids round the best); `maskSpot` takes the mask cut's one `KeySpot` (now with `reach`, the
+  farthest edge). `Spot.normal` faces out of the first piece (socket, fork, bore) into the second.
+- `addJoint` does what Cut into Parts does at a joint, sized by `limbcut::ballFor` / `hingeFor` from the spot's room
+  (or the size given): a Socket step and `ballOnNeck` merged on; Hinge steps on both (the tab half from the first
+  piece's end) and the pin and link added as hardware; or Magnet Socket steps facing each other.
+- `splitWithJoint`: `splitBody`, then for a gap (`limbcut::gapFor`: ball, double hinge) the back half's plane moved
+  back by it (keeping its own, flipped, normal), then `addJoint`. `splitByMaskWithJoint`: `splitByMask` without keys,
+  then a disc of the gap's thickness subtracted from the rest round the joint. One macro each; nothing new in the file.
+- App: `JointAtCutBox` (kind, labelled on top; size with "Fit the cut" at 0; fit), remembered under split/... and
+  mask/...; it turns the pegs or keys off while a joint is chosen.
