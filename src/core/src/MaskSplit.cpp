@@ -294,15 +294,39 @@ Pieces split(const std::vector<float>& positions, const std::vector<std::uint32_
     if (cut != MaskCut::Curved) {
         // Flat: through the plane that best fits the mask's edge, the masked side being
         // only what joins the masked part on that side (nothing else of the shape is cut).
-        if (loops.size() != 1)
+        // The mask's main edge: the longest. Small gaps left in the paint and specks of it
+        // elsewhere make little edges of their own; they don't change where the cut goes.
+        const auto lengthOf = [&](const std::vector<std::uint32_t>& loop) {
+            double l = 0.0;
+            for (std::size_t i = 0; i < loop.size(); ++i)
+                l += std::sqrt(dist2(points[loop[i]], points[loop[(i + 1) % loop.size()]]));
+            return l;
+        };
+        if (loops.empty())
+            throw std::invalid_argument("The mask has no edge to cut along.");
+        std::size_t main = 0;
+        std::vector<double> lengths;
+        for (std::size_t i = 0; i < loops.size(); ++i) {
+            lengths.push_back(lengthOf(loops[i]));
+            if (lengths[i] > lengths[main])
+                main = i;
+        }
+        int big = 0;
+        for (double l : lengths)
+            big += l >= 0.5 * lengths[main] ? 1 : 0;
+        if (big > 1)
             throw std::invalid_argument("A flat cut needs the mask's edge to go round the shape just once (this one "
-                                        "goes round " + std::to_string(loops.size()) +
-                                        " times): paint one end off, or use the curved cut.");
-        const auto& edge = loops.front();
+                                        "goes round " + std::to_string(big) +
+                                        " times, like a band): paint one end off, or use the curved cut.");
+        const auto& edge = loops[main];
         Vec3 c{0, 0, 0};
-        for (std::uint32_t v : edge)
-            c = add(c, points[v]);
-        c = mul(c, 1.0 / double(edge.size()));
+        for (std::size_t i = 0; i < edge.size(); ++i) {
+            // Weighted by the edge's length on each side, so close-set points don't pull it.
+            const double w = std::sqrt(dist2(points[edge[i]], points[edge[(i + 1) % edge.size()]])) +
+                             std::sqrt(dist2(points[edge[i]], points[edge[(i + edge.size() - 1) % edge.size()]]));
+            c = add(c, mul(points[edge[i]], 0.5 * w));
+        }
+        c = mul(c, 1.0 / lengths[main]);
         Vec3 area{0, 0, 0};
         for (std::size_t i = 0; i < edge.size(); ++i)
             area = add(area, cross3(sub(points[edge[i]], c), sub(points[edge[(i + 1) % edge.size()]], c)));
@@ -376,21 +400,62 @@ Pieces split(const std::vector<float>& positions, const std::vector<std::uint32_
                 byEdge[edgeKey(below[t][std::size_t(k)], below[t][std::size_t((k + 1) % 3)])].push_back(std::uint32_t(t));
         std::vector<char> keep(below.size(), 0);
         std::vector<std::uint32_t> stack;
-        for (std::size_t t = 0; t < below.size(); ++t) {
-            const Vec3 mid = mul(add(add(points[below[t][0]], points[below[t][1]]), points[below[t][2]]), 1.0 / 3.0);
-            if (field.masked(mid)) {
-                keep[t] = 1;
-                stack.push_back(std::uint32_t(t));
+        const auto areaOf = [&](std::uint32_t t) {
+            return std::sqrt(dist2(cross3(sub(points[below[t][1]], points[below[t][0]]),
+                                          sub(points[below[t][2]], points[below[t][0]])),
+                                   {0, 0, 0}));
+        };
+        const auto acrossPlane = [&](std::uint32_t a, std::uint32_t b) { return d[a] == 0.0 && d[b] == 0.0; };
+        {
+            // The masked part: the biggest painted patch on this side (a speck of paint
+            // elsewhere doesn't take what's round it along).
+            std::vector<char> painted(below.size(), 0);
+            for (std::size_t t = 0; t < below.size(); ++t) {
+                const Vec3 mid =
+                    mul(add(add(points[below[t][0]], points[below[t][1]]), points[below[t][2]]), 1.0 / 3.0);
+                painted[t] = field.masked(mid) ? 1 : 0;
             }
+            std::vector<int> patch(below.size(), -1);
+            std::vector<double> patchArea;
+            for (std::size_t s = 0; s < below.size(); ++s) {
+                if (!painted[s] || patch[s] >= 0)
+                    continue;
+                const int id = int(patchArea.size());
+                patchArea.push_back(0.0);
+                std::vector<std::uint32_t> todo{std::uint32_t(s)};
+                patch[s] = id;
+                while (!todo.empty()) {
+                    const std::uint32_t t = todo.back();
+                    todo.pop_back();
+                    patchArea[std::size_t(id)] += areaOf(t);
+                    for (int k = 0; k < 3; ++k) {
+                        const std::uint32_t a = below[t][std::size_t(k)], b = below[t][std::size_t((k + 1) % 3)];
+                        if (acrossPlane(a, b))
+                            continue;
+                        for (std::uint32_t o : byEdge[edgeKey(a, b)])
+                            if (painted[o] && patch[o] < 0) {
+                                patch[o] = id;
+                                todo.push_back(o);
+                            }
+                    }
+                }
+            }
+            if (patchArea.empty())
+                throw std::invalid_argument("The flat cut leaves nothing of the masked part: paint a little further in.");
+            const int biggest =
+                int(std::max_element(patchArea.begin(), patchArea.end()) - patchArea.begin());
+            for (std::size_t t = 0; t < below.size(); ++t)
+                if (patch[t] == biggest) {
+                    keep[t] = 1;
+                    stack.push_back(std::uint32_t(t));
+                }
         }
-        if (stack.empty())
-            throw std::invalid_argument("The flat cut leaves nothing of the masked part: paint a little further in.");
         while (!stack.empty()) {
             const std::uint32_t t = stack.back();
             stack.pop_back();
             for (int k = 0; k < 3; ++k) {
                 const std::uint32_t a = below[t][std::size_t(k)], b = below[t][std::size_t((k + 1) % 3)];
-                if (d[a] == 0.0 && d[b] == 0.0)
+                if (acrossPlane(a, b))
                     continue;  // along the plane: not across it
                 for (std::uint32_t o : byEdge[edgeKey(a, b)])
                     if (!keep[o]) {
@@ -508,16 +573,19 @@ Pieces split(const std::vector<float>& positions, const std::vector<std::uint32_
     out.masked = build(inTris, false);
     out.rest = build(outTris, true);
     out.caps = int(loops.size());
-    if (cut == MaskCut::Dome && !keySpots.empty() && keySpots.front().room >= 1.0) {
-        // A dome on the cut's middle: well inside its edge, a little under half as high as
-        // it is across at its foot.
-        const KeySpot& spot = keySpots.front();
-        Dome dome;
-        dome.centre = spot.point;
-        dome.normal = spot.normal;
-        dome.radius = 0.6 * spot.room;
-        dome.height = 0.45 * dome.radius;
-        out.dome = dome;
+    if (cut == MaskCut::Dome && !keySpots.empty()) {
+        // A dome on the main cut's middle (the biggest, not a speck's): well inside its
+        // edge, a little under half as high as it is across at its foot.
+        const KeySpot& spot = *std::max_element(keySpots.begin(), keySpots.end(),
+                                                [](const KeySpot& a, const KeySpot& b) { return a.reach < b.reach; });
+        if (spot.room >= 1.0) {
+            Dome dome;
+            dome.centre = spot.point;
+            dome.normal = spot.normal;
+            dome.radius = 0.6 * spot.room;
+            dome.height = 0.45 * dome.radius;
+            out.dome = dome;
+        }
     }
     out.keySpots = std::move(keySpots);
     return out;

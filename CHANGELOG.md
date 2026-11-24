@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.98.1 Beta — Slice 90: Flat cuts with uneven paint (2026-11-23)
+
+- **Split by Mask, Flat** (and **Ball and socket**, and a **joint at the cut**) no longer refuses a mask like a
+  shoulder's, saying the edge "goes round 8 times". Little gaps left in the paint, and specks of paint elsewhere, each
+  made an edge of their own and were counted. Now the cut follows the mask's main edge and the little ones are left out:
+  the flat cut goes through the main edge, and the painted piece is the main painted area (a speck on the body doesn't
+  take any of the body with it).
+- A real band painted round the middle (two long edges) is still refused, as before.
+- The ball and socket's dome and a joint at a curved cut go on the main cut, not on a speck's.
+
 ## 0.98.0 Beta — Slice 89: Rotate for Best Print (2026-11-23)
 
 - **Rotate for Best Print** (Print/Save tab, and Design → Place): turns the selected shapes the best way up to print
