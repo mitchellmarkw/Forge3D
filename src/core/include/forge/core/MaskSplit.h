@@ -29,6 +29,11 @@ public:
     // Whether the edge of some dab's ball passes within `slack` of p (slack no more than
     // the largest dab's radius).
     bool nearEdge(const Vec3& p, double slack) const;
+    // Whether the paint starts or stops somewhere across triangle a, b, c (looked at on a
+    // grid no finer than `finest`).
+    bool changesAcross(const Vec3& a, const Vec3& b, const Vec3& c, double finest) const;
+    // The same along the line from a to b.
+    bool changesAlong(const Vec3& a, const Vec3& b, double finest) const;
     double smallest() const { return m_smallest; }
     double cellSize() const { return m_cell; }
     bool empty() const { return m_dabs.empty(); }

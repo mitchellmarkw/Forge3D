@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.101.0 Beta — Slice 93: Faster Split by Mask (2026-11-23)
+
+- **Split by Mask** is much quicker on painted figures, and makes far lighter pieces:
+  - The surface is only made finer where the paint actually starts or stops, not all over the painted area wherever
+    strokes overlap.
+  - The middle of each cut's cap is no finer than it needs to be (it was as fine as the cut's edge all the way in).
+  - In a test with many overlapping 1 mm strokes it went from 7.3 s and 2.7 million triangles to 0.4 s and 77,000,
+    with the same pieces. Ball and socket, flat cuts and joints at the cut all gain from it.
+- Saving, undo and exports are lighter too, since the pieces have far fewer triangles.
+
 ## 0.100.0 Beta — Slice 92: Rotate for Best Print, for resin too (2026-11-23)
 
 - **Rotate for Best Print** has a **Printer** choice: **Filament (FDM)** as before, or **Resin (SLA / MSLA)**:

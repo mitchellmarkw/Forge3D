@@ -1846,3 +1846,14 @@ and sharp across edges.
 - `turnToFit(points)`: the 2D outline (monotone chain), the smallest box along one of its sides (kept only for a 1%
   gain), then a quarter turn if needed so the long side is along X. `bestPlacement` applies it after `laidOnFace` with
   `rotatedAboutPlateAxis(…, 2, angle, visibleCentre)`.
+
+## Faster Split by Mask (slice 93, 0.101.0)
+
+- `refineNearEdge` now splits a triangle only if `Field::changesAcross` finds the mask state changing over it (sampled
+  on a grid about half the smallest dab apart, skipped when no dab cell is near), and only its longest side (so slivers
+  left by merges get squarer). Only triangles made by the last pass are looked at again. Before, any dab's sphere near
+  an edge triggered a split, which refined the whole painted area where strokes overlap.
+- Caps: the inner rings have at most 96 points, zipped to the full-resolution edge loop (stepping whichever of the two
+  is behind), so a cap costs about (n + 96 × rings) triangles rather than n × rings, and the 300 smoothing passes run on
+  far fewer points.
+- A hidden benchmark test, `[maskbench]`, times a dense-stroke split.

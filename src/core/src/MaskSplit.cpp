@@ -83,6 +83,53 @@ Field::Field(const std::vector<MaskDab>& dabs) : m_dabs(dabs)
     }
 }
 
+bool Field::changesAcross(const Vec3& a, const Vec3& b, const Vec3& c, double finest) const
+{
+    // Nothing painted (or rubbed out) anywhere near: no change.
+    std::int64_t lo[3], hi[3];
+    for (int k = 0; k < 3; ++k) {
+        const auto x = std::size_t(k);
+        lo[k] = std::int64_t(std::floor(std::min({a[x], b[x], c[x]}) / m_cell));
+        hi[k] = std::int64_t(std::floor(std::max({a[x], b[x], c[x]}) / m_cell));
+    }
+    bool any = false;
+    if ((hi[0] - lo[0] + 1) * (hi[1] - lo[1] + 1) * (hi[2] - lo[2] + 1) > 4096) {
+        any = true;  // a huge triangle: just look
+    } else {
+        for (std::int64_t i = lo[0]; i <= hi[0] && !any; ++i)
+            for (std::int64_t j = lo[1]; j <= hi[1] && !any; ++j)
+                for (std::int64_t k = lo[2]; k <= hi[2] && !any; ++k)
+                    any = m_cells.count(key(i, j, k)) > 0;
+    }
+    if (!any)
+        return false;
+    // Looked at on a grid over the triangle, about half the smallest dab apart (a coarser
+    // grid on a big triangle: it's looked at again, finer, once it's split).
+    const double longestSide = std::sqrt(std::max({dist2(a, b), dist2(b, c), dist2(c, a)}));
+    const double spacing = std::max(finest, 0.5 * m_smallest);
+    const int n = std::clamp(int(std::ceil(longestSide / spacing)), 1, 48);
+    const bool first = masked(a);
+    for (int i = 0; i <= n; ++i)
+        for (int j = 0; i + j <= n; ++j) {
+            const double u = double(i) / n, w = double(j) / n;
+            const Vec3 p = add(a, add(mul(sub(b, a), u), mul(sub(c, a), w)));
+            if (masked(p) != first)
+                return true;
+        }
+    return false;
+}
+
+bool Field::changesAlong(const Vec3& a, const Vec3& b, double finest) const
+{
+    const double spacing = std::max(finest, 0.5 * m_smallest);
+    const int n = std::clamp(int(std::ceil(std::sqrt(dist2(a, b)) / spacing)), 1, 256);
+    const bool first = masked(a);
+    for (int i = 1; i <= n; ++i)
+        if (masked(add(a, mul(sub(b, a), double(i) / n))) != first)
+            return true;
+    return false;
+}
+
 std::uint64_t Field::key(std::int64_t i, std::int64_t j, std::int64_t k) const
 {
     const auto q = [](std::int64_t v) { return std::uint64_t(v + (1 << 20)) & 0x1FFFFF; };
@@ -130,26 +177,43 @@ namespace {
 // stay joined: every triangle on a split edge is divided.
 void refineNearEdge(std::vector<Vec3>& points, std::vector<std::uint32_t>& tris, const Field& field, double longest)
 {
+    // Only triangles made by the last pass are looked at again: the rest had no edge to
+    // split then, and their edges haven't changed (a neighbour splitting a shared edge
+    // splits them too, so they're new).
+    std::vector<char> fresh(tris.size() / 3, 1);
     for (int pass = 0; pass < 16; ++pass) {
         std::unordered_map<std::uint64_t, std::uint32_t> middle;
         const double l2 = longest * longest;
-        for (std::size_t t = 0; t + 2 < tris.size(); t += 3)
-            for (int k = 0; k < 3; ++k) {
-                const std::uint32_t a = tris[t + std::size_t(k)], b = tris[t + std::size_t((k + 1) % 3)];
-                if (dist2(points[a], points[b]) <= l2 || middle.count(edgeKey(a, b)))
-                    continue;
-                const Vec3 m = mul(add(points[a], points[b]), 0.5);
-                // Near enough to the mask's edge that the cut could cross it.
-                const double half = std::sqrt(dist2(points[a], points[b])) / 2.0;
-                if (!field.nearEdge(m, std::min(half + longest, field.cellSize())))
-                    continue;
+        for (std::size_t t = 0; t + 2 < tris.size(); t += 3) {
+            if (!fresh[t / 3])
+                continue;
+            const std::uint32_t v[3] = {tris[t], tris[t + 1], tris[t + 2]};
+            bool longEdge = false;
+            for (int k = 0; k < 3; ++k)
+                longEdge = longEdge || dist2(points[v[k]], points[v[(k + 1) % 3]]) > l2;
+            // Split only where the paint starts or stops across the triangle: not inside
+            // the paint, nor away from it, however many strokes overlap there.
+            if (!longEdge || !field.changesAcross(points[v[0]], points[v[1]], points[v[2]], longest))
+                continue;
+            // Its longest side halved: always the longest, so long thin triangles (as merges
+            // leave) get squarer as they're split, not thinner.
+            int longestSide = 0;
+            for (int k = 1; k < 3; ++k)
+                if (dist2(points[v[k]], points[v[(k + 1) % 3]]) >
+                    dist2(points[v[longestSide]], points[v[(longestSide + 1) % 3]]))
+                    longestSide = k;
+            const std::uint32_t a = v[longestSide], b = v[(longestSide + 1) % 3];
+            if (!middle.count(edgeKey(a, b))) {
                 middle.emplace(edgeKey(a, b), std::uint32_t(points.size()));
-                points.push_back(m);
+                points.push_back(mul(add(points[a], points[b]), 0.5));
             }
+        }
         if (middle.empty())
             return;
         std::vector<std::uint32_t> next;
+        std::vector<char> nextFresh;
         next.reserve(tris.size() * 2);
+        nextFresh.reserve(tris.size() * 2 / 3);
         for (std::size_t t = 0; t + 2 < tris.size(); t += 3) {
             const std::uint32_t v[3] = {tris[t], tris[t + 1], tris[t + 2]};
             std::int64_t e[3];
@@ -178,8 +242,10 @@ void refineNearEdge(std::vector<Vec3>& points, std::vector<std::uint32_t>& tris,
                 const auto mab = std::uint32_t(e[r]), mbc = std::uint32_t(e[(r + 1) % 3]);
                 next.insert(next.end(), {mab, b, mbc, a, mab, mbc, a, mbc, c});
             }
+            nextFresh.resize(next.size() / 3, splits > 0 ? 1 : 0);
         }
         tris.swap(next);
+        fresh.swap(nextFresh);
     }
 }
 
@@ -485,30 +551,50 @@ Pieces split(const std::vector<float>& positions, const std::vector<std::uint32_
         for (std::uint32_t v : loop)
             c = add(c, points[v]);
         c = mul(c, 1.0 / double(n));
-        const int rings = std::clamp(int(double(n) / (2.0 * std::numbers::pi)), 2, 40);
+        // The inner rings no finer than 96 points round (a finely cut edge would otherwise
+        // fill the cap with hundreds of thousands of triangles), stitched to the edge itself.
+        const std::size_t m = std::min<std::size_t>(n, 96);
+        const int rings = std::clamp(int(double(m) / (2.0 * std::numbers::pi)), 2, 40);
         std::vector<std::vector<std::uint32_t>> ring{loop};
         const std::size_t firstInner = points.size();
         for (int k = 1; k < rings; ++k) {
-            std::vector<std::uint32_t> r(n);
+            std::vector<std::uint32_t> r(m);
             const double t = 1.0 - double(k) / rings;
-            for (std::size_t i = 0; i < n; ++i) {
+            for (std::size_t i = 0; i < m; ++i) {
                 r[i] = std::uint32_t(points.size());
-                points.push_back(add(c, mul(sub(points[loop[i]], c), t)));
+                points.push_back(add(c, mul(sub(points[loop[i * n / m]], c), t)));
             }
             ring.push_back(std::move(r));
         }
         const auto centre = std::uint32_t(points.size());
         points.push_back(c);
         std::vector<std::uint32_t> tris;
-        for (std::size_t k = 0; k + 1 < ring.size(); ++k)
-            for (std::size_t i = 0; i < n; ++i) {
-                const std::size_t j = (i + 1) % n;
+        // Each edge run the other way from the masked piece. The edge (n points) to the first
+        // ring (m): along both together, stepping whichever is behind.
+        if (ring.size() > 1) {
+            const auto& o = ring[0];
+            const auto& x = ring[1];
+            std::size_t i = 0, j = 0;
+            while (i < n || j < m) {
+                const bool outer = j == m || (i < n && double(i + 1) * double(m) <= double(j + 1) * double(n));
+                if (outer) {
+                    tris.insert(tris.end(), {o[(i + 1) % n], o[i], x[j % m]});
+                    ++i;
+                } else {
+                    tris.insert(tris.end(), {o[i % n], x[j], x[(j + 1) % m]});
+                    ++j;
+                }
+            }
+        }
+        for (std::size_t k = 1; k + 1 < ring.size(); ++k)
+            for (std::size_t i = 0; i < m; ++i) {
+                const std::size_t j = (i + 1) % m;
                 const std::uint32_t o0 = ring[k][i], o1 = ring[k][j], i0 = ring[k + 1][i], i1 = ring[k + 1][j];
-                // Runs each loop edge the other way from the masked piece.
                 tris.insert(tris.end(), {o1, o0, i0, o1, i0, i1});
             }
-        for (std::size_t i = 0; i < n; ++i)
-            tris.insert(tris.end(), {ring.back()[(i + 1) % n], ring.back()[i], centre});
+        const std::size_t last = ring.back().size();
+        for (std::size_t i = 0; i < last; ++i)
+            tris.insert(tris.end(), {ring.back()[(i + 1) % last], ring.back()[i], centre});
         // Neighbours of the inner points, then the smoothing.
         const std::size_t inner = points.size() - firstInner;
         std::vector<std::vector<std::uint32_t>> around(inner);

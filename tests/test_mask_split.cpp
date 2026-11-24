@@ -14,7 +14,10 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include <array>
+#include <chrono>
+#include <cstdio>
 #include <cmath>
+#include <map>
 #include <set>
 #include <numbers>
 
@@ -451,6 +454,9 @@ TEST_CASE("Mask: a flat cut at a shoulder", "[mask][shoulder]")
         CHECK(vm > 0.5 * armVolume);
         CHECK(vm < armVolume);
         CHECK_THAT(vm + vr, WithinRel(all, 1e-4));
+        // Made finer only along the paint's edge, and the cap not as fine as the edge all
+        // the way in (slice 93): a few times the triangles it started with, not hundreds.
+        CHECK((flat.masked.indices.size() + flat.rest.indices.size()) / 3 < 8 * idx.size() / 3);
         // One flat cap, across the arm (the specks are left on the body): its way out
         // pointing back toward the body.
         REQUIRE(flat.keySpots.size() == 1);
@@ -463,4 +469,88 @@ TEST_CASE("Mask: a flat cut at a shoulder", "[mask][shoulder]")
     const splitjoint::Spot joint = splitjoint::maskSpot(doc, fig, dabs, MaskCut::Curved);
     CHECK(joint.normal[0] < -0.5);
     CHECK(joint.room > 4.0);
+}
+
+// Slice 93: how long a mask split takes with many small overlapping strokes (run by hand).
+TEST_CASE("Mask: benchmark, dense strokes", "[.bench][maskbench]")
+{
+    Document doc;
+    CommandStack stack(doc);
+    const ObjectId body = add(stack, doc, SphereSpec{20});
+    const Bounds sb = doc.worldBounds(body);
+    const Vec3 centre{(sb.min[0] + sb.max[0]) / 2, (sb.min[1] + sb.max[1]) / 2, (sb.min[2] + sb.max[2]) / 2};
+    Body arm;
+    arm.id = doc.allocateId();
+    arm.name = "Arm";
+    arm.spec = CylinderSpec{7, 45};
+    arm.placement.rotationY = 105;
+    const ObjectId armId = arm.id;
+    stack.execute(std::make_unique<AddBodyCommand>(arm));
+    {
+        const Bounds ab = doc.worldBounds(armId);
+        Body moved = *doc.find(armId);
+        moved.placement.x += centre[0] + 30.0 - (ab.min[0] + ab.max[0]) / 2;
+        moved.placement.y += centre[1] - (ab.min[1] + ab.max[1]) / 2;
+        moved.placement.z += centre[2] - 4.0 - (ab.min[2] + ab.max[2]) / 2;
+        stack.execute(std::make_unique<EditBodyCommand>(*doc.find(armId), moved, "Move"));
+    }
+    Body merged;
+    merged.id = doc.allocateId();
+    merged.name = "Figure";
+    BooleanSpec spec;
+    spec.op = BooleanOp::Merge;
+    spec.operands = {body, armId};
+    merged.boolean = spec;
+    const ObjectId fig = merged.id;
+    stack.execute(std::make_unique<CombineCommand>(std::move(merged)));
+    std::vector<float> pos;
+    std::vector<std::uint32_t> idx;
+    meshkernel::triangles(doc.meshSolid(fig), pos, idx);
+    const auto fromCentre = [&](const Vec3& p) {
+        return std::sqrt((p[0] - centre[0]) * (p[0] - centre[0]) + (p[1] - centre[1]) * (p[1] - centre[1]) +
+                         (p[2] - centre[2]) * (p[2] - centre[2]));
+    };
+    std::vector<MaskDab> dabs;
+    std::set<std::array<long, 3>> seen;
+    for (std::size_t t = 0; t + 2 < idx.size(); t += 3) {
+        Vec3 c[3];
+        for (int k = 0; k < 3; ++k)
+            c[k] = {pos[3 * idx[t + k]], pos[3 * idx[t + k] + 1], pos[3 * idx[t + k] + 2]};
+        const auto len = [](const Vec3& p, const Vec3& q) {
+            return std::sqrt((p[0] - q[0]) * (p[0] - q[0]) + (p[1] - q[1]) * (p[1] - q[1]) + (p[2] - q[2]) * (p[2] - q[2]));
+        };
+        const int k = std::max(1, int(std::ceil(std::max({len(c[0], c[1]), len(c[1], c[2]), len(c[2], c[0])}))));
+        for (int i = 0; i <= k; ++i)
+            for (int j = 0; i + j <= k; ++j) {
+                const double u = double(i) / k, w = double(j) / k;
+                Vec3 p;
+                for (int a = 0; a < 3; ++a)
+                    p[std::size_t(a)] = c[0][std::size_t(a)] + u * (c[1][std::size_t(a)] - c[0][std::size_t(a)]) +
+                                        w * (c[2][std::size_t(a)] - c[0][std::size_t(a)]);
+                if (fromCentre(p) > 23.0 && p[0] > centre[0] + 15.0 &&
+                    seen.insert({std::lround(p[0] * 1.5), std::lround(p[1] * 1.5), std::lround(p[2] * 1.5)}).second)
+                    dabs.push_back({p, 1.0, false});  // 1 mm brush, strokes 0.7 mm apart
+            }
+    }
+    {
+        Vec3 end{0, 0, 0};
+        double maxX = -1e300;
+        for (std::size_t v = 0; v + 2 < pos.size(); v += 3)
+            maxX = std::max(maxX, double(pos[v]));
+        int n = 0;
+        for (std::size_t v = 0; v + 2 < pos.size(); v += 3)
+            if (pos[v] > maxX - 4.0) {
+                end = {end[0] + pos[v], end[1] + pos[v + 1], end[2] + pos[v + 2]};
+                ++n;
+            }
+        dabs.push_back({{end[0] / n, end[1] / n, end[2] / n}, 9.0, false});
+    }
+    const auto t0 = std::chrono::steady_clock::now();
+    const mask::Pieces p = mask::split(pos, idx, dabs, MaskCut::Curved);
+    const double secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+    std::printf("dense strokes: %zu dabs, %zu triangles in, %zu + %zu out, %.2f s\n", dabs.size(), idx.size() / 3,
+                p.masked.indices.size() / 3, p.rest.indices.size() / 3, secs);
+    const double vm = meshkernel::volume(meshkernel::fromTriangles(p.masked.positions, p.masked.indices));
+    const double vr = meshkernel::volume(meshkernel::fromTriangles(p.rest.positions, p.rest.indices));
+    std::printf("volumes %.1f + %.1f, caps %d\n", vm, vr, p.caps);
 }
