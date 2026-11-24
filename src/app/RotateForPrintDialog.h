@@ -7,6 +7,7 @@
 
 #include <functional>
 
+class QCheckBox;
 class QComboBox;
 class QLabel;
 class QTableWidget;
@@ -20,14 +21,18 @@ class RotateForPrintDialog : public QDialog {
 
 public:
     // `work`: the facts now and at the best way for a goal (all the shapes together).
-    RotateForPrintDialog(int shapes, std::function<orient::Choice(orient::Goal)> work, QWidget* parent = nullptr);
+    RotateForPrintDialog(int shapes, std::function<orient::Choice(orient::Goal, const orient::Settings&)> work,
+                         QWidget* parent = nullptr);
 
     orient::Goal goal() const;
+    orient::Settings settings() const;
 
 private:
     void refresh();
-    std::function<orient::Choice(orient::Goal)> m_work;
+    std::function<orient::Choice(orient::Goal, const orient::Settings&)> m_work;
+    QComboBox* m_printer = nullptr;
     QComboBox* m_goal = nullptr;
+    QCheckBox* m_turn = nullptr;
     QLabel* m_about = nullptr;
     QTableWidget* m_table = nullptr;
     QLabel* m_verdict = nullptr;

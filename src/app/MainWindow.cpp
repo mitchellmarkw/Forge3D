@@ -5700,24 +5700,30 @@ void MainWindow::rotateForBestPrint()
         statusBar()->showMessage(tr("Select the shapes to turn first."), 5000);
         return;
     }
-    // The facts for each shape, worked out once per goal.
+    // The facts for each shape, worked out once per goal, printer and turning.
     std::map<int, std::vector<std::pair<Placement, orient::Choice>>> worked;
-    const auto work = [&](orient::Goal goal) -> std::vector<std::pair<Placement, orient::Choice>>& {
-        auto& w = worked[int(goal)];
+    const auto work = [&](orient::Goal goal,
+                          const orient::Settings& s) -> std::vector<std::pair<Placement, orient::Choice>>& {
+        auto& w = worked[int(goal) * 4 + (s.printer == orient::Printer::Resin ? 2 : 0) + (s.turnToFit ? 1 : 0)];
         if (w.empty())
             for (ObjectId id : ids) {
                 orient::Choice c;
-                const Placement p = orient::bestPlacement(m_doc, id, goal, &c);
+                const Placement p = orient::bestPlacement(m_doc, id, goal, &c, s);
                 w.emplace_back(p, c);
             }
         return w;
     };
     RotateForPrintDialog dialog(int(ids.size()),
-                                [&](orient::Goal goal) {
+                                [&](orient::Goal goal, const orient::Settings& s) {
                                     orient::Choice sum;
                                     bool turned = false;
-                                    for (const auto& [p, c] : work(goal)) {
-                                        turned = turned || !(c.now.down == c.best.down);
+                                    std::size_t at = 0;
+                                    for (const auto& [p, c] : work(goal, s)) {
+                                        const Placement& was = m_doc.find(ids[at++])->placement;
+                                        turned = turned || !(c.now.down == c.best.down) ||
+                                                 std::abs(p.rotationZ - was.rotationZ) > 1e-6 ||
+                                                 std::abs(p.rotationX - was.rotationX) > 1e-6 ||
+                                                 std::abs(p.rotationY - was.rotationY) > 1e-6;
                                         for (orient::Facts* f : {&sum.now, &sum.best}) {
                                             const orient::Facts& g = f == &sum.now ? c.now : c.best;
                                             f->height = std::max(f->height, g.height);
@@ -5726,6 +5732,7 @@ void MainWindow::rotateForBestPrint()
                                             f->baseArea += g.baseArea;
                                             f->staircase += g.staircase;
                                             f->alongLength = std::max(f->alongLength, g.alongLength);
+                                            f->largestLayer = std::max(f->largestLayer, g.largestLayer);
                                             f->score += g.score;
                                         }
                                     }
@@ -5739,7 +5746,7 @@ void MainWindow::rotateForBestPrint()
     std::vector<std::string> dropped;
     m_stack.beginMacro("Rotate for Best Print");
     try {
-        const auto& w = work(dialog.goal());
+        const auto& w = work(dialog.goal(), dialog.settings());
         for (std::size_t i = 0; i < ids.size(); ++i)
             if (!(w[i].first == m_doc.find(ids[i])->placement))
                 m_stack.execute(placementCommand(ids[i], w[i].first, dropped));

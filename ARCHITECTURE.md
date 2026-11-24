@@ -1835,3 +1835,14 @@ and sharp across edges.
 - `m_manageLibraryAction` (Tools → Library) runs `manageCustomShapes` (the CustomShapesDialog, also on Add Shape →
   Custom). Rotate for Best Print's one action appears on Tools and Print/Save.
 - User-visible text uses American spelling (Color, Mold); code names, settings keys and file fields keep theirs.
+
+## Rotate for Best Print for resin (slice 92, 0.100.0)
+
+- `orient::Settings` has `printer` (Filament, Resin) and `turnToFit`. `Facts::largestLayer` is the biggest slice: each
+  triangle's up-facing area (n·up × area, signed) binned by height into 256 bands, summed from the top down (the
+  surface above a height closes over the slice there).
+- Resin scores: Fastest = height (+ a little support and peel); Quality = (3 × overhang + base + 0.3 × staircase) /
+  area × width + 0.6 × largestLayer / width; Strongest = 4 × width × alongLength + peel + support. No stability term.
+- `turnToFit(points)`: the 2D outline (monotone chain), the smallest box along one of its sides (kept only for a 1%
+  gain), then a quarter turn if needed so the long side is along X. `bestPlacement` applies it after `laidOnFace` with
+  `rotatedAboutPlateAxis(…, 2, angle, visibleCentre)`.
