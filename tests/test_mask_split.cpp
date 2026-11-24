@@ -8,11 +8,14 @@
 #include "forge/core/MaskSplit.h"
 #include "forge/core/MeshKernel.h"
 #include "forge/core/Scale.h"
+#include "forge/core/SplitJoint.h"
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include <array>
 #include <cmath>
+#include <set>
 #include <numbers>
 
 using namespace forge;
@@ -334,4 +337,130 @@ TEST_CASE("Mask: a flat cut needs one edge", "[mask]")
     }
     CHECK_THROWS_AS(mask::split(pos, idx, dabs, MaskCut::Flat), std::invalid_argument);  // a band: two edges
     CHECK_NOTHROW(mask::split(pos, idx, dabs, MaskCut::Curved));
+}
+
+// Slice 90: a shoulder. An arm coming out of a round body at a slant, painted in many
+// small dabs, with a few gaps left in the paint and a few specks on the body.
+TEST_CASE("Mask: a flat cut at a shoulder", "[mask][shoulder]")
+{
+    Document doc;
+    CommandStack stack(doc);
+    const ObjectId body = add(stack, doc, SphereSpec{20});
+    const Bounds sb = doc.worldBounds(body);
+    const Vec3 centre{(sb.min[0] + sb.max[0]) / 2, (sb.min[1] + sb.max[1]) / 2, (sb.min[2] + sb.max[2]) / 2};
+    // The arm: 14 mm across, lying along X out of the body's side, tipped a little down.
+    Body arm;
+    arm.id = doc.allocateId();
+    arm.name = "Arm";
+    arm.spec = CylinderSpec{7, 45};
+    arm.placement.rotationY = 105;
+    const ObjectId armId = arm.id;
+    stack.execute(std::make_unique<AddBodyCommand>(arm));
+    {
+        // Its middle 22 mm out from the body's centre.
+        const Bounds ab = doc.worldBounds(armId);
+        Body moved = *doc.find(armId);
+        moved.placement.x += centre[0] + 30.0 - (ab.min[0] + ab.max[0]) / 2;
+        moved.placement.y += centre[1] - (ab.min[1] + ab.max[1]) / 2;
+        moved.placement.z += centre[2] - 4.0 - (ab.min[2] + ab.max[2]) / 2;
+        stack.execute(std::make_unique<EditBodyCommand>(*doc.find(armId), moved, "Move"));
+    }
+    Body merged;
+    merged.id = doc.allocateId();
+    merged.name = "Figure";
+    BooleanSpec spec;
+    spec.op = BooleanOp::Merge;
+    spec.operands = {body, armId};
+    merged.boolean = spec;
+    const ObjectId fig = merged.id;
+    stack.execute(std::make_unique<CombineCommand>(std::move(merged)));
+
+    std::vector<float> pos;
+    std::vector<std::uint32_t> idx;
+    meshkernel::triangles(doc.meshSolid(fig), pos, idx);
+    const auto fromCentre = [&](const Vec3& p) {
+        return std::sqrt((p[0] - centre[0]) * (p[0] - centre[0]) + (p[1] - centre[1]) * (p[1] - centre[1]) +
+                         (p[2] - centre[2]) * (p[2] - centre[2]));
+    };
+    // Paint: small dabs all over the arm out past the body, as strokes would leave them
+    // (points spread over each triangle, about a millimetre apart).
+    std::vector<MaskDab> dabs;
+    std::uint32_t specks = 0;
+    for (std::size_t t = 0; t + 2 < idx.size(); t += 3) {
+        const Vec3 a{pos[3 * idx[t]], pos[3 * idx[t] + 1], pos[3 * idx[t] + 2]};
+        const Vec3 b{pos[3 * idx[t + 1]], pos[3 * idx[t + 1] + 1], pos[3 * idx[t + 1] + 2]};
+        const Vec3 c{pos[3 * idx[t + 2]], pos[3 * idx[t + 2] + 1], pos[3 * idx[t + 2] + 2]};
+        const auto len = [](const Vec3& p, const Vec3& q) {
+            return std::sqrt((p[0] - q[0]) * (p[0] - q[0]) + (p[1] - q[1]) * (p[1] - q[1]) + (p[2] - q[2]) * (p[2] - q[2]));
+        };
+        const int k = std::max(1, int(std::ceil(std::max({len(a, b), len(b, c), len(c, a)}) / 2.0)));
+        for (int i = 0; i <= k; ++i)
+            for (int j = 0; i + j <= k; ++j) {
+                const double u = double(i) / k, w = double(j) / k;
+                const Vec3 p{a[0] + u * (b[0] - a[0]) + w * (c[0] - a[0]), a[1] + u * (b[1] - a[1]) + w * (c[1] - a[1]),
+                             a[2] + u * (b[2] - a[2]) + w * (c[2] - a[2])};
+                const double r = fromCentre(p);
+                if (r > 23.0 && p[0] > centre[0] + 15.0)
+                    dabs.push_back({p, 2.2, false});
+                else if (r < 20.5 && r > 19.0 && p[0] < centre[0] - 5.0 && (++specks % 4001) == 0)
+                    dabs.push_back({p, 1.0, false});  // a speck on the far side of the body
+            }
+    }
+    {
+        std::set<std::array<long, 3>> seen;
+        std::vector<MaskDab> kept;
+        for (const MaskDab& d : dabs)
+            if (seen.insert({std::lround(d.centre[0] / 1.5), std::lround(d.centre[1] / 1.5),
+                             std::lround(d.centre[2] / 1.5)})
+                    .second ||
+                d.radius < 2.0)
+                kept.push_back(d);
+        dabs = std::move(kept);
+    }
+    INFO(dabs.size() << " dabs");
+    {
+        // The arm's flat end painted too (its middle has no points of its own).
+        Vec3 end{0, 0, 0};
+        double maxX = -1e300;
+        for (std::size_t v = 0; v + 2 < pos.size(); v += 3)
+            maxX = std::max(maxX, double(pos[v]));
+        int n = 0;
+        for (std::size_t v = 0; v + 2 < pos.size(); v += 3)
+            if (pos[v] > maxX - 4.0) {
+                end = {end[0] + pos[v], end[1] + pos[v + 1], end[2] + pos[v + 2]};
+                ++n;
+            }
+        dabs.push_back({{end[0] / n, end[1] / n, end[2] / n}, 9.0, false});
+    }
+    // A few small gaps rubbed out of the arm's paint.
+    int gaps = 0;
+    for (std::size_t v = 0; v + 2 < pos.size() && gaps < 4; v += 3 * 97) {
+        const Vec3 p{pos[v], pos[v + 1], pos[v + 2]};
+        if (p[0] > centre[0] + 35.0 && p[0] < centre[0] + 45.0) {
+            dabs.push_back({p, 0.6, true});
+            ++gaps;
+        }
+    }
+    const double armVolume = std::numbers::pi * 49.0 * 45.0;
+    const double all = meshkernel::volume(doc.meshSolid(fig));
+    // (Ball and socket: the same flat cut, with the dome's place.)
+    for (const MaskCut cut : {MaskCut::Dome}) {
+        const mask::Pieces flat = mask::split(pos, idx, dabs, cut);
+        const double vm = meshkernel::volume(meshkernel::fromTriangles(flat.masked.positions, flat.masked.indices));
+        const double vr = meshkernel::volume(meshkernel::fromTriangles(flat.rest.positions, flat.rest.indices));
+        CHECK(vm > 0.5 * armVolume);
+        CHECK(vm < armVolume);
+        CHECK_THAT(vm + vr, WithinRel(all, 1e-4));
+        // One flat cap, across the arm (the specks are left on the body): its way out
+        // pointing back toward the body.
+        REQUIRE(flat.keySpots.size() == 1);
+        CHECK(flat.keySpots.front().normal[0] < -0.8);
+        CHECK(flat.keySpots.front().room > 4.0);
+        if (cut == MaskCut::Dome)
+            CHECK(flat.dome);
+    }
+    // A joint at the curved cut goes on the shoulder too, not on a speck's little cap.
+    const splitjoint::Spot joint = splitjoint::maskSpot(doc, fig, dabs, MaskCut::Curved);
+    CHECK(joint.normal[0] < -0.5);
+    CHECK(joint.room > 4.0);
 }

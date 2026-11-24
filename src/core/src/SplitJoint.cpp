@@ -226,11 +226,12 @@ Spot maskSpot(const Document& doc, ObjectId id, const std::vector<MaskDab>& dabs
             pos[i + k] = float(p[k]);
     }
     const mask::Pieces pieces = mask::split(pos, idx, dabs, cut == MaskCut::Dome ? MaskCut::Flat : cut);
-    if (pieces.keySpots.size() != 1)
-        throw std::invalid_argument("A joint needs the mask's edge to go round the shape just once (this one goes "
-                                    "round " +
-                                    std::to_string(pieces.keySpots.size()) + " times).");
-    const mask::KeySpot& k = pieces.keySpots.front();
+    if (pieces.keySpots.empty())
+        throw std::invalid_argument("The mask has no edge to put a joint on.");
+    // On the main cut: the biggest (small gaps and specks in the paint make little ones).
+    const mask::KeySpot& k =
+        *std::max_element(pieces.keySpots.begin(), pieces.keySpots.end(),
+                          [](const mask::KeySpot& a, const mask::KeySpot& b) { return a.reach < b.reach; });
     Spot s;
     s.point = k.point;
     s.normal = unit(k.normal);

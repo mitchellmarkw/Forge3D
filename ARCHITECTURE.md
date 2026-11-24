@@ -1819,3 +1819,11 @@ and sharp across edges.
   current way unless one is better by 2%. `bestPlacement` works in plate coordinates and turns with `laidOnFace`.
 - App: `RotateForPrintDialog` (goal labelled on top, a Now / Turned table), work cached per goal; applied with
   `placementCommand` in one macro, as Sit on Plate.
+
+## Flat mask cuts with uneven paint (slice 90, 0.98.1)
+
+- `mask::split` (Flat, Dome): the plane fits the longest edge loop (centre weighted by edge length); loops shorter
+  than half of it (gaps in the paint, specks) are ignored, and two or more at least half as long are refused as a band.
+- The masked side is the largest-area painted patch on the plane's masked side (patches joined by edges not along the
+  plane), grown from there as before, so specks elsewhere don't seed other regions.
+- The dome and `splitjoint::maskSpot` take the key spot with the greatest reach (the main cap), not the first or only.
