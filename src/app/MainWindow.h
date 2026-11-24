@@ -439,6 +439,7 @@ private:
     QMenu* m_addMenu = nullptr;  // Add Shape (toolbar dropdown and Add menu)
     QMenu* m_customMenu = nullptr;  // Add Shape → Custom: the saved custom shapes
     QAction* m_saveCustomShape = nullptr;
+    QAction* m_manageLibraryAction = nullptr;
     QAction* m_clear = nullptr;
     QAction* m_merge = nullptr;
     QAction* m_subtract = nullptr;

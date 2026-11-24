@@ -603,10 +603,10 @@ void MainWindow::createActions()
     m_unlink->setToolTip(tr("Makes a linked copy a shape of its own, as it is now: it stops following the other"));
     connect(m_unlink, &QAction::triggered, this, &MainWindow::unlinkSelected);
 
-    m_colourMenu = new QMenu(tr("Colour"), this);
+    m_colourMenu = new QMenu(tr("Color"), this);
     m_colourMenu->menuAction()->setToolTip(
-        tr("Colour: choose a colour for the selected shapes. It's saved with your model and written to 3MF "
-           "files, for printers with more than one colour"));
+        tr("Color: choose a color for the selected shapes. It's saved with your model and written to 3MF "
+           "files, for printers with more than one color"));
     setIconNamed(m_colourMenu->menuAction(), QStringLiteral("colour"));
     fillColourMenu(m_colourMenu);
 
@@ -788,6 +788,10 @@ void MainWindow::createActions()
     m_saveCustomShape->setToolTip(tr("Save Custom Shape: keep the selected shapes in your library, to add again "
                                      "at exactly this size from Add Shape → Custom"));
     m_saveCustomShape->setStatusTip(m_saveCustomShape->toolTip());
+    m_manageLibraryAction = new QAction(tr("Manage Library"), this);
+    m_manageLibraryAction->setToolTip(tr("Manage Library: your saved custom shapes. Rename or delete them, add one to "
+                                         "the plate, or choose the folder they're kept in"));
+    connect(m_manageLibraryAction, &QAction::triggered, this, &MainWindow::manageCustomShapes);
     connect(m_saveCustomShape, &QAction::triggered, this, &MainWindow::saveCustomShape);
 
     m_merge = new QAction(tr("Merge"), this);
@@ -871,8 +875,8 @@ void MainWindow::createActions()
         startCutParts(id);
     });
     m_paintAction = new QAction(tr("Paint"), this);
-    m_paintAction->setToolTip(tr("Paint: brush colours onto the selected shape (skin, clothes, eyes), for colour "
-                                 "printing; exported with the colours in 3MF files"));
+    m_paintAction->setToolTip(tr("Paint: brush colors onto the selected shape (skin, clothes, eyes), for color "
+                                 "printing; exported with the colors in 3MF files"));
     m_paintAction->setStatusTip(m_paintAction->toolTip());
     connect(m_paintAction, &QAction::triggered, this, [this] {
         const ObjectId id = selectedOne();
@@ -909,7 +913,7 @@ void MainWindow::createActions()
     m_instructionsAction->setStatusTip(m_instructionsAction->toolTip());
     connect(m_instructionsAction, &QAction::triggered, this, &MainWindow::showInstructionSheet);
     m_sewingAction = new QAction(tr("Sewing Pattern"), this);
-    m_sewingAction->setToolTip(tr("Sewing Pattern: the area of the selected shape painted one colour (a jacket, a "
+    m_sewingAction->setToolTip(tr("Sewing Pattern: the area of the selected shape painted one color (a jacket, a "
                                   "cape) cut into pieces and laid flat at full size, with a seam allowance, to cut "
                                   "cloth from (PDF or SVG)"));
     m_sewingAction->setStatusTip(m_sewingAction->toolTip());
@@ -920,7 +924,7 @@ void MainWindow::createActions()
     m_pictureAction->setStatusTip(m_pictureAction->toolTip());
     connect(m_pictureAction, &QAction::triggered, this, &MainWindow::showPicture);
     m_printCheckAction = new QAction(tr("Print Check"), this);
-    m_printCheckAction->setToolTip(tr("Print Check: colour the places that are too thin to print well, and the "
+    m_printCheckAction->setToolTip(tr("Print Check: color the places that are too thin to print well, and the "
                                       "faces that hang over the air the way the parts sit (they'll need "
                                       "supports). Nothing is changed."));
     m_printCheckAction->setStatusTip(m_printCheckAction->toolTip());
@@ -1175,14 +1179,14 @@ void MainWindow::createActions()
         }
         startPort(id, false);
     });
-    m_mouldAction = new QAction(tr("Make Mould"), this);
-    m_mouldAction->setToolTip(tr("Make Mould: a two-part mould box round the selected shape, for casting resin "
+    m_mouldAction = new QAction(tr("Make Mold"), this);
+    m_mouldAction->setToolTip(tr("Make Mold: a two-part mold box round the selected shape, for casting resin "
                                  "copies of a printed master, with registration keys, a pour spout and air vents"));
     m_mouldAction->setStatusTip(m_mouldAction->toolTip());
     connect(m_mouldAction, &QAction::triggered, this, [this] {
         const ObjectId id = selectedOne();
         if (id == kInvalidId || m_selection.size() != 1 || !m_doc.isTopLevel(id)) {
-            statusBar()->showMessage(tr("Make Mould: select one shape on the plate first."), 6000);
+            statusBar()->showMessage(tr("Make Mold: select one shape on the plate first."), 6000);
             return;
         }
         startMould(id, false);
@@ -1311,7 +1315,7 @@ void MainWindow::createActions()
                                      "printed."));
     m_mannequinAction->setStatusTip(m_mannequinAction->toolTip());
     connect(m_mannequinAction, &QAction::triggered, this, &MainWindow::startMannequin);
-    m_showPicturesAction = new QAction(tr("Show &Pictures"), this);
+    m_showPicturesAction = new QAction(tr("Show &Images"), this);
     m_showPicturesAction->setCheckable(true);
     m_showPicturesAction->setChecked(Preferences().value(QStringLiteral("reference/showAll"), true).toBool());
     m_showPicturesAction->setToolTip(tr("Show or hide all the reference pictures (they stay in the file)"));
@@ -1556,6 +1560,7 @@ void MainWindow::createToolBar()
         {m_redo, "redo"},
         {m_addMenu->menuAction(), "add-shape"},
         {m_saveCustomShape, "save-custom"},
+        {m_manageLibraryAction, "library"},
         {m_modeMove, "move"},
         {m_modeRotate, "rotate"},
         {m_modeResize, "resize"},
@@ -1709,9 +1714,8 @@ void MainWindow::createToolBar()
         return static_cast<QWidget*>(b);
     };
 
-    // Check and Undo are on every tab.
+    // Undo is on every tab.
     const auto common = [&](Page& p) {
-        group(p, tr("Check"), {button(m_measureAction), button(m_printCheckAction), button(m_standAction)});
         group(p, tr("Undo"), {shortButton(m_undo, tr("Undo")), shortButton(m_redo, tr("Redo"))});
         p.row->addStretch(1);
     };
@@ -1734,12 +1738,10 @@ void MainWindow::createToolBar()
     group(build, tr("Handles"),
           {button(m_modeMove), button(m_modeRotate), button(m_modeResize), button(m_snapAction),
            button(m_uniformAction)});
-    group(build, tr("Look"), {menuButton(m_colourMenu)});
-    group(build, tr("Variables"), {button(m_variablesAction)});
     group(build, tr("Remove"), {button(m_delete), button(m_clear)});
     common(build);
 
-    Page design = page(tr("Design"), tr("Combine and arrange shapes; sketches, words and cuts"));
+    Page design = page(tr("Design"), tr("Combine and arrange shapes; sketches, cuts, words and colors"));
     group(design, tr("Combine"), {button(m_merge), button(m_subtract), button(m_intersect), button(m_separate)});
     {
         QWidget* align = menuButton(m_alignMenu, tr("Align"));
@@ -1759,34 +1761,46 @@ void MainWindow::createToolBar()
         group(design, tr("Sketch"), {sketchButton});
     }
     group(design, tr("Change"), {button(m_split), button(m_maskAction), button(m_emboss)});
-    group(design, tr("Place"),
-          {button(m_layFlat), button(m_sitOnPlate), button(m_bestPrint), button(m_extrudeDownAction)});
+    group(design, tr("Look"),
+          {button(m_paintAction), menuButton(m_colourMenu), button(m_stampAction), button(m_panelLineAction)});
+    group(design, tr("Place"), {button(m_layFlat), button(m_sitOnPlate), button(m_extrudeDownAction)});
     common(design);
 
-    Page features = page(tr("Features"), tr("Holes, threads, sockets, shells, grooves, patterns and edges"));
-    group(features, tr("Holes and Joints"), {button(m_holeAction), button(m_threadAction), button(m_socketAction), button(m_hingeAction),
-                                       button(m_portAction), button(m_poseAction)});
+    Page figure = page(tr("Figure Design"), tr("Action figures: cut into parts, hands, posing and the figure guide"));
+    group(figure, tr("Figure"), {button(m_cutPartsAction), button(m_handAction)});
+    group(figure, tr("Position"), {button(m_poseFigureAction), named(m_mannequinAction, tr("Figure Guide"))});
+    common(figure);
+
+    Page features = page(tr("Features"), tr("Holes, threads, sockets, hinges, shells, edges and patterns"));
+    group(features, tr("Holes and Joints"),
+          {button(m_holeAction), button(m_threadAction), button(m_socketAction), button(m_hingeAction),
+           button(m_portAction)});
     group(features, tr("Surface"),
-          {button(m_shellAction), button(m_hollowAction), button(m_followAction), button(m_panelLineAction),
-           button(m_stampAction), button(m_edgesAction)});
+          {button(m_shellAction), button(m_hollowAction), button(m_followAction), button(m_edgesAction)});
     group(features, tr("Repeat"), {button(m_patternAction)});
     common(features);
 
-    Page sculpt = page(tr("Sculpt"), tr("Sculpting brushes"));
-    group(sculpt, tr("Brushes"), {button(m_sculptAction), button(m_paintAction)});
-    group(sculpt, tr("Whole Shape"), {button(m_smoothAction), button(m_simplifyAction), button(m_poseFigureAction),
-                                      button(m_cutPartsAction), button(m_handAction)});
+    Page sculpt = page(tr("Sculpt"), tr("Sculpting brushes, and smoothing or simplifying a whole shape"));
+    group(sculpt, tr("Sculpt"), {button(m_sculptAction)});
+    group(sculpt, tr("Whole Shape"), {button(m_smoothAction), button(m_simplifyAction)});
     common(sculpt);
 
-    Page viewPage = page(tr("View"), tr("Turn, slide and zoom the view; look inside; the build plate"));
+    Page tools = page(tr("Tools"), tr("Design variables, checks, the best way up to print, and your shape library"));
+    group(tools, tr("Variables"), {button(m_variablesAction)});
+    group(tools, tr("Check"),
+          {button(m_measureAction), button(m_printCheckAction), button(m_standAction), button(m_poseAction)});
+    group(tools, tr("Place"), {button(m_bestPrint)});
+    group(tools, tr("Library"), {button(m_manageLibraryAction)});
+    common(tools);
+
+    Page viewPage = page(tr("View"), tr("Turn, slide and zoom the view; look inside; images; the build plate"));
     group(viewPage, tr("Workspace"),
           {button(m_navOrbit), button(m_navPan), button(m_navZoom), named(m_fit, tr("Fit")),
            named(m_resetView, tr("Reset View"))});
     group(viewPage, tr("Look"), {button(m_lookActions[0]), button(m_lookActions[1]), button(m_lookActions[2])});
     group(viewPage, tr("Objects"), {named(m_sectionAction, tr("Section View"))});
     group(viewPage, tr("Pictures"),
-          {named(m_referenceAction, tr("Reference Images")), named(m_showPicturesAction, tr("Show Pictures")),
-           named(m_mannequinAction, tr("Figure Guide"))});
+          {named(m_referenceAction, tr("Reference Images")), named(m_showPicturesAction, tr("Show Images"))});
     group(viewPage, tr("Plate"), {named(m_plateSizeAction, tr("Plate Size"))});
     common(viewPage);
 
@@ -8727,11 +8741,11 @@ void MainWindow::fillColourMenu(QMenu* menu)
     swatches->setDefaultWidget(grid);
     menu->addAction(swatches);
     menu->addSeparator();
-    QAction* other = menu->addAction(tr("More Colours..."));
-    other->setToolTip(tr("Pick any colour"));
+    QAction* other = menu->addAction(tr("More Colors..."));
+    other->setToolTip(tr("Pick any color"));
     connect(other, &QAction::triggered, this, [this] { QTimer::singleShot(0, this, &MainWindow::chooseOtherColour); });
     QAction* automatic = menu->addAction(tr("Automatic"));
-    automatic->setToolTip(tr("Back to the colour Forge3D gave it (a combined shape takes its first part's colour)"));
+    automatic->setToolTip(tr("Back to the color Forge3D gave it (a combined shape takes its first part's color)"));
     connect(automatic, &QAction::triggered, this,
             [this] { QTimer::singleShot(0, this, [this] { colourSelected(std::nullopt); }); });
 }
@@ -8750,7 +8764,7 @@ void MainWindow::chooseOtherColour()
     if (ids.empty() || toolOpen())
         return;
     const std::uint32_t now = m_doc.colourOf(ids.front());
-    const QColor picked = QColorDialog::getColor(QColor::fromRgb(QRgb(now)), this, tr("Colour"));
+    const QColor picked = QColorDialog::getColor(QColor::fromRgb(QRgb(now)), this, tr("Color"));
     if (picked.isValid())
         colourSelected(std::uint32_t(picked.rgb() & 0xFFFFFFu));
 }
@@ -8777,7 +8791,7 @@ void MainWindow::showTreeMenu(const QPoint& pos)
     const ObjectId top = isStep ? item->data(0, kOwnerRole).value<ObjectId>() : id;
     menu.addAction(tr("Change..."), this, [this, id] { editStep(id); });
     if (!isStep) {
-        QMenu* colour = menu.addMenu(ribbonIcon(QStringLiteral("colour")), tr("Colour"));
+        QMenu* colour = menu.addMenu(ribbonIcon(QStringLiteral("colour")), tr("Color"));
         fillColourMenu(colour);
         if (!isSelected(id))
             setSelection(id);  // the colour goes on the shape clicked
@@ -13396,7 +13410,7 @@ void MainWindow::applyPaint()
     refreshScene();
     refreshCommandState();
     setSelection(m_doc.isTopLevel(id) ? id : history::objectOf(m_doc, target));
-    statusBar()->showMessage(tr("Painted. Export as 3MF for a colour printer; Split by Mask can cut a colour off "
+    statusBar()->showMessage(tr("Painted. Export as 3MF for a color printer; Split by Mask can cut a color off "
                                 "as its own piece."),
                              10000);
 }
@@ -14832,12 +14846,12 @@ void MainWindow::startMould(ObjectId target, bool editing)
     mode.vents = f.vents;
     m_mouldMode = std::move(mode);
     const QString name = QString::fromStdString(body->name);
-    m_mouldPanel->start(editing ? tr("Change the mould '%1'").arg(name) : tr("Make a mould of '%1'").arg(name), editing,
+    m_mouldPanel->start(editing ? tr("Change the mold '%1'").arg(name) : tr("Make a mold of '%1'").arg(name), editing,
                         f, m_mouldMode.partBounds);
     m_propsDockWidth = m_propsDock->width();
     m_properties->hide();
     m_mouldPanel->show();
-    statusBar()->showMessage(tr("Make Mould: set where the halves meet, click the part to add air vents (or move the "
+    statusBar()->showMessage(tr("Make Mold: set where the halves meet, click the part to add air vents (or move the "
                                 "spout), then Apply. Esc cancels."));
     updateMouldPreview();
     refreshCommandState();
@@ -14868,7 +14882,7 @@ void MainWindow::mouldClick(const QVector3D& origin, const QVector3D& direction)
         return;
     }
     if (!spot) {
-        statusBar()->showMessage(tr("Make Mould: click on the part itself."), 4000);
+        statusBar()->showMessage(tr("Make Mold: click on the part itself."), 4000);
         return;
     }
     const Vec3 p = mode.toPlate.inverse().apply(spot->point);
@@ -14958,10 +14972,10 @@ void MainWindow::applyMould()
         setSelection(made);
     } catch (const std::exception& e) {
         if (m_mouldMode.active)
-            m_mouldPanel->setStatus(tr("The mould couldn't be made: %1").arg(QString::fromUtf8(e.what())), true);
+            m_mouldPanel->setStatus(tr("The mold couldn't be made: %1").arg(QString::fromUtf8(e.what())), true);
         else
             QMessageBox::warning(this, tr("Forge3D"),
-                                 tr("The mould couldn't be made:\n%1").arg(QString::fromUtf8(e.what())));
+                                 tr("The mold couldn't be made:\n%1").arg(QString::fromUtf8(e.what())));
     }
 }
 
@@ -16192,13 +16206,13 @@ void MainWindow::showSewingPattern()
     if (shape == kInvalidId) {
         QMessageBox::information(this, tr("Sewing Pattern"),
                                  tr("Select the painted figure first: the pattern is made from the area painted one "
-                                    "colour (paint the clothes on with Sculpt → Paint)."));
+                                    "color (paint the clothes on with Design → Paint)."));
         return;
     }
     if (sewing::paintedColours(m_doc, shape).empty()) {
         QMessageBox::information(this, tr("Sewing Pattern"),
-                                 tr("%1 has no paint. Paint where the clothes go first (Sculpt → Paint): the pattern "
-                                    "is made from the area painted one colour.")
+                                 tr("%1 has no paint. Paint where the clothes go first (Design → Paint): the pattern "
+                                    "is made from the area painted one color.")
                                      .arg(QString::fromStdString(m_doc.find(shape)->name)));
         return;
     }
