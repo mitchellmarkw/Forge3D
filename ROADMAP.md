@@ -122,6 +122,7 @@ Gate to Phase 2: a new user prints a customised part within 10 minutes.
 | 90 | Flat mask cuts with uneven paint: the main edge only (gaps and specks ignored) | Done (0.98.1) |
 | 91 | A tidier ribbon: Figure Design and Tools tabs, Undo alone on every tab, Manage Library, American spelling | Done (0.99.0) |
 | 92 | Rotate for Best Print for resin printers, and turned to take the least room on the plate | **Delivered for testing** |
+| 93 | Faster Split by Mask: finer only where the paint's edge is, lighter caps | **Delivered for testing** |
 
 Slices 39–41 close the gaps found in the [Phase 1 gate review](docs/PHASE1_GATE.md).
 
