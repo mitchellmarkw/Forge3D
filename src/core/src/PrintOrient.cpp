@@ -123,8 +123,44 @@ Facts measure(const Shape& shape, const Vec3& downIn, Goal goal, const Settings&
             f.staircase += t.area * (slope - 0.5) * 2.0;
     }
     f.alongLength = shape.elongation * std::abs(dot(shape.longest, f.down));
+    {
+        // Each layer's area: what's above a height closes over it, so the slice there is
+        // the sum of the up-facing area above it less the down-facing (in bands of height).
+        constexpr int bands = 256;
+        std::array<double, bands> net{};
+        const double band = std::max(f.height, 1e-9) / bands;
+        for (const Tri& t : shape.tris) {
+            const int k = std::clamp(int((dot(t.mid, up) - lo) / band), 0, bands - 1);
+            net[std::size_t(k)] += dot(t.n, up) * t.area;
+        }
+        double above = 0.0;
+        for (int k = bands - 1; k >= 0; --k) {
+            above += net[std::size_t(k)];
+            f.largestLayer = std::max(f.largestLayer, above);
+        }
+    }
     // Scores, each in millimetres-ish so the parts weigh against each other.
     const double across = std::sqrt(shape.area / 6.0);  // a typical width
+    if (set.printer == Printer::Resin) {
+        // On supports, not the plate: a flat bottom is supported too (lightly scarred,
+        // usually out of sight), and a big layer pulls hard on the film as it peels.
+        const double peel = f.largestLayer / across;
+        switch (goal) {
+        case Goal::Fastest:
+            // Every layer takes the same time: only the height counts, and a little support.
+            f.score = f.height + 0.1 * f.supportVolume / (across * across) + 0.05 * peel;
+            break;
+        case Goal::Quality:
+            f.score = across * (3.0 * f.overhangArea + f.baseArea + 0.3 * f.staircase) / shape.area + 0.6 * peel +
+                      0.02 * f.height;
+            break;
+        case Goal::Strongest:
+            f.score = 4.0 * across * f.alongLength + 0.3 * peel + 0.2 * f.supportVolume / (across * across) +
+                      0.02 * f.height;
+            break;
+        }
+        return f;
+    }
     const double wobbly = f.baseArea < 0.02 * shape.area ? 1.0 - f.baseArea / (0.02 * shape.area) : 0.0;
     switch (goal) {
     case Goal::Fastest:
@@ -228,7 +264,94 @@ Placement bestPlacement(const Document& doc, ObjectId id, Goal goal, Choice* cho
     const Choice c = best(mesh, goal, {0, 0, -1}, s);
     if (choice)
         *choice = c;
-    return laidOnFace(doc, id, c.best.down);
+    Placement placed = laidOnFace(doc, id, c.best.down);
+    if (!s.turnToFit)
+        return placed;
+    // Then turned on the plate to take the least room.
+    Body turned = *doc.find(id);
+    turned.placement = placed;
+    const Transform after = placementTransform(placed, pivotOf(turned));
+    std::vector<std::array<double, 2>> flat;
+    flat.reserve(shown->positions.size() / 3);
+    for (std::size_t i = 0; i + 2 < shown->positions.size(); i += 3) {
+        const Vec3 p = after.apply(Vec3{shown->positions[i], shown->positions[i + 1], shown->positions[i + 2]});
+        flat.push_back({p[0], p[1]});
+    }
+    const double angle = turnToFit(flat);
+    if (std::abs(angle) < 1e-6)
+        return placed;
+    return rotatedAboutPlateAxis(turned, 2, angle, doc.visibleCentre(id));
+}
+
+double turnToFit(const std::vector<std::array<double, 2>>& pointsIn)
+{
+    if (pointsIn.size() < 3)
+        return 0.0;
+    // The outline round them (the box round the points is the box round it).
+    std::vector<std::array<double, 2>> pts = pointsIn;
+    std::sort(pts.begin(), pts.end());
+    pts.erase(std::unique(pts.begin(), pts.end()), pts.end());
+    if (pts.size() < 3)
+        return 0.0;
+    const auto turnOf = [](const std::array<double, 2>& o, const std::array<double, 2>& a,
+                           const std::array<double, 2>& b) {
+        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+    };
+    std::vector<std::array<double, 2>> hull(2 * pts.size());
+    std::size_t k = 0;
+    for (std::size_t i = 0; i < pts.size(); ++i) {
+        while (k >= 2 && turnOf(hull[k - 2], hull[k - 1], pts[i]) <= 0)
+            --k;
+        hull[k++] = pts[i];
+    }
+    for (std::size_t i = pts.size() - 1, t = k + 1; i > 0; --i) {
+        while (k >= t && turnOf(hull[k - 2], hull[k - 1], pts[i - 1]) <= 0)
+            --k;
+        hull[k++] = pts[i - 1];
+    }
+    hull.resize(k - 1);
+    // The smallest box lies along one of the outline's sides.
+    const auto boxAt = [&](double a, double& w, double& d) {
+        const double c = std::cos(a), s = std::sin(a);
+        double x0 = 1e300, x1 = -1e300, y0 = 1e300, y1 = -1e300;
+        for (const auto& q : hull) {
+            const double x = c * q[0] - s * q[1], y = s * q[0] + c * q[1];
+            x0 = std::min(x0, x);
+            x1 = std::max(x1, x);
+            y0 = std::min(y0, y);
+            y1 = std::max(y1, y);
+        }
+        w = x1 - x0;
+        d = y1 - y0;
+        return w * d;
+    };
+    double w0 = 0, d0 = 0;
+    const double now = boxAt(0.0, w0, d0);
+    double bestArea = now, bestAngle = 0.0;
+    for (std::size_t i = 0; i < hull.size(); ++i) {
+        const auto& a = hull[i];
+        const auto& b = hull[(i + 1) % hull.size()];
+        const double a0 = -std::atan2(b[1] - a[1], b[0] - a[0]);  // this side along X
+        double w = 0, d = 0;
+        const double area = boxAt(a0, w, d);
+        if (area < bestArea - 1e-9) {
+            bestArea = area;
+            bestAngle = a0;
+        }
+    }
+    // Only worth turning for a real gain; then its long side along X.
+    if (bestArea > now * 0.99)
+        bestAngle = 0.0;
+    double w = 0, d = 0;
+    boxAt(bestAngle, w, d);
+    if (d > w * 1.0001)
+        bestAngle += std::numbers::pi / 2;
+    double deg = bestAngle * 180.0 / std::numbers::pi;
+    while (deg > 90.0)
+        deg -= 180.0;
+    while (deg <= -90.0)
+        deg += 180.0;
+    return std::abs(deg) < 1e-6 ? 0.0 : deg;
 }
 
 }  // namespace orient

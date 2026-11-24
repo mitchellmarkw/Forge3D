@@ -120,7 +120,8 @@ Gate to Phase 2: a new user prints a customised part within 10 minutes.
 | 88 | A joint at a split (plane or mask): ball joint, hinge, double hinge, swivel or magnets | Done (0.97.0) |
 | 89 | Rotate for Best Print: fastest, best quality or strongest, from the shape's overhangs, height and length | Done (0.98.0) |
 | 90 | Flat mask cuts with uneven paint: the main edge only (gaps and specks ignored) | Done (0.98.1) |
-| 91 | A tidier ribbon: Figure Design and Tools tabs, Undo alone on every tab, Manage Library, American spelling | **Delivered for testing** |
+| 91 | A tidier ribbon: Figure Design and Tools tabs, Undo alone on every tab, Manage Library, American spelling | Done (0.99.0) |
+| 92 | Rotate for Best Print for resin printers, and turned to take the least room on the plate | **Delivered for testing** |
 
 Slices 39–41 close the gaps found in the [Phase 1 gate review](docs/PHASE1_GATE.md).
 

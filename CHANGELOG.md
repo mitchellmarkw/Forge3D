@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.100.0 Beta — Slice 92: Rotate for Best Print, for resin too (2026-11-23)
+
+- **Rotate for Best Print** has a **Printer** choice: **Filament (FDM)** as before, or **Resin (SLA / MSLA)**:
+  - **Fastest Print** on resin is the lowest height only (every layer takes the same time, however big).
+  - **Best Quality** on resin keeps supports off the surface and the layers small, since a big layer pulls hard on
+    the film as it peels. That usually means tipped, not lying flat. A flat bottom counts as supported (resin parts
+    stand on supports).
+  - **Strongest Print** still lays it along its length.
+- **Turn it to take the least room on the plate** (on unless you untick it): after turning it the best way up, it's
+  turned about upright so the box round it is as small as can be, its long side left to right.
+- The table has a **Biggest layer** row.
+- Both choices are remembered.
+
 ## 0.99.0 Beta — Slice 91: A tidier ribbon (2026-11-23)
 
 - Two new tabs, **Figure Design** and **Tools**, and the others thinned out so each tool is in one sensible place:
