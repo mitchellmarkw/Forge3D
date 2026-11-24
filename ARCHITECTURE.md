@@ -1827,3 +1827,11 @@ and sharp across edges.
 - The masked side is the largest-area painted patch on the plane's masked side (patches joined by edges not along the
   plane), grown from there as before, so specks elsewhere don't seed other regions.
 - The dome and `splitjoint::maskSpot` take the key spot with the greatest reach (the main cap), not the first or only.
+
+## A tidier ribbon (slice 91, 0.99.0)
+
+- `MainWindow` ribbon tabs: Build, Design, Figure Design, Features, Sculpt, Tools, View, Print/Save; `common()` adds
+  only the Undo group. The tab you were on is still kept by name (a tab that's gone falls back to Build).
+- `m_manageLibraryAction` (Tools → Library) runs `manageCustomShapes` (the CustomShapesDialog, also on Add Shape →
+  Custom). Rotate for Best Print's one action appears on Tools and Print/Save.
+- User-visible text uses American spelling (Color, Mold); code names, settings keys and file fields keep theirs.

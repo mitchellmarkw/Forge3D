@@ -93,7 +93,7 @@ MouldPanel::MouldPanel(QWidget* parent) : QWidget(parent)
     m_title->setFont(bold);
     m_title->setWordWrap(true);
     layout->addWidget(m_title);
-    layout->addWidget(wrapped(tr("A mould box round the part, for casting resin copies of it: print the pieces, put "
+    layout->addWidget(wrapped(tr("A mold box round the part, for casting resin copies of it: print the pieces, put "
                                  "them together and pour into the spout.")));
 
     auto* split = new QGroupBox(tr("Split"));
@@ -101,7 +101,7 @@ MouldPanel::MouldPanel(QWidget* parent) : QWidget(parent)
     m_direction = new QComboBox;
     for (int axis : {2, 0, 1})
         m_direction->addItem(directionName(axis), axis);
-    m_direction->setToolTip(tr("Which way the mould comes apart: horizontal makes top and bottom halves pulled up and "
+    m_direction->setToolTip(tr("Which way the mold comes apart: horizontal makes top and bottom halves pulled up and "
                                "down; vertical makes halves pulled to the sides"));
     splitLayout->addWidget(labelled(tr("Split direction:"), m_direction));
     m_parting = millimetres(-10000.0, 10000.0, 0.5);
@@ -119,7 +119,7 @@ MouldPanel::MouldPanel(QWidget* parent) : QWidget(parent)
     m_undercut = new QLabel;
     m_undercut->setWordWrap(true);
     m_undercut->setToolTip(tr("Where a piece pulled straight off would catch on the part (shown red). A rigid "
-                              "printed mould can't come off there; a soft silicone one may. Another direction or "
+                              "printed mold can't come off there; a soft silicone one may. Another direction or "
                               "place, or more pieces, can free it"));
     splitLayout->addWidget(m_undercut);
     m_best = new QPushButton(tr("Find Best Split"));
@@ -160,7 +160,7 @@ MouldPanel::MouldPanel(QWidget* parent) : QWidget(parent)
     auto* box = new QGroupBox(tr("Box"));
     auto* boxForm = new QFormLayout(box);
     m_wall = millimetres(2.0, 50.0, 0.5);
-    m_wall->setToolTip(tr("How much mould there is round the part on every side"));
+    m_wall->setToolTip(tr("How much mold there is round the part on every side"));
     boxForm->addRow(tr("Wall thickness:"), m_wall);
     layout->addWidget(box);
 
@@ -183,7 +183,7 @@ MouldPanel::MouldPanel(QWidget* parent) : QWidget(parent)
     auto* pour = new QVBoxLayout(pourBox);
     auto* pourForm = new QFormLayout;
     m_spoutSize = millimetres(1.0, 30.0, 0.5);
-    m_spoutSize->setToolTip(tr("The spout (red, with a funnel) runs from the part's top up out of the mould. Its "
+    m_spoutSize->setToolTip(tr("The spout (red, with a funnel) runs from the part's top up out of the mold. Its "
                                "diameter: 5 to 8 mm pours well"));
     pourForm->addRow(tr("Spout size:"), m_spoutSize);
     m_ventSize = millimetres(0.5, 10.0, 0.25);

@@ -101,7 +101,7 @@ SewingPatternDialog::SewingPatternDialog(const Document& doc, ObjectId shape, QW
     layout->addLayout(left, 0);
     const QSettings prefs = preferences();
 
-    auto* intro = new QLabel(tr("The area of %1 painted one colour (a jacket, a cape), cut into pieces and laid flat "
+    auto* intro = new QLabel(tr("The area of %1 painted one color (a jacket, a cape), cut into pieces and laid flat "
                                 "at full size, to cut cloth from.")
                                  .arg(m_name));
     intro->setWordWrap(true);
@@ -115,8 +115,8 @@ SewingPatternDialog::SewingPatternDialog(const Document& doc, ObjectId shape, QW
         swatch.fill(QColor::fromRgb(c & 0xFFFFFFu));
         m_colour->addItem(QIcon(swatch), colourName(c));
     }
-    m_colour->setToolTip(tr("The colour painted where the clothes go"));
-    left->addWidget(labelled(tr("Painted colour:"), m_colour));
+    m_colour->setToolTip(tr("The color painted where the clothes go"));
+    left->addWidget(labelled(tr("Painted color:"), m_colour));
 
     m_split = new QComboBox;
     for (int i = 0; i < sewing::kSplitCount; ++i)
@@ -128,7 +128,7 @@ SewingPatternDialog::SewingPatternDialog(const Document& doc, ObjectId shape, QW
 
     // Seams where you want them: thin lines painted in another colour across the clothes.
     m_useSeams = new QCheckBox(tr("Also cut along lines painted"));
-    m_useSeams->setToolTip(tr("Paint thin lines across the clothes in another colour where you want seams (under the "
+    m_useSeams->setToolTip(tr("Paint thin lines across the clothes in another color where you want seams (under the "
                               "arms, down the back); the pattern is cut along them too, the pieces meeting down the "
                               "middle of each line. With \"One piece\", only there."));
     left->addWidget(m_useSeams);
@@ -139,8 +139,8 @@ SewingPatternDialog::SewingPatternDialog(const Document& doc, ObjectId shape, QW
         m_seamColour->addItem(QIcon(swatch), colourName(c));
     }
     m_seamColour->setCurrentIndex(m_colours.size() > 1 ? 1 : 0);
-    m_seamColour->setToolTip(tr("The colour of the seam lines"));
-    auto* seamBox = labelled(tr("Seam lines' colour:"), m_seamColour);
+    m_seamColour->setToolTip(tr("The color of the seam lines"));
+    auto* seamBox = labelled(tr("Seam lines' color:"), m_seamColour);
     left->addWidget(seamBox);
     m_useSeams->setEnabled(m_colours.size() > 1);
     seamBox->setEnabled(false);
@@ -271,7 +271,7 @@ void SewingPatternDialog::rebuild()
     m_cutsFor = -1.0;
     const int i = m_colour->currentIndex();
     if (i < 0 || std::size_t(i) >= m_colours.size()) {
-        m_status->setText(tr("%1 has no paint. Paint where the clothes go first (Sculpt → Paint), then come back.")
+        m_status->setText(tr("%1 has no paint. Paint where the clothes go first (Design → Paint), then come back.")
                               .arg(m_name));
         return;
     }
@@ -283,7 +283,7 @@ void SewingPatternDialog::rebuild()
         if (m_useSeams->isChecked() && s >= 0 && s != i)
             seams = m_colours[std::size_t(s)];
         else if (m_useSeams->isChecked())
-            note = tr("The seam lines need a colour of their own.");
+            note = tr("The seam lines need a color of their own.");
         m_pattern = sewing::fromPaint(m_doc, m_shape, m_colours[std::size_t(i)], sewing::Split(m_split->currentIndex()),
                                       seams);
         double stretch = 0;

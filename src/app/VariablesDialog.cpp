@@ -298,7 +298,7 @@ FormulaDialog::FormulaDialog(const QString& field, const QString& formula, const
     m_pick->setEnabled(!table.empty());
     layout->addWidget(labelled(tr("Variables:"), m_pick));
     if (table.empty()) {
-        auto* none = new QLabel(tr("There are no variables yet: make some in Build → Variables."));
+        auto* none = new QLabel(tr("There are no variables yet: make some in Tools → Variables."));
         none->setWordWrap(true);
         layout->addWidget(none);
     }

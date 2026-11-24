@@ -68,7 +68,7 @@ PaintPanel::PaintPanel(QWidget* parent) : QWidget(parent)
     m_title->setFont(bold);
     layout->addWidget(m_title);
     auto* help = new QLabel(tr("Drag over the shape to paint it. Hold <b>Ctrl</b> to rub paint out (back to the "
-                               "shape's own colour). [ and ] change the brush size. Export as 3MF for a colour "
+                               "shape's own color). [ and ] change the brush size. Export as 3MF for a color "
                                "printer. Pose a figure before painting it."));
     help->setWordWrap(true);
     help->setStyleSheet(QStringLiteral("color: palette(mid);"));
@@ -79,13 +79,13 @@ PaintPanel::PaintPanel(QWidget* parent) : QWidget(parent)
     currentRow->addWidget(new QLabel(tr("Painting with:")));
     m_current = new QPushButton;
     m_current->setMinimumSize(48, 28);
-    m_current->setToolTip(tr("Choose any colour"));
+    m_current->setToolTip(tr("Choose any color"));
     currentRow->addWidget(m_current);
     m_currentName = new QLabel;
     currentRow->addWidget(m_currentName, 1);
     layout->addLayout(currentRow);
 
-    auto* palette = new QGroupBox(tr("Colours"));
+    auto* palette = new QGroupBox(tr("Colors"));
     auto* paletteLayout = new QVBoxLayout(palette);
     auto* grid = new QGridLayout;
     grid->setSpacing(3);
@@ -95,8 +95,8 @@ PaintPanel::PaintPanel(QWidget* parent) : QWidget(parent)
         ++i;
     }
     paletteLayout->addLayout(grid);
-    auto* other = new QPushButton(tr("Other Colour..."));
-    other->setToolTip(tr("Choose any colour"));
+    auto* other = new QPushButton(tr("Other Color..."));
+    other->setToolTip(tr("Choose any color"));
     paletteLayout->addWidget(other);
     m_usedBox = new QWidget;
     auto* usedColumn = new QVBoxLayout(m_usedBox);
@@ -125,7 +125,7 @@ PaintPanel::PaintPanel(QWidget* parent) : QWidget(parent)
 
     auto* edit = new QHBoxLayout;
     auto* fill = new QPushButton(tr("Fill All"));
-    fill->setToolTip(tr("Paint the whole shape this colour (then paint the details over it)"));
+    fill->setToolTip(tr("Paint the whole shape this color (then paint the details over it)"));
     auto* undo = new QPushButton(tr("Undo Stroke"));
     undo->setToolTip(tr("Take back the last stroke (Ctrl+Z)"));
     auto* clear = new QPushButton(tr("Clear"));
@@ -161,7 +161,7 @@ PaintPanel::PaintPanel(QWidget* parent) : QWidget(parent)
     showColour();
 
     const auto choose = [this] {
-        const QColor c = QColorDialog::getColor(m_colour, this, tr("Paint colour"));
+        const QColor c = QColorDialog::getColor(m_colour, this, tr("Paint color"));
         if (c.isValid())
             setColour(c);
     };

@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.99.0 Beta — Slice 91: A tidier ribbon (2026-11-23)
+
+- Two new tabs, **Figure Design** and **Tools**, and the others thinned out so each tool is in one sensible place:
+  - **Build**: File, Add, Handles, Remove.
+  - **Design**: Combine, Arrange, Sketch, Change, **Look** (Paint, Color, Stamp, Panel Lines), Place (Lay on Face, Sit on
+    Plate, Extrude Down).
+  - **Figure Design** (new): Figure (Cut into Parts, Make Hand), Position (Pose Figure, Figure Guide).
+  - **Features**: Holes and Joints (Hole, Thread, Quick Socket, Quick Hinge, Hand Ports), Surface (Shell, Hollow,
+    Follow, Edges), Repeat.
+  - **Sculpt**: Sculpt, Whole Shape (Smooth, Simplify).
+  - **Tools** (new): Variables, Check (Measure, Print Check, Will It Stand?, Pose Test), Place (Rotate for Best Print),
+    Library (**Manage Library**: rename or delete your saved custom shapes, or choose their folder).
+  - **View**: Workspace, Look, Objects, Pictures (Reference Images, **Show Images**), Plate.
+  - **Print/Save**: Prepare (Rotate for Best Print, Split to Fit, Lay Out, **Make Mold**), Out, Library, Kit, Share.
+- Only **Undo** and **Redo** are on every tab now (the Check tools moved to Tools).
+- American spelling throughout: **Color**, **Make Mold**, and the like in every window and the help.
+
 ## 0.98.1 Beta — Slice 90: Flat cuts with uneven paint (2026-11-23)
 
 - **Split by Mask, Flat** (and **Ball and socket**, and a **joint at the cut**) no longer refuses a mask like a

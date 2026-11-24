@@ -62,10 +62,10 @@ MaskPanel::MaskPanel(QWidget* parent) : QWidget(parent)
     auto* fromColumn = new QVBoxLayout(m_fromPaintBox);
     fromColumn->setContentsMargins(0, 0, 0, 0);
     fromColumn->setSpacing(0);
-    fromColumn->addWidget(new QLabel(tr("Mask from a painted colour:")));
+    fromColumn->addWidget(new QLabel(tr("Mask from a painted color:")));
     m_fromPaint = new QComboBox;
-    m_fromPaint->setToolTip(tr("Masks wherever this colour is painted (instead of the mask so far), to cut that "
-                               "colour off as its own piece"));
+    m_fromPaint->setToolTip(tr("Masks wherever this color is painted (instead of the mask so far), to cut that "
+                               "color off as its own piece"));
     fromColumn->addWidget(m_fromPaint);
     layout->addWidget(m_fromPaintBox);
     m_fromPaintBox->hide();
@@ -182,14 +182,14 @@ MaskPanel::MaskPanel(QWidget* parent) : QWidget(parent)
     layout->addWidget(m_strokes);
 
     // Strong, plain colours, so it's plain what's painted (shadows don't look like paint).
-    auto* colours = new QGroupBox(tr("Colours while painting"));
+    auto* colours = new QGroupBox(tr("Colors while painting"));
     auto* colourGrid = new QGridLayout(colours);
     m_unmaskedButton = new QPushButton;
-    m_unmaskedButton->setToolTip(tr("The colour of the shape where it isn't painted"));
+    m_unmaskedButton->setToolTip(tr("The color of the shape where it isn't painted"));
     m_maskedButton = new QPushButton;
-    m_maskedButton->setToolTip(tr("The colour of the paint (the mask)"));
+    m_maskedButton->setToolTip(tr("The color of the paint (the mask)"));
     auto* swap = new QPushButton(tr("Swap"));
-    swap->setToolTip(tr("Swap the two colours"));
+    swap->setToolTip(tr("Swap the two colors"));
     auto* reset = new QPushButton(tr("Reset"));
     reset->setToolTip(tr("Back to yellow and black"));
     colourGrid->addWidget(new QLabel(tr("Not painted:")), 0, 0);
@@ -219,8 +219,8 @@ MaskPanel::MaskPanel(QWidget* parent) : QWidget(parent)
         saveColours();
     };
     connect(m_unmaskedButton, &QPushButton::clicked, this,
-            [this, pick] { pick(m_unmaskedColour, tr("Colour where it isn't painted")); });
-    connect(m_maskedButton, &QPushButton::clicked, this, [this, pick] { pick(m_maskedColour, tr("Colour of the paint")); });
+            [this, pick] { pick(m_unmaskedColour, tr("Color where it isn't painted")); });
+    connect(m_maskedButton, &QPushButton::clicked, this, [this, pick] { pick(m_maskedColour, tr("Color of the paint")); });
     connect(swap, &QPushButton::clicked, this, [this] {
         std::swap(m_unmaskedColour, m_maskedColour);
         saveColours();
@@ -377,7 +377,7 @@ namespace forge::app {
 void MaskPanel::setPaintColours(const std::vector<std::uint32_t>& colours)
 {
     m_fromPaint->clear();
-    m_fromPaint->addItem(tr("Choose a colour..."));
+    m_fromPaint->addItem(tr("Choose a color..."));
     for (std::uint32_t c : colours) {
         QPixmap pix(16, 16);
         pix.fill(QColor::fromRgb(QRgb(c)));
