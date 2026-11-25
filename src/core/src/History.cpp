@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "forge/core/MaskSplit.h"
+#include "forge/core/Reshape.h"
 #include "forge/core/Hinge.h"
 #include "forge/core/Hollow.h"
 #include "forge/core/Stamp.h"
@@ -238,6 +239,7 @@ std::string describe(const Document& doc, ObjectId id)
         return "strength " + std::to_string(spec.smooth->strength);
     }
     case BooleanOp::ExtrudeDown: return "down to the plate";
+    case BooleanOp::Reshape: return spec.reshape ? reshape::describe(*spec.reshape) : std::string();
     case BooleanOp::Socket: return spec.socket ? socket::describe(*spec.socket) : std::string();
     case BooleanOp::Hinge: return spec.hinge ? hinge::describe(*spec.hinge) : std::string();
     case BooleanOp::MaskSplit: return spec.maskSplit ? mask::describe(*spec.maskSplit) : std::string();

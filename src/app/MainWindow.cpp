@@ -21,6 +21,7 @@
 #include "forge/core/MaskSplit.h"
 #include "forge/core/Lasso.h"
 #include "forge/core/Accessory.h"
+#include "forge/core/Reshape.h"
 #include "forge/core/Hinge.h"
 #include "forge/core/Socket.h"
 #include "forge/core/PrintOrient.h"
@@ -57,6 +58,7 @@
 #include "MaskPanel.h"
 #include "LassoPanel.h"
 #include "AccessoryPanel.h"
+#include "ReshapePanel.h"
 #include "ReferencePanel.h"
 #include "ScaleCalculator.h"
 #include "RescaleDialog.h"
@@ -675,6 +677,8 @@ void MainWindow::createActions()
             endHand();
         else if (m_accessoryMode.active)
             endAccessories();
+        else if (m_reshapeMode.active)
+            endReshape();
         else if (m_poseFigureMode.active)
             endPoseFigure();
         else if (m_paintMode.active)
@@ -942,6 +946,23 @@ void MainWindow::createActions()
     m_simplifyAction->setToolTip(tr("Simplify: fewer triangles for the selected shape, keeping its look (for big "
                                     "imported or sculpted meshes). Set how many to keep in Properties."));
     connect(m_simplifyAction, &QAction::triggered, this, &MainWindow::simplifySelected);
+    m_reshapeAction = new QAction(tr("Reshape"), this);
+    m_reshapeAction->setToolTip(tr("Reshape: a box of handles round the selected shape; drag a handle and the shape "
+                                   "bends smoothly with it (stretch, lean, bulge, pinch)"));
+    connect(m_reshapeAction, &QAction::triggered, this, [this] {
+        const ObjectId id = selectedOne();
+        if (id == kInvalidId || m_selection.size() != 1 || !m_doc.isTopLevel(id)) {
+            statusBar()->showMessage(tr("Reshape: select one shape on the plate first."), 6000);
+            return;
+        }
+        if (const QString open = openMeshIn({history::tip(m_doc, id)}); !open.isEmpty()) {
+            QMessageBox::information(this, tr("Forge3D"),
+                                     tr("'%1' has gaps in its surface (it isn't watertight), so it can't be reshaped.")
+                                         .arg(open));
+            return;
+        }
+        startReshape(history::tip(m_doc, id), false);
+    });
     m_smoothAction = new QAction(tr("Smooth"), this);
     m_smoothAction->setToolTip(tr("Smooth: round off the whole surface of the selected shape, edges and corners "
                                   "included. Set how strongly in Properties."));
@@ -1647,6 +1668,7 @@ void MainWindow::createToolBar()
         {m_sculptAction, "sculpt"},
         {m_simplifyAction, "simplify"},
         {m_smoothAction, "smooth"},
+        {m_reshapeAction, "reshape"},
         {m_extrudeDownAction, "extrude-down"},
         {m_measureAction, "measure"},
         {m_printCheckAction, "print-check"},
@@ -1842,7 +1864,7 @@ void MainWindow::createToolBar()
 
     Page sculpt = page(tr("Sculpt"), tr("Sculpting brushes, and smoothing or simplifying a whole shape"));
     group(sculpt, tr("Sculpt"), {button(m_sculptAction)});
-    group(sculpt, tr("Whole Shape"), {button(m_smoothAction), button(m_simplifyAction)});
+    group(sculpt, tr("Whole Shape"), {button(m_smoothAction), button(m_reshapeAction), button(m_simplifyAction)});
     common(sculpt);
 
     Page tools = page(tr("Tools"), tr("Design variables, checks, the best way up to print, and your shape library"));
@@ -2606,6 +2628,24 @@ void MainWindow::createDocks()
     m_handPanel = new HandPanel;
     stackLayout->addWidget(m_handPanel);
     m_handPanel->hide();
+    m_reshapePanel = new ReshapePanel;
+    stackLayout->addWidget(m_reshapePanel);
+    m_reshapePanel->hide();
+    connect(m_reshapePanel, &ReshapePanel::handlesChanged, this, [this](int handles) {
+        if (!m_reshapeMode.active)
+            return;
+        m_reshapeMode.finish = reshape::withHandles(m_reshapeMode.finish, handles);
+        updateReshapePreview();
+    });
+    connect(m_reshapePanel, &ReshapePanel::resetRequested, this, [this] {
+        if (!m_reshapeMode.active)
+            return;
+        for (auto& mv : m_reshapeMode.finish.moves)
+            mv = {0.0, 0.0, 0.0};
+        updateReshapePreview();
+    });
+    connect(m_reshapePanel, &ReshapePanel::applyRequested, this, &MainWindow::applyReshape);
+    connect(m_reshapePanel, &ReshapePanel::cancelRequested, this, &MainWindow::endReshape);
     m_accessoryPanel = new AccessoryPanel;
     stackLayout->addWidget(m_accessoryPanel);
     m_accessoryPanel->hide();
@@ -3204,8 +3244,8 @@ void MainWindow::onViewportClicked(const QVector3D& origin, const QVector3D& dir
         m_pressOnHandle = false;
         return;
     }
-    if (m_lassoCutMode.active)
-        return;  // drawing loops: a click picks nothing
+    if (m_lassoCutMode.active || m_reshapeMode.active)
+        return;  // drawing loops or dragging handles: a click picks nothing
     if (m_splitMode.active)
         return;  // while splitting, clicks don't change what is selected (Cancel or Esc leaves)
     if (m_embossMode.active) {
@@ -3367,6 +3407,10 @@ void MainWindow::previewAll(const std::vector<Body>& states)
     }
 }
 
+namespace {
+std::optional<Vec3> onPlane(const QVector3D& origin, const QVector3D& direction, const Vec3& point, const Vec3& normal);
+}
+
 void MainWindow::onLeftPressed(const QVector3D& origin, const QVector3D& direction,
                                const view::GizmoHandle& handle, const QPointF& pixel, Qt::KeyboardModifiers modifiers)
 {
@@ -3378,6 +3422,35 @@ void MainWindow::onLeftPressed(const QVector3D& origin, const QVector3D& directi
     if (m_lassoCutMode.active) {
         const auto c = m_doc.worldBounds(m_lassoCutMode.target).center();
         lassoBegin(origin, direction, {c[0], c[1], c[2]}, false);
+        return;
+    }
+    if (m_reshapeMode.active) {
+        // The handle nearest the ray, if the ray passes close enough to it.
+        auto& mode = m_reshapeMode;
+        mode.picked = -1;
+        const Vec3 o{origin.x(), origin.y(), origin.z()}, d{direction.x(), direction.y(), direction.z()};
+        const double reach = reshapeBallRadius() * 2.0;
+        double best = reach;
+        for (int i = 0; i < reshape::handleCount(mode.finish); ++i) {
+            const Vec3 p = mode.frame.apply(reshape::at(mode.finish, i));
+            const Vec3 op{p[0] - o[0], p[1] - o[1], p[2] - o[2]};
+            const double t = op[0] * d[0] + op[1] * d[1] + op[2] * d[2];
+            const Vec3 c{o[0] + d[0] * t - p[0], o[1] + d[1] * t - p[1], o[2] + d[2] * t - p[2]};
+            const double off = std::sqrt(c[0] * c[0] + c[1] * c[1] + c[2] * c[2]);
+            if (t > 0 && off < best) {
+                best = off;
+                mode.picked = i;
+            }
+        }
+        if (mode.picked >= 0) {
+            const QVector3D f = m_viewport->camera().forward();
+            mode.planeNormal = {f.x(), f.y(), f.z()};
+            mode.planePoint = mode.frame.apply(reshape::at(mode.finish, mode.picked));
+            if (const auto hit = onPlane(origin, direction, mode.planePoint, mode.planeNormal))
+                mode.grabOffset = {mode.planePoint[0] - (*hit)[0], mode.planePoint[1] - (*hit)[1],
+                                   mode.planePoint[2] - (*hit)[2]};
+            updateReshapePreview();
+        }
         return;
     }
     if (m_maskMode.active && m_maskPanel->lasso() && m_maskMode.shown) {
@@ -3577,6 +3650,28 @@ void MainWindow::onLeftDragged(const QVector3D& origin, const QVector3D& directi
 {
     if (m_lassoDraw.drawing) {
         lassoAdd(origin, direction);
+        return;
+    }
+    if (m_reshapeMode.active) {
+        auto& mode = m_reshapeMode;
+        if (mode.picked < 0)
+            return;
+        const auto hit = onPlane(origin, direction, mode.planePoint, mode.planeNormal);
+        if (!hit)
+            return;
+        const Vec3 plate{(*hit)[0] + mode.grabOffset[0], (*hit)[1] + mode.grabOffset[1], (*hit)[2] + mode.grabOffset[2]};
+        const Vec3 local = mode.frame.inverse().apply(plate);
+        const Vec3 rest = reshape::rest(mode.finish, mode.picked);
+        const std::array<double, 3> move{local[0] - rest[0], local[1] - rest[1], local[2] - rest[2]};
+        mode.finish.moves[std::size_t(mode.picked)] = move;
+        if (m_reshapePanel->mirror()) {
+            const int other = reshape::mirrored(mode.finish, mode.picked);
+            if (other != mode.picked)
+                mode.finish.moves[std::size_t(other)] = {-move[0], move[1], move[2]};
+            else
+                mode.finish.moves[std::size_t(other)][0] = 0.0;  // on the middle: stays on it
+        }
+        updateReshapePreview();
         return;
     }
     if (m_sculptMode.active) {
@@ -3806,6 +3901,13 @@ void MainWindow::onLeftDragged(const QVector3D& origin, const QVector3D& directi
 
 void MainWindow::onLeftReleased(bool wasDrag)
 {
+    if (m_reshapeMode.active) {
+        if (m_reshapeMode.picked >= 0) {
+            m_reshapeMode.picked = -1;
+            updateReshapePreview();
+        }
+        return;
+    }
     if (m_lassoDraw.drawing) {
         const bool erase = m_lassoDraw.erase;
         const std::optional<lasso::Loop> loop = lassoFinish();
@@ -5596,7 +5698,7 @@ bool MainWindow::toolOpen() const
            m_hingeMode.active || m_poseMode.active || m_printCheckMode.active || m_mannequinOpen ||
            m_hollowMode.active || m_stampMode.active || m_panelLineMode.active || m_poseFigureMode.active ||
            m_paintMode.active || m_cutPartsMode.active || m_mouldMode.active || m_portMode.active ||
-           m_handMode.active || m_lassoCutMode.active || m_accessoryMode.active;
+           m_handMode.active || m_lassoCutMode.active || m_accessoryMode.active || m_reshapeMode.active;
 }
 
 void MainWindow::startEmboss(ObjectId target, bool editing)
@@ -8136,6 +8238,8 @@ void MainWindow::refreshScene()
             endMask();
         if (m_lassoCutMode.active && (!m_doc.find(m_lassoCutMode.target) || !m_doc.isTopLevel(m_lassoCutMode.target)))
             endLassoCut();
+        if (m_reshapeMode.active && !m_doc.find(m_reshapeMode.target))
+            endReshape();
         if (m_paintMode.active && !m_doc.find(m_paintMode.target))
             endPaint();
         if (m_cutPartsMode.active && !m_doc.find(m_cutPartsMode.target))
@@ -8181,6 +8285,10 @@ void MainWindow::refreshScene()
                 item.mesh = m_paintMode.shown;
                 item.model = toQMatrix(m_paintMode.toPlate);
                 item.selected = false;  // the colours as they are, not lightened
+            }
+            if (m_reshapeMode.active && id == m_reshapeMode.object && m_reshapeMode.preview) {
+                item.mesh = m_reshapeMode.preview;  // bent as the handles say (plate coordinates)
+                item.model = QMatrix4x4();
             }
             if (m_maskMode.active && id == m_maskMode.object && m_maskMode.shown) {
                 item.mesh = m_maskMode.shown;
@@ -8412,6 +8520,16 @@ void MainWindow::refreshScene()
             marks.ghost = sunk;
             marks.helper = true;
             items.push_back(marks);
+        }
+        // Reshape: the handles and the box's lines, seen through the shape.
+        if (m_reshapeMode.active && m_reshapeMode.handles && !m_reshapeMode.handles->empty()) {
+            DisplayItem h;
+            h.id = kMouldItem - 11;
+            h.mesh = m_reshapeMode.handles;
+            h.color = QVector3D(0.92f, 0.66f, 0.15f);
+            h.ghost = true;
+            h.helper = true;
+            items.push_back(h);
         }
         // Accessories: the one to be made, see-through.
         if (m_accessoryMode.active && m_accessoryMode.preview && !m_accessoryMode.preview->empty()) {
@@ -8746,6 +8864,7 @@ void MainWindow::refreshScene()
     m_sculptAction->setEnabled(m_selection.size() == 1 && m_doc.isTopLevel(m_selection.front()) && !toolOpen());
     m_simplifyAction->setEnabled(m_sculptAction->isEnabled());
     m_smoothAction->setEnabled(m_sculptAction->isEnabled());
+    m_reshapeAction->setEnabled(m_sculptAction->isEnabled());
     m_extrudeDownAction->setEnabled(m_sculptAction->isEnabled());
     m_split->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen() && !rolled);
     m_emboss->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
@@ -8996,6 +9115,7 @@ void MainWindow::editStep(ObjectId id)
     case BooleanOp::Port: startPort(id, true); break;
     case BooleanOp::Linked: linkedMirror(id); break;
     case BooleanOp::Posed: startPoseFigure(id, true); break;
+    case BooleanOp::Reshape: startReshape(id, true); break;
     case BooleanOp::Paint: startPaint(id, true); break;
     case BooleanOp::Stamp: startStamp(id, true); break;
     case BooleanOp::PanelLines: startPanelLines(id, true); break;
@@ -13214,6 +13334,234 @@ void MainWindow::endLassoCut()
     m_lassoDraw = LassoDraw{};
     showLasso({}, false);
     m_lassoPanel->hide();
+    m_properties->show();
+    QTimer::singleShot(0, this, [this] { resizeDocks({m_propsDock}, {m_propsDockWidth}, Qt::Horizontal); });
+    statusBar()->clearMessage();
+    refreshScene();
+    refreshCommandState();
+}
+
+// ---- Reshape ---------------------------------------------------------------------------------
+
+namespace {
+
+// Balls at the handles and thin rods along the box's grid lines (plate mm).
+Mesh latticeMesh(const ReshapeFinish& f, const Transform& frame, double ball, int picked)
+{
+    Mesh out;
+    const auto addVertex = [&](const Vec3& p, const Vec3& n) {
+        for (std::size_t k = 0; k < 3; ++k) {
+            out.positions.push_back(float(p[k]));
+            out.normals.push_back(float(n[k]));
+        }
+    };
+    constexpr int around = 10, rings = 6;
+    const int count = reshape::handleCount(f);
+    std::vector<Vec3> spots(static_cast<std::size_t>(count));
+    for (int i = 0; i < count; ++i)
+        spots[std::size_t(i)] = frame.apply(reshape::at(f, i));
+    for (int i = 0; i < count; ++i) {
+        const double r = i == picked ? ball * 1.5 : ball;
+        const auto base = std::uint32_t(out.vertexCount());
+        for (int ring = 0; ring <= rings; ++ring) {
+            const double v = std::numbers::pi * ring / rings;
+            for (int s = 0; s <= around; ++s) {
+                const double u = 2.0 * std::numbers::pi * s / around;
+                const Vec3 n{std::sin(v) * std::cos(u), std::sin(v) * std::sin(u), std::cos(v)};
+                const Vec3& c = spots[std::size_t(i)];
+                addVertex({c[0] + n[0] * r, c[1] + n[1] * r, c[2] + n[2] * r}, n);
+            }
+        }
+        for (int ring = 0; ring < rings; ++ring)
+            for (int s = 0; s < around; ++s) {
+                const std::uint32_t a = base + std::uint32_t(ring * (around + 1) + s), b = a + around + 1;
+                out.indices.insert(out.indices.end(), {a, b, a + 1, a + 1, b, b + 1});
+            }
+    }
+    // Rods between neighbouring handles.
+    const auto rod = [&](const Vec3& a, const Vec3& b) {
+        Vec3 d{b[0] - a[0], b[1] - a[1], b[2] - a[2]};
+        const double len = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+        if (len < 1e-9)
+            return;
+        d = {d[0] / len, d[1] / len, d[2] / len};
+        const Vec3 ref = std::abs(d[2]) < 0.9 ? Vec3{0, 0, 1} : Vec3{1, 0, 0};
+        Vec3 u{d[1] * ref[2] - d[2] * ref[1], d[2] * ref[0] - d[0] * ref[2], d[0] * ref[1] - d[1] * ref[0]};
+        const double ul = std::sqrt(u[0] * u[0] + u[1] * u[1] + u[2] * u[2]);
+        u = {u[0] / ul, u[1] / ul, u[2] / ul};
+        const Vec3 w{d[1] * u[2] - d[2] * u[1], d[2] * u[0] - d[0] * u[2], d[0] * u[1] - d[1] * u[0]};
+        const double r = ball * 0.25;
+        const auto base = std::uint32_t(out.vertexCount());
+        constexpr int sides = 6;
+        for (int e = 0; e < 2; ++e)
+            for (int s = 0; s < sides; ++s) {
+                const double t = 2.0 * std::numbers::pi * s / sides;
+                const Vec3 n{u[0] * std::cos(t) + w[0] * std::sin(t), u[1] * std::cos(t) + w[1] * std::sin(t),
+                             u[2] * std::cos(t) + w[2] * std::sin(t)};
+                const Vec3& c = e == 0 ? a : b;
+                addVertex({c[0] + n[0] * r, c[1] + n[1] * r, c[2] + n[2] * r}, n);
+            }
+        for (int s = 0; s < sides; ++s) {
+            const std::uint32_t a0 = base + std::uint32_t(s), a1 = base + std::uint32_t((s + 1) % sides);
+            const std::uint32_t b0 = a0 + sides, b1 = a1 + sides;
+            out.indices.insert(out.indices.end(), {a0, a1, b0, a1, b1, b0});
+        }
+    };
+    for (int k = 0; k < f.count[2]; ++k)
+        for (int j = 0; j < f.count[1]; ++j)
+            for (int i = 0; i < f.count[0]; ++i) {
+                const int here = reshape::handleIndex(f, i, j, k);
+                if (i + 1 < f.count[0])
+                    rod(spots[std::size_t(here)], spots[std::size_t(reshape::handleIndex(f, i + 1, j, k))]);
+                if (j + 1 < f.count[1])
+                    rod(spots[std::size_t(here)], spots[std::size_t(reshape::handleIndex(f, i, j + 1, k))]);
+                if (k + 1 < f.count[2])
+                    rod(spots[std::size_t(here)], spots[std::size_t(reshape::handleIndex(f, i, j, k + 1))]);
+            }
+    return out;
+}
+
+}  // namespace
+
+double MainWindow::reshapeBallRadius() const
+{
+    const auto& f = m_reshapeMode.finish;
+    const double dx = f.max[0] - f.min[0], dy = f.max[1] - f.min[1], dz = f.max[2] - f.min[2];
+    return std::max(0.2, std::sqrt(dx * dx + dy * dy + dz * dz) / 70.0);
+}
+
+void MainWindow::startReshape(ObjectId target, bool editing)
+{
+    const Body* body = m_doc.find(target);
+    if (!body || toolOpen())
+        return;
+    if (m_dragState.kind != Drag::Kind::None)
+        cancelDrag();
+    ReshapeMode mode;
+    mode.active = true;
+    mode.editing = editing;
+    mode.target = target;
+    mode.object = history::objectOf(m_doc, target);
+    try {
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        struct RestoreCursor {
+            ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
+        } restore;
+        if (editing && (!body->boolean || !body->boolean->reshape))
+            throw std::invalid_argument("That isn't a Reshape step.");
+        const ObjectId part = editing ? body->boolean->operands.front() : target;
+        const ObjectId holder = editing ? kInvalidId : m_doc.parentOf(target);
+        mode.frame = editing ? m_doc.worldTransform(target)
+                             : (holder == kInvalidId ? Transform{} : m_doc.worldTransform(holder));
+        // The part's surface in the step's coordinates.
+        Mesh surface = *m_doc.mesh(part);
+        const Transform t = m_doc.localTransform(part);
+        for (std::size_t i = 0; i + 2 < surface.positions.size(); i += 3) {
+            const Vec3 p = t.apply(Vec3{surface.positions[i], surface.positions[i + 1], surface.positions[i + 2]});
+            for (std::size_t k = 0; k < 3; ++k)
+                surface.positions[i + k] = float(p[k]);
+        }
+        if (surface.empty())
+            throw std::invalid_argument("There's no surface to reshape.");
+        mode.finish = editing ? *body->boolean->reshape
+                              : reshape::around(surface.bounds(), m_reshapePanel->handles() > 0
+                                                                      ? m_reshapePanel->handles()
+                                                                      : 3);
+        mode.fine = std::make_shared<Mesh>(reshape::finer(surface, mode.finish));
+    } catch (const std::exception& e) {
+        QMessageBox::information(this, tr("Forge3D"),
+                                 tr("This shape can't be reshaped:\n%1").arg(QString::fromUtf8(e.what())));
+        return;
+    }
+    m_reshapeMode = std::move(mode);
+    const QString name = QString::fromStdString(m_doc.find(m_reshapeMode.object)->name);
+    m_reshapePanel->start(editing ? tr("Change the reshaping of '%1'").arg(name) : tr("Reshape '%1'").arg(name),
+                          editing ? m_reshapeMode.finish.count[0] : 0);
+    if (!editing && m_reshapePanel->handles() != m_reshapeMode.finish.count[0])
+        m_reshapeMode.finish = reshape::withHandles(m_reshapeMode.finish, m_reshapePanel->handles());
+    m_propsDockWidth = m_propsDock->width();
+    m_properties->hide();
+    m_reshapePanel->show();
+    statusBar()->showMessage(tr("Reshape: drag the gold handles (right-drag turns the view), then Apply. Esc cancels."));
+    updateReshapePreview();
+    refreshCommandState();
+}
+
+void MainWindow::updateReshapePreview()
+{
+    auto& mode = m_reshapeMode;
+    if (!mode.active || !mode.fine)
+        return;
+    Mesh bent = reshape::movedMesh(*mode.fine, mode.finish);
+    for (std::size_t i = 0; i + 2 < bent.positions.size(); i += 3) {
+        const Vec3 p = mode.frame.apply(Vec3{bent.positions[i], bent.positions[i + 1], bent.positions[i + 2]});
+        for (std::size_t k = 0; k < 3; ++k)
+            bent.positions[i + k] = float(p[k]);
+    }
+    mode.preview = together({bent});
+    mode.handles = std::make_shared<Mesh>(latticeMesh(mode.finish, mode.frame, reshapeBallRadius(), mode.picked));
+    int moved = 0;
+    for (const auto& mv : mode.finish.moves)
+        moved += (std::abs(mv[0]) + std::abs(mv[1]) + std::abs(mv[2])) > 1e-9;
+    m_reshapePanel->setStatus(moved == 0 ? tr("Drag a handle (the gold balls).")
+                                         : (moved == 1 ? tr("1 handle moved. Apply keeps it as a step.")
+                                                     : tr("%1 handles moved. Apply keeps it as a step.").arg(moved)),
+                              false);
+    refreshScene();
+}
+
+void MainWindow::applyReshape()
+{
+    auto& mode = m_reshapeMode;
+    if (!mode.active)
+        return;
+    const ReshapeFinish f = mode.finish;
+    const ObjectId target = mode.target;
+    const bool editing = mode.editing;
+    try {
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        struct RestoreCursor {
+            ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
+        } restore;
+        reshape::check(f);
+        if (editing) {
+            const Body* now = m_doc.find(target);
+            Body after = *now;
+            after.boolean->reshape = f;
+            const Body before = *now;
+            endReshape();
+            run(std::make_unique<EditBodyCommand>(before, after, "Change reshaping"));
+            setSelection(history::objectOf(m_doc, target));
+            return;
+        }
+        Body r;
+        r.id = m_doc.allocateId();
+        r.name = m_doc.uniqueName("Reshaped");
+        r.boolean = reshapeSpec(m_doc, target, f);
+        const ObjectId id = r.id;
+        const bool top = m_doc.isTopLevel(target);
+        const ObjectId object = history::objectOf(m_doc, target);
+        const ObjectId holder = m_doc.parentOf(target);
+        endReshape();
+        if (!top) {
+            if (run(std::make_unique<InsertStepCommand>(std::move(r), holder)))
+                setSelection(object);
+            return;
+        }
+        if (run(std::make_unique<CombineCommand>(std::move(r))))
+            setSelection(id);
+        statusBar()->showMessage(tr("Reshaped. Double-click the step in Objects to move the handles again."), 8000);
+    } catch (const std::exception& e) {
+        m_reshapePanel->setStatus(QString::fromUtf8(e.what()), true);
+    }
+}
+
+void MainWindow::endReshape()
+{
+    if (!m_reshapeMode.active)
+        return;
+    m_reshapeMode = ReshapeMode{};
+    m_reshapePanel->hide();
     m_properties->show();
     QTimer::singleShot(0, this, [this] { resizeDocks({m_propsDock}, {m_propsDockWidth}, Qt::Horizontal); });
     statusBar()->clearMessage();

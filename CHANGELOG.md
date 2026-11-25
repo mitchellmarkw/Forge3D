@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.110.0 Beta — Slice 102: Reshape box (2026-11-24)
+
+- **Reshape** (Sculpt tab → Whole Shape): a box of gold handles round the selected shape, any shape at all. Drag a
+  handle and the shape bends smoothly with it, like pulling on a cage round it: stretch it, lean it, bulge or pinch
+  it. A handle moves across the screen, so turn the view to move it the other way.
+- **Handles**: corners only (2 × 2 × 2) to stretch and lean, 3 × 3 × 3 to bulge, pinch and bend, or 4 × 4 × 4 for
+  finer shaping. **Move left and right together** (on at first) moves each handle's partner the mirror way, for
+  figures. **Put the Handles Back** starts again.
+- It's a step in the history: double-click it to move the handles again; sizes and other steps before it can
+  still change. Resizing the design stretches the box with it. File format 53.
+
 ## 0.109.0 Beta — Slice 101: Proportions (2026-11-24)
 
 - **Proportions** (Figure Design tab): select a figure sculpted in one piece and change its **head size**,

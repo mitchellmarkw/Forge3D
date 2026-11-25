@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "forge/core/FileFormat.h"
+#include "forge/core/Reshape.h"
 #include "forge/core/MaskSplit.h"
 
 #include "forge/core/Document.h"
@@ -248,6 +249,7 @@ const char* opName(BooleanOp op)
     case BooleanOp::Mould: return "mould";
     case BooleanOp::Port: return "port";
     case BooleanOp::Linked: return "linked";
+    case BooleanOp::Reshape: return "reshape";
     }
     return "merge";
 }
@@ -432,6 +434,13 @@ json bodyToJson(const Body& b)
             j["simplify"] = json{{"keep", sf->keep}};
         if (const auto& sm = b.boolean->smooth)
             j["smooth"] = json{{"strength", sm->strength}};
+        if (const auto& rs = b.boolean->reshape) {
+            std::vector<double> moves;
+            moves.reserve(rs->moves.size() * 3);
+            for (const auto& m : rs->moves)
+                moves.insert(moves.end(), m.begin(), m.end());
+            j["reshape"] = json{{"min", rs->min}, {"max", rs->max}, {"count", rs->count}, {"moves", moves}};
+        }
         if (const auto& pl = b.boolean->panelLines) {
             json lines = json::array();
             for (const PanelLine& l : pl->lines) {
@@ -766,6 +775,8 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
             spec.op = BooleanOp::Port;
         else if (op == "linked" && version >= 45)
             spec.op = BooleanOp::Linked;
+        else if (op == "reshape" && version >= 53)
+            spec.op = BooleanOp::Reshape;
         else
             damaged(where + ": unknown combine operation '" + op + "'");
         const auto operands = j.find("operands");
@@ -1316,6 +1327,24 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
                 damaged(where + ": " + e.what());
             }
             spec.hollow = std::move(ho);
+        }
+        if (spec.op == BooleanOp::Reshape) {
+            const auto rj = j.find("reshape");
+            if (rj == j.end() || !rj->is_object())
+                damaged(where + ": missing the reshape box");
+            try {
+                ReshapeFinish rs;
+                rs.min = rj->at("min").get<std::array<double, 3>>();
+                rs.max = rj->at("max").get<std::array<double, 3>>();
+                rs.count = rj->at("count").get<std::array<int, 3>>();
+                const auto moves = rj->at("moves").get<std::vector<double>>();
+                for (std::size_t i = 0; i + 2 < moves.size(); i += 3)
+                    rs.moves.push_back({moves[i], moves[i + 1], moves[i + 2]});
+                reshape::check(rs);
+                spec.reshape = std::move(rs);
+            } catch (const std::exception& e) {
+                damaged(where + ": the reshape box is damaged (" + e.what() + ")");
+            }
         }
         if (spec.op == BooleanOp::Smooth) {
             const auto sj = j.find("smooth");

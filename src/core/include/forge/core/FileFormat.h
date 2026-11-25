@@ -105,7 +105,8 @@ namespace forge::file {
 //      Mask Lasso stroke (brush 14: its dabs the outline, "grab" the way it was seen)
 //  52  Proportions (a posed step's "proportions": head, shoulders, torso, arms, hands, legs,
 //      feet; left out as made)
-inline constexpr int kFormatVersion = 52;
+//  53  Reshape steps (operation "reshape": the box, its handle counts and moves)
+inline constexpr int kFormatVersion = 53;
 // The highest sculpt::Brush number a file may hold (Pattern).
 inline constexpr int kLastSculptBrush = 14;
 inline constexpr const char* kExtension = ".f3d";
