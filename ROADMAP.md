@@ -127,7 +127,8 @@ Gate to Phase 2: a new user prints a customised part within 10 minutes.
 | 95 | Make Part from paint: a part over a painted area (armor, gloves, belts), on top or set in | Done (0.103.0) |
 | 96 | Toy joint recipes in Cut into Parts: butterfly shoulder, drop-down hip, ankle rocker, ab crunch; Super Poseable | Done (0.104.0) |
 | 97 | Sculpt strength: a 0-150% slider for each sculpt step, toning every stroke in it down or up together | Done (0.105.0) |
-| 98 | Show and hide shapes: an eye by each shape in Objects; Show Only This, Show All, Ctrl+H | **Delivered for testing** |
+| 98 | Show and hide shapes: an eye by each shape in Objects; Show Only This, Show All, Ctrl+H | Done (0.106.0) |
+| 99 | Lasso cut and lasso mask: cut straight through inside a drawn loop; lasso in Split by Mask, Make Part and the sculpt mask | **Delivered for testing** |
 
 Slices 39–41 close the gaps found in the [Phase 1 gate review](docs/PHASE1_GATE.md).
 

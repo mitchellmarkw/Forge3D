@@ -71,6 +71,7 @@ add_library(forge_core STATIC
     src/Picking.cpp
     src/Primitives.cpp
     src/MakePart.cpp
+    src/Lasso.cpp
     src/PrintOrient.cpp
     src/PrintSplit.cpp
     src/Scale.cpp

@@ -175,6 +175,12 @@ SculptPanel::SculptPanel(QWidget* parent) : QWidget(parent)
     clearMask->setToolTip(tr("Take the mask off everywhere"));
     auto* invertMask = new QPushButton(tr("Invert mask"));
     invertMask->setToolTip(tr("Mask what's free and free what's masked"));
+    m_lassoMask = new QPushButton(tr("Lasso mask"));
+    m_lassoMask->setCheckable(true);
+    m_lassoMask->setToolTip(tr("While on, drag a loop round what to mask instead of brushing: everything inside it "
+                               "is masked, right through the shape. Ctrl: takes the mask off inside it."));
+    maskButtons->addWidget(m_lassoMask);
+    connect(m_lassoMask, &QPushButton::toggled, this, &SculptPanel::brushChanged);  // the mask's colours show
     maskButtons->addWidget(clearMask);
     maskButtons->addWidget(invertMask);
     maskButtons->addStretch(1);
@@ -301,6 +307,7 @@ SculptPanel::SculptPanel(QWidget* parent) : QWidget(parent)
 void SculptPanel::start(const QString& title, double suggestedSize)
 {
     m_title->setText(title);
+    m_lassoMask->setChecked(false);
     const QSignalBlocker block(m_detail);
     m_size->setValue(suggestedSize);
     setDetailEnabled(true);
@@ -341,6 +348,11 @@ void SculptPanel::addOwnPattern(const SculptPattern& pattern)
     m_pattern->insertItem(at, QString::fromStdString(pattern.name));
     m_pattern->setCurrentIndex(at);
     m_lastPattern = at;
+}
+
+bool SculptPanel::lassoMask() const
+{
+    return m_lassoMask->isChecked();
 }
 
 bool SculptPanel::mirrorX() const

@@ -83,6 +83,12 @@ MaskPanel::MaskPanel(QWidget* parent) : QWidget(parent)
     m_size->setToolTip(tr("How far the brush reaches from its middle (the ring shows it on the shape)"));
     form->addRow(tr("Brush size:"), m_size);
     layout->addLayout(form);
+    m_lasso = new QPushButton(tr("Lasso: draw a loop instead"));
+    m_lasso->setCheckable(true);
+    m_lasso->setToolTip(tr("While on, drag a loop round the part instead of brushing: everything inside it is "
+                           "painted, right through the shape (front and back), so a loop round a hand paints all "
+                           "of the hand. Ctrl: rubs out inside it."));
+    layout->addWidget(m_lasso);
 
     m_keepBox = new QWidget;
     auto* keepColumn = new QVBoxLayout(m_keepBox);
@@ -333,6 +339,7 @@ void MaskPanel::start(const QString& title, bool editing, double keyFit, MaskCut
 {
     m_title->setText(title);
     m_makingPart = false;
+    m_lasso->setChecked(false);
     m_splitOptions->show();
     m_partOptions->hide();
     m_apply->setText(tr("Apply"));
@@ -378,6 +385,11 @@ MaskPanel::PartOptions MaskPanel::partOptions() const
     o.thickness = m_partThickness->value();
     o.fit = m_partFit->value();
     return o;
+}
+
+bool MaskPanel::lasso() const
+{
+    return m_lasso->isChecked();
 }
 
 double MaskPanel::brushSize() const

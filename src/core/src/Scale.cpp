@@ -207,8 +207,13 @@ void scaleInto(const Document& doc, ObjectId id, const Vec3& factors, const Vec3
         for (MaskDab& d : next.boolean->maskSplit->dabs) {
             for (std::size_t k = 0; k < 3; ++k)
                 d.centre[k] = factors[k] * (d.centre[k] - anchor[k]) + anchor[k];
-            if (even(factors))
-                d.radius *= factors[0];
+            for (auto& p : d.loop)  // a lasso's outline stretches with the shape
+                for (std::size_t k = 0; k < 3; ++k)
+                    p[k] = factors[k] * (p[k] - anchor[k]) + anchor[k];
+            for (std::size_t k = 0; k < 3; ++k)
+                d.along[k] *= factors[k];
+            if (even(factors) || d.isLasso())
+                d.radius *= d.isLasso() ? std::max({factors[0], factors[1], factors[2]}) : factors[0];
         }
         out.push_back(std::move(next));
         return;

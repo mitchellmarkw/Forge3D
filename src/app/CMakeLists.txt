@@ -48,7 +48,9 @@ add_executable(Forge3D WIN32
     JoinPanel.h
     JoinPanel.cpp
     MaskPanel.h
+    LassoPanel.h
     MaskPanel.cpp
+    LassoPanel.cpp
     ReferencePanel.h
     HingePanel.h
     ScaleCalculator.h

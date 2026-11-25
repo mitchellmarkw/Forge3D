@@ -1924,3 +1924,23 @@ and sharp across edges.
   takes a press on that column (and its double-click) as show / hide, so the selection doesn't change.
 - `setHidden` lets hidden shapes go from the selection; `showOnly`, `showAll`; View menu Hide Selected (Ctrl+H) and
   Show All (Ctrl+Shift+H); Hide / Show Only This / Show All on the tree's right-click menu.
+
+## Lasso cut and lasso mask (slice 99, 0.107.0)
+
+- `lasso::Loop`: points on a plane square to the view, and the view's direction (`along`, into the screen).
+  `frameOf` (u, v across, w towards the viewer), `flat`, `simplified` (Ramer-Douglas-Peucker on the ring, at most
+  200 points), `crossesItself`, `insideFlat` (even-odd), `distanceFlat`.
+- `lasso::cutter`: the loop (simplified to a 200th of its size) as a sketch of lines, a midplane Pad long enough to
+  pass right through the shape's bounds, placed with local Z = w. `lasso::cut`: Subtract (cut away inside),
+  Intersect (keep inside), or Both (the target copied with `duplicateTree`, one of each, with its own cutter); one
+  macro; refuses a loop that misses or would leave nothing, before anything changes.
+- `MaskDab` can be a lasso (`loop`, `along`; centre and radius cover it). `mask::Field` keeps lassos out of its grid:
+  `masked` lets a lasso decide when it comes later in the order than the last ball covering the point; `nearEdge`
+  and `changesAcross` look at lassos too (a triangle near one if its box overlaps the lasso's, seen its way).
+  `movedDab` moves a lasso's points and turns its direction; Rescale stretches them. Saved as
+  {"loop", "along", "erase"} among a mask's dabs.
+- Sculpt: `Brush::MaskLasso` (14), a whole-mesh stroke: its dabs the loop, `grab` the direction, `invert` to unmask;
+  `Sculptor::maskLasso` sets the mask inside (and in each mirror image of the loop). File format 51.
+- App: `LassoDraw` collects the rays of a left drag where they meet the plane through the shape's middle facing
+  the view, shown by `Viewport::setLasso` (a dashed outline, filled once closed). Lasso Cut mode (`LassoPanel`), the
+  mask panel's Lasso button, and the sculpt panel's Lasso mask button use it.

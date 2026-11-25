@@ -161,6 +161,9 @@ public:
         QColor colour{30, 140, 60};
     };
     void setLabels(std::vector<Label> labels);
+    // A lasso being drawn or waiting to be used: its points (plate mm), joined in order,
+    // closed back to the first when `closed`. Empty: none.
+    void setLasso(std::vector<QVector3D> points, bool closed);
     void themeChanged();  // light / dark: redraw in the new colours
     // How shapes are drawn: solid, see-through (half clear, so what's inside and behind
     // shows), or as their triangles' edges. Parts shown inside combined shapes, the
@@ -260,6 +263,8 @@ private:
     QOpenGLFunctions_3_3_Core* m_gl33 = nullptr;  // for glPolygonMode (Wireframe); none on OpenGL ES
     std::optional<Section> m_section;
     std::vector<Label> m_labels;
+    std::vector<QVector3D> m_lasso;
+    bool m_lassoClosed = false;
     std::set<std::uint64_t> m_sectionIds;  // the shapes a selected-only section cuts
     void noteSectionShapes();
     std::optional<int> m_cubeHover;

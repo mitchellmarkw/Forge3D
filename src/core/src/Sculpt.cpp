@@ -2,6 +2,7 @@
 #include "forge/core/Sculpt.h"
 
 #include "forge/core/FileFormat.h"
+#include "forge/core/Lasso.h"
 #include "forge/core/Remesh.h"
 
 #include <algorithm>
@@ -1197,7 +1198,7 @@ void Sculptor::endSnake()
     m_snake.clear();
 }
 
-static_assert(int(Brush::Pattern) == file::kLastSculptBrush, "files must be able to hold every brush");
+static_assert(int(Brush::MaskLasso) == file::kLastSculptBrush, "files must be able to hold every brush");
 
 void Sculptor::beginPattern(std::shared_ptr<const PictureData> image, double tile, double depth, double turn,
                             bool once)
@@ -1237,6 +1238,55 @@ std::pair<std::uint32_t, std::uint32_t> Sculptor::invertMask()
         m_mesh.shade.assign(m_mesh.vertexCount(), 0.0f);
     for (float& m : m_mesh.shade)
         m = 1.0f - m;
+    m_everything = true;
+    return {0, std::uint32_t(m_mesh.vertexCount())};
+}
+
+std::pair<std::uint32_t, std::uint32_t> Sculptor::maskLasso(const std::vector<Vec3>& loop, const Vec3& along,
+                                                             bool unmask, const Symmetry& symmetry)
+{
+    if (loop.size() < 3)
+        return {0, 0};
+    if (m_mesh.shade.size() != m_mesh.vertexCount())
+        m_mesh.shade.assign(m_mesh.vertexCount(), 0.0f);
+    // The loop and its mirror images, each flat in its own frame.
+    std::vector<std::vector<Vec3>> loops;
+    std::vector<Vec3> alongs;
+    for (const Vec3& p : loop) {
+        const std::vector<Vec3> im = symmetry.images(p);
+        if (loops.empty()) {
+            loops.resize(im.size());
+            const std::vector<Vec3> tips = symmetry.images({p[0] + along[0], p[1] + along[1], p[2] + along[2]});
+            for (std::size_t i = 0; i < im.size(); ++i)
+                alongs.push_back({tips[i][0] - im[i][0], tips[i][1] - im[i][1], tips[i][2] - im[i][2]});
+        }
+        for (std::size_t i = 0; i < im.size() && i < loops.size(); ++i)
+            loops[i].push_back(im[i]);
+    }
+    const float value = unmask ? 0.0f : 1.0f;
+    for (std::size_t i = 0; i < loops.size(); ++i) {
+        lasso::Loop l;
+        l.points = loops[i];
+        l.along = alongs[i];
+        const lasso::Frame f = lasso::frameOf(l);
+        const auto outline = lasso::flat(l, f);
+        double lo[2] = {1e300, 1e300}, hi[2] = {-1e300, -1e300};
+        for (const auto& q : outline)
+            for (int k = 0; k < 2; ++k) {
+                lo[k] = std::min(lo[k], q[std::size_t(k)]);
+                hi[k] = std::max(hi[k], q[std::size_t(k)]);
+            }
+        const auto& pos = m_mesh.positions;
+        for (std::size_t v = 0; v < m_mesh.vertexCount(); ++v) {
+            const double d[3] = {pos[3 * v] - f.origin[0], pos[3 * v + 1] - f.origin[1], pos[3 * v + 2] - f.origin[2]};
+            const double x = d[0] * f.u[0] + d[1] * f.u[1] + d[2] * f.u[2];
+            const double y = d[0] * f.v[0] + d[1] * f.v[1] + d[2] * f.v[2];
+            if (x < lo[0] || x > hi[0] || y < lo[1] || y > hi[1])
+                continue;
+            if (lasso::insideFlat(outline, x, y))
+                m_mesh.shade[v] = value;
+        }
+    }
     m_everything = true;
     return {0, std::uint32_t(m_mesh.vertexCount())};
 }
@@ -1416,6 +1466,13 @@ void replay(Sculptor& sculptor, const SculptStroke& stroke, const Mesh& start,
     }
     if (stroke.brush == int(Brush::MaskInvert)) {
         sculptor.invertMask();
+        return;
+    }
+    if (stroke.brush == int(Brush::MaskLasso)) {
+        std::vector<Vec3> loop;
+        for (const auto& d : stroke.dabs)
+            loop.push_back({d[0], d[1], d[2]});
+        sculptor.maskLasso(loop, {stroke.grab[0], stroke.grab[1], stroke.grab[2]}, stroke.invert, symmetry);
         return;
     }
     if (stroke.brush == int(Brush::SnakeHook)) {
