@@ -1911,3 +1911,16 @@ and sharp across edges.
   not a replay. The app's sculpt mode hands over the sculptor's rests when it finishes.
 - App: Properties shows a slider and percent box for a sculpt step; dragging sends the change when let go. An
   `EditBodyCommand` ("Sculpt strength"). Editing the step's strokes keeps its strength.
+
+## Show and hide (slice 98, 0.106.0)
+
+- `MainWindow::m_hiddenObjects`: top-level ids left out of the view. Only a view setting: not in the document, the
+  file or the undo stack; cleared on New, Open and recovery, and ids no longer top level are dropped on each
+  `refreshScene`.
+- `refreshScene` skips a hidden shape unless it's selected: then it's drawn see-through (a ghost, picked in Objects
+  so its handles have something to show), or as usual while a tool is open (a tool's target shows while it works).
+- The Objects tree has a third column (logical 2) for the eye, moved to the front (`moveSection`), with
+  `setTreePosition(0)` so the branch arrows stay by the names. Only top-level rows get one. The viewport event filter
+  takes a press on that column (and its double-click) as show / hide, so the selection doesn't change.
+- `setHidden` lets hidden shapes go from the selection; `showOnly`, `showAll`; View menu Hide Selected (Ctrl+H) and
+  Show All (Ctrl+Shift+H); Hide / Show Only This / Show All on the tree's right-click menu.

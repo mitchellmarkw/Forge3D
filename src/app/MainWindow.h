@@ -322,6 +322,12 @@ private:
     void scheduleSceneRefresh();
     void refreshScene();
     void refreshObjectList();
+    // Hiding shapes from the view (the eye in the Objects list). Only how things look: not
+    // saved, not undone, and a hidden shape is still printed and saved.
+    bool isHidden(ObjectId id) const { return m_hiddenObjects.count(id) > 0; }
+    void setHidden(const std::vector<ObjectId>& ids, bool hidden);
+    void showOnly(const std::vector<ObjectId>& ids);
+    void showAll();
     // Objects tree: each object, opened, lists its steps oldest first (tools under the
     // step that used them) with the rollback bar after the last step shown.
     void addObjectRow(QTreeWidgetItem* parent, ObjectId id);
@@ -361,6 +367,9 @@ private:
     QString m_filePath;  // empty = never saved
     bool m_refreshQueued = false;
     bool m_syncingList = false;
+    std::set<ObjectId> m_hiddenObjects;  // top-level shapes not drawn (the Objects list's eye)
+    QAction* m_hideAction = nullptr;
+    QAction* m_showAllAction = nullptr;
 
     struct Drag {
         enum class Kind { None, Plate, Arrow, Ring, Face, SplitPlane, FitPlane };

@@ -1461,6 +1461,16 @@ void MainWindow::createMenus()
         Preferences().setValue(QStringLiteral("view/cube"), on);
     });
     view->addSeparator();
+    m_hideAction = view->addAction(tr("&Hide Selected"));
+    m_hideAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_H));
+    m_hideAction->setToolTip(tr("Hide the selected shapes from the view (they're still saved and printed). "
+                                "Or click a shape's eye in Objects."));
+    connect(m_hideAction, &QAction::triggered, this, [this] { setHidden(m_selection, true); });
+    m_showAllAction = view->addAction(tr("&Show All"));
+    m_showAllAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_H));
+    m_showAllAction->setToolTip(tr("Show every hidden shape again"));
+    connect(m_showAllAction, &QAction::triggered, this, [this] { showAll(); });
+    view->addSeparator();
     for (QAction* a : m_lookActions)
         view->addAction(a);
     view->addSeparator();
@@ -1854,8 +1864,14 @@ void MainWindow::createDocks()
     // Objects tree (left): combined shapes hold their parts.
     m_objects = new QTreeWidget;
     m_objects->setHeaderHidden(true);
-    m_objects->setColumnCount(2);
+    m_objects->setColumnCount(3);
+    // Column 2 is the eye (show / hide), shown first; the tree's arrows stay with the names.
+    m_objects->setTreePosition(0);
+    m_objects->header()->moveSection(2, 0);
     m_objects->header()->setStretchLastSection(true);
+    m_objects->header()->setMinimumSectionSize(20);
+    m_objects->header()->setSectionResizeMode(2, QHeaderView::Fixed);
+    m_objects->header()->resizeSection(2, 24);
     m_objects->header()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
     m_objects->setSelectionMode(QAbstractItemView::ExtendedSelection);  // Ctrl+click, Shift+click
     m_objects->setContextMenuPolicy(Qt::CustomContextMenu);
@@ -6906,6 +6922,7 @@ void MainWindow::newDocument()
 {
     if (!confirmDiscardChanges())
         return;
+    m_hiddenObjects.clear();
     m_doc.replaceAll({});
     m_doc.setReferences({});
     m_doc.setPoses({});
@@ -6934,6 +6951,7 @@ bool MainWindow::openFile(const QString& path)
 {
     try {
         std::vector<Body> bodies = file::load(toPath(path));
+        m_hiddenObjects.clear();
         m_doc.replaceAll(std::move(bodies));
         m_doc.setReferences(file::loadReferences(toPath(path)));
         m_doc.setPoses(file::loadPoses(toPath(path)));
@@ -7190,6 +7208,7 @@ bool MainWindow::recoverFrom(const QString& backup)
 {
     try {
         std::vector<Body> bodies = file::load(toPath(backup));
+        m_hiddenObjects.clear();
         m_doc.replaceAll(std::move(bodies));
         m_doc.setReferences(file::loadReferences(toPath(backup)));
         m_doc.setPoses(file::loadPoses(toPath(backup)));
@@ -7976,7 +7995,13 @@ void MainWindow::refreshScene()
         if (m_patternMode.active && !m_doc.find(m_patternMode.target))
             endPattern();
         QString unbuilt;  // the first shape that couldn't be built: the others still show
+        std::erase_if(m_hiddenObjects, [this](ObjectId id) { return !m_doc.find(id) || !m_doc.isTopLevel(id); });
         for (ObjectId id : m_doc.topLevelIds()) {
+            // Hidden with the eye: left out, or see-through while picked in Objects (so what's
+            // moved or changed can be seen); shown as usual while a tool works on it.
+            const bool hiddenPicked = isHidden(id) && isSelected(id) && !toolOpen();
+            if (isHidden(id) && !isSelected(id))
+                continue;
             if (m_maskMode.active && id == m_maskMode.hidden)
                 continue;  // the other piece, while its mask is being changed
             if (m_mouldMode.active && m_mouldMode.editing && id == m_mouldMode.other)
@@ -8207,7 +8232,10 @@ void MainWindow::refreshScene()
                 item.masked = QVector3D(float(m.redF()), float(m.greenF()), float(m.blueF()));
                 item.selected = false;
             }
-            triangles += item.mesh->triangleCount();
+            if (hiddenPicked)
+                item.ghost = true;
+            else
+                triangles += item.mesh->triangleCount();
             items.push_back(std::move(item));
         }
         // Panel lines drawn so far: what's cut away, red, seen through the shape.
@@ -8517,6 +8545,8 @@ void MainWindow::refreshScene()
     const bool allTopLevel = std::all_of(m_selection.begin(), m_selection.end(),
                                          [this](ObjectId id) { return m_doc.isTopLevel(id); });
     m_delete->setEnabled(anySelected && allTopLevel);
+    m_hideAction->setEnabled(anySelected && allTopLevel && !toolOpen());
+    m_showAllAction->setEnabled(!m_hiddenObjects.empty());
     m_deselect->setEnabled(anySelected || toolOpen() || (m_layFlat && m_layFlat->isChecked()));  // Esc also closes a tool
     // A rolled-back object takes new steps only at its bar (Edges, Emboss): roll it
     // forward before combining, mirroring or splitting it.
@@ -8592,6 +8622,20 @@ void MainWindow::addObjectRow(QTreeWidgetItem* parent, ObjectId id)
     item->setData(0, Qt::UserRole, QVariant::fromValue<ObjectId>(id));
     item->setData(0, kRowKindRole, kObjectRow);
     item->setToolTip(0, QString::fromStdString(typeName(*body)));
+    if (!parent) {
+        // The eye: click it to hide the shape from the view, again to show it.
+        static QIcon eyes[2][2];  // [dark][hidden], made once per look
+        const bool dark = QApplication::palette().color(QPalette::Window).lightness() < 128;
+        const bool hidden = isHidden(id);
+        QIcon& eye = eyes[dark][hidden];
+        if (eye.isNull())
+            eye = ribbonIcon(hidden ? QStringLiteral("eye-off") : QStringLiteral("eye"));
+        item->setIcon(2, eye);
+        item->setToolTip(2, hidden ? tr("Hidden: click to show it") : tr("Click to hide it from the view"));
+        if (hidden)
+            for (int c : {0, 1})
+                item->setForeground(c, palette().brush(QPalette::Disabled, QPalette::Text));
+    }
     if (body->isBoolean()) {
         QFont bold = item->font(0);
         bold.setBold(true);
@@ -8675,6 +8719,50 @@ void MainWindow::addStepRows(QTreeWidgetItem* objectRow, ObjectId top)
         if (i + 1 == shown)
             addBar();
     }
+}
+
+void MainWindow::setHidden(const std::vector<ObjectId>& ids, bool hidden)
+{
+    bool changed = false;
+    for (ObjectId id : ids) {
+        if (!m_doc.find(id) || !m_doc.isTopLevel(id))
+            continue;
+        changed |= hidden ? m_hiddenObjects.insert(id).second : m_hiddenObjects.erase(id) > 0;
+    }
+    if (!changed)
+        return;
+    if (hidden && !toolOpen()) {
+        // A hidden shape can't be worked on in the view: it's let go.
+        std::vector<ObjectId> keep = m_selection;
+        std::erase_if(keep, [this](ObjectId id) { return isHidden(id); });
+        if (keep != m_selection)
+            setSelection(keep);
+    }
+    refreshScene();
+    if (hidden)
+        statusBar()->showMessage(tr("Hidden from the view only: it's still saved and printed. Click its eye "
+                                    "in Objects to show it again."),
+                                 6000);
+}
+
+void MainWindow::showOnly(const std::vector<ObjectId>& ids)
+{
+    std::vector<ObjectId> others;
+    for (ObjectId id : m_doc.topLevelIds())
+        if (std::find(ids.begin(), ids.end(), id) == ids.end())
+            others.push_back(id);
+    m_hiddenObjects.clear();
+    setHidden(others, true);
+    refreshScene();
+}
+
+void MainWindow::showAll()
+{
+    if (m_hiddenObjects.empty())
+        return;
+    m_hiddenObjects.clear();
+    statusBar()->clearMessage();
+    refreshScene();
 }
 
 void MainWindow::refreshObjectList()
@@ -8847,6 +8935,14 @@ void MainWindow::showTreeMenu(const QPoint& pos)
     const bool isStep = kind == kStepRow;
     const ObjectId top = isStep ? item->data(0, kOwnerRole).value<ObjectId>() : id;
     menu.addAction(tr("Change..."), this, [this, id] { editStep(id); });
+    if (!isStep && !item->parent()) {
+        menu.addAction(isHidden(id) ? tr("Show") : tr("Hide"), this,
+                       [this, id] { setHidden({id}, !isHidden(id)); });
+        menu.addAction(tr("Show Only This"), this, [this, id] { showOnly({id}); });
+        if (!m_hiddenObjects.empty())
+            menu.addAction(tr("Show All"), this, [this] { showAll(); });
+        menu.addSeparator();
+    }
     if (!isStep) {
         QMenu* colour = menu.addMenu(ribbonIcon(QStringLiteral("colour")), tr("Color"));
         fillColourMenu(colour);
@@ -8901,6 +8997,13 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
     case QEvent::MouseButtonPress: {
         auto* me = static_cast<QMouseEvent*>(event);
         QTreeWidgetItem* item = m_objects->itemAt(pointOf(event));
+        if (me->button() == Qt::LeftButton && item && !item->parent() &&
+            item->data(0, kRowKindRole).toInt() == kObjectRow && m_objects->columnAt(pointOf(event).x()) == 2) {
+            // The eye: show or hide, without changing what's selected.
+            const ObjectId id = item->data(0, Qt::UserRole).value<ObjectId>();
+            setHidden({id}, !isHidden(id));
+            return true;
+        }
         if (me->button() == Qt::LeftButton && item && item->data(0, kRowKindRole).toInt() == kBarRow &&
             !toolOpen()) {
             m_barDrag = item->data(0, kOwnerRole).value<ObjectId>();
@@ -8915,6 +9018,12 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
         QTreeWidgetItem* item = m_objects->itemAt(pointOf(event));
         if (me->button() != Qt::LeftButton || !item || item->data(0, kRowKindRole).toInt() == kBarRow)
             break;
+        if (!item->parent() && m_objects->columnAt(pointOf(event).x()) == 2) {
+            // A quick second click on the eye: it shows or hides again.
+            const ObjectId id = item->data(0, Qt::UserRole).value<ObjectId>();
+            setHidden({id}, !isHidden(id));
+            return true;
+        }
         const ObjectId id = item->data(0, Qt::UserRole).value<ObjectId>();
         const Body* body = m_doc.find(id);
         if (!body)
