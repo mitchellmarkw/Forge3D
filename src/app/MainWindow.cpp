@@ -13762,15 +13762,25 @@ void MainWindow::updateCutPartsPreview(bool replan)
         }
         discs.push_back(std::move(disc));
         if (int(c.joint) == m_cutPartsPanel->joint()) {
+            // As it will be built: printed in place, with the clearance in place of the fit.
+            const limbcut::InPlace inPlace = m_cutPartsPanel->inPlace();
+            const SocketFinish ball = inPlace.on ? limbcut::inPlaceBall(c.ball, inPlace.clearance) : c.ball;
+            const HingeFinish hingeAs = inPlace.on ? limbcut::inPlaceHinge(c.hinge, inPlace.clearance) : c.hinge;
+            const QString fitWord = inPlace.on ? tr("clearance") : tr("fit");
             switch (c.kind) {
             case limbcut::JointKind::Ball:
-                info = tr("A %1 mm ball on the piece nearer the middle, its socket in the limb (fit %2 mm).")
-                           .arg(c.ball.size)
-                           .arg(c.ball.fit);
+                info = tr("A %1 mm ball on the piece nearer the middle, its socket in the limb (%2 %3 mm).")
+                           .arg(ball.size)
+                           .arg(fitWord)
+                           .arg(ball.fit);
+                if (inPlace.on)
+                    info += tr(" Held in: the socket's opening is narrower than the ball.");
                 break;
             case limbcut::JointKind::Hinge:
-                info = QString::fromStdString(hinge::describe(c.hinge)) +
-                       tr(" (fit %1 mm); the limb's end becomes the tab.").arg(c.hinge.fit);
+                info = QString::fromStdString(hinge::describe(hingeAs)) +
+                       tr(" (%1 %2 mm); the limb's end becomes the tab.").arg(fitWord).arg(hingeAs.fit);
+                if (inPlace.on && hingeAs.kind != HingeKind::Swivel)
+                    info += tr(" The pin is part of the fork.");
                 break;
             default: info = tr("Cut straight across, nothing put in."); break;
             }

@@ -123,7 +123,7 @@ TEST_CASE("An object's steps, oldest first, with descriptions", "[history]")
     CHECK(history::tip(doc, b.cut) == b.cut);
     CHECK(history::describe(doc, b.box) == "20 \xC3\x97 20 \xC3\x97 10 mm");
     CHECK(history::describe(doc, b.rounded) == "1 edge rounded R2");
-    CHECK(history::describe(doc, b.cut) == "minus Cylinder 1");
+    CHECK(history::describe(doc, b.cut) == "minus Cylinder");
     CHECK(history::describe(doc, b.cyl) == "R3 \xC3\x97 20 mm");
     CHECK_THAT(volumeOf(doc, b.cut), WithinRel(kBox - kRound - kHole, 1e-4));
 }
@@ -305,7 +305,7 @@ TEST_CASE("Deleting a step and changing a combine", "[history]")
         after.boolean->op = BooleanOp::Intersect;
         stack.execute(std::make_unique<EditBodyCommand>(before, after, "Change to Intersect"));
         CHECK_THAT(volumeOf(doc, b.cut), WithinRel(kHole, 1e-4));
-        CHECK(history::describe(doc, b.cut) == "overlap with Cylinder 1");
+        CHECK(history::describe(doc, b.cut) == "overlap with Cylinder");
     }
 }
 
@@ -322,7 +322,7 @@ TEST_CASE("Subtract through all", "[history][through]")
     cut.boolean->throughAll = true;
     stack.execute(std::make_unique<CombineCommand>(cut));
     CHECK_THAT(volumeOf(doc, cut.id), WithinRel(kBox - pi * 9 * 10, 1e-6));
-    CHECK(history::describe(doc, cut.id) == "minus Cylinder 1 (through all)");
+    CHECK(history::describe(doc, cut.id) == "minus Cylinder (through all)");
 
     SECTION("still through when the box grows")
     {

@@ -454,12 +454,7 @@ ObjectId add(CommandStack& stack, Document& doc, const AccessorySettings& s, dou
     }
     Body b = hinge::pieceBody(m, nameOf(s));
     b.id = doc.allocateId();
-    b.name = nameOf(s);
-    for (const Body& other : doc.bodies())
-        if (other.name == b.name) {  // "Sword 2" if there's a sword already
-            b.name = doc.uniqueName(nameOf(s));
-            break;
-        }
+    b.name = doc.uniqueName(nameOf(s));  // "Sword 2" if there's a sword already
     const ObjectId id = b.id;
     stack.execute(std::make_unique<AddBodyCommand>(std::move(b)));
     return id;

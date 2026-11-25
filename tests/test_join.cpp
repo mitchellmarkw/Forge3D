@@ -333,7 +333,7 @@ TEST_CASE("Join: kept together, they're grouped; joining onto a group adds to it
     REQUIRE(doc.find(group)->isBoolean());
     CHECK(doc.find(group)->boolean->op == BooleanOp::Group);
     CHECK(!doc.isTopLevel(arm));
-    CHECK(stack.undoLabel() == "Join Shape 2 to Shape 1");
+    CHECK(stack.undoLabel() == "Join Shape 2 to Shape");
     stack.execute(std::make_unique<RenameBodyCommand>(group, "Figure"));
 
     // The head onto the figure's top: the figure group takes it in, keeping its name.

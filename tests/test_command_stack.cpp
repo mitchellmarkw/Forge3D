@@ -215,7 +215,7 @@ TEST_CASE("rename can be undone", "[commands]")
     stack.execute(std::make_unique<RenameBodyCommand>(id, "Lid"));
     CHECK(doc.find(id)->name == "Lid");
     stack.undo();
-    CHECK(doc.find(id)->name == "Box 1");
+    CHECK(doc.find(id)->name == "Box");
 }
 
 TEST_CASE("the history is capped at the limit", "[commands]")

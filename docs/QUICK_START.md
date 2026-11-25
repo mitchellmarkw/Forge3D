@@ -24,7 +24,7 @@ In about ten minutes you'll make a key tag with a hole for the ring and your nam
 
 ## 3. Pick both, the tag first
 
-Click **Box 1** in **Objects** on the left, then hold **Ctrl** and click **Cylinder 1**. Subtract keeps the first shape you pick and cuts the others out of it.
+Click **Box** in **Objects** on the left, then hold **Ctrl** and click **Cylinder**. Subtract keeps the first shape you pick and cuts the others out of it.
 
 ![Pick both, the tag first](quick-start/guide-3-select.png)
 

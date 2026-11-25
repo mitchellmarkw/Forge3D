@@ -152,9 +152,9 @@ TEST_CASE("Mask: Split by Mask on the plate; changed, saved, scaled", "[mask]")
     CHECK_THROWS_AS(splitByMask(stack, doc, box, {{{0, 0, 100}, 1.0, false}}, SplitKeep::Both), std::invalid_argument);
     const auto made = splitByMask(stack, doc, box, dabs, SplitKeep::Both);
     REQUIRE(made.size() == 2);
-    CHECK(doc.find(made[0])->name == "Shape 1 (masked)");
-    CHECK(doc.find(made[1])->name == "Shape 1 (rest)");
-    CHECK(stack.undoLabel() == "Split Shape 1 by mask");
+    CHECK(doc.find(made[0])->name == "Shape (masked)");
+    CHECK(doc.find(made[1])->name == "Shape (rest)");
+    CHECK(stack.undoLabel() == "Split Shape by mask");
     CHECK(history::describe(doc, made[0]) == "the masked part (1 dab)");
     const double a = volumeOf(doc, made[0]), b = volumeOf(doc, made[1]);
     CHECK_THAT(a + b, WithinRel(whole, 1e-6));
