@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.109.0 Beta — Slice 101: Proportions (2026-11-24)
+
+- **Proportions** (Figure Design tab): select a figure sculpted in one piece and change its **head size**,
+  **shoulder width**, **torso length**, **arm length**, **hand size**, **leg length** and **foot size** with
+  sliders (30% to 300%), or pick **Heroic** (long legs, broad shoulders, a smaller head) or **Chibi** (a big head on
+  a small body). The figure updates as you go; the joints stay joined.
+- It uses Pose Figure's skeleton, placed for you: if a part comes out wrong, click 1. Fit the Skeleton and drag
+  its balls onto the joints. Proportions are now stage 3 of Pose Figure too, so a figure can be resized and posed
+  in one step (the pose goes on from the new proportions). A figure already posed gets them in its pose step.
+- A step that only resizes is named "Proportions"; its history line says "new proportions". File format 52.
+
 ## 0.108.0 Beta — Slice 100: Accessory makers (2026-11-24)
 
 - **Accessories** (Figure Design tab): make an accessory at your figure's scale (1:6, 1:10, 1:12 or 1:18). Sizes

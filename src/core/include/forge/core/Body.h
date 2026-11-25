@@ -736,12 +736,17 @@ std::string toString(BooleanOp op);
 // angles, 0 standing straight).
 inline constexpr int kRigPointCount = 19;
 inline constexpr int kRigJointCount = 14;
+// Proportions (slice 101): head, shoulders, torso, arms, hands, legs, feet (rig::Proportion).
+inline constexpr int kProportionCount = 7;
 struct PosedFinish {
     std::array<std::array<double, 3>, kRigPointCount> points{};
     std::array<std::array<double, 2>, kRigJointCount> angles{};
     double blend = 4.0;     // mm: how far a bend spreads either side of a joint
     bool feetFlat = true;   // the feet keep their angle to the ground (ankle angles unused)
     bool onGround = true;   // moved up or down so it stands where it stood
+    // How much bigger each part is than as made (1: as made), before it's posed: the head
+    // and hands and feet all round, the shoulders wider, the torso, arms and legs longer.
+    std::array<double, kProportionCount> proportions{1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0};
     bool operator==(const PosedFinish&) const = default;
 };
 

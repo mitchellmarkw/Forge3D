@@ -523,6 +523,12 @@ json bodyToJson(const Body& b)
             }
             j["posed"] = json{{"points", std::move(points)}, {"angles", std::move(angles)}, {"blend", po->blend},
                               {"feetFlat", po->feetFlat},    {"onGround", po->onGround}};
+            if (rig::proportioned(*po)) {  // left out as made, as files before 52
+                json sizes = json::object();
+                for (int i = 0; i < kProportionCount; ++i)
+                    sizes[rig::key(rig::Proportion(i))] = po->proportions[std::size_t(i)];
+                j["posed"]["proportions"] = std::move(sizes);
+            }
         }
         if (const auto& ho = b.boolean->hollow) {
             json holes = json::array();
@@ -1272,6 +1278,9 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
             po.blend = pj->value("blend", po.blend);
             po.feetFlat = pj->value("feetFlat", po.feetFlat);
             po.onGround = pj->value("onGround", po.onGround);
+            if (const auto pr = pj->find("proportions"); pr != pj->end() && pr->is_object())
+                for (int i = 0; i < kProportionCount; ++i)
+                    po.proportions[std::size_t(i)] = pr->value(rig::key(rig::Proportion(i)), 1.0);
             try {
                 rig::check(po);
             } catch (const std::exception& e) {

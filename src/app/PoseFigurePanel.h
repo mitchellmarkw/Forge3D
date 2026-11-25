@@ -2,6 +2,7 @@
 #pragma once
 
 #include "forge/core/Body.h"
+#include "forge/core/Rig.h"
 
 #include <QWidget>
 
@@ -10,7 +11,9 @@ class QCheckBox;
 class QComboBox;
 class QDoubleSpinBox;
 class QLabel;
+class QSpinBox;
 class QPushButton;
+class QSlider;
 
 namespace forge::app {
 
@@ -26,6 +29,9 @@ public:
     // Opens on fitting for a new step, on posing for one being changed. `guide`: there's a
     // figure guide whose pose can be copied.
     void start(const QString& title, bool editing, const PosedFinish& f, bool guide);
+    // Opens straight on the proportions (slice 101).
+    void showProportions();
+    rig::Proportions proportions() const;
     // The settings now (after a ball was dragged, a pose chosen...).
     void setFinish(const PosedFinish& f);
     bool posing() const;
@@ -47,6 +53,7 @@ signals:
     void presetChosen(int index);
     void angleChanged(int joint, int which, double degrees);
     void optionsChanged();
+    void proportionsChanged();
     void jointChosen(int joint);
     void applyRequested();
     void cancelRequested();
@@ -60,6 +67,12 @@ private:
     QLabel* m_title = nullptr;
     QPushButton* m_fitStage = nullptr;
     QPushButton* m_poseStage = nullptr;
+    QPushButton* m_sizeStage = nullptr;
+    QWidget* m_sizeBox = nullptr;
+    QComboBox* m_sizePreset = nullptr;
+    QSlider* m_sizeSlider[kProportionCount] = {};
+    QSpinBox* m_sizePercent[kProportionCount] = {};
+    void showSizePreset();
     QWidget* m_fitBox = nullptr;
     QWidget* m_poseBox = nullptr;
     QCheckBox* m_mirror = nullptr;

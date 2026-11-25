@@ -293,3 +293,107 @@ TEST_CASE("Pose Figure: a step in the history, saved and rescaled", "[rig]")
     CHECK_THAT(grown.points[std::size_t(Point::Head)][2], WithinAbs(2 * head[2], 1e-6));
     CHECK_THAT(grown.blend, WithinAbs(2 * f.blend, 1e-9));
 }
+
+TEST_CASE("Proportions: parts bigger or longer before posing", "[rig][proportions]")
+{
+    const Mesh figure = trianglesOf(tFigure());
+    const PosedFinish made = rig::fit(figure);
+    const rig::Skin skin(figure, made);
+    const Bounds before = skin.posed(made).mesh.bounds();
+    const auto sizeWith = [&](rig::Proportion p, double k) {
+        PosedFinish f = made;
+        f.proportions[std::size_t(p)] = k;
+        return skin.posed(f).mesh.bounds().size();
+    };
+    // As made: exactly as before.
+    {
+        PosedFinish f = made;
+        f.proportions = rig::asMade();
+        CHECK_FALSE(rig::proportioned(f));
+        CHECK(skin.posed(f).mesh.positions == skin.posed(made).mesh.positions);
+    }
+    // Legs half as long again: taller by about half the legs (55 mm).
+    CHECK_THAT(double(sizeWith(rig::Proportion::Legs, 1.5)[2]), WithinAbs(before.size()[2] + 27.0, 6.0));
+    // Arms half as long again: wider by about half of each arm (60 mm each).
+    CHECK_THAT(double(sizeWith(rig::Proportion::Arms, 1.5)[0]), WithinAbs(before.size()[0] + 60.0, 10.0));
+    // A head twice as big: taller by about the head's height again.
+    CHECK(sizeWith(rig::Proportion::Head, 2.0)[2] > before.size()[2] + 10.0);
+    // Broader shoulders: wider.
+    CHECK(sizeWith(rig::Proportion::Shoulders, 1.3)[0] > before.size()[0] + 5.0);
+    // A longer torso: taller, the head and arms carried up with it.
+    {
+        PosedFinish f = made;
+        f.proportions[std::size_t(rig::Proportion::Torso)] = 1.5;
+        const rig::Points p = rig::proportionedPoints(f);
+        CHECK(pt(p, Point::Neck)[2] > pt(made.points, Point::Neck)[2] + 15.0);
+        CHECK_THAT(pt(p, Point::LeftShoulder)[2] - pt(p, Point::Neck)[2],
+                   WithinAbs(1.5 * (pt(made.points, Point::LeftShoulder)[2] - pt(made.points, Point::Neck)[2]), 2.0));
+        CHECK_THAT(pt(p, Point::LeftHip)[2], WithinAbs(pt(made.points, Point::LeftHip)[2], 1e-9));
+    }
+    // Chibi: much shorter; still one closed surface, posed after.
+    {
+        PosedFinish f = made;
+        f.proportions = rig::chibi();
+        f.angles[std::size_t(Joint::LeftElbow)][0] = 90;
+        const Mesh m = skin.posed(f).mesh;
+        CHECK(m.bounds().size()[2] < before.size()[2] * 0.95);
+        CHECK(meshkernel::volume(meshkernel::fromTriangles(m.positions, m.indices)) > 0.0);
+    }
+    // Out of range.
+    {
+        PosedFinish f = made;
+        f.proportions[std::size_t(rig::Proportion::Head)] = 0.1;
+        CHECK_THROWS_AS(rig::check(f), std::invalid_argument);
+    }
+}
+
+TEST_CASE("Proportions: saved with the step", "[rig][proportions]")
+{
+    Document doc;
+    CommandStack stack(doc);
+    const Mesh figure = trianglesOf(tFigure());
+    auto data = std::make_shared<MeshData>();
+    data->positions = figure.positions;
+    data->indices = figure.indices;
+    const Bounds b = figure.bounds();
+    const float cx = b.center()[0], cy = b.center()[1], z0 = b.min[2];
+    for (std::size_t i = 0; i < data->positions.size(); i += 3) {
+        data->positions[i] -= cx;
+        data->positions[i + 1] -= cy;
+        data->positions[i + 2] -= z0;
+    }
+    data->size = b.size();
+    MeshSpec spec;
+    spec.data = data;
+    spec.width = b.size()[0];
+    spec.depth = b.size()[1];
+    spec.height = b.size()[2];
+    Body body;
+    body.id = doc.allocateId();
+    body.spec = spec;
+    body.name = "Figure";
+    stack.execute(std::make_unique<AddBodyCommand>(body));
+    Mesh placed = *doc.mesh(body.id);
+    const Transform t = doc.localTransform(body.id);
+    for (std::size_t i = 0; i < placed.positions.size(); i += 3) {
+        const Vec3 p = t.apply(Vec3{placed.positions[i], placed.positions[i + 1], placed.positions[i + 2]});
+        for (std::size_t k = 0; k < 3; ++k)
+            placed.positions[i + k] = float(p[k]);
+    }
+    PosedFinish f = rig::fit(placed);
+    f.proportions = rig::heroic();
+    Body r;
+    r.id = doc.allocateId();
+    r.name = "Posed";
+    r.boolean = posedSpec(doc, body.id, f);
+    stack.execute(std::make_unique<CombineCommand>(r));
+    CHECK(history::describe(doc, r.id) == "posed, as made, feet flat, new proportions");
+    CHECK(doc.worldBounds(r.id).size()[2] > doc.worldBounds(body.id).size()[2] + 3.0);  // longer legs
+    const auto path = std::filesystem::temp_directory_path() / "forge_proportions_test.f3d";
+    file::save(doc, path, "test");
+    Document other;
+    other.replaceAll(file::load(path));
+    std::filesystem::remove(path);
+    CHECK(other.find(r.id)->boolean->posed->proportions == rig::heroic());
+    CHECK_THAT(meshkernel::volume(other.meshSolid(r.id)), WithinRel(meshkernel::volume(doc.meshSolid(r.id)), 1e-6));
+}

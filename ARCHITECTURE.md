@@ -1957,3 +1957,18 @@ and sharp across edges.
 - App: `AccessoryPanel` (a page of sizes per kind, remembered under accessory/...; the handle shares
   ports/handle with the hands), a see-through preview, and "Your accessories": a second `library` folder
   (accessories/folder, Documents/Forge3D/Accessories) with Save Selected and the custom shapes' manage dialog.
+
+## Proportions (slice 101, 0.109.0)
+
+- `PosedFinish::proportions` (7 shares, 1 as made; `rig::Proportion`): saved in a posed step as "proportions" only
+  when changed (file format 52).
+- `rig` builds an affine map per bone from the figure as made to its proportions, down the bones from the hips: the
+  chest stretched along the waist-to-neck line (torso) and across the shoulders (shoulder width) about the waist;
+  the head, hands and feet scaled all round about the joint they hang from; arms and legs stretched along each bone;
+  each carried to where its parent's map put its joint, so neighbours meet. `proportionedPoints` maps the
+  skeleton's points.
+- `Skin::posed`: with proportions, each rest point is moved by its bones' maps blended with the skinning weights
+  (linear, so joints stay joined), its normals worked out again, then posed as before. `moves` poses the
+  proportioned skeleton, so angles keep meaning what they did.
+- App: Pose Figure's third stage (sliders with percent boxes, Ready proportions), and a Proportions button that
+  opens it straight there (on the figure's pose step if it has one).

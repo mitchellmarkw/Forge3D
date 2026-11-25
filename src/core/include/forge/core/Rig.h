@@ -77,6 +77,23 @@ Angles fromMannequin(const std::array<std::array<double, 2>, kMJointCount>& pose
 // How much the figure's height is.
 double height(const Points& points);
 
+// Proportions (slice 101): each a share of the size as made (1).
+enum class Proportion { Head, Shoulders, Torso, Arms, Hands, Legs, Feet };
+static_assert(kProportionCount == 7);
+using Proportions = std::array<double, kProportionCount>;
+const char* key(Proportion p);    // "head"... (the file's names)
+const char* title(Proportion p);  // "Head size", "Shoulder width"...
+inline constexpr double kLeastProportion = 0.3, kMostProportion = 3.0;
+// Ready sets: as made, heroic (long legs, broad shoulders, a smaller head), chibi (a big
+// head on a small short body).
+Proportions asMade();
+Proportions heroic();
+Proportions chibi();
+// Whether any part's size is changed.
+bool proportioned(const PosedFinish& f);
+// The skeleton's points with the proportions (before posing).
+Points proportionedPoints(const PosedFinish& f);
+
 // Each bone's move from the figure as made to the pose (indexed by bone; the first is
 // the hips, which stay put), and where the skeleton's points go.
 struct Moves {

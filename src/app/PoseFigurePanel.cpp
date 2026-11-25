@@ -14,6 +14,9 @@
 #include <QLabel>
 #include <QPushButton>
 #include <QSettings>
+#include <QSignalBlocker>
+#include <QSlider>
+#include <QSpinBox>
 #include <QVBoxLayout>
 
 #include <algorithm>
@@ -65,8 +68,9 @@ PoseFigurePanel::PoseFigurePanel(QWidget* parent) : QWidget(parent)
     auto* stages = new QHBoxLayout;
     m_fitStage = new QPushButton(tr("1. Fit the Skeleton"));
     m_poseStage = new QPushButton(tr("2. Pose"));
+    m_sizeStage = new QPushButton(tr("3. Proportions"));
     auto* group = new QButtonGroup(this);
-    for (QPushButton* b : {m_fitStage, m_poseStage}) {
+    for (QPushButton* b : {m_fitStage, m_poseStage, m_sizeStage}) {
         b->setCheckable(true);
         group->addButton(b);
         stages->addWidget(b);
@@ -128,6 +132,39 @@ PoseFigurePanel::PoseFigurePanel(QWidget* parent) : QWidget(parent)
     pose->addWidget(m_onGround);
     layout->addWidget(m_poseBox);
 
+    // Proportions.
+    m_sizeBox = new QGroupBox(tr("Proportions"));
+    auto* sizes = new QVBoxLayout(m_sizeBox);
+    sizes->addWidget(wrapped(tr("Make parts bigger or smaller, longer or shorter: 100% is as made. The pose goes "
+                                "on from the new proportions.")));
+    m_sizePreset = new QComboBox;
+    m_sizePreset->addItem(tr("As it was made"));
+    m_sizePreset->addItem(tr("Heroic (long legs, broad shoulders, a smaller head)"));
+    m_sizePreset->addItem(tr("Chibi (a big head on a small body)"));
+    m_sizePreset->addItem(tr("Your own"));
+    sizes->addWidget(labelled(tr("Ready proportions:"), m_sizePreset));
+    auto* sizeForm = new QFormLayout;
+    for (int i = 0; i < kProportionCount; ++i) {
+        auto* row = new QWidget;
+        auto* line = new QHBoxLayout(row);
+        line->setContentsMargins(0, 0, 0, 0);
+        m_sizeSlider[i] = new QSlider(Qt::Horizontal);
+        m_sizeSlider[i]->setRange(int(rig::kLeastProportion * 100), int(rig::kMostProportion * 100));
+        m_sizeSlider[i]->setSingleStep(5);
+        m_sizeSlider[i]->setPageStep(10);
+        m_sizePercent[i] = new QSpinBox;
+        m_sizePercent[i]->setRange(int(rig::kLeastProportion * 100), int(rig::kMostProportion * 100));
+        m_sizePercent[i]->setSingleStep(5);
+        m_sizePercent[i]->setSuffix(tr(" %"));
+        m_sizePercent[i]->setKeyboardTracking(false);
+        line->addWidget(m_sizeSlider[i], 1);
+        line->addWidget(m_sizePercent[i]);
+        sizeForm->addRow(tr(rig::title(rig::Proportion(i))) + tr(":"), row);
+    }
+    sizes->addLayout(sizeForm);
+    layout->addWidget(m_sizeBox);
+    m_sizeBox->hide();
+
     m_status = new QLabel;
     m_status->setWordWrap(true);
     m_status->hide();
@@ -150,9 +187,10 @@ PoseFigurePanel::PoseFigurePanel(QWidget* parent) : QWidget(parent)
     connect(group, &QButtonGroup::buttonToggled, this, [this](QAbstractButton* b, bool on) {
         if (!on)
             return;
-        const bool posing = b == m_poseStage;
+        const bool posing = b != m_fitStage;  // posing or proportions: the skeleton is set
         m_fitBox->setVisible(!posing);
-        m_poseBox->setVisible(posing);
+        m_poseBox->setVisible(b == m_poseStage);
+        m_sizeBox->setVisible(b == m_sizeStage);
         if (!m_loading)
             emit stageChanged(posing);
     });
@@ -182,8 +220,69 @@ PoseFigurePanel::PoseFigurePanel(QWidget* parent) : QWidget(parent)
             if (!m_loading)
                 emit angleChanged(m_joint->currentIndex(), k, v);
         });
+    for (int i = 0; i < kProportionCount; ++i) {
+        // Dragging shows the number; letting go (or a click, a key, the box) changes the figure.
+        connect(m_sizeSlider[i], &QSlider::valueChanged, this, [this, i](int v) {
+            const QSignalBlocker block(m_sizePercent[i]);
+            m_sizePercent[i]->setValue(v);
+            if (!m_loading && !m_sizeSlider[i]->isSliderDown()) {
+                showSizePreset();
+                emit proportionsChanged();
+            }
+        });
+        connect(m_sizeSlider[i], &QSlider::sliderReleased, this, [this] {
+            showSizePreset();
+            emit proportionsChanged();
+        });
+        connect(m_sizePercent[i], &QSpinBox::valueChanged, this, [this, i](int v) {
+            const QSignalBlocker block(m_sizeSlider[i]);
+            m_sizeSlider[i]->setValue(v);
+            if (!m_loading) {
+                showSizePreset();
+                emit proportionsChanged();
+            }
+        });
+    }
+    connect(m_sizePreset, &QComboBox::activated, this, [this](int i) {
+        if (i >= 3)
+            return;  // your own: as they are
+        const rig::Proportions p = i == 1 ? rig::heroic() : i == 2 ? rig::chibi() : rig::asMade();
+        m_loading = true;
+        for (int k = 0; k < kProportionCount; ++k) {
+            m_sizeSlider[k]->setValue(int(std::lround(p[std::size_t(k)] * 100)));
+            m_sizePercent[k]->setValue(int(std::lround(p[std::size_t(k)] * 100)));
+        }
+        m_loading = false;
+        emit proportionsChanged();
+    });
     connect(apply, &QPushButton::clicked, this, &PoseFigurePanel::applyRequested);
     connect(cancel, &QPushButton::clicked, this, &PoseFigurePanel::cancelRequested);
+}
+
+void PoseFigurePanel::showProportions()
+{
+    m_sizeStage->setChecked(true);
+}
+
+rig::Proportions PoseFigurePanel::proportions() const
+{
+    rig::Proportions p{};
+    for (int i = 0; i < kProportionCount; ++i)
+        p[std::size_t(i)] = m_sizePercent[i]->value() / 100.0;
+    return p;
+}
+
+void PoseFigurePanel::showSizePreset()
+{
+    const rig::Proportions now = proportions();
+    const auto same = [&](const rig::Proportions& p) {
+        for (int i = 0; i < kProportionCount; ++i)
+            if (std::abs(p[std::size_t(i)] - now[std::size_t(i)]) > 0.004)
+                return false;
+        return true;
+    };
+    const QSignalBlocker block(m_sizePreset);
+    m_sizePreset->setCurrentIndex(same(rig::asMade()) ? 0 : same(rig::heroic()) ? 1 : same(rig::chibi()) ? 2 : 3);
 }
 
 void PoseFigurePanel::start(const QString& title, bool editing, const PosedFinish& f, bool guide)
@@ -201,6 +300,7 @@ void PoseFigurePanel::start(const QString& title, bool editing, const PosedFinis
     (editing ? m_poseStage : m_fitStage)->setChecked(true);
     m_fitBox->setVisible(!editing);
     m_poseBox->setVisible(editing);
+    m_sizeBox->setVisible(false);
     m_joint->setCurrentIndex(int(rig::Joint::LeftElbow));
     m_loading = false;
     setFinish(f);
@@ -214,6 +314,12 @@ void PoseFigurePanel::setFinish(const PosedFinish& f)
     m_blend->setValue(f.blend);
     m_feetFlat->setChecked(f.feetFlat);
     m_onGround->setChecked(f.onGround);
+    for (int i = 0; i < kProportionCount; ++i) {
+        const int v = int(std::lround(f.proportions[std::size_t(i)] * 100));
+        m_sizeSlider[i]->setValue(v);
+        m_sizePercent[i]->setValue(v);
+    }
+    showSizePreset();
     // Which pose it is, if it's one in the list.
     const auto same = [&](const rig::Angles& a) {
         for (int j = 0; j < kRigJointCount; ++j) {
@@ -266,7 +372,7 @@ void PoseFigurePanel::showJoint()
 
 bool PoseFigurePanel::posing() const
 {
-    return m_poseStage->isChecked();
+    return !m_fitStage->isChecked();  // posing, or setting the proportions
 }
 
 bool PoseFigurePanel::mirror() const
