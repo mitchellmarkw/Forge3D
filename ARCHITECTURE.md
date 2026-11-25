@@ -1897,3 +1897,17 @@ and sharp across edges.
   AbCrunch).
 - App: four recipe types in CutPartsPanel's list before the joint standard's (each enabled only where it fits), and
   a Super Poseable preset.
+
+## Sculpt strength (slice 97, 0.105.0)
+
+- `SculptFinish::strength` (0..1.5, default 1; saved as the sculpt's "strength" only when not 1, so saved results
+  of full-strength steps keep their keys). File format 50.
+- `Sculptor::restPositions()`: where every point started. Set from the mesh in the constructor and `setMesh` (after
+  `spatialOrder`, so a Remesh stroke starts afresh with what was sculpted before it baked in); `splitAround` gives a
+  new middle point the middle of its ends' rests.
+- `sculpt::replayedFully` returns the full-strength mesh and its rests; `atStrength(full, rest, s)` puts each point
+  at rest + s x (moved - rest) and works out the normals again. `replayed` is the two together.
+- `Document`'s known sculpts are kept at strength 1 with their rests, so changing a step's strength is a blend,
+  not a replay. The app's sculpt mode hands over the sculptor's rests when it finishes.
+- App: Properties shows a slider and percent box for a sculpt step; dragging sends the change when let go. An
+  `EditBodyCommand` ("Sculpt strength"). Editing the step's strokes keeps its strength.

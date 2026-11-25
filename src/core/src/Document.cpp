@@ -1452,22 +1452,28 @@ Mesh Document::sculptStart(ObjectId part, int detail) const
     return sculpt::startingMesh(sculptSurface(part), detail);
 }
 
-void Document::rememberSculpt(const Mesh& start, const SculptFinish& finish, const Mesh& sculpted) const
+void Document::rememberSculpt(const Mesh& start, const SculptFinish& finish, const Mesh& sculpted,
+                              std::vector<float> rest) const
 {
-    std::erase_if(m_knownSculpts, [&](const KnownSculpt& k) { return k.finish == finish; });
-    m_knownSculpts.push_back({start, finish, sculpted});
+    SculptFinish full = finish;
+    full.strength = 1.0;
+    std::erase_if(m_knownSculpts, [&](const KnownSculpt& k) { return k.finish == full; });
+    m_knownSculpts.push_back({start, full, sculpted, std::move(rest)});
     if (m_knownSculpts.size() > 4)
         m_knownSculpts.erase(m_knownSculpts.begin());
 }
 
 Mesh Document::sculpted(const Mesh& start, const SculptFinish& finish) const
 {
+    SculptFinish full = finish;
+    full.strength = 1.0;
     for (const KnownSculpt& k : m_knownSculpts)
-        if (k.finish == finish && k.start.positions == start.positions && k.start.indices == start.indices)
-            return k.sculpted;
-    Mesh done = sculpt::replayed(start, finish);
-    rememberSculpt(start, finish, done);
-    return done;
+        if (k.finish == full && k.start.positions == start.positions && k.start.indices == start.indices)
+            return sculpt::atStrength(k.sculpted, k.rest, finish.strength);
+    sculpt::Replay done = sculpt::replayedFully(start, full);
+    Mesh shown = sculpt::atStrength(done.mesh, done.rest, finish.strength);
+    rememberSculpt(start, full, done.mesh, std::move(done.rest));
+    return shown;
 }
 
 MeshSolid Document::combineMeshes(const BooleanSpec& spec) const

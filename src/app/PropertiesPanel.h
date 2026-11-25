@@ -10,6 +10,7 @@
 
 class QCheckBox;
 class QDoubleSpinBox;
+class QSlider;
 class QSpinBox;
 class QFormLayout;
 class QGroupBox;
@@ -63,6 +64,8 @@ signals:
     void simplifyKeepRequested(ObjectId id, double keep);
     // Smooth: how strongly (1..10).
     void smoothStrengthRequested(ObjectId id, int strength);
+    // A sculpt step's strength, 0..1.5 (1 = as sculpted).
+    void sculptStrengthRequested(ObjectId id, double strength);
     // A size or position to follow the design variables ("=" pressed in it, or its menu):
     // its key ("width", "at.x"...) and its label.
     void formulaRequested(ObjectId id, const QString& key, const QString& label);
@@ -112,6 +115,10 @@ private:
     std::size_t m_simplifyFrom = 0;
     QLabel* m_strengthLabel = nullptr;
     QSpinBox* m_strength = nullptr;
+    QWidget* m_sculptRow = nullptr;  // a sculpt step's strength: slider and percent
+    QLabel* m_sculptLabel = nullptr;
+    QSlider* m_sculptSlider = nullptr;
+    QSpinBox* m_sculptPercent = nullptr;
     QWidget* m_textGroup = nullptr;  // the words of a Text shape
     WordsEditor* m_words = nullptr;
     QDoubleSpinBox* m_letterHeight = nullptr;

@@ -15,7 +15,9 @@
 #include <QGroupBox>
 #include <QLabel>
 #include <QLineEdit>
+#include <QHBoxLayout>
 #include <QPushButton>
+#include <QSlider>
 #include <QSignalBlocker>
 #include <QSpinBox>
 #include <QStackedWidget>
@@ -205,6 +207,52 @@ PropertiesPanel::PropertiesPanel(QWidget* parent) : QWidget(parent)
     });
     m_strengthLabel = new QLabel(tr("Strength:"));
     general->addRow(m_strengthLabel, m_strength);
+    // A sculpt step's strength: 100% is as sculpted, less tones it down, more pushes it further.
+    m_sculptRow = new QWidget;
+    {
+        auto* row = new QHBoxLayout(m_sculptRow);
+        row->setContentsMargins(0, 0, 0, 0);
+        m_sculptSlider = new QSlider(Qt::Horizontal);
+        m_sculptSlider->setRange(0, 150);
+        m_sculptSlider->setSingleStep(5);
+        m_sculptSlider->setPageStep(25);
+        m_sculptSlider->setTickInterval(50);
+        m_sculptSlider->setTickPosition(QSlider::TicksBelow);
+        m_sculptPercent = new QSpinBox;
+        m_sculptPercent->setRange(0, 150);
+        m_sculptPercent->setSingleStep(5);
+        m_sculptPercent->setSuffix(tr(" %"));
+        m_sculptPercent->setKeyboardTracking(false);
+        const QString tip = tr("How much of this step's sculpting shows. 100% is as you sculpted it; less "
+                               "tones every stroke down together (0% is as before the step); up to 150% "
+                               "pushes it further.");
+        m_sculptSlider->setToolTip(tip);
+        m_sculptPercent->setToolTip(tip);
+        row->addWidget(m_sculptSlider, 1);
+        row->addWidget(m_sculptPercent);
+        const auto send = [this](int percent) {
+            if (m_body)
+                emit sculptStrengthRequested(m_body->id, percent / 100.0);
+        };
+        // Dragging shows the number; letting go (or a click, a key, the box) changes the step.
+        connect(m_sculptSlider, &QSlider::valueChanged, this, [this, send](int percent) {
+            const QSignalBlocker block(m_sculptPercent);
+            m_sculptPercent->setValue(percent);
+            if (!m_sculptSlider->isSliderDown())
+                send(percent);
+        });
+        connect(m_sculptSlider, &QSlider::sliderReleased, this,
+                [this, send] { send(m_sculptSlider->value()); });
+        connect(m_sculptPercent, &QSpinBox::valueChanged, this, [this, send](int percent) {
+            const QSignalBlocker block(m_sculptSlider);
+            m_sculptSlider->setValue(percent);
+            send(percent);
+        });
+    }
+    m_sculptLabel = new QLabel(tr("Sculpt strength:"));
+    general->addRow(m_sculptLabel, m_sculptRow);
+    m_sculptRow->hide();
+    m_sculptLabel->hide();
     layout->addLayout(general);
 
     // A Text shape's words
@@ -457,6 +505,15 @@ void PropertiesPanel::setBody(const Body* body, const QString& context, bool isP
     if (smooth) {
         const QSignalBlocker block(m_strength);
         m_strength->setValue(body->boolean->smooth->strength);
+    }
+    const bool sculpted = body->isBoolean() && body->boolean->op == BooleanOp::Sculpt && body->boolean->sculpt;
+    m_sculptRow->setVisible(sculpted && !isPart);
+    m_sculptLabel->setVisible(sculpted && !isPart);
+    if (sculpted) {
+        const int percent = int(std::lround(body->boolean->sculpt->strength * 100.0));
+        const QSignalBlocker a(m_sculptSlider), b(m_sculptPercent);
+        m_sculptSlider->setValue(percent);
+        m_sculptPercent->setValue(percent);
     }
     if (simplify) {
         const QSignalBlocker block(m_keep);

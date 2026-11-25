@@ -337,6 +337,8 @@ json bodyToJson(const Body& b)
                 strokes.push_back(std::move(sj));
             }
             j["sculpt"] = json{{"detail", sc->detail}, {"strokes", strokes}};
+            if (sc->strength != 1.0)
+                j["sculpt"]["strength"] = sc->strength;  // left out at full, as files before 50
             if (!sc->patterns.empty()) {
                 json patterns = json::array();
                 for (const SculptPattern& p : sc->patterns) {
@@ -827,6 +829,7 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
                 damaged(where + ": missing the sculpting");
             SculptFinish sc;
             sc.detail = std::clamp(sj->value("detail", 1), 0, 2);
+            sc.strength = std::clamp(sj->value("strength", 1.0), 0.0, 1.5);
             const auto strokes = sj->find("strokes");
             if (strokes != sj->end() && strokes->is_array())
                 for (const auto& s : *strokes) {

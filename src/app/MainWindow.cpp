@@ -2881,6 +2881,17 @@ void MainWindow::createDocks()
         run(std::make_unique<EditBodyCommand>(*body, after, "Smooth"));
         QApplication::restoreOverrideCursor();
     });
+    connect(m_properties, &PropertiesPanel::sculptStrengthRequested, this, [this](ObjectId id, double strength) {
+        const Body* body = m_doc.find(id);
+        if (!body || !body->isBoolean() || !body->boolean->sculpt ||
+            std::abs(body->boolean->sculpt->strength - strength) < 1e-9)
+            return;
+        Body after = *body;
+        after.boolean->sculpt->strength = std::clamp(strength, 0.0, 1.5);
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        run(std::make_unique<EditBodyCommand>(*body, after, "Sculpt strength"));
+        QApplication::restoreOverrideCursor();
+    });
     connect(m_properties, &PropertiesPanel::simplifyKeepRequested, this, [this](ObjectId id, double keep) {
         const Body* body = m_doc.find(id);
         if (!body || !body->isBoolean() || !body->boolean->simplify ||
@@ -6224,7 +6235,8 @@ void MainWindow::finishSculpt()
     // What the strokes made is kept, so the step isn't worked out again from the start
     // (with none left out above, it is exactly what playing them again gives).
     if (erased == 0)
-        m_doc.rememberSculpt(m_sculptMode.start, finish, m_sculptMode.sculptor->mesh());
+        m_doc.rememberSculpt(m_sculptMode.start, finish, m_sculptMode.sculptor->mesh(),
+                             m_sculptMode.sculptor->restPositions());
     qInfo().noquote() << "Sculpt: done," << m_sculptMode.dabs << "dabs, average"
                       << (m_sculptMode.dabs ? m_sculptMode.dabMs / m_sculptMode.dabs : 0.0) << "ms each";
     const ObjectId target = m_sculptMode.target;
@@ -6235,6 +6247,8 @@ void MainWindow::finishSculpt()
         if (!now)
             return;
         Body after = *now;
+        if (now->boolean && now->boolean->sculpt)
+            finish.strength = now->boolean->sculpt->strength;  // the strength chosen for it stays
         after.boolean->sculpt = finish;
         run(std::make_unique<EditBodyCommand>(*now, after, "Change sculpting"));
         setSelection(history::objectOf(m_doc, target));

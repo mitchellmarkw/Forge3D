@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.105.0 Beta — Slice 97: Sculpt strength (2026-11-24)
+
+- **Sculpt strength**: click a sculpt step (in the Objects list or its history) and a **Sculpt strength** slider in
+  Properties tones the whole step down or pushes it further: 100% is as sculpted, 50% is halfway between the shape
+  before the step and after it, 0% is as before the step, and up to 150% takes it further the same way.
+- Every stroke in the step changes together, the detail added where the brush went stays, and the step's strokes
+  are kept, so going back to 100% gives exactly what was sculpted. Each change is one undo.
+- Changing the strength doesn't play the strokes again, so it's quick even on a heavy sculpt. A step that isn't at
+  100% says so in its history ("3 strokes, at 60%"). Opening the step to sculpt more keeps its strength.
+
 ## 0.104.0 Beta — Slice 96: Toy joint recipes (2026-11-24)
 
 - **Cut into Parts** has the joints toy figures use, as joint types for the joints they're for. Each puts a small

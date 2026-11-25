@@ -271,7 +271,10 @@ std::string describe(const Document& doc, ObjectId id)
         if (!spec.sculpt)
             return {};
         const std::size_t n = spec.sculpt->strokes.size();
-        return std::to_string(n) + (n == 1 ? " stroke" : " strokes");
+        std::string text = std::to_string(n) + (n == 1 ? " stroke" : " strokes");
+        if (std::abs(spec.sculpt->strength - 1.0) > 1e-9)
+            text += ", at " + num(spec.sculpt->strength * 100.0) + "%";
+        return text;
     }
     case BooleanOp::Pattern: {
         if (!spec.pattern)
