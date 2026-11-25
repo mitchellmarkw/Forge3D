@@ -96,6 +96,7 @@ class PanelLinePanel;
 class JoinPanel;
 class MaskPanel;
 class LassoPanel;
+class AccessoryPanel;
 class ReferencePanel;
 class ScaleCalculator;
 class ToleranceDialog;
@@ -964,6 +965,26 @@ private:
     void endHand();
     void updateHandPreview();
     void applyHand();
+
+    // Accessories (slice 100)
+    QAction* m_accessoryAction = nullptr;
+    AccessoryPanel* m_accessoryPanel = nullptr;
+    QTimer* m_accessoryTimer = nullptr;
+    struct AccessoryMode {
+        bool active = false;
+        double x = 0.0, y = 0.0;              // where it goes on the plate
+        ObjectId toSave = kInvalidId;         // the shape selected when it opened
+        std::shared_ptr<const Mesh> preview;  // plate mm
+    };
+    AccessoryMode m_accessoryMode;
+    QString accessoriesFolder() const;
+    void startAccessories();
+    void endAccessories();
+    void updateAccessoryPreview();
+    void applyAccessory();
+    void refreshAccessoryLibrary();
+    void addOwnAccessory(int index);
+    void saveAsAccessory();
 
     // Pose Figure: bones in one sculpted figure, to bend it at its joints
     QAction* m_poseFigureAction = nullptr;

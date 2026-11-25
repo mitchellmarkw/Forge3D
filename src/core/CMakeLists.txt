@@ -72,6 +72,7 @@ add_library(forge_core STATIC
     src/Primitives.cpp
     src/MakePart.cpp
     src/Lasso.cpp
+    src/Accessory.cpp
     src/PrintOrient.cpp
     src/PrintSplit.cpp
     src/Scale.cpp

@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.108.0 Beta — Slice 100: Accessory makers (2026-11-24)
+
+- **Accessories** (Figure Design tab): make an accessory at your figure's scale (1:6, 1:10, 1:12 or 1:18). Sizes
+  are typed life size, as for a person, and made that much smaller, never thinner than will print:
+  - **Blade**: blade length, width and thickness, guard, grip, a pointed, rounded or angled tip, and a pommel. Under
+    40 cm it's a dagger.
+  - **Shield**: round, heater or kite; width, height, thickness and how much it bows; a boss; and a grip bar on the
+    back for a gripping hand.
+  - **Staff or spear**: plain, with a spear point, or with an orb on top.
+  - **Belt with buckle**: round the figure's waist (measured as printed), with a fit, open at the back to clip on.
+  - **Holster**: a pouch with a loop on the back that takes the belt.
+- Grips, staffs and shield bars are the **Handle** size, the same one Make Hand and Hand Ports use for grip holes,
+  so a gripping hand holds them.
+- A see-through preview shows what Make adds and its printed size. Each comes in lying ready to print, in front of
+  the selected shape.
+- **Your accessories**: save a shape as one of yours (select it, open Accessories, Save Selected), then add it again
+  any time at the size it was saved. Manage renames or deletes them or moves their folder (Documents\Forge3D\
+  Accessories), like custom shapes.
+
 ## 0.107.0 Beta — Slice 99: Lasso cut and lasso mask (2026-11-24)
 
 - **Lasso Cut** (Figure Design tab): select a shape, drag a loop round part of it as you see it, and cut straight

@@ -1944,3 +1944,16 @@ and sharp across edges.
 - App: `LassoDraw` collects the rays of a left drag where they meet the plane through the shape's middle facing
   the view, shown by `Viewport::setLasso` (a dashed outline, filled once closed). Lasso Cut mode (`LassoPanel`), the
   mask panel's Lasso button, and the sculpt panel's Lasso mask button use it.
+
+## Accessory makers (slice 100, 0.108.0)
+
+- `AccessorySettings`: the kind, the scale (1 : n), the handle diameter as printed, and each kind's sizes (life size,
+  divided by the scale; the belt's waist and the fits as printed). Never thinner than `accessory::kThinnest` (0.8).
+- `accessory::make`: each kind is a signed distance (spheres, capsules, rounded boxes, flat outlines with a tapering
+  thickness for blades and the spear's leaf, smooth unions), meshed by `meshkernel::levelSet` sampled finely
+  enough for its thinnest part (at most about four million samples), then centred and set on the plate. The shield
+  is bowed by unrolling a cylinder round an upright line behind it; the belt's band follows the waist's ellipse.
+- `accessory::add`: a mesh body (`hinge::pieceBody`) as one undo step.
+- App: `AccessoryPanel` (a page of sizes per kind, remembered under accessory/...; the handle shares
+  ports/handle with the hands), a see-through preview, and "Your accessories": a second `library` folder
+  (accessories/folder, Documents/Forge3D/Accessories) with Save Selected and the custom shapes' manage dialog.

@@ -15,7 +15,8 @@ namespace forge::app {
 class CustomShapesDialog : public QDialog {
     Q_OBJECT
 public:
-    CustomShapesDialog(const QString& folder, QWidget* parent = nullptr);
+    // `accessories`: the same for your saved accessories (slice 100).
+    CustomShapesDialog(const QString& folder, QWidget* parent = nullptr, bool accessories = false);
     QString folder() const { return m_folder; }
 
 signals:
@@ -32,6 +33,7 @@ private:
     void chooseFolder();
 
     QString m_folder;
+    bool m_accessories = false;
     QLabel* m_where = nullptr;
     QListWidget* m_list = nullptr;
     QPushButton* m_add = nullptr;
