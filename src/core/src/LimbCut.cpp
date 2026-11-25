@@ -435,9 +435,32 @@ const char* title(Recipe recipe)
     }
 }
 
-Made cutIntoParts(CommandStack& stack, Document& doc, ObjectId figure, const rig::Points& points,
-                  std::vector<Choice> choices, std::uint32_t firstLink)
+SocketFinish inPlaceBall(SocketFinish ball, double clearance)
 {
+    ball.fit = clearance;
+    ball.resin = false;
+    ball.snap = true;  // the opening narrower than the ball holds it in
+    ball.grip = std::max(ball.grip, 15.0);
+    ball.ridges = 0;
+    ball.reliefCuts = 0;
+    return ball;
+}
+
+HingeFinish inPlaceHinge(HingeFinish hinge, double clearance)
+{
+    hinge.fit = clearance;
+    hinge.resin = false;
+    hinge.stiff = false;  // the tab's hole as roomy as the rest
+    hinge.clicks = 0;
+    hinge.pin = PinKind::Printed;
+    return hinge;
+}
+
+Made cutIntoParts(CommandStack& stack, Document& doc, ObjectId figure, const rig::Points& points,
+                  std::vector<Choice> choices, std::uint32_t firstLink, const InPlace& inPlace)
+{
+    if (inPlace.on && !(inPlace.clearance >= kLeastClearance && inPlace.clearance <= kMostClearance))
+        throw std::invalid_argument("The clearance for printing in place must be from 0.2 to 1 mm.");
     if (!doc.find(figure) || !doc.isTopLevel(figure))
         throw std::invalid_argument("Choose a figure on the plate to cut.");
     if (choices.empty())
@@ -592,10 +615,24 @@ Made cutIntoParts(CommandStack& stack, Document& doc, ObjectId figure, const rig
         };
         // A joint at a cut between `a` (nearer the middle) and `b` (the limb side); `pinWant`
         // the way a hinge's pin should run (zero: square to the limb and to the front).
-        const auto join = [&](ObjectId a, ObjectId b, JointKind kind, const SocketFinish& ball,
+        // Merges a closed surface (plate coordinates) onto piece `a` as a step.
+        const auto fuse = [&](ObjectId a, const Mesh& mesh, const std::string& name) {
+            Body extra = hinge::pieceBody(mesh, name);
+            extra.id = doc.allocateId();
+            const ObjectId extraId = extra.id;
+            stack.execute(std::make_unique<AddBodyCommand>(std::move(extra)));
+            BooleanSpec merge;
+            merge.op = BooleanOp::Merge;
+            merge.operands = {a, extraId};
+            const auto centre = doc.previewResult(merge).bounds.center();
+            merge.pivot = {centre[0], centre[1], centre[2]};
+            step(std::move(merge), a);
+        };
+        const auto join = [&](ObjectId a, ObjectId b, JointKind kind, const SocketFinish& ballIn,
                               const HingeFinish& hingeIn, const Cut& cut, const Vec3& pinWant) {
             const Vec3 n = unit(cut.finish.normal);
             const Vec3 restAt = restFace(cut.finish), limbAt = limbFace(cut.finish);
+            const SocketFinish ball = inPlace.on ? inPlaceBall(ballIn, inPlace.clearance) : ballIn;
             if (kind == JointKind::Ball) {
                 // The socket in the limb, the ball on its neck merged onto the other piece.
                 step(socketSpec(doc, b, {limbAt, mul(n, -1.0)}, ball), b);
@@ -613,7 +650,7 @@ Made cutIntoParts(CommandStack& stack, Document& doc, ObjectId figure, const rig
             }
             if (kind != JointKind::Hinge)
                 return;
-            HingeFinish f = hingeIn;
+            HingeFinish f = inPlace.on ? inPlaceHinge(hingeIn, inPlace.clearance) : hingeIn;
             f.half = HingeHalf::Fork;
             f.link = link++;
             // The pin square to the limb and to the front, so the limb bends forwards and back
@@ -632,10 +669,36 @@ Made cutIntoParts(CommandStack& stack, Document& doc, ObjectId figure, const rig
                 f.reach = std::max(1.25 * r, 0.5 * f.width + 1.0);
             f.turn = std::atan2(dot(cross(a0, want), n), dot(a0, want)) * 180.0 / std::numbers::pi;
             hinge::check(f);
-            const hinge::Half other = hinge::otherHalf(f, restAt, n);
-            step(hingeSpec(doc, a, {restAt, n}, f), a);
-            step(hingeSpec(doc, b, {other.point, other.normal}, other.finish), b);
+            hinge::Half other = hinge::otherHalf(f, restAt, n);
+            // In place, the pin is part of the fork: a touch wider than the fork's hole so they
+            // join, and the tab's (or the link's) hole the clearance wider than the pin.
+            HingeFinish pinned = f;
+            if (inPlace.on && f.kind != HingeKind::Swivel) {
+                pinned.pinSize = hinge::armHole(f) + 0.05;
+                if (f.kind == HingeKind::Single)
+                    other.finish.pinSize = pinned.pinSize;
+            }
+            const ObjectId aNow = step(hingeSpec(doc, a, {restAt, n}, f), a);
+            const ObjectId bNow = step(hingeSpec(doc, b, {other.point, other.normal}, other.finish), b);
             const double span = std::max(0.95 * r, 0.5 * f.width + 0.5);
+            if (inPlace.on && f.kind != HingeKind::Swivel) {
+                const std::vector<hinge::Piece> parts = hinge::pieces(pinned, restAt, n, false, {span, span});
+                int pins = 0;
+                for (const hinge::Piece& piece : parts) {
+                    if (piece.name.rfind("Hinge pin", 0) == 0) {
+                        // The first pin is in this fork; a double hinge's second, in the other.
+                        fuse(pins == 0 ? aNow : bNow, piece.mesh, piece.name);
+                        ++pins;
+                        continue;
+                    }
+                    Body extra = hinge::pieceBody(piece.mesh, piece.name);  // the double hinge's link
+                    extra.id = doc.allocateId();
+                    extra.hardware = true;
+                    made.extras.push_back(extra.id);
+                    stack.execute(std::make_unique<AddBodyCommand>(std::move(extra)));
+                }
+                return;
+            }
             for (const hinge::Piece& piece : hinge::pieces(f, restAt, n, false, {span, span})) {
                 Body extra = hinge::pieceBody(piece.mesh, piece.name);
                 extra.id = doc.allocateId();

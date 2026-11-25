@@ -132,6 +132,7 @@ Gate to Phase 2: a new user prints a customised part within 10 minutes.
 | 100 | Accessory makers: blade, shield, staff or spear, belt with buckle, holster at the figure's scale; your own accessories library | **Delivered for testing** |
 | 101 | Proportions: head, shoulders, torso, arms, hands, legs and feet sliders for a figure; Heroic and Chibi | **Delivered for testing** |
 | 102 | Reshape box: drag handles on a box round any shape to bend it smoothly (2, 3 or 4 a side, mirrored) | **Delivered for testing** |
+| 103 | Print-in-place joints in Cut into Parts: captive balls, hinges with pins built on, a clearance all round | **Delivered for testing** |
 
 Slices 39–41 close the gaps found in the [Phase 1 gate review](docs/PHASE1_GATE.md).
 

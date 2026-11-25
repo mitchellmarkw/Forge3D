@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.111.0 Beta — Slice 103: Print-in-place joints (2026-11-24)
+
+- **Print in place** in Cut into Parts: tick **Print in place (filament)** and every joint is built captive with a
+  **Clearance** all round (0.35 mm to start), so the figure prints already put together on a filament printer and
+  moves once it's off the plate.
+  - Ball joints: the ball held in a socket whose opening is narrower than the ball.
+  - Hinges: the pin is part of the fork, the tab's hole the clearance wider; a double hinge's link stays a piece
+    of its own, held on both pins. Swivels keep their lip in its groove.
+  - No clicks, ridges or relief cuts (they'd print joined), and the printer is set to filament.
+- The pieces stay put together where they were cut. If the joints print stuck, try a bigger clearance; if
+  they're loose, a smaller one (the Tolerance Test Print helps find your printer's).
+
 ## 0.110.0 Beta — Slice 102: Reshape box (2026-11-24)
 
 - **Reshape** (Sculpt tab → Whole Shape): a box of gold handles round the selected shape, any shape at all. Drag a

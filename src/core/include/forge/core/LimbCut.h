@@ -105,11 +105,24 @@ struct Made {
     std::vector<ObjectId> pieces;  // one per piece, named for its bones
     std::vector<ObjectId> extras;  // hinge pins and links, to print with them
 };
+// Print in place (slice 103): every joint built captive with `clearance` all round, so the
+// figure prints already put together on a filament printer and moves once it's off the
+// plate. Balls are held in sockets narrower than them; hinge pins are part of the fork (a
+// double hinge's link stays a piece of its own, held on both pins); swivels keep their lip
+// in its groove. No clicks, ridges or relief cuts (they'd print joined).
+struct InPlace {
+    bool on = false;
+    double clearance = 0.35;  // mm, all round
+};
+inline constexpr double kLeastClearance = 0.2, kMostClearance = 1.0;
+// A joint's settings as they're built in place (what join() uses).
+SocketFinish inPlaceBall(SocketFinish ball, double clearance);
+HingeFinish inPlaceHinge(HingeFinish hinge, double clearance);
 // Cuts the figure (a shape on the plate) at each chosen joint and puts the joints in, as
 // one undo step. `points`: the skeleton, plate coordinates. Throws (changing nothing) if a
 // cut leaves nothing.
 Made cutIntoParts(CommandStack& stack, Document& doc, ObjectId figure, const rig::Points& points,
-                  std::vector<Choice> choices, std::uint32_t firstLink);
+                  std::vector<Choice> choices, std::uint32_t firstLink, const InPlace& inPlace = {});
 
 }  // namespace limbcut
 
