@@ -485,6 +485,12 @@ Made cutIntoParts(CommandStack& stack, Document& doc, ObjectId figure, const rig
         tilts.push_back(c.tilt);
     }
     std::vector<Cut> cuts = plan(surface, points, joints, tilts);
+    for (std::size_t i = 0; i < choices.size(); ++i)
+        if (choices[i].shift != 0.0) {
+            const Vec3 n = unit(cuts[i].finish.normal);
+            for (int k = 0; k < 3; ++k)
+                cuts[i].finish.point[std::size_t(k)] += choices[i].shift * n[std::size_t(k)];
+        }
 
     std::map<int, ObjectId> owner;  // each bone's piece
     for (int b = 0; b < rig::kBoneCount; ++b)

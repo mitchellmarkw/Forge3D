@@ -88,6 +88,7 @@ struct Choice {
     JointKind kind = JointKind::Cut;
     Recipe recipe = Recipe::None;
     Tilt tilt;           // the cut turned by hand
+    double shift = 0.0;  // mm the cut is moved along the limb (less: nearer the middle)
     SocketFinish ball;   // JointKind::Ball (the fit and printer included)
     HingeFinish hinge;   // JointKind::Hinge
 };

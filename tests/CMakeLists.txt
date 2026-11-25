@@ -50,6 +50,7 @@ add_executable(forge_tests
     test_make_part.cpp
     test_lasso.cpp
     test_accessory.cpp
+    test_figure_style.cpp
     test_reshape.cpp
     test_reference.cpp
     test_hinge.cpp

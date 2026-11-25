@@ -21,6 +21,7 @@
 #include "forge/core/MaskSplit.h"
 #include "forge/core/Lasso.h"
 #include "forge/core/Accessory.h"
+#include "forge/core/FigureStyle.h"
 #include "forge/core/Reshape.h"
 #include "forge/core/Hinge.h"
 #include "forge/core/Socket.h"
@@ -1191,7 +1192,21 @@ void MainWindow::createActions()
         const ObjectId tip = history::tip(m_doc, id);
         const Body* last = m_doc.find(tip);
         const bool posed = last && last->isBoolean() && last->boolean->op == BooleanOp::Posed;
-        startPoseFigure(tip, posed, true);
+        startPoseFigure(tip, posed, 3);
+    });
+    m_figureStyleAction = new QAction(tr("Figure Style"), this);
+    m_figureStyleAction->setToolTip(tr("Figure Style: turn a figure sculpted in one piece into a bobblehead (its head "
+                                       "can sit on a spring), a vinyl collectible, a caricature or a blocky toy"));
+    connect(m_figureStyleAction, &QAction::triggered, this, [this] {
+        const ObjectId id = selectedOne();
+        if (id == kInvalidId || m_selection.size() != 1 || !m_doc.isTopLevel(id)) {
+            statusBar()->showMessage(tr("Figure Style: select one figure on the plate first."), 6000);
+            return;
+        }
+        const ObjectId tip = history::tip(m_doc, id);
+        const Body* last = m_doc.find(tip);
+        const bool posed = last && last->isBoolean() && last->boolean->op == BooleanOp::Posed;
+        startPoseFigure(tip, posed, 4);
     });
     m_hollowAction = new QAction(tr("Hollow"), this);
     m_hollowAction->setToolTip(tr("Hollow: for resin printing, take the inside out of the selected shape (any shape, "
@@ -1700,6 +1715,7 @@ void MainWindow::createToolBar()
         {m_pictureAction, "picture"},
         {m_poseFigureAction, "pose-figure"},
         {m_proportionsAction, "proportions"},
+        {m_figureStyleAction, "figure-style"},
         {m_paintAction, "paint"},
         {m_cutPartsAction, "cut-parts"},
         {m_stampAction, "stamp"},
@@ -1849,7 +1865,7 @@ void MainWindow::createToolBar()
     Page figure = page(tr("Figure Design"), tr("Action figures: cut into parts, hands, posing and the figure guide"));
     group(figure, tr("Figure"), {button(m_cutPartsAction), button(m_lassoCutAction), button(m_handAction),
                                     button(m_makePartAction), button(m_accessoryAction)});
-    group(figure, tr("Position"), {button(m_poseFigureAction), button(m_proportionsAction),
+    group(figure, tr("Position"), {button(m_poseFigureAction), button(m_proportionsAction), button(m_figureStyleAction),
                                    named(m_mannequinAction, tr("Figure Guide"))});
     common(figure);
 
@@ -2588,6 +2604,7 @@ void MainWindow::createDocks()
         if (!mode.active)
             return;
         mode.finish.proportions = m_poseFigurePanel->proportions();
+        mode.finish.blocky = m_poseFigurePanel->blocky();
         updatePoseFigurePreview();
     });
     connect(m_poseFigurePanel, &PoseFigurePanel::presetChosen, this, [this](int index) {
@@ -8880,6 +8897,7 @@ void MainWindow::refreshScene()
     m_accessoryAction->setEnabled(!toolOpen());
     m_poseFigureAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_proportionsAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
+    m_figureStyleAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_paintAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_cutPartsAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_stampAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
@@ -16288,8 +16306,9 @@ double ballRadius(const rig::Points& points)
 
 }  // namespace
 
-void MainWindow::startPoseFigure(ObjectId target, bool editing, bool proportions)
+void MainWindow::startPoseFigure(ObjectId target, bool editing, int openOn)
 {
+    const bool proportions = openOn == 3, styles = openOn == 4;
     const Body* body = m_doc.find(target);
     if (!body || toolOpen())
         return;
@@ -16334,16 +16353,21 @@ void MainWindow::startPoseFigure(ObjectId target, bool editing, bool proportions
     }
     m_poseFigureMode = std::move(mode);
     const QString name = QString::fromStdString(body->name);
-    m_poseFigurePanel->start(proportions ? tr("Proportions of '%1'").arg(name)
-                             : editing   ? tr("Change the pose of '%1'").arg(name)
+    m_poseFigurePanel->start(styles        ? tr("Style '%1'").arg(name)
+                             : proportions ? tr("Proportions of '%1'").arg(name)
+                             : editing     ? tr("Change the pose of '%1'").arg(name)
                                          : tr("Pose '%1'").arg(name),
                              editing, m_poseFigureMode.finish, m_doc.mannequin().has_value());
     if (proportions)
         m_poseFigurePanel->showProportions();
+    if (styles)
+        m_poseFigurePanel->showStyle();
     m_propsDockWidth = m_propsDock->width();
     m_properties->hide();
     m_poseFigurePanel->show();
-    statusBar()->showMessage(proportions ? tr("Proportions: change the sizes, or pick Heroic or Chibi. If a part "
+    statusBar()->showMessage(styles ? tr("Figure Style: pick a style (bobblehead, vinyl collectible, caricature, "
+                                         "blocky) and how strong, then Apply. Esc cancels.")
+                             : proportions ? tr("Proportions: change the sizes, or pick Heroic or Chibi. If a part "
                                               "comes out wrong, click 1. Fit the Skeleton and drag its balls onto "
                                               "the joints. Esc cancels.")
                              : editing ? tr("Pose Figure: drag a ball to bend the joint above it, or choose a pose. "
@@ -16582,7 +16606,10 @@ void MainWindow::applyPoseFigure()
             r.id = m_doc.allocateId();
             // Only resized, not bent: named for what it is.
             const bool bent = f.angles != rig::restAngles(f.points);
-            r.name = m_doc.uniqueName(!bent && rig::proportioned(f) ? "Proportions" : "Posed");
+            const int style = m_poseFigurePanel->style();
+            r.name = m_doc.uniqueName(!bent && style >= 0 ? figurestyle::title(figurestyle::Style(style))
+                                      : !bent && rig::shaped(f) ? "Proportions"
+                                                                : "Posed");
             r.boolean = posedSpec(m_doc, target, f);
             m_doc.previewMesh(*r.boolean);  // worked out (and kept) before anything changes
             result = std::move(r);
@@ -16591,29 +16618,99 @@ void MainWindow::applyPoseFigure()
         m_poseFigurePanel->setStatus(tr("It couldn't be posed: %1").arg(QString::fromUtf8(e.what())), true);
         return;
     }
+    // A bobblehead's head cut off for its spring (slice 105): where the skeleton is posed,
+    // on the plate.
+    const bool separate = m_poseFigurePanel->separateHead();
+    const figurestyle::Spring spring = m_poseFigurePanel->spring();
+    rig::Points posedPoints{};
+    if (separate) {
+        try {
+            figurestyle::check(spring);
+            const auto skin = mode.skin && mode.skin->sameWeights(f) ? mode.skin
+                                                                    : std::make_shared<rig::Skin>(*mode.rest, f);
+            posedPoints = skin->posed(f).points;
+            for (Vec3& p : posedPoints)
+                p = mode.frame.apply(p);
+        } catch (const std::exception& e) {
+            m_poseFigurePanel->setStatus(tr("The head couldn't be cut off: %1").arg(QString::fromUtf8(e.what())), true);
+            return;
+        }
+    }
+    const auto cutHead = [&](ObjectId posed) {
+        const figurestyle::Bobble b = figurestyle::separateHead(m_stack, m_doc, posed, posedPoints, spring);
+        return b.head;
+    };
     if (mode.editing) {
         const Body* now = m_doc.find(target);
         if (!now)
             return endPoseFigure();
         const Body before = *now;
         endPoseFigure();
-        run(std::make_unique<EditBodyCommand>(before, *result, "Change pose"));
-        setSelection(history::objectOf(m_doc, target));
+        if (!separate) {
+            run(std::make_unique<EditBodyCommand>(before, *result, "Change pose"));
+            setSelection(history::objectOf(m_doc, target));
+            return;
+        }
+        ObjectId head = kInvalidId;
+        try {
+            m_stack.beginMacro("Bobblehead");
+            try {
+                m_stack.execute(std::make_unique<EditBodyCommand>(before, *result, "Change pose"));
+                const ObjectId top = history::objectOf(m_doc, target);
+                head = cutHead(top);
+            } catch (...) {
+                m_stack.abortMacro();
+                throw;
+            }
+            m_stack.endMacro();
+        } catch (const std::exception& e) {
+            QMessageBox::warning(this, tr("Forge3D"),
+                                 tr("The head couldn't be cut off:\n%1").arg(QString::fromUtf8(e.what())));
+            refreshScene();
+            return;
+        }
+        refreshScene();
+        refreshCommandState();
+        setSelection(head);
+        statusBar()->showMessage(tr("Bobblehead: the head is a part of its own, with a socket for the spring; the "
+                                    "post is on the neck."),
+                                 10000);
         return;
     }
     const ObjectId id = result->id;
     endPoseFigure();
+    ObjectId head = kInvalidId;
     try {
-        if (!m_doc.isTopLevel(target))
-            m_stack.execute(std::make_unique<InsertStepCommand>(std::move(*result), m_doc.parentOf(target)));
-        else
-            m_stack.execute(std::make_unique<CombineCommand>(std::move(*result)));
+        if (separate)
+            m_stack.beginMacro("Bobblehead");
+        try {
+            if (!m_doc.isTopLevel(target))
+                m_stack.execute(std::make_unique<InsertStepCommand>(std::move(*result), m_doc.parentOf(target)));
+            else
+                m_stack.execute(std::make_unique<CombineCommand>(std::move(*result)));
+            if (separate)
+                head = cutHead(m_doc.isTopLevel(id) ? id : history::objectOf(m_doc, target));
+        } catch (...) {
+            if (separate)
+                m_stack.abortMacro();
+            throw;
+        }
+        if (separate)
+            m_stack.endMacro();
     } catch (const std::exception& e) {
         QMessageBox::warning(this, tr("Forge3D"), tr("It couldn't be posed:\n%1").arg(QString::fromUtf8(e.what())));
         refreshScene();
         return;
     }
     refreshScene();
+    if (separate) {
+        refreshCommandState();
+        setSelection(head);
+        statusBar()->showMessage(tr("Bobblehead: the head is a part of its own, with a socket for the spring; the "
+                                    "post is on the neck."),
+                                 10000);
+        return;
+    }
     refreshCommandState();
     setSelection(m_doc.isTopLevel(id) ? id : history::objectOf(m_doc, target));
     statusBar()->showMessage(tr("Posed. Double-click the step in Objects to change the pose; sculpting goes on "

@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.113.0 Beta — Slice 105: Figure styles (2026-11-25)
+
+- **Figure Style** (Figure Design tab → Position): turn a figure sculpted in one piece into a toy style in one go.
+  It opens Pose Figure on a new **4. Style** stage; pick a style and how strong, and the preview changes at once.
+  - **Bobblehead**: a big head on a smaller body. Tick **Cut the head off to sit on a spring** and Apply cuts the
+    head off where the neck is narrowest, with a socket in it for the spring and a post on the neck for the
+    spring's other end. Set the **Spring diameter**, **Wire thickness** and **Fit** to match the spring you'll use.
+  - **Vinyl collectible**: a huge head on a short, chunky body with stubby arms and legs.
+  - **Caricature**: what's already big on the figure made bigger, what's small smaller, and a bigger head.
+  - **Blocky**: squared off all over, like a toy built from blocks.
+  - **Strength** takes the style less far (towards the figure as made) or further (up to 150%).
+  - **Blocky** squares off any style, 0 to 100%.
+- A style only sets numbers: fine-tune them in 3. Proportions, and pose the figure in the same step. Double-click
+  the step later and it opens on its style.
+- **Proportions** gain **Limb thickness** (arms and legs thicker or thinner) and **Body width** (the torso and hips
+  wider all round).
+- Pose Figure's stage buttons sit two to a row, so their names fit.
+- File format 54 (posed steps' limb thickness, body width and blockiness).
+
 ## 0.112.0 Beta — Slice 104: Rough edges (2026-11-25)
 
 - **Names without a needless number**: a new shape or step is called just "Box", "Posed", "Reshaped", "Sword"...

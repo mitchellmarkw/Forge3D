@@ -2,6 +2,7 @@
 #pragma once
 
 #include "forge/core/Body.h"
+#include "forge/core/FigureStyle.h"
 #include "forge/core/Rig.h"
 
 #include <QWidget>
@@ -32,6 +33,14 @@ public:
     // Opens straight on the proportions (slice 101).
     void showProportions();
     rig::Proportions proportions() const;
+    // Opens straight on the figure styles (slice 105).
+    void showStyle();
+    double blocky() const;
+    // The style chosen (-1: none) and, for a bobblehead, whether its head is cut off to
+    // sit on a spring, and the spring.
+    int style() const;
+    bool separateHead() const;
+    figurestyle::Spring spring() const;
     // The settings now (after a ball was dragged, a pose chosen...).
     void setFinish(const PosedFinish& f);
     bool posing() const;
@@ -68,6 +77,21 @@ private:
     QPushButton* m_fitStage = nullptr;
     QPushButton* m_poseStage = nullptr;
     QPushButton* m_sizeStage = nullptr;
+    QPushButton* m_styleStage = nullptr;
+    QWidget* m_styleBox = nullptr;
+    QComboBox* m_style = nullptr;
+    QLabel* m_styleBlurb = nullptr;
+    QSlider* m_strengthSlider = nullptr;
+    QSpinBox* m_strength = nullptr;
+    QSlider* m_blockySlider = nullptr;
+    QSpinBox* m_blocky = nullptr;
+    QWidget* m_bobbleBox = nullptr;
+    QCheckBox* m_separate = nullptr;
+    QDoubleSpinBox* m_springSize = nullptr;
+    QDoubleSpinBox* m_springWire = nullptr;
+    QDoubleSpinBox* m_springFit = nullptr;
+    void useStyle();
+    void showStyleOptions();
     QWidget* m_sizeBox = nullptr;
     QComboBox* m_sizePreset = nullptr;
     QSlider* m_sizeSlider[kProportionCount] = {};
