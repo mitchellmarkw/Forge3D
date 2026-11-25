@@ -2,6 +2,8 @@
 #pragma once
 
 #include <QStringList>
+#include "forge/core/LimbCut.h"
+
 #include <QWidget>
 
 #include <map>
@@ -19,8 +21,22 @@ class CutPartsPanel : public QWidget {
     Q_OBJECT
 
 public:
-    // What goes in a cut: the first five, then the joint standard's joints in turn.
-    enum Type { JustCut, Ball, Hinge, DoubleHinge, Swivel, FirstStandard };
+    // What goes in a cut: the first five, the toy joint recipes (slice 96: each only at its
+    // own joints), then the joint standard's joints in turn.
+    enum Type {
+        JustCut,
+        Ball,
+        Hinge,
+        DoubleHinge,
+        Swivel,
+        Butterfly,
+        DropHip,
+        AnkleRocker,
+        AbCrunch,
+        FirstStandard
+    };
+    // The recipe a type is (Recipe::None for the others).
+    static limbcut::Recipe recipeOf(int type);
     struct Choice {
         bool cut = false;
         int type = JustCut;

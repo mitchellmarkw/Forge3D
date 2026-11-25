@@ -68,9 +68,25 @@ Mesh rod(const Vec3& a, const Vec3& b, double radius, int around = 20);
 // middle, the socket in the limb), or a hinge (single, double or swivel: the fork in the
 // piece nearer the middle, the tab made from the limb's end).
 enum class JointKind { Cut, Ball, Hinge };
+// Toy joint recipes (slice 96): two joints in a row with a small block between them, cut
+// from the piece nearer the middle just inside the cut. `kind` (and its ball or hinge)
+// is the joint between the block and the limb; the block's own joint is set by the recipe:
+//   Butterfly (shoulders): a hinge with an upright pin, so the arm can swing forward
+//     (crossed arms), then the ball.
+//   DropHip (hips): a hinge with its pin left to right, so the leg's ball can drop for
+//     high kicks, then the ball.
+//   AnkleRocker (ankles): a hinge left to right (the foot up and down), then a hinge
+//     front to back (it rocks side to side).
+//   AbCrunch (waist): a swivel (turning at the waist), then a hinge left to right (it
+//     bends forward).
+enum class Recipe { None, Butterfly, DropHip, AnkleRocker, AbCrunch };
+// Whether a recipe is for this joint.
+bool recipeFits(Recipe recipe, rig::Joint joint);
+const char* title(Recipe recipe);
 struct Choice {
     rig::Joint joint = rig::Joint::LeftShoulder;
     JointKind kind = JointKind::Cut;
+    Recipe recipe = Recipe::None;
     Tilt tilt;           // the cut turned by hand
     SocketFinish ball;   // JointKind::Ball (the fit and printer included)
     HingeFinish hinge;   // JointKind::Hinge

@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.104.0 Beta — Slice 96: Toy joint recipes (2026-11-24)
+
+- **Cut into Parts** has the joints toy figures use, as joint types for the joints they're for. Each puts a small
+  **block** in, cut from the piece nearer the middle just inside the cut, with a joint on each side of it:
+  - **Butterfly shoulder** (shoulders): the block hinges in the chest on an upright pin, carrying the shoulder's
+    ball, so the arm swings forward for crossed arms and two-handed poses.
+  - **Drop-down hip** (hips): the hip's ball on a block that hinges down, so the leg kicks higher and sits wider.
+  - **Ankle rocker** (ankles): a hinge for the foot up and down, then one for it to rock side to side, so it stays
+    flat in a wide stance.
+  - **Ab crunch** (waist): a swivel at the waist, then a hinge so the chest bends forward.
+- **Super Poseable**: one click for a toy's full set: a ball at the neck, butterfly shoulders, an ab crunch,
+  drop-down hips, double elbows and knees, and ankle rockers.
+- Recipes not meant for a joint are greyed out in its list. The blocks are named for their joint ("Left shoulder
+  block") and sized to the limb.
+
 ## 0.103.0 Beta — Slice 95: Make Part from paint (2026-11-24)
 
 - **Make Part** (Figure Design tab): paint where armor, a glove, a boot or a belt goes on a shape, and a new

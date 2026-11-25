@@ -6,6 +6,7 @@
 
 #include <QCheckBox>
 #include <QComboBox>
+#include <QStandardItemModel>
 #include <QDoubleSpinBox>
 #include <QFormLayout>
 #include <QGroupBox>
@@ -76,8 +77,12 @@ CutPartsPanel::CutPartsPanel(QWidget* parent) : QWidget(parent)
     auto* ready = new QHBoxLayout;
     auto* usual = new QPushButton(tr("Usual Figure"));
     usual->setToolTip(tr("Ball joints at the neck, shoulders and hips; hinges at the elbows and knees"));
+    auto* poseable = new QPushButton(tr("Super Poseable"));
+    poseable->setToolTip(tr("A toy's full set: a ball at the neck, butterfly shoulders, an ab crunch, drop-down hips, "
+                            "double elbows and knees, and ankle rockers"));
     auto* none = new QPushButton(tr("No Cuts"));
     ready->addWidget(usual);
+    ready->addWidget(poseable);
     ready->addWidget(none);
     cuts->addLayout(ready);
     m_joint = new QComboBox;
@@ -188,6 +193,23 @@ CutPartsPanel::CutPartsPanel(QWidget* parent) : QWidget(parent)
         showJoint();
         emit changed();
     });
+    connect(poseable, &QPushButton::clicked, this, [this] {
+        using J = rig::Joint;
+        for (auto& [j, c] : m_choices)
+            c = Choice{};
+        m_choices[int(J::Neck)] = {true, Ball};
+        m_choices[int(J::Waist)] = {true, AbCrunch};
+        for (J j : {J::LeftShoulder, J::RightShoulder})
+            m_choices[int(j)] = {true, Butterfly};
+        for (J j : {J::LeftHip, J::RightHip})
+            m_choices[int(j)] = {true, DropHip};
+        for (J j : {J::LeftElbow, J::RightElbow, J::LeftKnee, J::RightKnee})
+            m_choices[int(j)] = {true, DoubleHinge};
+        for (J j : {J::LeftAnkle, J::RightAnkle})
+            m_choices[int(j)] = {true, AnkleRocker};
+        showJoint();
+        emit changed();
+    });
     connect(none, &QPushButton::clicked, this, [this] {
         for (auto& [j, c] : m_choices)
             c = Choice{};
@@ -207,13 +229,37 @@ void CutPartsPanel::start(const QString& title, const QStringList& standardJoint
         m_choices[int(j)] = Choice{};
     m_loading = true;
     m_type->clear();
-    m_type->addItems({tr("Just cut"), tr("Ball joint"), tr("Hinge"), tr("Double hinge"), tr("Swivel")});
+    m_type->addItems({tr("Just cut"), tr("Ball joint"), tr("Hinge"), tr("Double hinge"), tr("Swivel"),
+                      tr("Butterfly shoulder (hinge, then ball)"), tr("Drop-down hip (hinge, then ball)"),
+                      tr("Ankle rocker (two hinges)"), tr("Ab crunch (swivel, then hinge)")});
+    m_type->setItemData(Butterfly, tr("A small block in the chest on an upright hinge, carrying the shoulder's ball: "
+                                      "the arm can swing forward, for crossed arms and two-handed poses"),
+                        Qt::ToolTipRole);
+    m_type->setItemData(DropHip, tr("The hip's ball on a block that hinges down, so the leg kicks higher and sits "
+                                    "wider"),
+                        Qt::ToolTipRole);
+    m_type->setItemData(AnkleRocker, tr("A hinge for the foot up and down, then one for it to rock side to side, so "
+                                        "it stays flat in a wide stance"),
+                        Qt::ToolTipRole);
+    m_type->setItemData(AbCrunch, tr("A swivel at the waist, then a hinge so the chest bends forward"),
+                        Qt::ToolTipRole);
     for (const QString& s : standardJoints)
         m_type->addItem(tr("Standard: %1").arg(s));
     m_joint->setCurrentIndex(0);
     m_loading = false;
     showJoint();
     setStatus({}, false);
+}
+
+limbcut::Recipe CutPartsPanel::recipeOf(int type)
+{
+    switch (type) {
+    case Butterfly: return limbcut::Recipe::Butterfly;
+    case DropHip: return limbcut::Recipe::DropHip;
+    case AnkleRocker: return limbcut::Recipe::AnkleRocker;
+    case AbCrunch: return limbcut::Recipe::AbCrunch;
+    default: return limbcut::Recipe::None;
+    }
 }
 
 int CutPartsPanel::joint() const
@@ -258,6 +304,10 @@ void CutPartsPanel::showJoint()
     const bool was = m_loading;
     m_loading = true;
     m_cut->setChecked(c.cut);
+    // Each recipe only at its own joints.
+    if (auto* model = qobject_cast<QStandardItemModel*>(m_type->model()))
+        for (int t = Butterfly; t <= AbCrunch && t < model->rowCount(); ++t)
+            model->item(t)->setEnabled(limbcut::recipeFits(recipeOf(t), rig::Joint(joint())));
     m_type->setCurrentIndex(std::min(c.type, m_type->count() - 1));
     m_type->setEnabled(c.cut);
     m_forward->setValue(c.forward);

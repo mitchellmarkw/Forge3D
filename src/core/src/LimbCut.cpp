@@ -412,6 +412,29 @@ Mesh ballOnNeck(const SocketFinish& f, const Vec3& spot, const Vec3& normalOutOf
     return out;
 }
 
+bool recipeFits(Recipe recipe, rig::Joint joint)
+{
+    switch (recipe) {
+    case Recipe::None: return true;
+    case Recipe::Butterfly: return joint == rig::Joint::LeftShoulder || joint == rig::Joint::RightShoulder;
+    case Recipe::DropHip: return joint == rig::Joint::LeftHip || joint == rig::Joint::RightHip;
+    case Recipe::AnkleRocker: return joint == rig::Joint::LeftAnkle || joint == rig::Joint::RightAnkle;
+    case Recipe::AbCrunch: return joint == rig::Joint::Waist;
+    }
+    return false;
+}
+
+const char* title(Recipe recipe)
+{
+    switch (recipe) {
+    case Recipe::Butterfly: return "Butterfly shoulder";
+    case Recipe::DropHip: return "Drop-down hip";
+    case Recipe::AnkleRocker: return "Ankle rocker";
+    case Recipe::AbCrunch: return "Ab crunch";
+    default: return "None";
+    }
+}
+
 Made cutIntoParts(CommandStack& stack, Document& doc, ObjectId figure, const rig::Points& points,
                   std::vector<Choice> choices, std::uint32_t firstLink)
 {
@@ -457,111 +480,191 @@ Made cutIntoParts(CommandStack& stack, Document& doc, ObjectId figure, const rig
                 o = to;
     };
 
+    // Pieces that own no bones (a recipe's blocks), by name; and where each piece is now.
+    std::map<ObjectId, std::string> fixedName;
+    const auto nameFor = [&](ObjectId id) {
+        const auto f = fixedName.find(id);
+        return f != fixedName.end() ? f->second : nameOf(id);
+    };
+    std::vector<ObjectId> blocks(choices.size(), kInvalidId);
+    std::vector<Cut> blockCuts(choices.size());
+
+    // Cuts `piece` in two at `finish` (the limb side and the rest), the limb side's bones
+    // `below` going with it; the new ids (rest, limb).
+    const auto cutPiece = [&](ObjectId piece, LimbCutFinish finish, const std::string& at,
+                              const std::vector<int>& below, const std::string& limbName) {
+        LimbCutFinish rest = finish, limb = finish;
+        rest.limb = false;
+        limb.limb = true;
+        BooleanSpec restSpec = limbCutSpec(doc, piece, rest);
+        BooleanSpec limbSpec = limbCutSpec(doc, piece, limb);
+        const auto restShape = doc.previewResult(restSpec), limbShape = doc.previewResult(limbSpec);
+        if (limbShape.empty || restShape.empty)
+            throw std::invalid_argument("The cut at the " + at +
+                                        " doesn't cut anything off: check the skeleton's balls there.");
+        const std::vector<Body> copies = duplicateTree(doc, piece);
+        for (const Body& c : copies)
+            stack.execute(std::make_unique<AddBodyCommand>(c));
+        // The copy is the same shape: handed over, so it isn't worked out again from the start.
+        doc.seedSolid(copies.back().id, doc.meshSolid(piece));
+        limbSpec.operands = {copies.back().id};
+        Body r, l;
+        r.id = doc.allocateId();
+        l.id = doc.allocateId();
+        r.boolean = std::move(restSpec);
+        l.boolean = std::move(limbSpec);
+        // The limb takes its bones from the piece; the rest keeps the others.
+        for (int b : below)
+            if (owner[b] == piece)
+                owner[b] = l.id;
+        handOver(piece, r.id);
+        if (const auto f = fixedName.find(piece); f != fixedName.end()) {
+            fixedName[r.id] = f->second;
+            fixedName.erase(f);
+        }
+        if (!limbName.empty())
+            fixedName[l.id] = limbName;
+        r.name = nameFor(r.id);
+        l.name = nameFor(l.id);
+        const std::pair<ObjectId, ObjectId> ids{r.id, l.id};
+        stack.execute(std::make_unique<CombineCommand>(std::move(r)));
+        stack.execute(std::make_unique<CombineCommand>(std::move(l)));
+        return ids;
+    };
+
     Made made;
     stack.beginMacro("Cut into Parts");
     try {
-        // 1. The cuts.
+        // 1. The cuts (and a recipe's block, cut from the rest just inside its cut).
         for (std::size_t i = 0; i < choices.size(); ++i) {
             Cut& cut = cuts[i];
             cut.finish.gap = gapFor(choices[i]);
             const int bone = rig::boneOf(choices[i].joint);
-            const ObjectId piece = owner[bone];
-            LimbCutFinish rest = cut.finish, limb = cut.finish;
-            rest.limb = false;
-            limb.limb = true;
-            BooleanSpec restSpec = limbCutSpec(doc, piece, rest);
-            BooleanSpec limbSpec = limbCutSpec(doc, piece, limb);
-            const auto restShape = doc.previewResult(restSpec), limbShape = doc.previewResult(limbSpec);
-            std::string at = rig::title(choices[i].joint);
-            if (limbShape.empty || restShape.empty)
-                throw std::invalid_argument("The cut at the " + at +
-                                            " doesn't cut anything off: check the skeleton's balls there.");
-            const std::vector<Body> copies = duplicateTree(doc, piece);
-            for (const Body& c : copies)
-                stack.execute(std::make_unique<AddBodyCommand>(c));
-            // The copy is the same shape: handed over, so it isn't worked out again from the start.
-            doc.seedSolid(copies.back().id, doc.meshSolid(piece));
-            limbSpec.operands = {copies.back().id};
-            Body r, l;
-            r.id = doc.allocateId();
-            l.id = doc.allocateId();
-            r.boolean = std::move(restSpec);
-            l.boolean = std::move(limbSpec);
-            // The limb takes its bones from the piece; the rest keeps the others.
-            const std::vector<int> below = rig::boneAndBelow(bone);
-            for (int b : below)
-                if (owner[b] == piece)
-                    owner[b] = l.id;
-            handOver(piece, r.id);
-            r.name = nameOf(r.id);
-            l.name = nameOf(l.id);
-            stack.execute(std::make_unique<CombineCommand>(std::move(r)));
-            stack.execute(std::make_unique<CombineCommand>(std::move(l)));
+            const std::string at = rig::title(choices[i].joint);
+            const auto [rest, limb] = cutPiece(owner[bone], cut.finish, at, rig::boneAndBelow(bone), {});
+            (void)limb;
+            const Recipe recipe = choices[i].recipe;
+            if (recipe == Recipe::None)
+                continue;
+            if (!recipeFits(recipe, choices[i].joint))
+                throw std::invalid_argument(std::string(title(recipe)) + " isn't for the " + at + ".");
+            // The block: what of the rest lies within a rod round the joint, from its cut
+            // face back in by about the limb's thickness.
+            const Vec3 n = unit(cut.finish.normal);
+            const Vec3 face = restFace(cut.finish);
+            const double r = cut.limbRadius;
+            const double depth = std::clamp(1.4 * r, 3.0, 20.0);
+            Cut block;
+            block.limbRadius = 1.2 * r;
+            block.finish = cut.finish;
+            const Vec3 inner = sub(face, mul(n, depth));
+            block.finish.point = {inner[0], inner[1], inner[2]};
+            block.finish.reach = {LimbRod{{inner[0] - n[0] * 2, inner[1] - n[1] * 2, inner[2] - n[2] * 2},
+                                          {face[0] + n[0] * 2, face[1] + n[1] * 2, face[2] + n[2] * 2},
+                                          block.limbRadius}};
+            block.finish.gap = 0.0;  // a single hinge or a swivel: the tab is made from the block's end
+            std::string name = at + " block";
+            name[0] = char(std::toupper(static_cast<unsigned char>(name[0])));
+            const auto [torso, blockId] = cutPiece(rest, block.finish, at, {}, name);
+            (void)torso;
+            blocks[i] = blockId;
+            blockCuts[i] = block;
         }
+
         // 2. The joints, on the finished pieces.
         std::uint32_t link = firstLink;
-        for (std::size_t i = 0; i < choices.size(); ++i) {
-            const Choice& c = choices[i];
-            if (c.kind == JointKind::Cut)
-                continue;
-            const int bone = rig::boneOf(c.joint);
-            const ObjectId a = owner[rig::parentBone(bone)], b = owner[bone];
-            const Vec3 n = unit(cuts[i].finish.normal);
-            const Vec3 restAt = restFace(cuts[i].finish), limbAt = limbFace(cuts[i].finish);
-            const auto step = [&](BooleanSpec spec, ObjectId of) {
-                Body s;
-                s.id = doc.allocateId();
-                s.name = nameOf(of);
-                s.boolean = std::move(spec);
-                const ObjectId id = s.id;
-                stack.execute(std::make_unique<CombineCommand>(std::move(s)));
-                handOver(of, id);
-                return id;
-            };
-            if (c.kind == JointKind::Ball) {
+        const auto step = [&](BooleanSpec spec, ObjectId of) {
+            Body s;
+            s.id = doc.allocateId();
+            s.name = nameFor(of);
+            s.boolean = std::move(spec);
+            const ObjectId id = s.id;
+            stack.execute(std::make_unique<CombineCommand>(std::move(s)));
+            handOver(of, id);
+            if (const auto f = fixedName.find(of); f != fixedName.end()) {
+                fixedName[id] = f->second;
+                fixedName.erase(f);
+            }
+            for (ObjectId& b : blocks)
+                if (b == of)
+                    b = id;
+            return id;
+        };
+        // A joint at a cut between `a` (nearer the middle) and `b` (the limb side); `pinWant`
+        // the way a hinge's pin should run (zero: square to the limb and to the front).
+        const auto join = [&](ObjectId a, ObjectId b, JointKind kind, const SocketFinish& ball,
+                              const HingeFinish& hingeIn, const Cut& cut, const Vec3& pinWant) {
+            const Vec3 n = unit(cut.finish.normal);
+            const Vec3 restAt = restFace(cut.finish), limbAt = limbFace(cut.finish);
+            if (kind == JointKind::Ball) {
                 // The socket in the limb, the ball on its neck merged onto the other piece.
-                step(socketSpec(doc, b, {limbAt, mul(n, -1.0)}, c.ball), b);
-                Body ball = hinge::pieceBody(ballOnNeck(c.ball, limbAt, mul(n, -1.0), restAt), "Ball");
-                ball.id = doc.allocateId();
-                const ObjectId ballId = ball.id;
-                stack.execute(std::make_unique<AddBodyCommand>(std::move(ball)));
+                step(socketSpec(doc, b, {limbAt, mul(n, -1.0)}, ball), b);
+                Body ballBody = hinge::pieceBody(ballOnNeck(ball, limbAt, mul(n, -1.0), restAt), "Ball");
+                ballBody.id = doc.allocateId();
+                const ObjectId ballId = ballBody.id;
+                stack.execute(std::make_unique<AddBodyCommand>(std::move(ballBody)));
                 BooleanSpec merge;
                 merge.op = BooleanOp::Merge;
                 merge.operands = {a, ballId};
                 const auto centre = doc.previewResult(merge).bounds.center();
                 merge.pivot = {centre[0], centre[1], centre[2]};
                 step(std::move(merge), a);
-            } else {
-                HingeFinish f = c.hinge;
-                f.half = HingeHalf::Fork;
-                f.link = link++;
-                // The pin square to the limb and to the front, so the limb bends forwards and back
-                // (an arm hanging down: the pin runs left to right; held out to the side: up and down).
-                HingeFinish straight = f;
-                straight.turn = 0.0;
-                const Vec3 a0 = hinge::pinAxis(straight, n);
-                Vec3 want = cross(n, Vec3{0, -1, 0});
-                if (length(want) < 0.2)
-                    want = sub(Vec3{1, 0, 0}, mul(n, n[0]));
-                want = unit(want);
-                // The slot and pin hole just through the limb, not on into the rest of the figure.
-                const double r = cuts[i].limbRadius;
-                if (f.reach <= 0.0 && f.kind != HingeKind::Swivel)
-                    f.reach = std::max(1.25 * r, 0.5 * f.width + 1.0);
-                f.turn = std::atan2(dot(cross(a0, want), n), dot(a0, want)) * 180.0 / std::numbers::pi;
-                hinge::check(f);
-                const hinge::Half other = hinge::otherHalf(f, restAt, n);
-                step(hingeSpec(doc, a, {restAt, n}, f), a);
-                step(hingeSpec(doc, b, {other.point, other.normal}, other.finish), b);
-                const double span = std::max(0.95 * r, 0.5 * f.width + 0.5);
-                for (const hinge::Piece& piece : hinge::pieces(f, restAt, n, false, {span, span})) {
-                    Body extra = hinge::pieceBody(piece.mesh, piece.name);
-                    extra.id = doc.allocateId();
-                    extra.hardware = true;
-                    made.extras.push_back(extra.id);
-                    stack.execute(std::make_unique<AddBodyCommand>(std::move(extra)));
-                }
+                return;
             }
+            if (kind != JointKind::Hinge)
+                return;
+            HingeFinish f = hingeIn;
+            f.half = HingeHalf::Fork;
+            f.link = link++;
+            // The pin square to the limb and to the front, so the limb bends forwards and back
+            // (an arm hanging down: the pin runs left to right; held out to the side: up and
+            // down), unless a recipe says otherwise.
+            HingeFinish straight = f;
+            straight.turn = 0.0;
+            const Vec3 a0 = hinge::pinAxis(straight, n);
+            Vec3 want = length(pinWant) > 0.5 ? sub(pinWant, mul(n, dot(pinWant, n))) : cross(n, Vec3{0, -1, 0});
+            if (length(want) < 0.2)
+                want = sub(Vec3{1, 0, 0}, mul(n, n[0]));
+            want = unit(want);
+            // The slot and pin hole just through the limb, not on into the rest of the figure.
+            const double r = cut.limbRadius;
+            if (f.reach <= 0.0 && f.kind != HingeKind::Swivel)
+                f.reach = std::max(1.25 * r, 0.5 * f.width + 1.0);
+            f.turn = std::atan2(dot(cross(a0, want), n), dot(a0, want)) * 180.0 / std::numbers::pi;
+            hinge::check(f);
+            const hinge::Half other = hinge::otherHalf(f, restAt, n);
+            step(hingeSpec(doc, a, {restAt, n}, f), a);
+            step(hingeSpec(doc, b, {other.point, other.normal}, other.finish), b);
+            const double span = std::max(0.95 * r, 0.5 * f.width + 0.5);
+            for (const hinge::Piece& piece : hinge::pieces(f, restAt, n, false, {span, span})) {
+                Body extra = hinge::pieceBody(piece.mesh, piece.name);
+                extra.id = doc.allocateId();
+                extra.hardware = true;
+                made.extras.push_back(extra.id);
+                stack.execute(std::make_unique<AddBodyCommand>(std::move(extra)));
+            }
+        };
+        const Vec3 upright{0, 0, 1}, leftRight{1, 0, 0}, frontBack{0, 1, 0}, none{0, 0, 0};
+        for (std::size_t i = 0; i < choices.size(); ++i) {
+            const Choice& c = choices[i];
+            const int bone = rig::boneOf(c.joint);
+            if (c.recipe == Recipe::None) {
+                if (c.kind != JointKind::Cut)
+                    join(owner[rig::parentBone(bone)], owner[bone], c.kind, c.ball, c.hinge, cuts[i], none);
+                continue;
+            }
+            // The block's own joint, with the piece nearer the middle.
+            HingeFinish inner = hingeFor(blockCuts[i].limbRadius,
+                                         c.recipe == Recipe::AbCrunch ? HingeKind::Swivel : HingeKind::Single);
+            inner.resin = c.hinge.resin;
+            inner.fit = c.hinge.fit;
+            const Vec3 innerPin = c.recipe == Recipe::Butterfly ? upright : leftRight;
+            join(owner[rig::parentBone(bone)], blocks[i], JointKind::Hinge, c.ball, inner, blockCuts[i], innerPin);
+            // Then the block and the limb.
+            const Vec3 outerPin = c.recipe == Recipe::AnkleRocker ? frontBack
+                                  : c.recipe == Recipe::AbCrunch  ? leftRight
+                                                                  : none;
+            join(blocks[i], owner[bone], c.kind, c.ball, c.hinge, cuts[i], outerPin);
         }
     } catch (...) {
         stack.abortMacro();
@@ -571,6 +674,9 @@ Made cutIntoParts(CommandStack& stack, Document& doc, ObjectId figure, const rig
     for (const auto& [b, o] : owner)
         if (std::find(made.pieces.begin(), made.pieces.end(), o) == made.pieces.end())
             made.pieces.push_back(o);
+    for (ObjectId b : blocks)
+        if (b != kInvalidId)
+            made.pieces.push_back(b);
     return made;
 }
 
