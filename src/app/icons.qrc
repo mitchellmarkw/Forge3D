@@ -60,6 +60,7 @@
     <file alias="eye.svg">icons/eye.svg</file>
     <file alias="lasso.svg">icons/lasso.svg</file>
     <file alias="accessory.svg">icons/accessory.svg</file>
+    <file alias="proportions.svg">icons/proportions.svg</file>
     <file alias="eye-off.svg">icons/eye-off.svg</file>
     <file alias="sketch.svg">icons/sketch.svg</file>
     <file alias="snap.svg">icons/snap.svg</file>

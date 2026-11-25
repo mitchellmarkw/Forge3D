@@ -1157,6 +1157,21 @@ void MainWindow::createActions()
         }
         startPoseFigure(history::tip(m_doc, id), false);
     });
+    m_proportionsAction = new QAction(tr("Proportions"), this);
+    m_proportionsAction->setToolTip(tr("Proportions: a figure sculpted in one piece made heroic, chibi, or with its "
+                                       "head, shoulders, torso, arms, hands, legs and feet sized as you like"));
+    connect(m_proportionsAction, &QAction::triggered, this, [this] {
+        const ObjectId id = selectedOne();
+        if (id == kInvalidId || m_selection.size() != 1 || !m_doc.isTopLevel(id)) {
+            statusBar()->showMessage(tr("Proportions: select one figure on the plate first."), 6000);
+            return;
+        }
+        // A figure posed already: its pose step takes the proportions too.
+        const ObjectId tip = history::tip(m_doc, id);
+        const Body* last = m_doc.find(tip);
+        const bool posed = last && last->isBoolean() && last->boolean->op == BooleanOp::Posed;
+        startPoseFigure(tip, posed, true);
+    });
     m_hollowAction = new QAction(tr("Hollow"), this);
     m_hollowAction->setToolTip(tr("Hollow: for resin printing, take the inside out of the selected shape (any shape, "
                                   "sculpts too), leaving walls of a set thickness, with drain holes and plugs"));
@@ -1662,6 +1677,7 @@ void MainWindow::createToolBar()
         {m_sewingAction, "sewing"},
         {m_pictureAction, "picture"},
         {m_poseFigureAction, "pose-figure"},
+        {m_proportionsAction, "proportions"},
         {m_paintAction, "paint"},
         {m_cutPartsAction, "cut-parts"},
         {m_stampAction, "stamp"},
@@ -1811,7 +1827,8 @@ void MainWindow::createToolBar()
     Page figure = page(tr("Figure Design"), tr("Action figures: cut into parts, hands, posing and the figure guide"));
     group(figure, tr("Figure"), {button(m_cutPartsAction), button(m_lassoCutAction), button(m_handAction),
                                     button(m_makePartAction), button(m_accessoryAction)});
-    group(figure, tr("Position"), {button(m_poseFigureAction), named(m_mannequinAction, tr("Figure Guide"))});
+    group(figure, tr("Position"), {button(m_poseFigureAction), button(m_proportionsAction),
+                                   named(m_mannequinAction, tr("Figure Guide"))});
     common(figure);
 
     Page features = page(tr("Features"), tr("Holes, threads, sockets, hinges, shells, edges and patterns"));
@@ -2542,6 +2559,13 @@ void MainWindow::createDocks()
         mode.finish.blend = m_poseFigurePanel->blend();
         mode.finish.feetFlat = m_poseFigurePanel->feetFlat();
         mode.finish.onGround = m_poseFigurePanel->onGround();
+        updatePoseFigurePreview();
+    });
+    connect(m_poseFigurePanel, &PoseFigurePanel::proportionsChanged, this, [this] {
+        auto& mode = m_poseFigureMode;
+        if (!mode.active)
+            return;
+        mode.finish.proportions = m_poseFigurePanel->proportions();
         updatePoseFigurePreview();
     });
     connect(m_poseFigurePanel, &PoseFigurePanel::presetChosen, this, [this](int index) {
@@ -8736,6 +8760,7 @@ void MainWindow::refreshScene()
     m_handAction->setEnabled(!toolOpen());
     m_accessoryAction->setEnabled(!toolOpen());
     m_poseFigureAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
+    m_proportionsAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_paintAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_cutPartsAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_stampAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
@@ -15896,7 +15921,7 @@ double ballRadius(const rig::Points& points)
 
 }  // namespace
 
-void MainWindow::startPoseFigure(ObjectId target, bool editing)
+void MainWindow::startPoseFigure(ObjectId target, bool editing, bool proportions)
 {
     const Body* body = m_doc.find(target);
     if (!body || toolOpen())
@@ -15942,12 +15967,19 @@ void MainWindow::startPoseFigure(ObjectId target, bool editing)
     }
     m_poseFigureMode = std::move(mode);
     const QString name = QString::fromStdString(body->name);
-    m_poseFigurePanel->start(editing ? tr("Change the pose of '%1'").arg(name) : tr("Pose '%1'").arg(name), editing,
-                             m_poseFigureMode.finish, m_doc.mannequin().has_value());
+    m_poseFigurePanel->start(proportions ? tr("Proportions of '%1'").arg(name)
+                             : editing   ? tr("Change the pose of '%1'").arg(name)
+                                         : tr("Pose '%1'").arg(name),
+                             editing, m_poseFigureMode.finish, m_doc.mannequin().has_value());
+    if (proportions)
+        m_poseFigurePanel->showProportions();
     m_propsDockWidth = m_propsDock->width();
     m_properties->hide();
     m_poseFigurePanel->show();
-    statusBar()->showMessage(editing ? tr("Pose Figure: drag a ball to bend the joint above it, or choose a pose. "
+    statusBar()->showMessage(proportions ? tr("Proportions: change the sizes, or pick Heroic or Chibi. If a part "
+                                              "comes out wrong, click 1. Fit the Skeleton and drag its balls onto "
+                                              "the joints. Esc cancels.")
+                             : editing ? tr("Pose Figure: drag a ball to bend the joint above it, or choose a pose. "
                                           "Apply when it's right; Esc cancels.")
                                      : tr("Pose Figure: drag the skeleton's balls onto the figure's joints, then "
                                           "click 2. Pose. Esc cancels."));
@@ -16173,7 +16205,9 @@ void MainWindow::applyPoseFigure()
         } else {
             Body r;
             r.id = m_doc.allocateId();
-            r.name = m_doc.uniqueName("Posed");
+            // Only resized, not bent: named for what it is.
+            const bool bent = f.angles != rig::restAngles(f.points);
+            r.name = m_doc.uniqueName(!bent && rig::proportioned(f) ? "Proportions" : "Posed");
             r.boolean = posedSpec(m_doc, target, f);
             m_doc.previewMesh(*r.boolean);  // worked out (and kept) before anything changes
             result = std::move(r);

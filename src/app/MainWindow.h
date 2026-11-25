@@ -1007,7 +1007,8 @@ private:
         Vec3 dragPlaneNormal{};
     };
     PoseFigureMode m_poseFigureMode;
-    void startPoseFigure(ObjectId target, bool editing);
+    void startPoseFigure(ObjectId target, bool editing, bool proportions = false);
+    QAction* m_proportionsAction = nullptr;
     void endPoseFigure();
     bool poseFigureGrab(const QVector3D& origin, const QVector3D& direction);
     void poseFigureDrag(const QVector3D& origin, const QVector3D& direction);
