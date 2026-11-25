@@ -129,6 +129,7 @@ Gate to Phase 2: a new user prints a customised part within 10 minutes.
 | 97 | Sculpt strength: a 0-150% slider for each sculpt step, toning every stroke in it down or up together | Done (0.105.0) |
 | 98 | Show and hide shapes: an eye by each shape in Objects; Show Only This, Show All, Ctrl+H | Done (0.106.0) |
 | 99 | Lasso cut and lasso mask: cut straight through inside a drawn loop; lasso in Split by Mask, Make Part and the sculpt mask | **Delivered for testing** |
+| 100 | Accessory makers: blade, shield, staff or spear, belt with buckle, holster at the figure's scale; your own accessories library | **Delivered for testing** |
 
 Slices 39–41 close the gaps found in the [Phase 1 gate review](docs/PHASE1_GATE.md).
 

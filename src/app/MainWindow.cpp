@@ -20,6 +20,7 @@
 #include "forge/core/MakePart.h"
 #include "forge/core/MaskSplit.h"
 #include "forge/core/Lasso.h"
+#include "forge/core/Accessory.h"
 #include "forge/core/Hinge.h"
 #include "forge/core/Socket.h"
 #include "forge/core/PrintOrient.h"
@@ -55,6 +56,7 @@
 #include "forge/core/Sewing.h"
 #include "MaskPanel.h"
 #include "LassoPanel.h"
+#include "AccessoryPanel.h"
 #include "ReferencePanel.h"
 #include "ScaleCalculator.h"
 #include "RescaleDialog.h"
@@ -671,6 +673,8 @@ void MainWindow::createActions()
             endPort();
         else if (m_handMode.active)
             endHand();
+        else if (m_accessoryMode.active)
+            endAccessories();
         else if (m_poseFigureMode.active)
             endPoseFigure();
         else if (m_paintMode.active)
@@ -1237,6 +1241,11 @@ void MainWindow::createActions()
         }
         startMask(id, false, true);
     });
+    m_accessoryAction = new QAction(tr("Accessories"), this);
+    m_accessoryAction->setToolTip(tr("Accessories: make a blade, shield, staff or spear, belt or holster at your "
+                                     "figure's scale, its handle fitting the hands' grip holes; or add one of your "
+                                     "own saved accessories"));
+    connect(m_accessoryAction, &QAction::triggered, this, &MainWindow::startAccessories);
     m_lassoCutAction = new QAction(tr("Lasso Cut"), this);
     m_lassoCutAction->setToolTip(tr("Lasso Cut: drag a loop round part of the selected shape, as you see it, and cut "
                                     "straight through: cut away what's inside, keep only that, or both pieces"));
@@ -1605,6 +1614,7 @@ void MainWindow::createToolBar()
         {m_maskAction, "split-mask"},
         {m_makePartAction, "make-part"},
         {m_lassoCutAction, "lasso"},
+        {m_accessoryAction, "accessory"},
         {m_mirrorMenu->menuAction(), "mirror"},
         {m_patternAction, "pattern"},
         {m_group, "group"},
@@ -1800,7 +1810,7 @@ void MainWindow::createToolBar()
 
     Page figure = page(tr("Figure Design"), tr("Action figures: cut into parts, hands, posing and the figure guide"));
     group(figure, tr("Figure"), {button(m_cutPartsAction), button(m_lassoCutAction), button(m_handAction),
-                                    button(m_makePartAction)});
+                                    button(m_makePartAction), button(m_accessoryAction)});
     group(figure, tr("Position"), {button(m_poseFigureAction), named(m_mannequinAction, tr("Figure Guide"))});
     common(figure);
 
@@ -2572,6 +2582,32 @@ void MainWindow::createDocks()
     m_handPanel = new HandPanel;
     stackLayout->addWidget(m_handPanel);
     m_handPanel->hide();
+    m_accessoryPanel = new AccessoryPanel;
+    stackLayout->addWidget(m_accessoryPanel);
+    m_accessoryPanel->hide();
+    m_accessoryTimer = new QTimer(this);
+    m_accessoryTimer->setSingleShot(true);
+    m_accessoryTimer->setInterval(250);
+    connect(m_accessoryTimer, &QTimer::timeout, this, &MainWindow::updateAccessoryPreview);
+    connect(m_accessoryPanel, &AccessoryPanel::changed, this, [this] { m_accessoryTimer->start(); });
+    connect(m_accessoryPanel, &AccessoryPanel::applyRequested, this, &MainWindow::applyAccessory);
+    connect(m_accessoryPanel, &AccessoryPanel::cancelRequested, this, &MainWindow::endAccessories);
+    connect(m_accessoryPanel, &AccessoryPanel::libraryAddRequested, this, &MainWindow::addOwnAccessory);
+    connect(m_accessoryPanel, &AccessoryPanel::saveRequested, this, &MainWindow::saveAsAccessory);
+    connect(m_accessoryPanel, &AccessoryPanel::manageRequested, this, [this] {
+        CustomShapesDialog dialog(accessoriesFolder(), this, true);
+        connect(&dialog, &CustomShapesDialog::folderChanged, this,
+                [](const QString& folder) { Preferences().setValue(QStringLiteral("accessories/folder"), folder); });
+        connect(&dialog, &CustomShapesDialog::addRequested, this, [this, &dialog](const QString& file) {
+            dialog.accept();
+            const auto entries = library::list(toPath(accessoriesFolder()));
+            for (std::size_t i = 0; i < entries.size(); ++i)
+                if (toPath(file) == entries[i].file)
+                    addOwnAccessory(int(i));
+        });
+        dialog.exec();
+        refreshAccessoryLibrary();
+    });
     m_handTimer = new QTimer(this);
     m_handTimer->setSingleShot(true);
     m_handTimer->setInterval(200);
@@ -5536,7 +5572,7 @@ bool MainWindow::toolOpen() const
            m_hingeMode.active || m_poseMode.active || m_printCheckMode.active || m_mannequinOpen ||
            m_hollowMode.active || m_stampMode.active || m_panelLineMode.active || m_poseFigureMode.active ||
            m_paintMode.active || m_cutPartsMode.active || m_mouldMode.active || m_portMode.active ||
-           m_handMode.active || m_lassoCutMode.active;
+           m_handMode.active || m_lassoCutMode.active || m_accessoryMode.active;
 }
 
 void MainWindow::startEmboss(ObjectId target, bool editing)
@@ -8353,6 +8389,16 @@ void MainWindow::refreshScene()
             marks.helper = true;
             items.push_back(marks);
         }
+        // Accessories: the one to be made, see-through.
+        if (m_accessoryMode.active && m_accessoryMode.preview && !m_accessoryMode.preview->empty()) {
+            DisplayItem a;
+            a.id = kMouldItem - 10;
+            a.mesh = m_accessoryMode.preview;
+            a.color = QVector3D(0.75f, 0.72f, 0.66f);
+            a.alpha = 0.75f;
+            a.helper = true;
+            items.push_back(a);
+        }
         // Make Hand: the hand to be made, see-through.
         if (m_handMode.active && m_handMode.preview && !m_handMode.preview->empty()) {
             DisplayItem h;
@@ -8688,6 +8734,7 @@ void MainWindow::refreshScene()
     m_mouldAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_portAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_handAction->setEnabled(!toolOpen());
+    m_accessoryAction->setEnabled(!toolOpen());
     m_poseFigureAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_paintAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_cutPartsAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
@@ -15043,6 +15090,188 @@ void MainWindow::applyHand()
         setSelection(made);
     } catch (const std::exception& e) {
         m_handPanel->setStatus(tr("The hand couldn't be made: %1").arg(QString::fromUtf8(e.what())), true);
+    }
+}
+
+// ---- Accessories -----------------------------------------------------------------------
+
+QString MainWindow::accessoriesFolder() const
+{
+    const QString chosen = Preferences().value(QStringLiteral("accessories/folder")).toString();
+    if (!chosen.isEmpty())
+        return chosen;
+    return QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation) + QStringLiteral("/Forge3D/Accessories");
+}
+
+void MainWindow::refreshAccessoryLibrary()
+{
+    QStringList names;
+    for (const auto& e : library::list(toPath(accessoriesFolder())))
+        names << QString::fromStdString(e.name);
+    m_accessoryPanel->setLibrary(names);
+}
+
+void MainWindow::startAccessories()
+{
+    if (toolOpen())
+        return;
+    if (m_dragState.kind != Drag::Kind::None)
+        cancelDrag();
+    AccessoryMode mode;
+    mode.active = true;
+    // Beside the selected shape (a figure), else in the plate's middle.
+    if (const ObjectId id = selectedOne(); id != kInvalidId && m_doc.find(id) && m_doc.isTopLevel(id)) {
+        // In front of it (so it stays on the plate).
+        const Bounds b = m_doc.worldBounds(id);
+        mode.x = (double(b.min[0]) + b.max[0]) / 2.0;
+        mode.y = double(b.min[1]) - 30.0;
+        mode.toSave = id;
+    }
+    m_accessoryMode = std::move(mode);
+    m_accessoryPanel->start(m_accessoryMode.toSave != kInvalidId);
+    refreshAccessoryLibrary();
+    m_propsDockWidth = m_propsDock->width();
+    m_properties->hide();
+    m_accessoryPanel->show();
+    statusBar()->showMessage(tr("Accessories: choose what to make and its sizes, then Make. Esc closes."));
+    updateAccessoryPreview();
+    refreshCommandState();
+}
+
+void MainWindow::endAccessories()
+{
+    if (!m_accessoryMode.active)
+        return;
+    m_accessoryTimer->stop();
+    m_accessoryMode = AccessoryMode{};
+    m_accessoryPanel->hide();
+    m_properties->show();
+    QTimer::singleShot(0, this, [this] { resizeDocks({m_propsDock}, {m_propsDockWidth}, Qt::Horizontal); });
+    statusBar()->clearMessage();
+    refreshScene();
+    refreshCommandState();
+}
+
+void MainWindow::updateAccessoryPreview()
+{
+    auto& mode = m_accessoryMode;
+    if (!mode.active)
+        return;
+    m_accessoryTimer->stop();
+    mode.preview.reset();
+    try {
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        struct RestoreCursor {
+            ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
+        } restore;
+        const AccessorySettings s = m_accessoryPanel->settings();
+        Mesh m = accessory::make(s);
+        Bounds b;
+        for (std::size_t i = 0; i + 2 < m.positions.size(); i += 3) {
+            m.positions[i] += float(mode.x);
+            m.positions[i + 1] += float(mode.y);
+            b.expand(m.positions[i], m.positions[i + 1], m.positions[i + 2]);
+        }
+        mode.preview = together({m});
+        const auto size = b.size();
+        m_accessoryPanel->setStatus(tr("Make adds a %1, printed %2 × %3 × %4 mm.")
+                                        .arg(QString::fromStdString(accessory::nameOf(s)).toLower())
+                                        .arg(size[0], 0, 'f', 1)
+                                        .arg(size[1], 0, 'f', 1)
+                                        .arg(size[2], 0, 'f', 1),
+                                    false);
+        m_accessoryPanel->setApplyEnabled(true);
+    } catch (const std::exception& e) {
+        m_accessoryPanel->setStatus(QString::fromUtf8(e.what()), true);
+        m_accessoryPanel->setApplyEnabled(false);
+    }
+    refreshScene();
+}
+
+void MainWindow::applyAccessory()
+{
+    auto& mode = m_accessoryMode;
+    if (!mode.active)
+        return;
+    try {
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        struct RestoreCursor {
+            ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
+        } restore;
+        const ObjectId made = accessory::add(m_stack, m_doc, m_accessoryPanel->settings(), mode.x, mode.y);
+        endAccessories();
+        qInfo().noquote() << "Command:" << QString::fromStdString(m_stack.undoLabel());
+        setSelection(made);
+    } catch (const std::exception& e) {
+        m_accessoryPanel->setStatus(tr("It couldn't be made: %1").arg(QString::fromUtf8(e.what())), true);
+    }
+}
+
+void MainWindow::addOwnAccessory(int index)
+{
+    const auto entries = library::list(toPath(accessoriesFolder()));
+    if (index < 0 || index >= int(entries.size()))
+        return;
+    const auto file = entries[std::size_t(index)].file;
+    endAccessories();
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    try {
+        const auto made = library::add(m_stack, m_doc, file);
+        QApplication::restoreOverrideCursor();
+        setSelection(made);
+    } catch (const std::exception& e) {
+        QApplication::restoreOverrideCursor();
+        QMessageBox::warning(this, tr("Forge3D"),
+                             tr("The accessory couldn't be added:\n%1").arg(QString::fromUtf8(e.what())));
+    }
+}
+
+void MainWindow::saveAsAccessory()
+{
+    const ObjectId id = m_accessoryMode.toSave;
+    const Body* body = m_doc.find(id);
+    if (!m_accessoryMode.active || !body)
+        return;
+    const QString folder = accessoriesFolder();
+    QString name;
+    for (;;) {
+        bool ok = false;
+        name = QInputDialog::getText(this, tr("Save as an Accessory"),
+                                     tr("Name for this accessory (it's added at this size from Figure Design → "
+                                        "Accessories):"),
+                                     QLineEdit::Normal, QString::fromStdString(body->name), &ok)
+                   .trimmed();
+        if (!ok || name.isEmpty())
+            return;
+        std::string fileName;
+        try {
+            fileName = library::fileNameFor(name.toStdString());
+        } catch (const std::exception& e) {
+            QMessageBox::warning(this, tr("Save as an Accessory"), QString::fromUtf8(e.what()));
+            continue;
+        }
+        if (!QFileInfo::exists(folder + QLatin1Char('/') + QString::fromStdString(fileName)))
+            break;
+        const auto answer = QMessageBox::question(this, tr("Save as an Accessory"),
+                                                  tr("There's already an accessory called '%1'. Replace it?").arg(name),
+                                                  QMessageBox::Yes | QMessageBox::No | QMessageBox::Cancel,
+                                                  QMessageBox::No);
+        if (answer == QMessageBox::Yes)
+            break;
+        if (answer == QMessageBox::Cancel)
+            return;
+    }
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    try {
+        const std::string createdBy = std::string(build::kAppName) + " " + build::kVersion;
+        library::save(m_doc, {id}, toPath(folder), name.toStdString(), createdBy);
+        QApplication::restoreOverrideCursor();
+        m_accessoryPanel->setStatus(tr("Saved '%1' with your accessories.").arg(name), false);
+        refreshAccessoryLibrary();
+    } catch (const std::exception& e) {
+        QApplication::restoreOverrideCursor();
+        QMessageBox::warning(this, tr("Save as an Accessory"),
+                             tr("The accessory couldn't be saved:\n%1").arg(QString::fromUtf8(e.what())));
     }
 }
 

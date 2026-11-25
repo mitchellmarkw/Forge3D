@@ -40,12 +40,15 @@ QString fromPath(const std::filesystem::path& p)
 
 }  // namespace
 
-CustomShapesDialog::CustomShapesDialog(const QString& folder, QWidget* parent) : QDialog(parent), m_folder(folder)
+CustomShapesDialog::CustomShapesDialog(const QString& folder, QWidget* parent, bool accessories)
+    : QDialog(parent), m_folder(folder), m_accessories(accessories)
 {
-    setWindowTitle(tr("Custom Shapes"));
+    setWindowTitle(accessories ? tr("Your Accessories") : tr("Custom Shapes"));
     auto* layout = new QVBoxLayout(this);
-    auto* intro = new QLabel(tr("Shapes you've saved with Save Custom Shape. Each comes in at the size it was "
-                                "saved. Add one here, or from Add Shape → Custom."));
+    auto* intro = new QLabel(accessories ? tr("Accessories you've saved from Figure Design → Accessories. Each comes "
+                                              "in at the size it was saved.")
+                                         : tr("Shapes you've saved with Save Custom Shape. Each comes in at the size "
+                                              "it was saved. Add one here, or from Add Shape → Custom."));
     intro->setWordWrap(true);
     layout->addWidget(intro);
 
@@ -117,7 +120,10 @@ void CustomShapesDialog::reload(const QString& select)
     if (!m_list->currentItem() && m_list->count() > 0)
         m_list->setCurrentRow(0);
     m_where->setText(m_list->count() == 0
-                         ? tr("None saved yet. Select a shape, then Print/Save → Save Custom Shape.\nFolder: %1")
+                         ? (m_accessories ? tr("None saved yet. Select a shape, then Figure Design → Accessories → "
+                                               "Save Selected.\nFolder: %1")
+                                          : tr("None saved yet. Select a shape, then Print/Save → Save Custom "
+                                               "Shape.\nFolder: %1"))
                                .arg(QDir::toNativeSeparators(m_folder))
                          : tr("Folder: %1").arg(QDir::toNativeSeparators(m_folder)));
     updateButtons();
@@ -142,7 +148,7 @@ void CustomShapesDialog::renameCurrent()
     if (!item)
         return;
     bool ok = false;
-    const QString name = QInputDialog::getText(this, tr("Rename Custom Shape"), tr("New name:"), QLineEdit::Normal,
+    const QString name = QInputDialog::getText(this, m_accessories ? tr("Rename Accessory") : tr("Rename Custom Shape"), tr("New name:"), QLineEdit::Normal,
                                                item->text(), &ok)
                              .trimmed();
     if (!ok || name.isEmpty() || name == item->text())
@@ -163,8 +169,9 @@ void CustomShapesDialog::deleteCurrent()
         return;
     const QString name = item->text();
     if (QMessageBox::question(this, windowTitle(),
-                              tr("Delete the custom shape '%1'?\n\nIts file goes to the Recycle Bin, so it can be "
-                                 "got back from there. Shapes already added to models aren't changed.")
+                              ((m_accessories ? tr("Delete the accessory '%1'?") : tr("Delete the custom shape '%1'?")) +
+                               tr("\n\nIts file goes to the Recycle Bin, so it can be got back from there. Shapes "
+                                  "already added to models aren't changed."))
                                   .arg(name)) != QMessageBox::Yes)
         return;
     const QString file = currentFile();
@@ -177,7 +184,8 @@ void CustomShapesDialog::deleteCurrent()
 
 void CustomShapesDialog::chooseFolder()
 {
-    const QString chosen = QFileDialog::getExistingDirectory(this, tr("Folder for Custom Shapes"), m_folder);
+    const QString chosen = QFileDialog::getExistingDirectory(
+        this, m_accessories ? tr("Folder for Accessories") : tr("Folder for Custom Shapes"), m_folder);
     if (chosen.isEmpty() || QDir(chosen) == QDir(m_folder))
         return;
     m_folder = chosen;
