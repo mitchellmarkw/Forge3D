@@ -32,7 +32,7 @@ TEST_CASE("bodies can be inserted, found and removed", "[document]")
     doc.insertBody(b);
 
     REQUIRE(doc.bodyCount() == 2);
-    CHECK(doc.find(idA)->name == "Box 1");
+    CHECK(doc.find(idA)->name == "Box");
     CHECK(doc.find(idB)->name == "Box 2");
     CHECK(doc.indexOf(idB) == 1);
 
@@ -43,16 +43,21 @@ TEST_CASE("bodies can be inserted, found and removed", "[document]")
     CHECK(doc.indexOf(idA) == Document::npos);
 }
 
-TEST_CASE("unique names reuse the lowest free number", "[document]")
+TEST_CASE("unique names: the name itself while free, then the lowest free number", "[document]")
 {
     Document doc;
     Body a = makeBox(doc);
-    doc.insertBody(a);  // Box 1
+    doc.insertBody(a);  // Box
     Body b = makeBox(doc);
     doc.insertBody(b);  // Box 2
+    Body c = makeBox(doc);
+    doc.insertBody(c);  // Box 3
+    CHECK(c.name == "Box 3");
+    doc.removeBody(b.id);
+    CHECK(doc.uniqueName("Box") == "Box 2");
     doc.removeBody(a.id);
-    CHECK(doc.uniqueName("Box") == "Box 1");
-    CHECK(doc.uniqueName("Cylinder") == "Cylinder 1");
+    CHECK(doc.uniqueName("Box") == "Box");
+    CHECK(doc.uniqueName("Cylinder") == "Cylinder");
 }
 
 TEST_CASE("invalid input is rejected without changing the document", "[document]")

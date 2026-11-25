@@ -114,7 +114,7 @@ TEST_CASE("Magnet: the matching pocket in the part against the face", "[magnet]"
     const auto joints = pose::findJoints(doc);
     REQUIRE(joints.size() == 2);
     CHECK(joints[0].kind == pose::JointKind::Fixed);
-    CHECK(joints[0].name == "Magnet in Pocketed 1");
+    CHECK(joints[0].name == "Magnet in Pocketed");
     CHECK(joints[0].other == p2);
 
     // Saved and opened again.

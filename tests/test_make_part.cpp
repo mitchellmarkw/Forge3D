@@ -83,9 +83,9 @@ TEST_CASE("Make part: armor sitting on top", "[makepart]")
     o.thickness = 1.5;
     o.fit = 0.2;
     const makepart::Made made = makepart::makePart(stack, doc, ball, capPaint(b, 8.0), o);
-    CHECK(stack.undoLabel() == "Make part from Ball 1");
+    CHECK(stack.undoLabel() == "Make part from Ball");
     REQUIRE(doc.find(made.part));
-    CHECK(doc.find(made.part)->name == "Ball 1 part");
+    CHECK(doc.find(made.part)->name == "Ball part");
     CHECK(made.body == ball);
     CHECK_THAT(volumeOf(doc, ball), WithinRel(before, 1e-9));  // the body as it was
     // Over the top: from the fit gap out by the thickness.

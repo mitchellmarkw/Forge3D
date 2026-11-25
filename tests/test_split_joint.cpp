@@ -74,7 +74,7 @@ TEST_CASE("Split joint: a ball joint at a plane split", "[splitjoint]")
     CHECK(gap > 0.3);
     const splitjoint::Made made = splitjoint::splitWithJoint(stack, doc, arm, {mid, {0, 0, 1}}, o, 7);
     REQUIRE(made.pieces.size() == 2);
-    CHECK(stack.undoLabel() == "Split Arm 1 with a ball joint");
+    CHECK(stack.undoLabel() == "Split Arm with a ball joint");
     const ObjectId top = made.pieces[0], bottom = made.pieces[1];
     CHECK(doc.isTopLevel(top));
     CHECK(doc.isTopLevel(bottom));

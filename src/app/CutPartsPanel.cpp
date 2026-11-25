@@ -166,10 +166,12 @@ CutPartsPanel::CutPartsPanel(QWidget* parent) : QWidget(parent)
         QSettings(QSettings::NativeFormat, QSettings::UserScope, QStringLiteral("Forge3D"), QStringLiteral("Forge3D"))
             .setValue(QStringLiteral("cutParts/inPlace"), on);
         showSummary();
+        emit changed();
     });
-    connect(m_clearance, &QDoubleSpinBox::valueChanged, this, [](double v) {
+    connect(m_clearance, &QDoubleSpinBox::valueChanged, this, [this](double v) {
         QSettings(QSettings::NativeFormat, QSettings::UserScope, QStringLiteral("Forge3D"), QStringLiteral("Forge3D"))
             .setValue(QStringLiteral("cutParts/clearance"), v);
+        emit changed();  // the joint's line shows the clearance
     });
     m_summary = wrapped(QString());
     cuts->addWidget(m_summary);

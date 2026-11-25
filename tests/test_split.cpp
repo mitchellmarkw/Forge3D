@@ -51,14 +51,14 @@ TEST_CASE("Split a box flat, keeping both halves", "[split]")
     const auto made = splitBody(stack, doc, box, SplitPlane{{0, 0, 5}, {0, 0, 1}}, SplitKeep::Both);
     REQUIRE(made.size() == 2);
     CHECK(doc.topLevelIds() == made);
-    CHECK(doc.find(made[0])->name == "Box 1 (top)");
-    CHECK(doc.find(made[1])->name == "Box 1 (bottom)");
+    CHECK(doc.find(made[0])->name == "Box (top)");
+    CHECK(doc.find(made[1])->name == "Box (bottom)");
     CHECK_THAT(volumeOf(doc.shape(made[0])), WithinRel(20.0 * 20 * 15, 1e-9));
     CHECK_THAT(volumeOf(doc.shape(made[1])), WithinRel(20.0 * 20 * 5, 1e-9));
     CHECK_THAT(doc.worldBounds(made[0]).min[2], WithinAbs(5, 1e-4));
     CHECK_THAT(doc.worldBounds(made[1]).max[2], WithinAbs(5, 1e-4));
     CHECK(BRepCheck_Analyzer(doc.shape(made[0])).IsValid());
-    CHECK(stack.undoLabel() == "Split Box 1");
+    CHECK(stack.undoLabel() == "Split Box");
 
     // Each half turns about its own middle.
     CHECK_THAT(doc.visibleCentre(made[0])[2], WithinAbs(12.5, 1e-4));
@@ -78,12 +78,12 @@ TEST_CASE("Keep one side only", "[split]")
     const auto front = splitBody(stack, doc, cyl, SplitPlane{{3, 0, 0}, {1, 0, 0}}, SplitKeep::Front);
     REQUIRE(front.size() == 1);
     CHECK(doc.bodyCount() == 2);  // the cylinder is inside the result
-    CHECK(doc.find(front[0])->name == "Cylinder 1 (right)");
+    CHECK(doc.find(front[0])->name == "Cylinder (right)");
     CHECK_THAT(doc.worldBounds(front[0]).min[0], WithinAbs(3, 1e-4));
     stack.undo();
 
     const auto back = splitBody(stack, doc, cyl, SplitPlane{{3, 0, 0}, {1, 0, 0}}, SplitKeep::Back);
-    CHECK(doc.find(back[0])->name == "Cylinder 1 (left)");
+    CHECK(doc.find(back[0])->name == "Cylinder (left)");
     CHECK_THAT(doc.worldBounds(back[0]).max[0], WithinAbs(3, 1e-4));
 }
 
@@ -127,8 +127,8 @@ TEST_CASE("Splitting a combined shape copies all its parts", "[split]")
     const Body* copy = doc.find(bottom->boolean->operands.front());
     CHECK(copy->name == "Merge 1 copy");
     REQUIRE(copy->boolean);
-    CHECK(doc.find(copy->boolean->operands[0])->name == "Box 1 copy");
-    CHECK(doc.find(copy->boolean->operands[1])->name == "Cylinder 1 copy");
+    CHECK(doc.find(copy->boolean->operands[0])->name == "Box copy");
+    CHECK(doc.find(copy->boolean->operands[1])->name == "Cylinder copy");
     // Top: box above 10 plus the peg above it; bottom: box below 10 plus the peg below it.
     CHECK_THAT(doc.worldBounds(made[0]).max[2], WithinAbs(30, 1e-4));
     CHECK_THAT(doc.worldBounds(made[1]).max[2], WithinAbs(10, 1e-4));

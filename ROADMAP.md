@@ -128,11 +128,12 @@ Gate to Phase 2: a new user prints a customised part within 10 minutes.
 | 96 | Toy joint recipes in Cut into Parts: butterfly shoulder, drop-down hip, ankle rocker, ab crunch; Super Poseable | Done (0.104.0) |
 | 97 | Sculpt strength: a 0-150% slider for each sculpt step, toning every stroke in it down or up together | Done (0.105.0) |
 | 98 | Show and hide shapes: an eye by each shape in Objects; Show Only This, Show All, Ctrl+H | Done (0.106.0) |
-| 99 | Lasso cut and lasso mask: cut straight through inside a drawn loop; lasso in Split by Mask, Make Part and the sculpt mask | **Delivered for testing** |
-| 100 | Accessory makers: blade, shield, staff or spear, belt with buckle, holster at the figure's scale; your own accessories library | **Delivered for testing** |
-| 101 | Proportions: head, shoulders, torso, arms, hands, legs and feet sliders for a figure; Heroic and Chibi | **Delivered for testing** |
-| 102 | Reshape box: drag handles on a box round any shape to bend it smoothly (2, 3 or 4 a side, mirrored) | **Delivered for testing** |
-| 103 | Print-in-place joints in Cut into Parts: captive balls, hinges with pins built on, a clearance all round | **Delivered for testing** |
+| 99 | Lasso cut and lasso mask: cut straight through inside a drawn loop; lasso in Split by Mask, Make Part and the sculpt mask | Done (0.107.0) |
+| 100 | Accessory makers: blade, shield, staff or spear, belt with buckle, holster at the figure's scale; your own accessories library | Done (0.108.0) |
+| 101 | Proportions: head, shoulders, torso, arms, hands, legs and feet sliders for a figure; Heroic and Chibi | Done (0.109.0) |
+| 102 | Reshape box: drag handles on a box round any shape to bend it smoothly (2, 3 or 4 a side, mirrored) | Done (0.110.0) |
+| 103 | Print-in-place joints in Cut into Parts: captive balls, hinges with pins built on, a clearance all round | Done (0.111.0) |
+| 104 | Rough edges: names without a needless " 1"; Cut into Parts' joint line shows the print-in-place clearance | **Delivered for testing** |
 
 Slices 39–41 close the gaps found in the [Phase 1 gate review](docs/PHASE1_GATE.md).
 

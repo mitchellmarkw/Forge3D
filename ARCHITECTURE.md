@@ -1996,3 +1996,10 @@ and sharp across edges.
   already one piece each side (the peg on the limb, the lip in the bore's groove).
 - The pieces stay where they were cut, joined only by the joints; a test checks no two of them overlap.
 - App: Cut into Parts' "Print in place (filament)" with a Clearance (remembered under cutParts/...).
+
+## Rough edges (slice 104, 0.112.0)
+
+- `Document::uniqueName(base)` gives `base` itself while no body has that name, then "base 2", "base 3"... (the
+  lowest free). Every new shape and step is named through it.
+- Cut into Parts' joint line is worked out from `limbcut::inPlaceBall` / `inPlaceHinge` when Print in place is on,
+  and the panel's in-place box and clearance send `changed` so it follows them.

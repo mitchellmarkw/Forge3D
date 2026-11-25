@@ -165,7 +165,10 @@ std::string Document::uniqueName(const std::string& base) const
     std::set<std::string> used;
     for (const Body& b : m_bodies)
         used.insert(b.name);
-    for (int n = 1;; ++n) {
+    // The name itself while it's free; then "Box 2", "Box 3"...
+    if (!used.count(base))
+        return base;
+    for (int n = 2;; ++n) {
         std::string candidate = base + " " + std::to_string(n);
         if (!used.count(candidate))
             return candidate;

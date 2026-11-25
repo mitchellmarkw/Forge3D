@@ -57,7 +57,7 @@ public:
 
     // ---- Identity and naming ----
     ObjectId allocateId() { return m_nextId++; }
-    // "Box 1", "Box 2", ...: the lowest number not already used with this base.
+    // "Box" while that is free, then "Box 2", "Box 3"...: the lowest number not already used.
     std::string uniqueName(const std::string& base) const;
 
     // ---- Bodies ----

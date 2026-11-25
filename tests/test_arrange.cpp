@@ -55,7 +55,7 @@ TEST_CASE("Duplicate puts copies beside the originals", "[arrange]")
     CHECK_THAT(offset[0], WithinAbs(45 + 5, 1e-3));
     const auto made = addCopies(stack, doc, {captureTree(doc, a), captureTree(doc, b)}, offset, "Duplicate");
     REQUIRE(made.size() == 2);
-    CHECK(doc.find(made[0])->name == "Box 1 copy");
+    CHECK(doc.find(made[0])->name == "Box copy");
     CHECK_THAT(doc.worldBounds(made[0]).min[0], WithinAbs(40, 1e-3));
     CHECK(stack.undoLabel() == "Duplicate");
     stack.undo();
@@ -81,8 +81,8 @@ TEST_CASE("Copies of a combined shape copy its parts", "[arrange]")
     const auto pasted = addCopies(stack, doc, {tree}, {0, 0, 0}, "Paste");
     CHECK(doc.bodyCount() == 3);
     const Body* copy = doc.find(pasted.front());
-    CHECK(copy->name == "Group 1 copy");
-    CHECK(doc.find(copy->boolean->operands[0])->name == "Box 1 copy");
+    CHECK(copy->name == "Group copy");
+    CHECK(doc.find(copy->boolean->operands[0])->name == "Box copy");
     CHECK(doc.isTopLevel(pasted.front()));
     CHECK_FALSE(doc.isTopLevel(copy->boolean->operands[1]));
 }
@@ -96,7 +96,7 @@ TEST_CASE("Mirror flips a shape in place", "[arrange]")
     const auto made = mirrorBodies(stack, doc, {w}, 0);
     REQUIRE(made.size() == 1);
     const ObjectId m = made.front();
-    CHECK(doc.find(m)->name == "Wedge 1 (mirrored)");
+    CHECK(doc.find(m)->name == "Wedge (mirrored)");
     const Bounds after = doc.worldBounds(m);
     for (int i = 0; i < 3; ++i) {
         CHECK_THAT(after.min[i], WithinAbs(before.min[i], 1e-4));
@@ -125,7 +125,7 @@ TEST_CASE("Mirrored and grouped shapes combine, scale and save", "[arrange]")
     const ObjectId a = add(stack, doc, BoxSpec{10, 10, 10});
     const ObjectId b = add(stack, doc, BoxSpec{10, 10, 10}, 30);
     const ObjectId g = groupBodies(stack, doc, {a, b});
-    CHECK(doc.find(g)->name == "Group 1");
+    CHECK(doc.find(g)->name == "Group");
     CHECK_THAT(volumeOf(doc.shape(g)), WithinRel(2000.0, 1e-9));
     CHECK_THROWS_AS(groupBodies(stack, doc, {g}), std::invalid_argument);
 

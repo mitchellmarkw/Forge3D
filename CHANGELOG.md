@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.112.0 Beta — Slice 104: Rough edges (2026-11-25)
+
+- **Names without a needless number**: a new shape or step is called just "Box", "Posed", "Reshaped", "Sword"...
+  while no other shape has that name; the next is "Box 2", then "Box 3". Shapes already in files keep their names.
+- **Cut into Parts with Print in place**: the joint's line now shows what will be built: the clearance (not the
+  usual fit), and that the ball is held in or the pin is part of the fork. It changes as you change the clearance.
+
 ## 0.111.0 Beta — Slice 103: Print-in-place joints (2026-11-24)
 
 - **Print in place** in Cut into Parts: tick **Print in place (filament)** and every joint is built captive with a
