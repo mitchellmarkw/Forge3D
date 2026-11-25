@@ -19,6 +19,7 @@
 #include "forge/core/ShapeLibrary.h"
 #include "forge/core/MakePart.h"
 #include "forge/core/MaskSplit.h"
+#include "forge/core/Lasso.h"
 #include "forge/core/Hinge.h"
 #include "forge/core/Socket.h"
 #include "forge/core/PrintOrient.h"
@@ -53,6 +54,7 @@
 #include "forge/core/Balance.h"
 #include "forge/core/Sewing.h"
 #include "MaskPanel.h"
+#include "LassoPanel.h"
 #include "ReferencePanel.h"
 #include "ScaleCalculator.h"
 #include "RescaleDialog.h"
@@ -693,6 +695,8 @@ void MainWindow::createActions()
             endJoin();
         else if (m_maskMode.active)
             endMask();
+        else if (m_lassoCutMode.active)
+            endLassoCut();
         else if (m_referenceMode.active && m_referenceMode.picking) {
             m_referenceMode.picking = 0;
             m_referencePanel->setPicking(0);
@@ -1233,6 +1237,10 @@ void MainWindow::createActions()
         }
         startMask(id, false, true);
     });
+    m_lassoCutAction = new QAction(tr("Lasso Cut"), this);
+    m_lassoCutAction->setToolTip(tr("Lasso Cut: drag a loop round part of the selected shape, as you see it, and cut "
+                                    "straight through: cut away what's inside, keep only that, or both pieces"));
+    connect(m_lassoCutAction, &QAction::triggered, this, &MainWindow::startLassoCut);
     m_joinAction = new QAction(tr("Join Parts"), this);
     m_joinAction->setToolTip(tr("Join Parts: move one part so it joins another: a peg into its socket, a ball "
                                 "into its cup, a face flat against a face. Click the place on each part."));
@@ -1596,6 +1604,7 @@ void MainWindow::createToolBar()
         {m_joinAction, "join"},
         {m_maskAction, "split-mask"},
         {m_makePartAction, "make-part"},
+        {m_lassoCutAction, "lasso"},
         {m_mirrorMenu->menuAction(), "mirror"},
         {m_patternAction, "pattern"},
         {m_group, "group"},
@@ -1790,7 +1799,8 @@ void MainWindow::createToolBar()
     common(design);
 
     Page figure = page(tr("Figure Design"), tr("Action figures: cut into parts, hands, posing and the figure guide"));
-    group(figure, tr("Figure"), {button(m_cutPartsAction), button(m_handAction), button(m_makePartAction)});
+    group(figure, tr("Figure"), {button(m_cutPartsAction), button(m_lassoCutAction), button(m_handAction),
+                                    button(m_makePartAction)});
     group(figure, tr("Position"), {button(m_poseFigureAction), named(m_mannequinAction, tr("Figure Guide"))});
     common(figure);
 
@@ -2238,6 +2248,9 @@ void MainWindow::createDocks()
     m_maskPanel = new MaskPanel;
     stackLayout->addWidget(m_maskPanel);
     m_maskPanel->hide();
+    m_lassoPanel = new LassoPanel;
+    stackLayout->addWidget(m_lassoPanel);
+    m_lassoPanel->hide();
     m_referencePanel = new ReferencePanel;
     stackLayout->addWidget(m_referencePanel);
     m_referencePanel->hide();
@@ -2797,6 +2810,15 @@ void MainWindow::createDocks()
         m_maskMode.strokeStarts.clear();
         repaintMask();
     });
+    connect(m_lassoPanel, &LassoPanel::clearRequested, this, [this] {
+        m_lassoCutMode.loop.reset();
+        showLasso({}, false);
+        m_lassoPanel->start(tr("Lasso cut '%1'").arg(
+            m_doc.find(m_lassoCutMode.target) ? QString::fromStdString(m_doc.find(m_lassoCutMode.target)->name)
+                                              : QString()));
+    });
+    connect(m_lassoPanel, &LassoPanel::applyRequested, this, &MainWindow::applyLassoCut);
+    connect(m_lassoPanel, &LassoPanel::cancelRequested, this, &MainWindow::endLassoCut);
     connect(m_maskPanel, &MaskPanel::applyRequested, this, &MainWindow::applyMask);
     connect(m_maskPanel, &MaskPanel::cancelRequested, this, &MainWindow::endMask);
     connect(m_joinPanel, &JoinPanel::changed, this, &MainWindow::updateJoinPreview);
@@ -3122,6 +3144,8 @@ void MainWindow::onViewportClicked(const QVector3D& origin, const QVector3D& dir
         m_pressOnHandle = false;
         return;
     }
+    if (m_lassoCutMode.active)
+        return;  // drawing loops: a click picks nothing
     if (m_splitMode.active)
         return;  // while splitting, clicks don't change what is selected (Cancel or Esc leaves)
     if (m_embossMode.active) {
@@ -3290,6 +3314,22 @@ void MainWindow::onLeftPressed(const QVector3D& origin, const QVector3D& directi
     m_pressOnHandle = false;
     if (m_measureMode.active)
         return;  // measuring: clicks pick, nothing moves
+    const bool ctrl = modifiers.testFlag(Qt::ControlModifier);
+    if (m_lassoCutMode.active) {
+        const auto c = m_doc.worldBounds(m_lassoCutMode.target).center();
+        lassoBegin(origin, direction, {c[0], c[1], c[2]}, false);
+        return;
+    }
+    if (m_maskMode.active && m_maskPanel->lasso() && m_maskMode.shown) {
+        const auto c = m_maskMode.shown->bounds().center();
+        lassoBegin(origin, direction, m_maskMode.toPlate.apply({c[0], c[1], c[2]}), ctrl);
+        return;
+    }
+    if (m_sculptMode.active && m_sculptPanel->lassoMask() && m_sculptMode.sculptor && !m_sculptMode.stroking) {
+        const auto c = m_sculptMode.sculptor->mesh().bounds().center();
+        lassoBegin(origin, direction, m_sculptMode.toPlate.apply({c[0], c[1], c[2]}), ctrl);
+        return;
+    }
     if (m_sculptMode.active) {
         beginStroke(origin, direction, modifiers);
         return;
@@ -3475,6 +3515,10 @@ void MainWindow::onLeftPressed(const QVector3D& origin, const QVector3D& directi
 void MainWindow::onLeftDragged(const QVector3D& origin, const QVector3D& direction, const QPointF& pixel,
                                Qt::KeyboardModifiers modifiers)
 {
+    if (m_lassoDraw.drawing) {
+        lassoAdd(origin, direction);
+        return;
+    }
     if (m_sculptMode.active) {
         if (m_sculptMode.stroking)
             sculptAt(origin, direction, modifiers);
@@ -3702,6 +3746,25 @@ void MainWindow::onLeftDragged(const QVector3D& origin, const QVector3D& directi
 
 void MainWindow::onLeftReleased(bool wasDrag)
 {
+    if (m_lassoDraw.drawing) {
+        const bool erase = m_lassoDraw.erase;
+        const std::optional<lasso::Loop> loop = lassoFinish();
+        if (m_lassoCutMode.active) {
+            m_lassoCutMode.loop = loop;
+            if (loop) {
+                showLasso(loop->points, true);
+                m_lassoPanel->setStatus(tr("Cut, or drag again for a new loop."), false);
+            }
+            m_lassoPanel->setApplyEnabled(loop.has_value());
+        } else if (m_maskMode.active && loop) {
+            m_maskMode.strokeStarts.push_back(m_maskMode.dabs.size());
+            m_maskMode.dabs.push_back(mask::lassoDab(loop->points, loop->along, erase));
+            repaintMask();
+        } else if (m_sculptMode.active && loop) {
+            sculptLasso(*loop, erase);
+        }
+        return;
+    }
     if (m_stampMode.active) {
         auto& mode = m_stampMode;
         if (wasDrag && !mode.row.empty()) {
@@ -5473,7 +5536,7 @@ bool MainWindow::toolOpen() const
            m_hingeMode.active || m_poseMode.active || m_printCheckMode.active || m_mannequinOpen ||
            m_hollowMode.active || m_stampMode.active || m_panelLineMode.active || m_poseFigureMode.active ||
            m_paintMode.active || m_cutPartsMode.active || m_mouldMode.active || m_portMode.active ||
-           m_handMode.active;
+           m_handMode.active || m_lassoCutMode.active;
 }
 
 void MainWindow::startEmboss(ObjectId target, bool editing)
@@ -5954,7 +6017,7 @@ void MainWindow::showBrushRing(const sculpt::Hit& hit, double radius)
 
 void MainWindow::sculptHover(const QVector3D& origin, const QVector3D& direction)
 {
-    const auto hit = sculptHit(origin, direction);
+    const auto hit = m_sculptPanel->lassoMask() ? std::nullopt : sculptHit(origin, direction);
     if (!hit) {
         m_viewport->setBrushRing(std::nullopt);
         return;
@@ -6199,6 +6262,32 @@ void MainWindow::wholeMask(int brush)
     m_sculptMode.strokes.push_back(newStroke(brush, false));
     const auto [first, last] = brush == int(sculpt::Brush::MaskClear) ? m_sculptMode.sculptor->clearMask()
                                                                       : m_sculptMode.sculptor->invertMask();
+    sculptShown(first, last);
+    m_sculptPanel->setDetailEnabled(false);
+    m_sculptPanel->setUndoEnabled(true);
+}
+
+void MainWindow::sculptLasso(const lasso::Loop& loop, bool unmask)
+{
+    if (!m_sculptMode.active || !m_sculptMode.sculptor)
+        return;
+    m_sculptMode.undo.push_back({m_sculptMode.sculptor->mesh(), m_sculptMode.strokes.size()});
+    if (m_sculptMode.undo.size() > 8)
+        m_sculptMode.undo.erase(m_sculptMode.undo.begin());
+    // In the part's own coordinates, as the strokes are kept.
+    SculptStroke stroke = newStroke(int(sculpt::Brush::MaskLasso), unmask);
+    std::vector<Vec3> local;
+    for (const Vec3& p : loop.points) {
+        const Vec3 q = m_sculptMode.fromPlate.apply(p);
+        local.push_back(q);
+        stroke.dabs.push_back({float(q[0]), float(q[1]), float(q[2])});
+    }
+    const Vec3 along = m_sculptMode.fromPlate.applyDirection(loop.along);
+    stroke.grab = {float(along[0]), float(along[1]), float(along[2])};
+    m_sculptMode.strokes.push_back(stroke);
+    m_sculptMode.recording = -1;
+    const auto [first, last] = m_sculptMode.sculptor->maskLasso(local, along, unmask,
+                                                                sculpt::symmetryFor(stroke, m_sculptMode.start));
     sculptShown(first, last);
     m_sculptPanel->setDetailEnabled(false);
     m_sculptPanel->setUndoEnabled(true);
@@ -6806,6 +6895,8 @@ void MainWindow::endSculpt()
     if (!m_sculptMode.active)
         return;
     m_sculptMode = SculptMode{};
+    m_lassoDraw = LassoDraw{};
+    showLasso({}, false);
     m_viewport->setBrushRing(std::nullopt);
     m_sculptPanel->hide();
     m_properties->show();
@@ -7983,6 +8074,8 @@ void MainWindow::refreshScene()
             endHinge();
         if (m_maskMode.active && !m_doc.find(m_maskMode.target))
             endMask();
+        if (m_lassoCutMode.active && (!m_doc.find(m_lassoCutMode.target) || !m_doc.isTopLevel(m_lassoCutMode.target)))
+            endLassoCut();
         if (m_paintMode.active && !m_doc.find(m_paintMode.target))
             endPaint();
         if (m_cutPartsMode.active && !m_doc.find(m_cutPartsMode.target))
@@ -8224,7 +8317,8 @@ void MainWindow::refreshScene()
                 }
             }
             // Painting a mask (Split by Mask, or sculpting's Mask brush): plain, strong colours.
-            if (m_sculptMode.active && id == m_sculptMode.object && m_sculptPanel->brush() == int(sculpt::Brush::Mask))
+            if (m_sculptMode.active && id == m_sculptMode.object &&
+                (m_sculptPanel->brush() == int(sculpt::Brush::Mask) || m_sculptPanel->lassoMask()))
                 item.maskColours = true;
             if (item.maskColours) {
                 const QColor u = m_maskPanel->unmaskedColour(), m = m_maskPanel->maskedColour();
@@ -8558,6 +8652,7 @@ void MainWindow::refreshScene()
     m_joinAction->setEnabled(m_doc.bodyCount() >= 2 && !toolOpen());
     m_maskAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_makePartAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
+    m_lassoCutAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     for (QAction* a : {m_duplicate, m_copy, m_cut, m_saveCustomShape})
         a->setEnabled(anySelected && allTopLevel && !toolOpen());
     m_mirrorMenu->menuAction()->setEnabled(anySelected && allTopLevel && !toolOpen() && !rolled);
@@ -9485,7 +9580,7 @@ ObjectId MainWindow::sketchedToolOf(ObjectId id) const
     if (!body->isBoolean())
         return isSketched(body->spec) ? id : kInvalidId;
     const BooleanOp op = body->boolean->op;
-    if ((op != BooleanOp::Merge && op != BooleanOp::Subtract) || body->boolean->operands.size() != 2)
+    if ((op != BooleanOp::Merge && op != BooleanOp::Subtract && op != BooleanOp::Intersect) || body->boolean->operands.size() != 2)
         return kInvalidId;
     const ObjectId added = body->boolean->operands[1];
     const Body* tool = m_doc.find(added);
@@ -12708,7 +12803,7 @@ std::optional<emboss::SurfacePoint> MainWindow::maskHit(const QVector3D& origin,
 
 void MainWindow::maskHover(const QVector3D& origin, const QVector3D& direction)
 {
-    const auto hit = maskHit(origin, direction);
+    const auto hit = m_maskPanel->lasso() ? std::nullopt : maskHit(origin, direction);
     if (!hit) {
         m_viewport->setBrushRing(std::nullopt);
         return;
@@ -12904,8 +12999,149 @@ void MainWindow::endMask()
     if (!m_maskMode.active)
         return;
     m_maskMode = MaskMode{};
+    m_lassoDraw = LassoDraw{};
+    showLasso({}, false);
     m_viewport->setBrushRing(std::nullopt);
     m_maskPanel->hide();
+    m_properties->show();
+    QTimer::singleShot(0, this, [this] { resizeDocks({m_propsDock}, {m_propsDockWidth}, Qt::Horizontal); });
+    statusBar()->clearMessage();
+    refreshScene();
+    refreshCommandState();
+}
+
+// ---- Lasso ---------------------------------------------------------------------------------
+
+namespace {
+
+// Where a ray meets the plane through `point` facing `normal` (none if it runs along it).
+std::optional<Vec3> onPlane(const QVector3D& origin, const QVector3D& direction, const Vec3& point, const Vec3& normal)
+{
+    const double dn = direction.x() * normal[0] + direction.y() * normal[1] + direction.z() * normal[2];
+    if (std::abs(dn) < 1e-9)
+        return std::nullopt;
+    const double t = ((point[0] - origin.x()) * normal[0] + (point[1] - origin.y()) * normal[1] +
+                      (point[2] - origin.z()) * normal[2]) /
+                     dn;
+    return Vec3{origin.x() + direction.x() * t, origin.y() + direction.y() * t, origin.z() + direction.z() * t};
+}
+
+}  // namespace
+
+void MainWindow::lassoBegin(const QVector3D& origin, const QVector3D& direction, const Vec3& planePoint, bool erase)
+{
+    m_lassoDraw = LassoDraw{};
+    m_lassoDraw.drawing = true;
+    m_lassoDraw.erase = erase;
+    m_lassoDraw.planePoint = planePoint;
+    const QVector3D f = m_viewport->camera().forward();
+    m_lassoDraw.along = {f.x(), f.y(), f.z()};
+    m_viewport->setBrushRing(std::nullopt);
+    lassoAdd(origin, direction);
+}
+
+void MainWindow::lassoAdd(const QVector3D& origin, const QVector3D& direction)
+{
+    auto& d = m_lassoDraw;
+    if (!d.drawing)
+        return;
+    const auto p = onPlane(origin, direction, d.planePoint, d.along);
+    if (!p)
+        return;
+    if (!d.points.empty()) {
+        // Points a little apart: no need for one per pixel.
+        const Vec3& last = d.points.back();
+        const double step = std::hypot((*p)[0] - last[0], (*p)[1] - last[1], (*p)[2] - last[2]);
+        const auto b = m_viewport->sceneBounds(false);
+        if (step < std::max(1e-3, double(b.radius()) / 400.0))
+            return;
+    }
+    d.points.push_back(*p);
+    showLasso(d.points, false);
+}
+
+std::optional<lasso::Loop> MainWindow::lassoFinish()
+{
+    LassoDraw d = std::move(m_lassoDraw);
+    m_lassoDraw = LassoDraw{};
+    showLasso({}, false);
+    if (d.points.size() < 3)
+        return std::nullopt;
+    lasso::Loop loop;
+    loop.points = std::move(d.points);
+    loop.along = d.along;
+    return loop;
+}
+
+void MainWindow::showLasso(const std::vector<Vec3>& points, bool closed)
+{
+    std::vector<QVector3D> shown;
+    shown.reserve(points.size());
+    for (const Vec3& p : points)
+        shown.emplace_back(float(p[0]), float(p[1]), float(p[2]));
+    m_viewport->setLasso(std::move(shown), closed);
+}
+
+void MainWindow::startLassoCut()
+{
+    const ObjectId id = selectedOne();
+    if (id == kInvalidId || m_selection.size() != 1 || !m_doc.isTopLevel(id)) {
+        statusBar()->showMessage(tr("Lasso Cut: select one shape on the plate first."), 6000);
+        return;
+    }
+    if (toolOpen())
+        return;
+    if (m_dragState.kind != Drag::Kind::None)
+        cancelDrag();
+    m_lassoCutMode = LassoCutMode{};
+    m_lassoCutMode.active = true;
+    m_lassoCutMode.target = id;
+    m_lassoPanel->start(tr("Lasso cut '%1'").arg(QString::fromStdString(m_doc.find(id)->name)));
+    m_propsDockWidth = m_propsDock->width();
+    m_properties->hide();
+    m_lassoPanel->show();
+    statusBar()->showMessage(tr("Lasso Cut: drag a loop round part of the shape (right-drag turns the view), then "
+                                "Cut. Esc cancels."));
+    refreshScene();
+    refreshCommandState();
+}
+
+void MainWindow::applyLassoCut()
+{
+    auto& mode = m_lassoCutMode;
+    if (!mode.active || !mode.loop)
+        return;
+    const ObjectId target = mode.target;
+    const lasso::Loop loop = *mode.loop;
+    const lasso::Keep keep = m_lassoPanel->keep();
+    std::vector<ObjectId> made;
+    try {
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        struct RestoreCursor {
+            ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
+        } restore;
+        made = lasso::cut(m_stack, m_doc, target, loop, keep);
+    } catch (const std::exception& e) {
+        m_lassoPanel->setStatus(QString::fromUtf8(e.what()), true);  // stay, to draw again
+        return;
+    }
+    endLassoCut();
+    setSelection(made);
+    statusBar()->showMessage(made.size() == 2 ? tr("Cut in two along the loop. Double-click the cut step to change "
+                                                   "the loop's outline.")
+                                              : tr("Cut along the loop. Double-click the cut step to change the "
+                                                   "loop's outline."),
+                             8000);
+}
+
+void MainWindow::endLassoCut()
+{
+    if (!m_lassoCutMode.active)
+        return;
+    m_lassoCutMode = LassoCutMode{};
+    m_lassoDraw = LassoDraw{};
+    showLasso({}, false);
+    m_lassoPanel->hide();
     m_properties->show();
     QTimer::singleShot(0, this, [this] { resizeDocks({m_propsDock}, {m_propsDockWidth}, Qt::Horizontal); });
     statusBar()->clearMessage();

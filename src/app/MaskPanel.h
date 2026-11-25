@@ -47,6 +47,8 @@ public:
     // The joint to put in at the cut (kind None: none).
     splitjoint::Options joint() const;
     double brushSize() const;  // the brush's radius, mm
+    // Lasso on: dragging draws a loop, masking everything inside it right through.
+    bool lasso() const;
     void setBrushSize(double radius);
     SplitKeep keep() const;
     void setStrokes(int strokes);
@@ -90,6 +92,7 @@ private:
     QCheckBox* m_keys = nullptr;
     QDoubleSpinBox* m_keyFit = nullptr;
     QPushButton* m_undo = nullptr;
+    QPushButton* m_lasso = nullptr;
     QPushButton* m_clear = nullptr;
     QLabel* m_strokes = nullptr;
     QLabel* m_status = nullptr;

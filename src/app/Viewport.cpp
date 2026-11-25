@@ -17,6 +17,7 @@
 
 #include <QFontMetricsF>
 #include <QPainter>
+#include <QPolygonF>
 #include <QVariantAnimation>
 
 #include <QKeyEvent>
@@ -250,6 +251,13 @@ void Viewport::setItems(std::vector<DisplayItem> items)
 void Viewport::themeChanged()
 {
     m_plateDirty = true;
+    update();
+}
+
+void Viewport::setLasso(std::vector<QVector3D> points, bool closed)
+{
+    m_lasso = std::move(points);
+    m_lassoClosed = closed;
     update();
 }
 
@@ -1061,6 +1069,30 @@ void Viewport::paintGL()
             painter.setPen(theme::look().labelText);
             painter.drawText(box, Qt::AlignCenter, label.text);
         }
+    }
+
+    if (m_lasso.size() >= 2) {
+        // The lasso: a dark line under a light dashed one, seen on any background.
+        QPainter painter(this);
+        painter.setRenderHint(QPainter::Antialiasing);
+        QPolygonF line;
+        for (const QVector3D& p : m_lasso)
+            if (const auto s = projectToScreen(p))
+                line << *s;
+        if (m_lassoClosed && line.size() >= 3)
+            line << line.front();
+        painter.setBrush(Qt::NoBrush);
+        if (m_lassoClosed && line.size() >= 4) {
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(QColor(0x2b, 0x78, 0xd0, 40));
+            painter.drawPolygon(line);
+            painter.setBrush(Qt::NoBrush);
+        }
+        painter.setPen(QPen(QColor(20, 24, 30, 200), 3.0));
+        painter.drawPolyline(line);
+        QPen dash(QColor(255, 200, 40), 1.6, Qt::DashLine);
+        painter.setPen(dash);
+        painter.drawPolyline(line);
     }
 
     if (m_viewCube) {

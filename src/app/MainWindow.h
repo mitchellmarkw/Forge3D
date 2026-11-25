@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "forge/core/Lasso.h"
 #include "forge/core/Align.h"
 #include "forge/core/Arrange.h"
 #include "forge/core/PrintSplit.h"
@@ -94,6 +95,7 @@ class StampPanel;
 class PanelLinePanel;
 class JoinPanel;
 class MaskPanel;
+class LassoPanel;
 class ReferencePanel;
 class ScaleCalculator;
 class ToleranceDialog;
@@ -691,6 +693,7 @@ private:
     std::shared_ptr<const PictureData> loadPictureFile(const QString& path);       // Remesh: even triangles of the panel's size, kept as a stroke
     // Shows what a dab changed: points [first, last), or everything if it added triangles.
     void sculptShown(std::uint32_t first, std::uint32_t last);
+    void sculptLasso(const lasso::Loop& loop, bool unmask);
     void finishSculpt();
     void endSculpt();
     QTimer* m_shellTimer = nullptr;
@@ -809,6 +812,33 @@ private:
     // A picture under a click outside the panel (active ones only): opens the panel on it.
     bool referenceClickedOutside(const QVector3D& origin, const QVector3D& direction);
     void startMask(ObjectId target, bool editing, bool makingPart = false);
+    // Lasso (slice 99): a loop drawn on the screen, on a plane square to the view through
+    // `planePoint` (plate mm). Shared by Lasso Cut, the mask's lasso and Lasso mask.
+    struct LassoDraw {
+        bool drawing = false;
+        bool erase = false;  // Ctrl was held: rub out / unmask
+        Vec3 planePoint{0, 0, 0};
+        Vec3 along{0, 0, -1};
+        std::vector<Vec3> points;
+    };
+    LassoDraw m_lassoDraw;
+    void lassoBegin(const QVector3D& origin, const QVector3D& direction, const Vec3& planePoint, bool erase);
+    void lassoAdd(const QVector3D& origin, const QVector3D& direction);
+    // The loop drawn (none if it was too short), the overlay cleared.
+    std::optional<lasso::Loop> lassoFinish();
+    void showLasso(const std::vector<Vec3>& points, bool closed);
+    // Lasso Cut
+    QAction* m_lassoCutAction = nullptr;
+    LassoPanel* m_lassoPanel = nullptr;
+    struct LassoCutMode {
+        bool active = false;
+        ObjectId target = kInvalidId;
+        std::optional<lasso::Loop> loop;  // plate mm
+    };
+    LassoCutMode m_lassoCutMode;
+    void startLassoCut();
+    void applyLassoCut();
+    void endLassoCut();
     std::optional<emboss::SurfacePoint> maskHit(const QVector3D& origin, const QVector3D& direction) const;
     void maskAt(const QVector3D& origin, const QVector3D& direction);
     void maskHover(const QVector3D& origin, const QVector3D& direction);

@@ -41,6 +41,8 @@ enum class Brush {
     MaskInvert,  // a whole-mesh step: masked and free swapped
     Remesh,      // a whole-mesh step: even triangles of a size (the stroke's radius)
     Pattern,     // press a repeating pattern in (see beginPattern); engrave, inverted
+    MaskLasso,   // a whole-mesh step: masked inside a loop, right through (unmasked, inverted).
+                 // The stroke's dabs are the loop, its `grab` the way it was seen (see maskLasso)
 };
 
 // The grey picture of a pattern: built-in ones are made (the same every time, and
@@ -150,6 +152,10 @@ public:
 
     std::pair<std::uint32_t, std::uint32_t> clearMask();
     std::pair<std::uint32_t, std::uint32_t> invertMask();
+    // Every point inside the loop (seen along `along`, right through the shape) masked,
+    // or unmasked; the loop mirrored too where `symmetry` says.
+    std::pair<std::uint32_t, std::uint32_t> maskLasso(const std::vector<Vec3>& loop, const Vec3& along, bool unmask,
+                                                      const Symmetry& symmetry = {});
     // The whole mesh made of even triangles about `edge` across (see remesh::remeshed);
     // the mask comes along.
     void remesh(double edge);

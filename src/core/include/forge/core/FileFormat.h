@@ -101,9 +101,11 @@ namespace forge::file {
 //  48  Mask split cut styles (a mask split's "cut": flat / dome, and the socket's "fit")
 //  49  Joints that follow their cut (a split's "cutJoint"; a body's "jointFor")
 //  50  Sculpt strength (a sculpt step's "strength", 0..1.5, left out at 1)
-inline constexpr int kFormatVersion = 50;
+//  51  Lassos: a mask lasso ({"loop", "along", "erase"} among a mask's dabs); the sculpt
+//      Mask Lasso stroke (brush 14: its dabs the outline, "grab" the way it was seen)
+inline constexpr int kFormatVersion = 51;
 // The highest sculpt::Brush number a file may hold (Pattern).
-inline constexpr int kLastSculptBrush = 13;
+inline constexpr int kLastSculptBrush = 14;
 inline constexpr const char* kExtension = ".f3d";
 inline constexpr const char* kDocumentEntry = "document.json";
 

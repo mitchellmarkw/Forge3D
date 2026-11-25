@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "forge/core/FileFormat.h"
+#include "forge/core/MaskSplit.h"
 
 #include "forge/core/Document.h"
 #include "forge/core/Hollow.h"
@@ -359,8 +360,18 @@ json bodyToJson(const Body& b)
         }
         if (const auto& ms = b.boolean->maskSplit) {
             json dabs = json::array();
-            for (const MaskDab& d : ms->dabs)
+            for (const MaskDab& d : ms->dabs) {
+                if (d.isLasso()) {
+                    // A lasso: its outline and the way it was seen.
+                    std::vector<double> loop;
+                    loop.reserve(d.loop.size() * 3);
+                    for (const auto& p : d.loop)
+                        loop.insert(loop.end(), p.begin(), p.end());
+                    dabs.push_back(json{{"loop", loop}, {"along", d.along}, {"erase", d.erase}});
+                    continue;
+                }
                 dabs.push_back(json::array({d.centre[0], d.centre[1], d.centre[2], d.radius, d.erase ? 1 : 0}));
+            }
             j["mask"] = json{{"piece", ms->masked ? "masked" : "rest"}, {"dabs", dabs}};
             if (ms->keys)
                 j["mask"]["keyFit"] = ms->keyFit;  // alignment keys on the cuts
@@ -912,6 +923,27 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
             if (dj == mj->end() || !dj->is_array())
                 damaged(where + ": the mask's dabs are missing");
             for (const auto& d : *dj) {
+                if (d.is_object()) {
+                    // A lasso (format 51).
+                    const auto lj = d.find("loop");
+                    const auto aj = d.find("along");
+                    if (lj == d.end() || !lj->is_array() || lj->size() < 9 || lj->size() % 3 != 0 || aj == d.end() ||
+                        !aj->is_array() || aj->size() != 3)
+                        damaged(where + ": a mask lasso is damaged");
+                    std::vector<Vec3> loop;
+                    for (std::size_t i = 0; i < lj->size(); i += 3) {
+                        if (!(*lj)[i].is_number() || !(*lj)[i + 1].is_number() || !(*lj)[i + 2].is_number())
+                            damaged(where + ": a mask lasso is damaged");
+                        loop.push_back({(*lj)[i].get<double>(), (*lj)[i + 1].get<double>(), (*lj)[i + 2].get<double>()});
+                    }
+                    for (std::size_t i = 0; i < 3; ++i)
+                        if (!(*aj)[i].is_number())
+                            damaged(where + ": a mask lasso is damaged");
+                    ms.dabs.push_back(mask::lassoDab(
+                        loop, {(*aj)[0].get<double>(), (*aj)[1].get<double>(), (*aj)[2].get<double>()},
+                        d.value("erase", false)));
+                    continue;
+                }
                 if (!d.is_array() || d.size() != 5)
                     damaged(where + ": a mask dab is damaged");
                 for (std::size_t i = 0; i < 5; ++i)

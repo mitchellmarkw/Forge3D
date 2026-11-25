@@ -597,6 +597,12 @@ struct MaskDab {
     std::array<double, 3> centre{0.0, 0.0, 0.0};  // the step's coordinates
     double radius = 2.0;
     bool erase = false;
+    // A lasso (slice 99) instead of a ball: everything inside this outline, seen along
+    // `along`, right through the part. Its points lie on a plane square to `along`;
+    // `centre` is the middle of them and `radius` reaches the furthest.
+    std::vector<std::array<double, 3>> loop;
+    std::array<double, 3> along{0.0, 0.0, 0.0};
+    bool isLasso() const { return loop.size() >= 3; }
     bool operator==(const MaskDab&) const = default;
 };
 // A Hollow step: the part hollowed out to walls `thickness` thick (any shape, sculpts

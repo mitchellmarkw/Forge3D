@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.107.0 Beta — Slice 99: Lasso cut and lasso mask (2026-11-24)
+
+- **Lasso Cut** (Figure Design tab): select a shape, drag a loop round part of it as you see it, and cut straight
+  through the way you're looking. **What to keep**: cut away inside the loop (a hole or notch right through), keep
+  only inside it, or both pieces. Turn the view first (right-drag) to look from the best side; drag again for a new
+  loop. The loop is kept as a sketch in the cut step, so double-clicking the step changes its outline later.
+- **Lasso in Split by Mask and Make Part**: "Lasso: draw a loop instead" paints everything inside a loop, right
+  through the shape (front and back), so a loop round a hand paints all of the hand. Ctrl rubs out inside a loop.
+  Loops and brush strokes mix, and Undo Stroke takes back a loop.
+- **Lasso mask** when sculpting: masks everything inside a loop, right through; Ctrl takes the mask off inside it.
+  Mirror applies to it too.
+- File format 51 (lassos in masks and sculpt steps).
+
 ## 0.106.0 Beta — Slice 98: Show and hide shapes (2026-11-24)
 
 - **An eye by every shape in Objects**: click it to hide the shape from the view, click again to show it. Hidden

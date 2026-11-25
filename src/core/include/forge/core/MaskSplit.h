@@ -44,7 +44,22 @@ private:
     double m_smallest = 1.0;
     std::unordered_map<std::uint64_t, std::vector<std::uint32_t>> m_cells;
     std::uint64_t key(std::int64_t i, std::int64_t j, std::int64_t k) const;
+    // Lassos, apart from the grid (they reach right through): flat in their own frame.
+    struct Lasso {
+        std::uint32_t index = 0;  // in m_dabs: its place in the order
+        Vec3 origin{0, 0, 0}, u{1, 0, 0}, v{0, 1, 0};
+        std::vector<std::array<double, 2>> outline;
+        double lo[2]{0, 0}, hi[2]{0, 0};
+        bool covers(const Vec3& p) const;
+        std::array<double, 2> flat(const Vec3& p) const;
+    };
+    std::vector<Lasso> m_lassos;
 };
+
+// A dab (ball or lasso) moved by t.
+MaskDab movedDab(const MaskDab& d, const Transform& t);
+// A lasso dab from a loop (plate coordinates): centre and radius worked out.
+MaskDab lassoDab(const std::vector<Vec3>& loop, const Vec3& along, bool erase);
 
 // Where an alignment key can go on a cap: its middle (the point furthest in), the way
 // out of the masked piece into the rest there, a direction across the cap (the key's

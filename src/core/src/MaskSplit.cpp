@@ -4,6 +4,7 @@
 #include "forge/core/CommandStack.h"
 #include "forge/core/Commands.h"
 #include "forge/core/Document.h"
+#include "forge/core/Lasso.h"
 
 #include <algorithm>
 #include <array>
@@ -60,17 +61,85 @@ std::uint64_t edgeKey(std::uint32_t a, std::uint32_t b)
 
 }  // namespace
 
+MaskDab movedDab(const MaskDab& d, const Transform& t)
+{
+    MaskDab out = d;
+    out.centre = t.apply(d.centre);
+    for (auto& p : out.loop)
+        p = t.apply(p);
+    if (d.isLasso())
+        out.along = t.applyDirection(d.along);
+    return out;
+}
+
+MaskDab lassoDab(const std::vector<Vec3>& loop, const Vec3& along, bool erase)
+{
+    MaskDab d;
+    d.erase = erase;
+    d.along = along;
+    d.loop.assign(loop.begin(), loop.end());
+    Vec3 c{0, 0, 0};
+    for (const Vec3& p : loop)
+        for (int k = 0; k < 3; ++k)
+            c[std::size_t(k)] += p[std::size_t(k)] / double(std::max<std::size_t>(loop.size(), 1));
+    d.centre = c;
+    d.radius = 1e-3;
+    for (const Vec3& p : loop)
+        d.radius = std::max(d.radius, std::sqrt(dist2(p, c)));
+    return d;
+}
+
+std::array<double, 2> Field::Lasso::flat(const Vec3& p) const
+{
+    const Vec3 d = sub(p, origin);
+    return {d[0] * u[0] + d[1] * u[1] + d[2] * u[2], d[0] * v[0] + d[1] * v[1] + d[2] * v[2]};
+}
+
+bool Field::Lasso::covers(const Vec3& p) const
+{
+    const auto q = flat(p);
+    if (q[0] < lo[0] || q[0] > hi[0] || q[1] < lo[1] || q[1] > hi[1])
+        return false;
+    return lasso::insideFlat(outline, q[0], q[1]);
+}
+
 Field::Field(const std::vector<MaskDab>& dabs) : m_dabs(dabs)
 {
     double biggest = 0.0;
     m_smallest = dabs.empty() ? 1.0 : 1e300;
-    for (const MaskDab& d : dabs) {
+    for (std::uint32_t i = 0; i < m_dabs.size(); ++i) {
+        const MaskDab& d = m_dabs[i];
+        if (d.isLasso()) {
+            lasso::Loop loop;
+            loop.along = d.along;
+            loop.points.assign(d.loop.begin(), d.loop.end());
+            const lasso::Frame f = lasso::frameOf(loop);
+            Lasso l;
+            l.index = i;
+            l.origin = f.origin;
+            l.u = f.u;
+            l.v = f.v;
+            l.outline = lasso::flat(loop, f);
+            l.lo[0] = l.lo[1] = 1e300;
+            l.hi[0] = l.hi[1] = -1e300;
+            for (const auto& q : l.outline)
+                for (int k = 0; k < 2; ++k) {
+                    l.lo[k] = std::min(l.lo[k], q[std::size_t(k)]);
+                    l.hi[k] = std::max(l.hi[k], q[std::size_t(k)]);
+                }
+            // Looked at about a 60th of its size apart (no coarser than a ball's).
+            m_smallest = std::min(m_smallest, std::max(0.1, std::max(l.hi[0] - l.lo[0], l.hi[1] - l.lo[1]) / 60.0));
+            m_lassos.push_back(std::move(l));
+            continue;
+        }
         biggest = std::max(biggest, d.radius);
         m_smallest = std::min(m_smallest, d.radius);
     }
     m_cell = std::max(biggest, 1e-3);
     for (std::uint32_t i = 0; i < m_dabs.size(); ++i) {
         const MaskDab& d = m_dabs[i];
+        if (d.isLasso())
+            continue;
         std::int64_t lo[3], hi[3];
         for (int k = 0; k < 3; ++k) {
             lo[k] = std::int64_t(std::floor((d.centre[std::size_t(k)] - d.radius) / m_cell));
@@ -93,7 +162,23 @@ bool Field::changesAcross(const Vec3& a, const Vec3& b, const Vec3& c, double fi
         hi[k] = std::int64_t(std::floor(std::max({a[x], b[x], c[x]}) / m_cell));
     }
     bool any = false;
-    if ((hi[0] - lo[0] + 1) * (hi[1] - lo[1] + 1) * (hi[2] - lo[2] + 1) > 4096) {
+    for (const Lasso& l : m_lassos) {
+        // Near a lasso if the triangle, seen its way, overlaps the lasso's box.
+        double tlo[2] = {1e300, 1e300}, thi[2] = {-1e300, -1e300};
+        for (const Vec3* p : {&a, &b, &c}) {
+            const auto q = l.flat(*p);
+            for (int k = 0; k < 2; ++k) {
+                tlo[k] = std::min(tlo[k], q[std::size_t(k)]);
+                thi[k] = std::max(thi[k], q[std::size_t(k)]);
+            }
+        }
+        if (thi[0] >= l.lo[0] && tlo[0] <= l.hi[0] && thi[1] >= l.lo[1] && tlo[1] <= l.hi[1]) {
+            any = true;
+            break;
+        }
+    }
+    if (any) {
+    } else if ((hi[0] - lo[0] + 1) * (hi[1] - lo[1] + 1) * (hi[2] - lo[2] + 1) > 4096) {
         any = true;  // a huge triangle: just look
     } else {
         for (std::int64_t i = lo[0]; i <= hi[0] && !any; ++i)
@@ -138,16 +223,23 @@ std::uint64_t Field::key(std::int64_t i, std::int64_t j, std::int64_t k) const
 
 bool Field::masked(const Vec3& p) const
 {
+    bool state = false;
+    std::int64_t last = -1;  // the dab that decided
     const auto found = m_cells.find(key(std::int64_t(std::floor(p[0] / m_cell)), std::int64_t(std::floor(p[1] / m_cell)),
                                         std::int64_t(std::floor(p[2] / m_cell))));
-    if (found == m_cells.end())
-        return false;
-    bool state = false;
-    for (std::uint32_t i : found->second) {
-        const MaskDab& d = m_dabs[i];
-        if (dist2(p, d.centre) <= d.radius * d.radius)
-            state = !d.erase;  // the last dab covering it decides
-    }
+    if (found != m_cells.end())
+        for (std::uint32_t i : found->second) {
+            const MaskDab& d = m_dabs[i];
+            if (dist2(p, d.centre) <= d.radius * d.radius) {
+                state = !d.erase;  // the last dab covering it decides
+                last = i;
+            }
+        }
+    for (const Lasso& l : m_lassos)
+        if (std::int64_t(l.index) > last && l.covers(p)) {
+            state = !m_dabs[l.index].erase;
+            last = l.index;
+        }
     return state;
 }
 
@@ -167,6 +259,11 @@ bool Field::nearEdge(const Vec3& p, double slack) const
                         return true;
                 }
             }
+    for (const Lasso& l : m_lassos) {
+        const auto q = l.flat(p);
+        if (lasso::distanceFlat(l.outline, q[0], q[1]) < slack)
+            return true;
+    }
     return false;
 }
 
@@ -813,9 +910,15 @@ MeshSolid keyed(const Mesh& piece, const std::vector<KeySpot>& spots, bool maske
 
 std::string describe(const MaskSplitFinish& f)
 {
-    const std::size_t n = f.dabs.size();
-    return std::string(f.masked ? "the masked part" : "the rest") + " (" + std::to_string(n) +
-           (n == 1 ? " dab" : " dabs") + (f.cut == MaskCut::Flat ? ", flat" : f.cut == MaskCut::Dome ? ", ball and socket" : "") +
+    const std::size_t lassos = std::size_t(std::count_if(f.dabs.begin(), f.dabs.end(),
+                                                         [](const MaskDab& d) { return d.isLasso(); }));
+    const std::size_t n = f.dabs.size() - lassos;
+    std::string what;
+    if (n > 0 || lassos == 0)
+        what = std::to_string(n) + (n == 1 ? " dab" : " dabs");
+    if (lassos > 0)
+        what += (what.empty() ? "" : ", ") + std::to_string(lassos) + (lassos == 1 ? " lasso" : " lassos");
+    return std::string(f.masked ? "the masked part" : "the rest") + " (" + what + (f.cut == MaskCut::Flat ? ", flat" : f.cut == MaskCut::Dome ? ", ball and socket" : "") +
            (f.keys ? ", keyed)" : ")");
 }
 
@@ -833,9 +936,10 @@ const Body& maskStep(const Document& doc, ObjectId result)
 
 std::vector<MaskDab> moved(const std::vector<MaskDab>& dabs, const Transform& t)
 {
-    std::vector<MaskDab> out = dabs;
-    for (MaskDab& d : out)
-        d.centre = t.apply(d.centre);
+    std::vector<MaskDab> out;
+    out.reserve(dabs.size());
+    for (const MaskDab& d : dabs)
+        out.push_back(mask::movedDab(d, t));
     return out;
 }
 

@@ -453,7 +453,7 @@ Made joinCut(CommandStack& stack, Document& doc, ObjectId first, ObjectId second
         std::vector<MaskDab> dabs = f.boolean->maskSplit->dabs;  // the step's coordinates
         const Transform toPlate = doc.worldTransform(first);
         for (MaskDab& d : dabs)
-            d.centre = toPlate.apply(Vec3{d.centre[0], d.centre[1], d.centre[2]});
+            d = mask::movedDab(d, toPlate);
         spot = maskSpotOf(std::move(pos), idx, dabs, f.boolean->maskSplit->cut);
         gap = gapFor(o, spot.room);
         if (gap > 0.0)  // the rest's face cut back round the joint

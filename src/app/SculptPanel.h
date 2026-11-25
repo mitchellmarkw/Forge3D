@@ -38,6 +38,8 @@ public:
     // A picture of the user's to press in: added to the list and chosen.
     void addOwnPattern(const SculptPattern& pattern);
     bool mirrorX() const;
+    // Lasso Mask on: dragging draws a loop to mask inside (right through) instead of brushing.
+    bool lassoMask() const;
     bool mirrorY() const;
     bool mirrorZ() const;
     double size() const;       // the brush's radius, mm
@@ -75,6 +77,7 @@ private:
     QComboBox* m_brush = nullptr;
     QLabel* m_brushHint = nullptr;
     QCheckBox* m_mirror[3] = {nullptr, nullptr, nullptr};
+    QPushButton* m_lassoMask = nullptr;
     QDoubleSpinBox* m_size = nullptr;
     QSlider* m_strength = nullptr;
     QLabel* m_strengthValue = nullptr;
