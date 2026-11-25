@@ -47,6 +47,7 @@ add_executable(forge_tests
     test_mask_split.cpp
     test_split_joint.cpp
     test_print_orient.cpp
+    test_make_part.cpp
     test_reference.cpp
     test_hinge.cpp
     test_pose.cpp

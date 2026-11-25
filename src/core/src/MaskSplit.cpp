@@ -656,6 +656,17 @@ Pieces split(const std::vector<float>& positions, const std::vector<std::uint32_
         return m;
     };
     Pieces out;
+    {
+        // The painted surface alone: the masked piece without its caps.
+        std::unordered_map<std::uint32_t, std::uint32_t> local;
+        for (std::uint32_t v : inTris) {
+            const auto [it, added] = local.emplace(v, std::uint32_t(local.size()));
+            if (added)
+                for (int k = 0; k < 3; ++k)
+                    out.surface.positions.push_back(float(points[v][std::size_t(k)]));
+            out.surface.indices.push_back(it->second);
+        }
+    }
     out.masked = build(inTris, false);
     out.rest = build(outTris, true);
     out.caps = int(loops.size());

@@ -729,10 +729,12 @@ private:
     void endThread();
 
     QAction* m_maskAction = nullptr;
+    QAction* m_makePartAction = nullptr;
     MaskPanel* m_maskPanel = nullptr;
     struct MaskMode {
         bool active = false;
         bool editing = false;
+        bool makingPart = false;       // Make Part (slice 95), not a split
         ObjectId target = kInvalidId;  // the shape being split, or the Split by Mask step being changed
         ObjectId object = kInvalidId;  // the shape on the plate it's shown as
         ObjectId part = kInvalidId;    // whose surface is painted
@@ -797,7 +799,7 @@ private:
     void dragReference(const QVector3D& origin, const QVector3D& direction);
     // A picture under a click outside the panel (active ones only): opens the panel on it.
     bool referenceClickedOutside(const QVector3D& origin, const QVector3D& direction);
-    void startMask(ObjectId target, bool editing);
+    void startMask(ObjectId target, bool editing, bool makingPart = false);
     std::optional<emboss::SurfacePoint> maskHit(const QVector3D& origin, const QVector3D& direction) const;
     void maskAt(const QVector3D& origin, const QVector3D& direction);
     void maskHover(const QVector3D& origin, const QVector3D& direction);

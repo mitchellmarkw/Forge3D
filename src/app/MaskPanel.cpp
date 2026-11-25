@@ -49,12 +49,10 @@ MaskPanel::MaskPanel(QWidget* parent) : QWidget(parent)
     bold.setBold(true);
     m_title->setFont(bold);
     layout->addWidget(m_title);
-    auto* help = new QLabel(tr("Paint over the part to cut off: drag on the shape. Hold <b>Ctrl</b> to rub paint "
-                               "out. The shape is cut along the edge of the paint, and both pieces are closed with "
-                               "the same smooth cap, so they fit back together. [ and ] change the brush size."));
-    help->setWordWrap(true);
-    help->setStyleSheet(QStringLiteral("color: palette(mid);"));
-    layout->addWidget(help);
+    m_help = new QLabel;
+    m_help->setWordWrap(true);
+    m_help->setStyleSheet(QStringLiteral("color: palette(mid);"));
+    layout->addWidget(m_help);
     layout->addSpacing(6);
 
     // A painted colour as the mask (Split for painting along the colours).
@@ -99,6 +97,10 @@ MaskPanel::MaskPanel(QWidget* parent) : QWidget(parent)
     keepColumn->addWidget(m_keep);
     layout->addWidget(m_keepBox);
 
+    // What only a split needs (hidden for Make Part).
+    m_splitOptions = new QWidget;
+    auto* splitLayout = new QVBoxLayout(m_splitOptions);
+    splitLayout->setContentsMargins(0, 0, 0, 0);
     // The cut's surface: along the mask, flat, or flat with a ball and socket.
     auto* cutColumn = new QVBoxLayout;
     cutColumn->setSpacing(0);
@@ -112,7 +114,7 @@ MaskPanel::MaskPanel(QWidget* parent) : QWidget(parent)
                          "Ball and socket: a flat cut with a dome on the painted piece and a matching "
                          "socket in the rest, so the pieces sit together one way and turn on it"));
     cutColumn->addWidget(m_cut);
-    layout->addLayout(cutColumn);
+    splitLayout->addLayout(cutColumn);
     auto* socketRow = new QFormLayout;
     m_socketFit = new QDoubleSpinBox;
     m_socketFit->setRange(0.0, 1.0);
@@ -122,11 +124,11 @@ MaskPanel::MaskPanel(QWidget* parent) : QWidget(parent)
     m_socketFit->setToolTip(tr("How much bigger the socket is than the dome, all round: 0.15 mm for resin, "
                                "0.25 for filament"));
     socketRow->addRow(tr("Socket fit:"), m_socketFit);
-    layout->addLayout(socketRow);
+    splitLayout->addLayout(socketRow);
 
     // A joint where the pieces meet (a new split only).
     m_joint = new JointAtCutBox(QStringLiteral("mask"));
-    layout->addWidget(m_joint);
+    splitLayout->addWidget(m_joint);
     connect(m_joint, &JointAtCutBox::changed, this, [this] { showCut(); });
 
     // Alignment keys, so painted pieces glue back only one way.
@@ -134,7 +136,7 @@ MaskPanel::MaskPanel(QWidget* parent) : QWidget(parent)
     m_keys->setToolTip(tr("A three-sided peg on the painted piece and a matching hole in the rest, on each cut, so "
                           "the pieces only go back together one way (for painting apart and gluing). Cuts too "
                           "small for one are left plain."));
-    layout->addWidget(m_keys);
+    splitLayout->addWidget(m_keys);
     auto* fitRow = new QFormLayout;
     m_keyFit = new QDoubleSpinBox;
     m_keyFit->setRange(0.0, 1.0);
@@ -144,7 +146,44 @@ MaskPanel::MaskPanel(QWidget* parent) : QWidget(parent)
     m_keyFit->setToolTip(tr("How much bigger the hole is than the peg, all round: 0.1 mm for resin, 0.2 for "
                             "filament"));
     fitRow->addRow(tr("Key fit:"), m_keyFit);
-    layout->addLayout(fitRow);
+    splitLayout->addLayout(fitRow);
+    layout->addWidget(m_splitOptions);
+
+    // Make Part: how thick, and whether it sits on the body or is set into it.
+    m_partOptions = new QWidget;
+    auto* partLayout = new QVBoxLayout(m_partOptions);
+    partLayout->setContentsMargins(0, 0, 0, 0);
+    auto* placeColumn = new QVBoxLayout;
+    placeColumn->setSpacing(0);
+    placeColumn->addWidget(new QLabel(tr("The new part:")));
+    m_partPlace = new QComboBox;
+    m_partPlace->addItem(tr("Sits on top of the body"));
+    m_partPlace->addItem(tr("Set into the body (flush)"));
+    m_partPlace->setToolTip(tr("Sits on top: the part lies over the body with a small gap, like real armor (the "
+                               "figure is a little bulkier there).\nSet into the body: the body is cut back under "
+                               "the part, so the outline stays the same and the part sits flush (a removable plate)."));
+    placeColumn->addWidget(m_partPlace);
+    partLayout->addLayout(placeColumn);
+    auto* partForm = new QFormLayout;
+    m_partThickness = new QDoubleSpinBox;
+    m_partThickness->setRange(0.3, 20.0);
+    m_partThickness->setDecimals(2);
+    m_partThickness->setSingleStep(0.1);
+    m_partThickness->setSuffix(tr(" mm"));
+    m_partThickness->setToolTip(tr("How thick the part is: about 1 mm for clothes, 1.5 to 2 for armor"));
+    partForm->addRow(tr("Thickness:"), m_partThickness);
+    m_partFit = new QDoubleSpinBox;
+    m_partFit->setRange(0.0, 1.0);
+    m_partFit->setDecimals(2);
+    m_partFit->setSingleStep(0.05);
+    m_partFit->setSuffix(tr(" mm"));
+    m_partFit->setToolTip(tr("The gap between the part and the body, so it goes on: 0.1 mm for resin, 0.2 for "
+                             "filament (0 to make it touch, to glue)"));
+    partForm->addRow(tr("Fit:"), m_partFit);
+    partLayout->addLayout(partForm);
+    layout->addWidget(m_partOptions);
+    m_partOptions->hide();
+
     {
         const QSettings prefs(QSettings::NativeFormat, QSettings::UserScope, QStringLiteral("Forge3D"),
                               QStringLiteral("Forge3D"));
@@ -235,6 +274,24 @@ MaskPanel::MaskPanel(QWidget* parent) : QWidget(parent)
     m_status->setWordWrap(true);
     layout->addWidget(m_status);
     auto* buttons = new QHBoxLayout;
+    {
+        const QSettings prefs(QSettings::NativeFormat, QSettings::UserScope, QStringLiteral("Forge3D"),
+                              QStringLiteral("Forge3D"));
+        m_partPlace->setCurrentIndex(std::clamp(prefs.value(QStringLiteral("part/place"), 0).toInt(), 0, 1));
+        m_partThickness->setValue(prefs.value(QStringLiteral("part/thickness"), 1.5).toDouble());
+        m_partFit->setValue(prefs.value(QStringLiteral("part/fit"), 0.1).toDouble());
+    }
+    const auto rememberPart = [this] {
+        QSettings prefs(QSettings::NativeFormat, QSettings::UserScope, QStringLiteral("Forge3D"),
+                        QStringLiteral("Forge3D"));
+        prefs.setValue(QStringLiteral("part/place"), m_partPlace->currentIndex());
+        prefs.setValue(QStringLiteral("part/thickness"), m_partThickness->value());
+        prefs.setValue(QStringLiteral("part/fit"), m_partFit->value());
+    };
+    connect(m_partPlace, &QComboBox::currentIndexChanged, this, rememberPart);
+    connect(m_partThickness, &QDoubleSpinBox::valueChanged, this, rememberPart);
+    connect(m_partFit, &QDoubleSpinBox::valueChanged, this, rememberPart);
+
     m_apply = new QPushButton(tr("Apply"));
     m_apply->setDefault(true);
     auto* cancel = new QPushButton(tr("Cancel"));
@@ -275,6 +332,13 @@ void MaskPanel::saveColours()
 void MaskPanel::start(const QString& title, bool editing, double keyFit, MaskCut cut, double socketFit)
 {
     m_title->setText(title);
+    m_makingPart = false;
+    m_splitOptions->show();
+    m_partOptions->hide();
+    m_apply->setText(tr("Apply"));
+    m_help->setText(tr("Paint over the part to cut off: drag on the shape. Hold <b>Ctrl</b> to rub paint out. The "
+                       "shape is cut along the edge of the paint, and both pieces are closed with the same smooth "
+                       "cap, so they fit back together. [ and ] change the brush size."));
     m_keys->setProperty("editing", editing);
     if (editing) {
         const QSignalBlocker a(m_keys), b(m_keyFit), c(m_cut), d(m_socketFit);
@@ -290,6 +354,30 @@ void MaskPanel::start(const QString& title, bool editing, double keyFit, MaskCut
     showCut();
     m_apply->setToolTip(editing ? tr("Cut along the changed mask") : tr("Cut the shape along the mask"));
     setStatus({}, false);
+}
+
+void MaskPanel::startPart(const QString& title)
+{
+    m_title->setText(title);
+    m_makingPart = true;
+    m_splitOptions->hide();
+    m_keepBox->hide();
+    m_partOptions->show();
+    m_apply->setText(tr("Make Part"));
+    m_apply->setToolTip(tr("Make a new part over the painted area"));
+    m_help->setText(tr("Paint where the new part goes (armor, a glove, a belt...): drag on the shape. Hold "
+                       "<b>Ctrl</b> to rub paint out. The part follows the body's surface and the edge of the paint. "
+                       "[ and ] change the brush size."));
+    setStatus({}, false);
+}
+
+MaskPanel::PartOptions MaskPanel::partOptions() const
+{
+    PartOptions o;
+    o.setIn = m_partPlace->currentIndex() == 1;
+    o.thickness = m_partThickness->value();
+    o.fit = m_partFit->value();
+    return o;
 }
 
 double MaskPanel::brushSize() const

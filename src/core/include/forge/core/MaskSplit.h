@@ -70,6 +70,7 @@ struct Dome {
 // with the same cap (facing opposite ways), so they fit back together.
 struct Pieces {
     Mesh masked, rest;  // positions and indices only
+    Mesh surface;       // the masked part's own surface, open where the paint stops (no caps)
     int caps = 0;       // how many cut edges (loops) were capped
     std::vector<KeySpot> keySpots;  // one per cap
     std::optional<Dome> dome;       // MaskCut::Dome (if there's room for one)

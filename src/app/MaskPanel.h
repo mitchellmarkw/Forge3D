@@ -29,6 +29,15 @@ public:
 
     // `keyFit`: the step's keys when changing one (negative: none).
     // `cut`, `socketFit`: the step's cut surface when changing one.
+    // Make Part from paint (slice 95): the same painting, with the part's options.
+    void startPart(const QString& title);
+    bool makingPart() const { return m_makingPart; }
+    struct PartOptions {
+        bool setIn = false;
+        double thickness = 1.5;
+        double fit = 0.1;
+    };
+    PartOptions partOptions() const;
     void start(const QString& title, bool editing, double keyFit = -1.0, MaskCut cut = MaskCut::Curved,
                double socketFit = 0.15);
     // The alignment keys' fit, or negative for no keys.
@@ -62,6 +71,13 @@ signals:
 
 private:
     QLabel* m_title = nullptr;
+    QLabel* m_help = nullptr;
+    QWidget* m_splitOptions = nullptr;
+    QWidget* m_partOptions = nullptr;
+    QComboBox* m_partPlace = nullptr;
+    QDoubleSpinBox* m_partThickness = nullptr;
+    QDoubleSpinBox* m_partFit = nullptr;
+    bool m_makingPart = false;
     QWidget* m_fromPaintBox = nullptr;
     QComboBox* m_fromPaint = nullptr;
     QDoubleSpinBox* m_size = nullptr;
