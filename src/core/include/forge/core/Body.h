@@ -330,6 +330,7 @@ enum class BooleanOp {
     Mould,        // one piece of a mould box round the part (see `mould`)
     Port,         // a wrist or accessory peg added, or a grip hole cut through (see `port`)
     Linked,       // another shape mirrored, kept up to date with it (see `link`; no parts)
+    Reshape,      // bent by a box of handles round it (see `reshape`; mesh engine)
 };
 
 // What happens to the picked edges of a shape.
@@ -465,6 +466,17 @@ struct SimplifyFinish {
 struct SmoothFinish {
     int strength = 3;
     bool operator==(const SmoothFinish&) const = default;
+};
+
+// A Reshape step (slice 102): a box round the part (the step's coordinates) with handles
+// on a grid of count[0] x count[1] x count[2] (X fastest, then Y, then Z), each moved by
+// its `moves` entry; the part bends smoothly with them (a Bezier lattice).
+struct ReshapeFinish {
+    std::array<double, 3> min{0.0, 0.0, 0.0};
+    std::array<double, 3> max{1.0, 1.0, 1.0};
+    std::array<int, 3> count{3, 3, 3};
+    std::vector<std::array<double, 3>> moves;
+    bool operator==(const ReshapeFinish&) const = default;
 };
 
 // One picked face, found again by place (like EdgeRef): a point on it, which way it
@@ -890,6 +902,8 @@ struct BooleanSpec {
     std::optional<SimplifyFinish> simplify{};
     // Smooth: how strongly.
     std::optional<SmoothFinish> smooth{};
+    // Reshape: the box and its handles' moves.
+    std::optional<ReshapeFinish> reshape{};
     // Thread: where and what size.
     std::optional<ThreadFinish> thread{};
     // Socket: what it takes (the spot is planePoint / planeNormal).

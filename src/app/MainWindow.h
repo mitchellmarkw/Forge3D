@@ -97,6 +97,7 @@ class JoinPanel;
 class MaskPanel;
 class LassoPanel;
 class AccessoryPanel;
+class ReshapePanel;
 class ReferencePanel;
 class ScaleCalculator;
 class ToleranceDialog;
@@ -965,6 +966,30 @@ private:
     void endHand();
     void updateHandPreview();
     void applyHand();
+
+    // Reshape (slice 102)
+    QAction* m_reshapeAction = nullptr;
+    ReshapePanel* m_reshapePanel = nullptr;
+    struct ReshapeMode {
+        bool active = false;
+        bool editing = false;
+        ObjectId target = kInvalidId;  // the shape reshaped, or (editing) the Reshape step
+        ObjectId object = kInvalidId;  // the shape on the plate it shows as
+        Transform frame;               // the step's coordinates to the plate
+        ReshapeFinish finish;          // the step's coordinates
+        std::shared_ptr<const Mesh> fine;     // the part's surface, made fine (step coordinates)
+        std::shared_ptr<const Mesh> preview;  // reshaped (plate)
+        std::shared_ptr<const Mesh> handles;  // the balls and the box's lines (plate)
+        int picked = -1;
+        Vec3 planePoint{0, 0, 0}, planeNormal{0, 0, 1};  // plate: the drag's plane
+        Vec3 grabOffset{0, 0, 0};                       // from where it was pressed to the handle
+    };
+    ReshapeMode m_reshapeMode;
+    void startReshape(ObjectId target, bool editing);
+    void endReshape();
+    void applyReshape();
+    void updateReshapePreview();
+    double reshapeBallRadius() const;
 
     // Accessories (slice 100)
     QAction* m_accessoryAction = nullptr;

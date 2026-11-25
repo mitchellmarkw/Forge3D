@@ -50,9 +50,11 @@ add_executable(Forge3D WIN32
     MaskPanel.h
     LassoPanel.h
     AccessoryPanel.h
+    ReshapePanel.h
     MaskPanel.cpp
     LassoPanel.cpp
     AccessoryPanel.cpp
+    ReshapePanel.cpp
     ReferencePanel.h
     HingePanel.h
     ScaleCalculator.h

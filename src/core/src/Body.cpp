@@ -436,6 +436,7 @@ std::string toString(BooleanOp op)
     case BooleanOp::Mould: return "Mould";
     case BooleanOp::Port: return "Port";
     case BooleanOp::Linked: return "Linked mirror";
+    case BooleanOp::Reshape: return "Reshape";
     }
     return "Combine";
 }

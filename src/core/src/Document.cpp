@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "forge/core/Document.h"
+#include "forge/core/Reshape.h"
 #include "forge/core/MeshSteps.h"
 #include "forge/core/Remesh.h"
 #include "forge/core/MaskSplit.h"
@@ -331,6 +332,12 @@ void Document::validateBoolean(const Body& body, const std::map<ObjectId, Object
         if (!body.boolean->port)
             throw std::invalid_argument("A port needs its settings");
         port::check(*body.boolean->port);
+    } else if (op == BooleanOp::Reshape) {
+        if (ops.size() != 1)
+            throw std::invalid_argument("Reshape works on exactly one shape");
+        if (!body.boolean->reshape)
+            throw std::invalid_argument("Reshape needs its box");
+        reshape::check(*body.boolean->reshape);
     } else if (op == BooleanOp::Smooth) {
         if (ops.size() != 1)
             throw std::invalid_argument("Smooth works on exactly one shape");
@@ -701,7 +708,7 @@ TopoDS_Shape Document::combine(const BooleanSpec& spec) const
             op == BooleanOp::Socket || op == BooleanOp::Hinge || op == BooleanOp::MaskSplit ||
             op == BooleanOp::Hollow || op == BooleanOp::Stamp || op == BooleanOp::PanelLines ||
             op == BooleanOp::Posed || op == BooleanOp::Paint || op == BooleanOp::LimbCut ||
-            op == BooleanOp::Mould || op == BooleanOp::Port || op == BooleanOp::Linked)
+            op == BooleanOp::Mould || op == BooleanOp::Port || op == BooleanOp::Linked || op == BooleanOp::Reshape)
             throw GeometryError(toString(op) + " is worked out by the mesh engine");
         if (op == BooleanOp::Pattern)
             return patternShape(spec);
@@ -835,6 +842,7 @@ TopoDS_Shape Document::combine(const BooleanSpec& spec) const
             case BooleanOp::Mould:
             case BooleanOp::Port:
             case BooleanOp::Linked:
+            case BooleanOp::Reshape:
                 break;  // handled above / by the mesh engine
             }
         }
@@ -954,7 +962,8 @@ TopoDS_Shape Document::previewCombine(const BooleanSpec& spec) const
          spec.op == BooleanOp::ExtrudeDown || spec.op == BooleanOp::Socket || spec.op == BooleanOp::Hinge ||
          spec.op == BooleanOp::MaskSplit || spec.op == BooleanOp::Hollow || spec.op == BooleanOp::PanelLines ||
          spec.op == BooleanOp::Posed || spec.op == BooleanOp::Paint || spec.op == BooleanOp::LimbCut ||
-         spec.op == BooleanOp::Mould || spec.op == BooleanOp::Port || spec.op == BooleanOp::Linked) &&
+         spec.op == BooleanOp::Mould || spec.op == BooleanOp::Port || spec.op == BooleanOp::Linked ||
+         spec.op == BooleanOp::Reshape) &&
         spec.operands.size() != 1)
         throw std::invalid_argument(toString(spec.op) + " works on exactly one shape");
     return combine(spec);
@@ -1198,7 +1207,8 @@ bool Document::specUsesMesh(const BooleanSpec& spec) const
         spec.op == BooleanOp::Socket || spec.op == BooleanOp::Hinge || spec.op == BooleanOp::MaskSplit ||
         spec.op == BooleanOp::Hollow || spec.op == BooleanOp::Stamp || spec.op == BooleanOp::PanelLines ||
         spec.op == BooleanOp::Posed || spec.op == BooleanOp::Paint || spec.op == BooleanOp::LimbCut ||
-        spec.op == BooleanOp::Mould || spec.op == BooleanOp::Port || spec.op == BooleanOp::Linked)
+        spec.op == BooleanOp::Mould || spec.op == BooleanOp::Port || spec.op == BooleanOp::Linked ||
+         spec.op == BooleanOp::Reshape)
         return true;  // letters following a surface, and sculpting, only exist as triangles
     for (ObjectId part : spec.operands)
         if (usesMeshEngine(part))
@@ -1630,6 +1640,14 @@ MeshSolid Document::combineMeshes(const BooleanSpec& spec) const
             result = meshkernel::subtracted(result, {meshkernel::fromTriangles(cut.clear.positions, cut.clear.indices)});
         return meshkernel::subtracted(result,
                                       {meshkernel::fromTriangles(cut.groove.positions, cut.groove.indices)});
+    }
+    case BooleanOp::Reshape: {
+        if (!spec.reshape)
+            throw GeometryError("Reshape has no box");
+        Mesh surface;
+        meshkernel::triangles(parts.front(), surface.positions, surface.indices);
+        const Mesh bent = reshape::reshaped(surface, *spec.reshape);
+        return meshkernel::fromTriangles(bent.positions, bent.indices);
     }
     case BooleanOp::Smooth: {
         if (!spec.smooth)

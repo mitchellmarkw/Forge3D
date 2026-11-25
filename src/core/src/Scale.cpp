@@ -218,6 +218,20 @@ void scaleInto(const Document& doc, ObjectId id, const Vec3& factors, const Vec3
         out.push_back(std::move(next));
         return;
     }
+    if (body->boolean->op == BooleanOp::Reshape && body->boolean->reshape) {
+        // The box and its handles' moves stretch with the shape.
+        Body next = *body;
+        ReshapeFinish& r = *next.boolean->reshape;
+        for (std::size_t k = 0; k < 3; ++k) {
+            r.min[k] = factors[k] * (r.min[k] - anchor[k]) + anchor[k];
+            r.max[k] = factors[k] * (r.max[k] - anchor[k]) + anchor[k];
+        }
+        for (auto& m : r.moves)
+            for (std::size_t k = 0; k < 3; ++k)
+                m[k] *= factors[k];
+        out.push_back(std::move(next));
+        return;
+    }
     if (body->boolean->op == BooleanOp::Linked)
         throw std::invalid_argument("'" + body->name + "' is a linked mirror: it follows the shape it mirrors. "
                                     "Resize that one (or unlink it first)");

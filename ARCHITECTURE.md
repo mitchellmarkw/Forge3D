@@ -1972,3 +1972,15 @@ and sharp across edges.
   proportioned skeleton, so angles keep meaning what they did.
 - App: Pose Figure's third stage (sliders with percent boxes, Ready proportions), and a Proportions button that
   opens it straight there (on the figure's pose step if it has one).
+
+## Reshape box (slice 102, 0.110.0)
+
+- `BooleanOp::Reshape` with `ReshapeFinish`: the box (min, max in the step's coordinates), its handle grid (2 to 4
+  a side; X fastest) and each handle's move. A mesh-engine step (file format 53, operation "reshape").
+- `reshape::moved`: a Bezier lattice (free-form deformation): a point's place in the box as (s, t, u), moved by
+  the sum of the handles' moves weighted by Bernstein polynomials of degree count - 1 (a point where every handle
+  moves the same way moves that way). `finer` makes the surface fine enough to bend (welded, edges no longer than
+  a 60th of the box's diagonal); `reshaped` is both. Rescaling stretches the box and the moves.
+- App: Reshape mode keeps the fine surface, so a drag only moves points; the handle nearest the ray is dragged on
+  a plane facing the view through it (its mirror partner across the box's middle in X too, when on). The handles
+  and grid lines are one see-through helper mesh.

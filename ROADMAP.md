@@ -131,6 +131,7 @@ Gate to Phase 2: a new user prints a customised part within 10 minutes.
 | 99 | Lasso cut and lasso mask: cut straight through inside a drawn loop; lasso in Split by Mask, Make Part and the sculpt mask | **Delivered for testing** |
 | 100 | Accessory makers: blade, shield, staff or spear, belt with buckle, holster at the figure's scale; your own accessories library | **Delivered for testing** |
 | 101 | Proportions: head, shoulders, torso, arms, hands, legs and feet sliders for a figure; Heroic and Chibi | **Delivered for testing** |
+| 102 | Reshape box: drag handles on a box round any shape to bend it smoothly (2, 3 or 4 a side, mirrored) | **Delivered for testing** |
 
 Slices 39–41 close the gaps found in the [Phase 1 gate review](docs/PHASE1_GATE.md).
 
