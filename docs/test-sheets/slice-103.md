@@ -21,3 +21,5 @@ Use a copy of a figure sculpted in one piece, standing straight, arms away from 
 | 8 | Print it (small is fine), free each joint gently | The joints move and don't come apart | |
 | 9 | Close Cut into Parts, open it again | Print in place and the clearance are remembered | |
 | 10 | Untick Print in place | Cut into Parts works as before (separate pins) | |
+| 11 | Untick "Move both sides together", close Cut into Parts, select the figure that wouldn't move before, open it again | Every ball can be dragged on its own | |
+| 12 | The same in Pose Figure (1. Fit the Skeleton) | Every ball can be dragged on its own | |
