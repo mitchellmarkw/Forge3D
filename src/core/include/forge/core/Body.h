@@ -761,9 +761,6 @@ struct PosedFinish {
     // and hands and feet all round, the shoulders wider, the torso, arms and legs longer,
     // the arms and legs thicker, the torso and hips wider all round.
     std::array<double, kProportionCount> proportions{1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0};
-    // How square it's made (slice 105): 0 as it is, 1 each part's round sides squared off
-    // about its bone (a blocky, toy-like figure). After the proportions, before the pose.
-    double blocky = 0.0;
     bool operator==(const PosedFinish&) const = default;
 };
 

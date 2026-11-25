@@ -2024,3 +2024,21 @@ and sharp across edges.
 - App: Pose Figure's 4. Style stage (style, strength, blocky, the bobblehead's spring, remembered under
   poseFigure/...); the Figure Style button opens Pose Figure on it (editing the tip if it's a Posed step). Apply
   with the head cut off is one undo step with the pose; the step is named for the style.
+
+## Figure styles refined (slice 106, 0.114.0)
+
+- Blocky (slice 105) removed: `PosedFinish::blocky`, `rig::shaped` and the squaring in `Skin::posed` are gone; a
+  0.113.0 file's "blocky" is ignored.
+- `Skin::posed`'s reshape: when the head's size changes, its weight is sharpened (smoothstep over 0.3–0.7) and
+  faded out from the neck's ball to a sixth of the head's height below it (smoothstep), the other bones sharing
+  what's left in their own proportions. The neck under a big head keeps its thickness.
+- `figurestyle::look`: Vinyl and Caricature use half the strength as the power (100% is 0.113.0's 50%);
+  `kMostStrength` 2.
+- `figurestyle::neckCut(surface, points, raise, tilt)`: `limbcut::plan` at the neck with `Tilt::forward`, the
+  narrowest ring below it, then `raise` along the cut's normal (the ring measured again there). `cutDisc` is the
+  preview's disc. `separateHead` takes raise and tilt and passes the tilt and the shift to Cut into Parts.
+- `figurestyle::separateHeadByMask`: `mask::split` (Flat) on the figure's joined-up plate triangles for the main
+  cap's spot (point, which way the head is, room), then `splitByMask` (Both, Flat) and the same socket and post.
+- App: the Style stage's "Where the head comes off" (remembered as poseFigure/headByMask), Cut higher by and Tip
+  forward; the disc is drawn with the skeleton. Mask mode gains `head` (with the spring): `MaskPanel::startHead`,
+  Apply calls separateHeadByMask.

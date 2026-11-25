@@ -1196,7 +1196,7 @@ void MainWindow::createActions()
     });
     m_figureStyleAction = new QAction(tr("Figure Style"), this);
     m_figureStyleAction->setToolTip(tr("Figure Style: turn a figure sculpted in one piece into a bobblehead (its head "
-                                       "can sit on a spring), a vinyl collectible, a caricature or a blocky toy"));
+                                       "can sit on a spring), a vinyl collectible or a caricature"));
     connect(m_figureStyleAction, &QAction::triggered, this, [this] {
         const ObjectId id = selectedOne();
         if (id == kInvalidId || m_selection.size() != 1 || !m_doc.isTopLevel(id)) {
@@ -2604,7 +2604,6 @@ void MainWindow::createDocks()
         if (!mode.active)
             return;
         mode.finish.proportions = m_poseFigurePanel->proportions();
-        mode.finish.blocky = m_poseFigurePanel->blocky();
         updatePoseFigurePreview();
     });
     connect(m_poseFigurePanel, &PoseFigurePanel::presetChosen, this, [this](int index) {
@@ -2637,6 +2636,7 @@ void MainWindow::createDocks()
     });
     connect(m_poseFigurePanel, &PoseFigurePanel::jointChosen, this, [this] { updatePoseFigurePreview(); });
     connect(m_poseFigurePanel, &PoseFigurePanel::applyRequested, this, &MainWindow::applyPoseFigure);
+    connect(m_poseFigurePanel, &PoseFigurePanel::neckCutChanged, this, [this] { updatePoseFigurePreview(); });
     connect(m_poseFigurePanel, &PoseFigurePanel::cancelRequested, this, &MainWindow::endPoseFigure);
     m_hollowPanel = new HollowPanel;
     stackLayout->addWidget(m_hollowPanel);
@@ -12910,6 +12910,18 @@ std::uint64_t maskCellKey(std::int64_t i, std::int64_t j, std::int64_t k)
 
 }  // namespace
 
+void MainWindow::startHeadMask(ObjectId figure, const figurestyle::Spring& spring)
+{
+    startMask(figure, false, false);
+    if (!m_maskMode.active)
+        return;
+    m_maskMode.head = true;
+    m_maskMode.spring = spring;
+    m_maskPanel->startHead(tr("Paint over the head of '%1'").arg(QString::fromStdString(m_doc.find(figure)->name)));
+    statusBar()->showMessage(tr("Bobblehead: paint over the whole head (or click Lasso and draw round it from the "
+                                "front), then Cut Off Head. Esc leaves the head on."));
+}
+
 void MainWindow::startMask(ObjectId target, bool editing, bool makingPart)
 {
     const Body* body = m_doc.find(target);
@@ -13124,13 +13136,34 @@ void MainWindow::applyMask()
     if (!mode.active)
         return;
     if (mode.dabs.empty()) {
-        m_maskPanel->setStatus(mode.makingPart ? tr("Paint where the part goes first.")
+        m_maskPanel->setStatus(mode.head         ? tr("Paint over the head first.")
+                               : mode.makingPart ? tr("Paint where the part goes first.")
                                                : tr("Paint over the part to cut off first."),
                                true);
         return;
     }
     const ObjectId target = mode.target;
     const std::vector<MaskDab> dabs = mode.dabs;
+    if (mode.head) {
+        figurestyle::Bobble made;
+        try {
+            QApplication::setOverrideCursor(Qt::WaitCursor);
+            struct RestoreCursor {
+                ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
+            } restore;
+            made = figurestyle::separateHeadByMask(m_stack, m_doc, target, dabs, mode.spring);
+        } catch (const std::exception& e) {
+            m_maskPanel->setStatus(QString::fromUtf8(e.what()), true);  // stay, to paint again
+            return;
+        }
+        qInfo().noquote() << "Command:" << QString::fromStdString(m_stack.undoLabel());
+        endMask();
+        setSelection(made.head);
+        statusBar()->showMessage(tr("Bobblehead: the head is a part of its own, with a socket for the spring; the "
+                                    "post is on the neck."),
+                                 10000);
+        return;
+    }
     if (mode.makingPart) {
         const MaskPanel::PartOptions po = m_maskPanel->partOptions();
         makepart::Options o;
@@ -16365,8 +16398,8 @@ void MainWindow::startPoseFigure(ObjectId target, bool editing, int openOn)
     m_propsDockWidth = m_propsDock->width();
     m_properties->hide();
     m_poseFigurePanel->show();
-    statusBar()->showMessage(styles ? tr("Figure Style: pick a style (bobblehead, vinyl collectible, caricature, "
-                                         "blocky) and how strong, then Apply. Esc cancels.")
+    statusBar()->showMessage(styles ? tr("Figure Style: pick a style (bobblehead, vinyl collectible, caricature) "
+                                         "and how strong, then Apply. Esc cancels.")
                              : proportions ? tr("Proportions: change the sizes, or pick Heroic or Chibi. If a part "
                                               "comes out wrong, click 1. Fit the Skeleton and drag its balls onto "
                                               "the joints. Esc cancels.")
@@ -16422,7 +16455,28 @@ void MainWindow::updatePoseFigurePreview()
         mode.posed.reset();
         m_poseFigurePanel->setStatus(QString::fromUtf8(e.what()), true);
     }
-    mode.skeleton = std::make_shared<const Mesh>(rig::skeletonMesh(mode.shown, ballRadius(mode.shown), highlight));
+    Mesh skeleton = rig::skeletonMesh(mode.shown, ballRadius(mode.shown), highlight);
+    // A bobblehead's cut at the neck, as a disc, where the head will come off.
+    if (posing && mode.posed && m_poseFigurePanel->showingStyle() && m_poseFigurePanel->separateHead() &&
+        !m_poseFigurePanel->headByMask()) {
+        try {
+            const figurestyle::NeckCut nc = figurestyle::neckCut(*mode.posed, mode.shown, m_poseFigurePanel->cutRaise(),
+                                                                 m_poseFigurePanel->cutTilt());
+            const Mesh disc = figurestyle::cutDisc(nc, std::max(2.2 * nc.radius, m_poseFigurePanel->spring().diameter));
+            const auto base = std::uint32_t(skeleton.positions.size() / 3);
+            skeleton.positions.insert(skeleton.positions.end(), disc.positions.begin(), disc.positions.end());
+            skeleton.normals.insert(skeleton.normals.end(), disc.normals.begin(), disc.normals.end());
+            for (std::uint32_t i : disc.indices)
+                skeleton.indices.push_back(base + i);
+            if (figurestyle::sizesFor(m_poseFigurePanel->spring()).post / 2.0 > 0.9 * nc.radius)
+                m_poseFigurePanel->setStatus(tr("The neck is too thin there for this spring: move the cut, or choose "
+                                                "a smaller spring."),
+                                             true);
+        } catch (const std::exception& e) {
+            m_poseFigurePanel->setStatus(QString::fromUtf8(e.what()), true);
+        }
+    }
+    mode.skeleton = std::make_shared<const Mesh>(std::move(skeleton));
     m_poseFigurePanel->setFinish(mode.finish);
     refreshScene();
 }
@@ -16608,7 +16662,7 @@ void MainWindow::applyPoseFigure()
             const bool bent = f.angles != rig::restAngles(f.points);
             const int style = m_poseFigurePanel->style();
             r.name = m_doc.uniqueName(!bent && style >= 0 ? figurestyle::title(figurestyle::Style(style))
-                                      : !bent && rig::shaped(f) ? "Proportions"
+                                      : !bent && rig::proportioned(f) ? "Proportions"
                                                                 : "Posed");
             r.boolean = posedSpec(m_doc, target, f);
             m_doc.previewMesh(*r.boolean);  // worked out (and kept) before anything changes
@@ -16620,8 +16674,10 @@ void MainWindow::applyPoseFigure()
     }
     // A bobblehead's head cut off for its spring (slice 105): where the skeleton is posed,
     // on the plate.
-    const bool separate = m_poseFigurePanel->separateHead();
+    const bool byMask = m_poseFigurePanel->separateHead() && m_poseFigurePanel->headByMask();
+    const bool separate = m_poseFigurePanel->separateHead() && !byMask;
     const figurestyle::Spring spring = m_poseFigurePanel->spring();
+    const double raise = m_poseFigurePanel->cutRaise(), tilt = m_poseFigurePanel->cutTilt();
     rig::Points posedPoints{};
     if (separate) {
         try {
@@ -16637,7 +16693,8 @@ void MainWindow::applyPoseFigure()
         }
     }
     const auto cutHead = [&](ObjectId posed) {
-        const figurestyle::Bobble b = figurestyle::separateHead(m_stack, m_doc, posed, posedPoints, spring);
+        const figurestyle::Bobble b =
+            figurestyle::separateHead(m_stack, m_doc, posed, posedPoints, spring, raise, tilt);
         return b.head;
     };
     if (mode.editing) {
@@ -16649,6 +16706,8 @@ void MainWindow::applyPoseFigure()
         if (!separate) {
             run(std::make_unique<EditBodyCommand>(before, *result, "Change pose"));
             setSelection(history::objectOf(m_doc, target));
+            if (byMask)
+                startHeadMask(history::objectOf(m_doc, target), spring);
             return;
         }
         ObjectId head = kInvalidId;
@@ -16703,6 +16762,13 @@ void MainWindow::applyPoseFigure()
         return;
     }
     refreshScene();
+    if (byMask) {
+        refreshCommandState();
+        const ObjectId top = m_doc.isTopLevel(id) ? id : history::objectOf(m_doc, target);
+        setSelection(top);
+        startHeadMask(top, spring);
+        return;
+    }
     if (separate) {
         refreshCommandState();
         setSelection(head);

@@ -203,9 +203,6 @@ PoseFigurePanel::PoseFigurePanel(QWidget* parent) : QWidget(parent)
     styleForm->addRow(tr("Strength:"), sliderRow(m_strengthSlider, m_strength, int(figurestyle::kMostStrength * 100)));
     m_strength->setToolTip(tr("How far to take the style: 100% is the style itself, less is nearer the figure as "
                               "made, more goes further"));
-    styleForm->addRow(tr("Blocky:"), sliderRow(m_blockySlider, m_blocky, 100));
-    m_blocky->setToolTip(tr("How square the figure's round parts are made, about each bone: 0% as they are, 100% "
-                            "squared off"));
     style->addLayout(styleForm);
     m_bobbleBox = new QGroupBox(tr("Bobblehead spring"));
     auto* bobble = new QVBoxLayout(m_bobbleBox);
@@ -213,6 +210,34 @@ PoseFigurePanel::PoseFigurePanel(QWidget* parent) : QWidget(parent)
     m_separate->setToolTip(tr("On Apply, the head is cut off at the neck as a part of its own, with a socket in it "
                               "for a spring, and a post on the neck for the spring's other end"));
     bobble->addWidget(m_separate);
+    m_headCut = new QComboBox;
+    m_headCut->addItem(tr("A flat cut at the neck (shown in the view)"));
+    m_headCut->addItem(tr("Paint a mask over the head after Apply"));
+    m_headCut->setToolTip(tr("How the head's edge is chosen: a flat cut you can move up or down the neck and tip, "
+                             "or a mask you paint over the head (the cut goes flat through the paint's edge)"));
+    bobble->addWidget(labelled(tr("Where the head comes off:"), m_headCut));
+    m_cutPlace = new QWidget;
+    auto* place = new QFormLayout(m_cutPlace);
+    place->setContentsMargins(0, 0, 0, 0);
+    m_cutRaise = new QDoubleSpinBox;
+    m_cutRaise->setRange(-figurestyle::kMostRaise, figurestyle::kMostRaise);
+    m_cutRaise->setDecimals(1);
+    m_cutRaise->setSingleStep(0.5);
+    m_cutRaise->setSuffix(tr(" mm"));
+    m_cutRaise->setKeyboardTracking(false);
+    m_cutRaise->setToolTip(tr("Move the cut up the neck (more) or down it (less than 0) from where Forge3D put it, "
+                              "where the neck is narrowest"));
+    place->addRow(tr("Cut higher by:"), m_cutRaise);
+    m_cutTilt = new QDoubleSpinBox;
+    m_cutTilt->setRange(-figurestyle::kMostTilt, figurestyle::kMostTilt);
+    m_cutTilt->setDecimals(0);
+    m_cutTilt->setSingleStep(5.0);
+    m_cutTilt->setSuffix(tr("°"));
+    m_cutTilt->setKeyboardTracking(false);
+    m_cutTilt->setToolTip(tr("Tip the cut forward, lower at the front (more), or back (less than 0): under a chin "
+                             "or a hairline"));
+    place->addRow(tr("Tip forward:"), m_cutTilt);
+    bobble->addWidget(m_cutPlace);
     auto* springForm = new QFormLayout;
     m_springSize = new QDoubleSpinBox;
     m_springSize->setRange(figurestyle::kLeastSpring, figurestyle::kMostSpring);
@@ -359,23 +384,23 @@ PoseFigurePanel::PoseFigurePanel(QWidget* parent) : QWidget(parent)
         if (!m_loading)
             useStyle();
     });
-    connect(m_blockySlider, &QSlider::valueChanged, this, [this](int v) {
-        const QSignalBlocker block(m_blocky);
-        m_blocky->setValue(v);
-        if (!m_loading && !m_blockySlider->isSliderDown())
-            emit proportionsChanged();
-    });
-    connect(m_blockySlider, &QSlider::sliderReleased, this, [this] { emit proportionsChanged(); });
-    connect(m_blocky, &QSpinBox::valueChanged, this, [this](int v) {
-        const QSignalBlocker block(m_blockySlider);
-        m_blockySlider->setValue(v);
-        if (!m_loading)
-            emit proportionsChanged();
-    });
     connect(m_separate, &QCheckBox::toggled, this, [this](bool on) {
         preferences().setValue(QStringLiteral("poseFigure/separateHead"), on);
         showStyleOptions();
+        emit neckCutChanged();
     });
+    m_headCut->setCurrentIndex(preferences().value(QStringLiteral("poseFigure/headByMask"), false).toBool() ? 1 : 0);
+    connect(m_headCut, &QComboBox::currentIndexChanged, this, [this](int i) {
+        preferences().setValue(QStringLiteral("poseFigure/headByMask"), i == 1);
+        showStyleOptions();
+        emit neckCutChanged();
+    });
+    for (QDoubleSpinBox* box : {m_cutRaise, m_cutTilt})
+        connect(box, &QDoubleSpinBox::valueChanged, this, [this] {
+            if (!m_loading)
+                emit neckCutChanged();
+        });
+    connect(m_springSize, &QDoubleSpinBox::valueChanged, this, &PoseFigurePanel::neckCutChanged);
     connect(m_springSize, &QDoubleSpinBox::valueChanged, this,
             [](double v) { preferences().setValue(QStringLiteral("poseFigure/springSize"), v); });
     connect(m_springWire, &QDoubleSpinBox::valueChanged, this,
@@ -397,9 +422,24 @@ void PoseFigurePanel::showStyle()
     m_styleStage->setChecked(true);
 }
 
-double PoseFigurePanel::blocky() const
+bool PoseFigurePanel::showingStyle() const
 {
-    return m_blocky->value() / 100.0;
+    return m_styleStage->isChecked();
+}
+
+bool PoseFigurePanel::headByMask() const
+{
+    return m_headCut->currentIndex() == 1;
+}
+
+double PoseFigurePanel::cutRaise() const
+{
+    return m_cutRaise->value();
+}
+
+double PoseFigurePanel::cutTilt() const
+{
+    return m_cutTilt->value();
 }
 
 int PoseFigurePanel::style() const
@@ -424,9 +464,9 @@ figurestyle::Spring PoseFigurePanel::spring() const
 void PoseFigurePanel::showStyleOptions()
 {
     const int s = style();
-    m_styleBlurb->setText(s < 0 ? (rig::shaped(m_f) ? tr("Proportions of your own: choose a style to replace them, "
-                                                         "or None to go back to the figure as made.")
-                                                      : tr("The figure's own proportions; nothing squared off."))
+    m_styleBlurb->setText(s < 0 ? (rig::proportioned(m_f) ? tr("Proportions of your own: choose a style to replace "
+                                                               "them, or None to go back to the figure as made.")
+                                                            : tr("The figure's own proportions."))
                                 : tr(figurestyle::blurb(figurestyle::Style(s))));
     m_strength->setEnabled(s >= 0);
     m_strengthSlider->setEnabled(s >= 0);
@@ -434,9 +474,11 @@ void PoseFigurePanel::showStyleOptions()
     for (QWidget* w : {static_cast<QWidget*>(m_springSize), static_cast<QWidget*>(m_springWire),
                        static_cast<QWidget*>(m_springFit)})
         w->setEnabled(m_separate->isChecked());
+    m_headCut->setEnabled(m_separate->isChecked());
+    m_cutPlace->setVisible(m_separate->isChecked() && !headByMask());
 }
 
-// The style's proportions and blockiness, from the skeleton as fitted.
+// The style's proportions, from the skeleton as fitted.
 void PoseFigurePanel::useStyle()
 {
     const int s = style();
@@ -448,8 +490,6 @@ void PoseFigurePanel::useStyle()
         m_sizeSlider[k]->setValue(v);
         m_sizePercent[k]->setValue(v);
     }
-    m_blockySlider->setValue(int(std::lround(look.blocky * 100)));
-    m_blocky->setValue(int(std::lround(look.blocky * 100)));
     m_loading = false;
     showSizePreset();
     emit proportionsChanged();
@@ -494,16 +534,18 @@ void PoseFigurePanel::start(const QString& title, bool editing, const PosedFinis
     m_sizeBox->setVisible(false);
     m_styleBox->setVisible(false);
     m_style->setCurrentIndex(0);  // none chosen yet (a style only sets the numbers)
+    m_cutRaise->setValue(0.0);
+    m_cutTilt->setValue(0.0);
     m_joint->setCurrentIndex(int(rig::Joint::LeftElbow));
     m_loading = false;
     setFinish(f);
     // A step already in a style (at the strength last used) shows it.
     for (int s = 0; s < figurestyle::kStyleCount; ++s) {
         const figurestyle::Look look = figurestyle::look(figurestyle::Style(s), f.points, m_strength->value() / 100.0);
-        bool same = std::abs(look.blocky - f.blocky) < 0.005;
+        bool same = true;
         for (int k = 0; k < kProportionCount && same; ++k)
             same = std::abs(look.proportions[std::size_t(k)] - f.proportions[std::size_t(k)]) < 0.005;
-        if (same && rig::shaped(f)) {
+        if (same && rig::proportioned(f)) {
             m_loading = true;
             m_style->setCurrentIndex(s + 1);
             m_loading = false;
@@ -526,8 +568,6 @@ void PoseFigurePanel::setFinish(const PosedFinish& f)
         m_sizeSlider[i]->setValue(v);
         m_sizePercent[i]->setValue(v);
     }
-    m_blockySlider->setValue(int(std::lround(f.blocky * 100)));
-    m_blocky->setValue(int(std::lround(f.blocky * 100)));
     showSizePreset();
     // Which pose it is, if it's one in the list.
     const auto same = [&](const rig::Angles& a) {

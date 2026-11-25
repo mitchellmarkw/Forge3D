@@ -106,8 +106,8 @@ namespace forge::file {
 //  52  Proportions (a posed step's "proportions": head, shoulders, torso, arms, hands, legs,
 //      feet; left out as made)
 //  53  Reshape steps (operation "reshape": the box, its handle counts and moves)
-//  54  Figure styles: a posed step's "proportions" gain "limbs" and "body", and "blocky"
-//      (left out when 0)
+//  54  Figure styles: a posed step's "proportions" gain "limbs" and "body" (0.113.0 also
+//      wrote "blocky", no longer used)
 inline constexpr int kFormatVersion = 54;
 // The highest sculpt::Brush number a file may hold (Pattern).
 inline constexpr int kLastSculptBrush = 14;

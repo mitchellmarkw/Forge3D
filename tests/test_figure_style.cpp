@@ -131,21 +131,20 @@ TEST_CASE("Figure styles: each style's proportions", "[figurestyle]")
         // No strength: as made.
         const auto none = figurestyle::look(Style(s), made.points, 0.0);
         CHECK(none.proportions == rig::asMade());
-        CHECK(none.blocky == 0.0);
         CHECK(std::string(figurestyle::title(Style(s))).size() > 3);
         // Always a bigger head.
         CHECK(k(figurestyle::look(Style(s), made.points), rig::Proportion::Head) > 1.0);
     }
     const auto vinyl = figurestyle::look(Style::Vinyl, made.points);
-    CHECK(k(vinyl, rig::Proportion::Head) > 2.0);
-    CHECK(k(vinyl, rig::Proportion::Legs) < 0.7);
-    CHECK(k(vinyl, rig::Proportion::LimbThickness) > 1.3);
+    // Gentler at 100% than 0.113.0 made it: its 50%.
+    CHECK_THAT(k(vinyl, rig::Proportion::Head), WithinAbs(1.64, 0.01));
+    CHECK(k(vinyl, rig::Proportion::Legs) < 0.8);
+    CHECK(k(vinyl, rig::Proportion::LimbThickness) > 1.2);
+    CHECK(k(figurestyle::look(Style::Bobblehead, made.points), rig::Proportion::Head) > 2.0);
     // Stronger: further from as made; within the range.
-    const auto strong = figurestyle::look(Style::Vinyl, made.points, 1.5);
+    const auto strong = figurestyle::look(Style::Vinyl, made.points, 2.0);
     CHECK(k(strong, rig::Proportion::Head) > k(vinyl, rig::Proportion::Head));
     CHECK(k(strong, rig::Proportion::Head) <= rig::kMostProportion);
-    CHECK(figurestyle::look(Style::Blocky, made.points).blocky == 1.0);
-    CHECK(figurestyle::look(Style::Blocky, made.points, 0.5).blocky == 0.5);
     // A caricature makes long arms longer still.
     PosedFinish longArms = made;
     for (Point p : {Point::LeftElbow, Point::LeftWrist, Point::LeftHand}) {
@@ -159,10 +158,10 @@ TEST_CASE("Figure styles: each style's proportions", "[figurestyle]")
         q[0] = s[0] + 1.6 * (q[0] - s[0]);
     }
     CHECK(k(figurestyle::look(Style::Caricature, longArms.points), rig::Proportion::Arms) >
-          k(figurestyle::look(Style::Caricature, made.points), rig::Proportion::Arms) + 0.2);
+          k(figurestyle::look(Style::Caricature, made.points), rig::Proportion::Arms) + 0.1);
 }
 
-TEST_CASE("Figure styles: thicker limbs, a wider body, squared off", "[figurestyle][rig]")
+TEST_CASE("Figure styles: thicker limbs, a wider body", "[figurestyle][rig]")
 {
     const Mesh figure = trianglesOf(tFigure());
     const PosedFinish made = rig::fit(figure);
@@ -185,33 +184,17 @@ TEST_CASE("Figure styles: thicker limbs, a wider body, squared off", "[figuresty
         CHECK(m.bounds().size()[1] > before.bounds().size()[1] + 2.5);  // the torso deeper
         CHECK(volumeOf(m) > 1.1 * v0);
     }
+    // A big head: the neck under it isn't pulled out into a wide lip.
     {
         PosedFinish f = made;
-        f.blocky = 1.0;
-        CHECK(rig::shaped(f));
-        CHECK_FALSE(rig::proportioned(f));
+        f.proportions[std::size_t(rig::Proportion::Head)] = 2.4;
         const Mesh m = skin.posed(f).mesh;
-        const double v = volumeOf(m);
-        CHECK(v > 1.1 * v0);  // a square round each circle
-        CHECK(v < 1.4 * v0);
-        // The torso's surface at 45 degrees round it is pushed out, square to it isn't.
-        double diagonal = 0, front = 0;
-        for (std::size_t i = 0; i + 2 < m.positions.size(); i += 3) {
-            const double x0 = before.positions[i], y0 = before.positions[i + 1], z0 = before.positions[i + 2];
-            if (z0 < 80 || z0 > 100)
-                continue;
-            const double r0 = std::hypot(x0, y0);
-            const double r = std::hypot(double(m.positions[i]), double(m.positions[i + 1]));
-            const double angle = std::abs(std::atan2(std::abs(y0), std::abs(x0)) * 180.0 / 3.14159265358979 - 45.0);
-            if (angle < 5)
-                diagonal = std::max(diagonal, r - r0);
-            else if (angle > 40)
-                front = std::max(front, std::abs(r - r0));
-        }
-        CHECK(diagonal > 3.0);
-        CHECK(front < 1.0);
-        f.blocky = 1.5;
-        CHECK_THROWS_AS(rig::check(f), std::invalid_argument);
+        const double neckZ = made.points[std::size_t(Point::Neck)][2];
+        double widest = 0;
+        for (std::size_t i = 0; i + 2 < m.positions.size(); i += 3)
+            if (std::abs(m.positions[i + 2] - (neckZ - 3.0)) < 0.75 && std::abs(m.positions[i]) < 12.0)
+                widest = std::max(widest, std::hypot(double(m.positions[i]), double(m.positions[i + 1])));
+        CHECK(widest < 8.0);  // the neck's 5 mm thick; 0.113.0 made it about 10
     }
 }
 
@@ -221,15 +204,13 @@ TEST_CASE("Figure styles: saved with the step", "[figurestyle]")
     CommandStack stack(doc);
     const ObjectId figure = addFigure(stack, doc, trianglesOf(tFigure()));
     PosedFinish f = rig::fit(onPlate(doc, figure));
-    const auto look = figurestyle::look(figurestyle::Style::Blocky, f.points);
-    f.proportions = look.proportions;
-    f.blocky = look.blocky;
+    f.proportions = figurestyle::look(figurestyle::Style::Vinyl, f.points).proportions;
     Body r;
     r.id = doc.allocateId();
     r.name = "Posed";
     r.boolean = posedSpec(doc, figure, f);
     stack.execute(std::make_unique<CombineCommand>(r));
-    CHECK(history::describe(doc, r.id) == "posed, as made, feet flat, new proportions, blocky");
+    CHECK(history::describe(doc, r.id) == "posed, as made, feet flat, new proportions");
     const auto path = std::filesystem::temp_directory_path() / "forge_figure_style_test.f3d";
     file::save(doc, path, "test");
     Document other;
@@ -264,7 +245,7 @@ TEST_CASE("Figure styles: a bobblehead's head cut off for a spring", "[figuresty
     REQUIRE(doc.isTopLevel(made.head));
     REQUIRE(doc.isTopLevel(made.body));
     CHECK(doc.find(made.head)->name == "Head");
-    CHECK(doc.find(made.body)->name == "Torso");
+    CHECK(doc.find(made.body)->name == "Body");
     const double head = meshkernel::volume(doc.meshSolid(made.head));
     const double body = meshkernel::volume(doc.meshSolid(made.body));
     // The socket out of the head, the post on the body: about their sizes.
@@ -303,4 +284,60 @@ TEST_CASE("Figure styles: a bobblehead styled, then its head cut off", "[figures
     // Cut at the neck's narrowest, under the neck's ball: the head's piece reaches below it.
     CHECK(doc.worldBounds(made.head).min[2] < points[std::size_t(Point::Neck)][2]);
     CHECK(doc.worldBounds(made.head).min[2] > points[std::size_t(Point::LeftShoulder)][2]);
+}
+
+TEST_CASE("Figure styles: the neck's cut moved by hand", "[figurestyle]")
+{
+    const Mesh figure = trianglesOf(tFigure());
+    const PosedFinish f = rig::fit(figure);
+    const figurestyle::NeckCut found = figurestyle::neckCut(figure, f.points);
+    CHECK(found.point[2] < f.points[std::size_t(Point::Neck)][2] + 0.01);
+    CHECK(found.point[2] > 112.0);  // on the neck, above the shoulders
+    CHECK_THAT(found.radius, WithinAbs(5.0, 1.0));
+    const figurestyle::NeckCut lower = figurestyle::neckCut(figure, f.points, -3.0);
+    CHECK_THAT(lower.point[2], WithinAbs(found.point[2] - 3.0, 0.05));
+    const figurestyle::NeckCut tipped = figurestyle::neckCut(figure, f.points, 0.0, 20.0);
+    CHECK_THAT(std::acos(tipped.normal[2]) * 180.0 / 3.14159265358979, WithinAbs(20.0, 1.0));
+    // Out of range: kept in it.
+    CHECK_THAT(figurestyle::neckCut(figure, f.points, 0.0, 90.0).tilt, WithinAbs(figurestyle::kMostTilt, 1e-9));
+    const Mesh disc = figurestyle::cutDisc(found, 12.0);
+    CHECK_THAT(double(disc.bounds().size()[0]), WithinAbs(24.0, 0.2));
+    CHECK(meshkernel::volume(meshkernel::fromTriangles(disc.positions, disc.indices)) > 0.0);
+
+    // Cut where it's moved to.
+    Document doc;
+    CommandStack stack(doc);
+    const ObjectId id = addFigure(stack, doc, figure);
+    const PosedFinish onIt = rig::fit(onPlate(doc, id));
+    const figurestyle::NeckCut there = figurestyle::neckCut(onPlate(doc, id), onIt.points, 2.0);
+    const figurestyle::Bobble made = figurestyle::separateHead(stack, doc, id, onIt.points, {}, 2.0);
+    CHECK_THAT(double(doc.worldBounds(made.head).min[2]), WithinAbs(there.point[2], 0.8));
+}
+
+TEST_CASE("Figure styles: a bobblehead's head marked with a mask", "[figurestyle]")
+{
+    Document doc;
+    CommandStack stack(doc);
+    const ObjectId figure = addFigure(stack, doc, trianglesOf(tFigure()));
+    const Bounds b = doc.worldBounds(figure);
+    // A ball of mask over the head and the top of the neck.
+    MaskDab dab;
+    dab.centre = {b.center()[0], b.center()[1], b.max[2] - 12.0};
+    dab.radius = 17.0;
+    const double whole = meshkernel::volume(doc.meshSolid(figure));
+    const std::size_t before = stack.count();
+    const figurestyle::Bobble made = figurestyle::separateHeadByMask(stack, doc, figure, {dab}, {});
+    CHECK(stack.count() == before + 1);
+    CHECK(doc.find(made.head)->name == "Head");
+    CHECK(doc.find(made.body)->name == "Body");
+    const Bounds hb = doc.worldBounds(made.head), bb = doc.worldBounds(made.body);
+    CHECK(hb.max[2] > b.max[2] - 0.5);   // the head is the top
+    CHECK(hb.min[2] > b.max[2] - 32.0);  // and only the top
+    CHECK(bb.max[2] > hb.min[2]);        // the post up into it
+    const double head = meshkernel::volume(doc.meshSolid(made.head));
+    const double body = meshkernel::volume(doc.meshSolid(made.body));
+    CHECK(head < 0.3 * whole);
+    CHECK_THAT(head + body, WithinRel(whole, 0.05));
+    // Nothing masked: refused.
+    CHECK_THROWS_AS(figurestyle::separateHeadByMask(stack, doc, made.body, {}, {}), std::invalid_argument);
 }
