@@ -396,6 +396,7 @@ void spatialOrder(Mesh& mesh)
 Sculptor::Sculptor(Mesh mesh) : m_mesh(std::move(mesh))
 {
     spatialOrder(m_mesh);
+    m_rest = m_mesh.positions;
     rebuild();
 }
 
@@ -404,6 +405,7 @@ void Sculptor::setMesh(Mesh mesh)
     m_mesh = std::move(mesh);
     m_grab.clear();
     spatialOrder(m_mesh);
+    m_rest = m_mesh.positions;  // a new surface (a remesh keeps what was sculpted before it)
     rebuild();
 }
 
@@ -955,6 +957,10 @@ bool Sculptor::splitAround(const std::vector<std::uint32_t>& points, double maxE
                 const auto m = std::uint32_t(pos.size() / 3);
                 const V3 c = (at(pos, a) + at(pos, b)) * 0.5;
                 pos.insert(pos.end(), {float(c.x), float(c.y), float(c.z)});
+                if (m_rest.size() + 3 == pos.size()) {
+                    const V3 r = (at(m_rest, a) + at(m_rest, b)) * 0.5;
+                    m_rest.insert(m_rest.end(), {float(r.x), float(r.y), float(r.z)});
+                }
                 const V3 n = V3{m_mesh.normals[3 * a], m_mesh.normals[3 * a + 1], m_mesh.normals[3 * a + 2]} +
                              V3{m_mesh.normals[3 * b], m_mesh.normals[3 * b + 1], m_mesh.normals[3 * b + 2]};
                 const double nl = len(n);
@@ -1456,12 +1462,30 @@ void replay(Sculptor& sculptor, const SculptStroke& stroke, const Mesh& start,
         sculptor.endPattern();
 }
 
-Mesh replayed(const Mesh& start, const SculptFinish& finish)
+Replay replayedFully(const Mesh& start, const SculptFinish& finish)
 {
     Sculptor sculptor(start);
     for (const SculptStroke& stroke : finish.strokes)
         replay(sculptor, stroke, start, finish.patterns);
-    return sculptor.mesh();
+    return {sculptor.mesh(), sculptor.restPositions()};
+}
+
+Mesh atStrength(const Mesh& full, const std::vector<float>& rest, double strength)
+{
+    if (std::abs(strength - 1.0) < 1e-9 || rest.size() != full.positions.size())
+        return full;
+    Mesh m = full;
+    const float s = float(strength);
+    for (std::size_t i = 0; i < m.positions.size(); ++i)
+        m.positions[i] = rest[i] + s * (full.positions[i] - rest[i]);
+    allNormals(m);
+    return m;
+}
+
+Mesh replayed(const Mesh& start, const SculptFinish& finish)
+{
+    Replay r = replayedFully(start, finish);
+    return atStrength(r.mesh, r.rest, finish.strength);
 }
 
 void Sculptor::setPositions(const std::vector<float>& positions)

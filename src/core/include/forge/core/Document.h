@@ -176,7 +176,9 @@ public:
     // A sculpted surface already worked out (by the Sculpt tool, as it went), kept so
     // making or undoing the step doesn't play every stroke again. Used only while the
     // starting surface and strokes are exactly these.
-    void rememberSculpt(const Mesh& start, const SculptFinish& finish, const Mesh& sculpted) const;
+    // `sculpted` is at full strength; `rest` is where its points started (see sculpt::Replay).
+    void rememberSculpt(const Mesh& start, const SculptFinish& finish, const Mesh& sculpted,
+                        std::vector<float> rest) const;
     // The body as a triangle solid, in its own coordinates (cached like shape()).
     // Throws MeshEngineError (e.g. an imported mesh that isn't watertight).
     MeshSolid meshSolid(ObjectId id) const;
@@ -278,8 +280,9 @@ private:
     bool partsUnchanged(const LastPreview& p) const;
     struct KnownSculpt {
         Mesh start;
-        SculptFinish finish;
+        SculptFinish finish;  // at strength 1: changing the strength needs no replay
         Mesh sculpted;
+        std::vector<float> rest;
     };
     mutable std::vector<KnownSculpt> m_knownSculpts;  // the last few, newest last
     Mesh sculpted(const Mesh& start, const SculptFinish& finish) const;

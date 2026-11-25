@@ -447,6 +447,9 @@ struct SculptPattern {
 // divided finely (detail 0 Low, 1 Medium, 2 High) and the strokes played on it.
 struct SculptFinish {
     int detail = 1;
+    // How much of the sculpting shows: each point goes this share of the way from where it
+    // started to where the strokes took it (0 none, 1 all of it, up to 1.5 for more).
+    double strength = 1.0;
     std::vector<SculptStroke> strokes;
     std::vector<SculptPattern> patterns;  // the Pattern brush's, by number from the strokes
     bool operator==(const SculptFinish&) const = default;

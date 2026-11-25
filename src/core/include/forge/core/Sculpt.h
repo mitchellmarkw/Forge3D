@@ -93,6 +93,9 @@ public:
     explicit Sculptor(Mesh mesh);
 
     const Mesh& mesh() const { return m_mesh; }
+    // Where every point started, three numbers each like the mesh's: a point made by
+    // splitting an edge starts halfway between its ends' starts. Remeshing starts afresh.
+    const std::vector<float>& restPositions() const { return m_rest; }
     // Detail where the brush goes: edges under it longer than `finest` (or 8% of the
     // brush, whichever is more) are split before it acts, up to maxTriangles in all.
     // 0: off (the triangles never change).
@@ -222,6 +225,7 @@ private:
     double m_snakeFollow = 1.0;
 
     Mesh m_mesh;
+    std::vector<float> m_rest;
     std::vector<std::vector<std::uint32_t>> m_vt;  // the triangles round each point
     std::vector<std::uint32_t> m_mark;             // for walks: the walk number that last reached it
     std::vector<std::uint32_t> m_triMark;
@@ -259,7 +263,15 @@ Symmetry symmetryFor(const SculptStroke& stroke, const Mesh& start);
 // One recorded stroke played on a sculptor (as when it was made).
 void replay(Sculptor& sculptor, const SculptStroke& stroke, const Mesh& start,
             const std::vector<SculptPattern>& patterns = {});
-// Every stroke played on the starting mesh: the sculpted surface.
+// Every stroke played on the starting mesh: the sculpted surface, at the step's strength.
 Mesh replayed(const Mesh& start, const SculptFinish& finish);
+// The strokes played at full strength, with where every point started.
+struct Replay {
+    Mesh mesh;
+    std::vector<float> rest;
+};
+Replay replayedFully(const Mesh& start, const SculptFinish& finish);
+// A full-strength result taken part of the way (or past it): start + strength x (moved - start).
+Mesh atStrength(const Mesh& full, const std::vector<float>& rest, double strength);
 
 }  // namespace forge::sculpt

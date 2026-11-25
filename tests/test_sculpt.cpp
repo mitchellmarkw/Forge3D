@@ -929,3 +929,68 @@ TEST_CASE("Sculpt: only what a dab changed is reported, in short runs", "[sculpt
     // part of the mesh, not a stretch from one end of it to the other.
     CHECK(double(sent) / 6.0 < 0.25 * double(s.mesh().vertexCount()));
 }
+
+TEST_CASE("Sculpt steps: the strength tones the whole step down or up", "[sculpt][sculptstep][strength]")
+{
+    Document doc;
+    CommandStack stack(doc);
+    Body box;
+    box.id = doc.allocateId();
+    box.name = "Box";
+    box.spec = BoxSpec{20, 20, 20};
+    stack.execute(std::make_unique<AddBodyCommand>(box));
+
+    SculptFinish finish;
+    finish.detail = 0;
+    finish.strokes.push_back(drawAcrossTop());
+
+    // Points made by splitting start halfway between where their ends started.
+    const Mesh start = doc.sculptStart(box.id, finish.detail);
+    const sculpt::Replay full = sculpt::replayedFully(start, finish);
+    REQUIRE(full.rest.size() == full.mesh.positions.size());
+    REQUIRE(full.mesh.vertexCount() > start.vertexCount());  // detail was added
+    for (std::size_t v = 0; v < full.mesh.vertexCount(); ++v)
+        CHECK_THAT(full.rest[3 * v + 2], WithinAbs(std::clamp(double(full.rest[3 * v + 2]), 0.0, 20.0), 1e-4));
+    // At 0% nothing moved: the box as it was, with its added points lying flat on it.
+    const Mesh none = sculpt::atStrength(full.mesh, full.rest, 0.0);
+    CHECK_THAT(volume(none), WithinRel(8000.0, 1e-6));
+    CHECK(closed(none));
+
+    Body step;
+    step.id = doc.allocateId();
+    step.name = "Sculpt";
+    BooleanSpec spec;
+    spec.op = BooleanOp::Sculpt;
+    spec.operands = {box.id};
+    spec.sculpt = finish;
+    step.boolean = spec;
+    stack.execute(std::make_unique<CombineCommand>(step));
+    const double at100 = meshkernel::volume(doc.meshSolid(step.id)) - 8000.0;
+    REQUIRE(at100 > 5.0);
+    const std::string fullKey = file::resultKey(doc, step.id);
+
+    const auto setStrength = [&](double s) {
+        Body after = *doc.find(step.id);
+        after.boolean->sculpt->strength = s;
+        stack.execute(std::make_unique<EditBodyCommand>(*doc.find(step.id), after, "Sculpt strength"));
+        return meshkernel::volume(doc.meshSolid(step.id)) - 8000.0;
+    };
+    const double at50 = setStrength(0.5);
+    CHECK(history::describe(doc, step.id).find("1 stroke, at 50%") != std::string::npos);
+    CHECK_THAT(at50, WithinRel(at100 * 0.5, 0.05));
+    const double at150 = setStrength(1.5);
+    CHECK_THAT(at150, WithinRel(at100 * 1.5, 0.05));
+    CHECK_THAT(setStrength(0.0), WithinAbs(0.0, 0.05));
+    stack.undo();
+    CHECK_THAT(meshkernel::volume(doc.meshSolid(step.id)) - 8000.0, WithinRel(at150, 1e-9));
+
+    // Saved and opened at 150%: the same.
+    const auto loaded = file::fromJson(file::toJson(doc, "test"));
+    Document other;
+    other.replaceAll(loaded);
+    CHECK(other.find(step.id)->boolean->sculpt->strength == 1.5);
+    CHECK_THAT(meshkernel::volume(other.meshSolid(step.id)) - 8000.0, WithinRel(at150, 1e-6));
+    // Back at full strength it is written as before (saved results still match).
+    setStrength(1.0);
+    CHECK(file::resultKey(doc, step.id) == fullKey);
+}
