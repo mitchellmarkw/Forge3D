@@ -1984,3 +1984,15 @@ and sharp across edges.
 - App: Reshape mode keeps the fine surface, so a drag only moves points; the handle nearest the ray is dragged on
   a plane facing the view through it (its mirror partner across the box's middle in X too, when on). The handles
   and grid lines are one see-through helper mesh.
+
+## Print-in-place joints (slice 103, 0.111.0)
+
+- `limbcut::InPlace` (on, clearance 0.2 to 1 mm) passed to `cutIntoParts`. `inPlaceBall`: fit = clearance, snap on
+  with at least 15% grip (the opening narrower than the ball), no ridges or relief cuts, filament.
+  `inPlaceHinge`: fit = clearance, not stiff (the tab's hole fit-wide all round), no clicks, a printed pin.
+- Hinges: the pin is made a touch wider than the fork's arm hole (armHole + 0.05) and merged onto the fork as a
+  step; the tab (single) or the link (double) is given that pin size, so its hole is the clearance wider. A double
+  hinge's first pin goes to the near fork, its second to the far one; the link stays an extra piece. Swivels are
+  already one piece each side (the peg on the limb, the lip in the bore's groove).
+- The pieces stay where they were cut, joined only by the joints; a test checks no two of them overlap.
+- App: Cut into Parts' "Print in place (filament)" with a Clearance (remembered under cutParts/...).

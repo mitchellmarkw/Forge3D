@@ -132,6 +132,45 @@ CutPartsPanel::CutPartsPanel(QWidget* parent) : QWidget(parent)
     m_printer->addItem(tr("FDM (filament)"));
     m_printer->setToolTip(tr("The joints' fit is your printer's (from the Tolerance Test Print, if you made one)"));
     cuts->addWidget(labelled(tr("Printer:"), m_printer));
+    m_inPlace = new QCheckBox(tr("Print in place (filament)"));
+    m_inPlace->setToolTip(tr("Builds every joint captive, with room all round, so the figure prints already put "
+                             "together on a filament printer and moves once it's off the plate: balls held in "
+                             "their sockets, hinge pins part of the fork. No clicks or ridges (they'd print "
+                             "joined)."));
+    cuts->addWidget(m_inPlace);
+    m_clearanceRow = new QWidget;
+    {
+        auto* form = new QFormLayout(m_clearanceRow);
+        form->setContentsMargins(0, 0, 0, 0);
+        m_clearance = new QDoubleSpinBox;
+        m_clearance->setRange(limbcut::kLeastClearance, limbcut::kMostClearance);
+        m_clearance->setDecimals(2);
+        m_clearance->setSingleStep(0.05);
+        m_clearance->setSuffix(tr(" mm"));
+        m_clearance->setToolTip(tr("Room all round each joint: 0.3 to 0.4 suits most filament printers (more if "
+                                   "the joints print stuck, less if they're too loose)"));
+        form->addRow(tr("Clearance:"), m_clearance);
+    }
+    cuts->addWidget(m_clearanceRow);
+    {
+        const QSettings p(QSettings::NativeFormat, QSettings::UserScope, QStringLiteral("Forge3D"),
+                          QStringLiteral("Forge3D"));
+        m_inPlace->setChecked(p.value(QStringLiteral("cutParts/inPlace"), false).toBool());
+        m_clearance->setValue(p.value(QStringLiteral("cutParts/clearance"), 0.35).toDouble());
+    }
+    m_clearanceRow->setVisible(m_inPlace->isChecked());
+    connect(m_inPlace, &QCheckBox::toggled, this, [this](bool on) {
+        m_clearanceRow->setVisible(on);
+        if (on)
+            m_printer->setCurrentIndex(1);  // filament
+        QSettings(QSettings::NativeFormat, QSettings::UserScope, QStringLiteral("Forge3D"), QStringLiteral("Forge3D"))
+            .setValue(QStringLiteral("cutParts/inPlace"), on);
+        showSummary();
+    });
+    connect(m_clearance, &QDoubleSpinBox::valueChanged, this, [](double v) {
+        QSettings(QSettings::NativeFormat, QSettings::UserScope, QStringLiteral("Forge3D"), QStringLiteral("Forge3D"))
+            .setValue(QStringLiteral("cutParts/clearance"), v);
+    });
     m_summary = wrapped(QString());
     cuts->addWidget(m_summary);
     layout->addWidget(cutBox);
@@ -279,6 +318,14 @@ bool CutPartsPanel::mirror() const
     return m_mirror->isChecked();
 }
 
+limbcut::InPlace CutPartsPanel::inPlace() const
+{
+    limbcut::InPlace p;
+    p.on = m_inPlace->isChecked();
+    p.clearance = m_clearance->value();
+    return p;
+}
+
 bool CutPartsPanel::resin() const
 {
     return m_printer->currentIndex() == 0;
@@ -330,7 +377,10 @@ void CutPartsPanel::showSummary()
         lines << line;
     }
     m_summary->setText(lines.isEmpty() ? tr("No cuts chosen yet: try Usual Figure, or pick a joint and tick Cut here.")
-                                       : tr("Cuts (%1):\n%2").arg(lines.size()).arg(lines.join(QLatin1Char('\n'))));
+                                       : tr("Cuts (%1):\n%2").arg(lines.size()).arg(lines.join(QLatin1Char('\n'))) +
+                                             (m_inPlace && m_inPlace->isChecked()
+                                                  ? tr("\nPrinted in place: the pieces stay put together.")
+                                                  : QString()));
 }
 
 void CutPartsPanel::setInfo(const QString& text)

@@ -8,6 +8,7 @@
 #include "forge/core/LimbCut.h"
 #include "forge/core/MeshKernel.h"
 #include "forge/core/Rig.h"
+#include "forge/core/Socket.h"
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -351,4 +352,58 @@ TEST_CASE("Cut into Parts: toy joint recipes", "[limbcut][recipes]")
     add(Joint::LeftKnee, limbcut::JointKind::Ball, limbcut::Recipe::Butterfly, 5.0);
     CHECK_THROWS_AS(limbcut::cutIntoParts(stack, doc, figure, skeleton.points, choices, 300), std::invalid_argument);
     CHECK(doc.topLevelIds() == std::vector<ObjectId>{figure});
+}
+
+TEST_CASE("Cut into Parts: print in place, joints built captive", "[limbcut][inplace]")
+{
+    // The settings as built in place.
+    const SocketFinish b = limbcut::inPlaceBall(limbcut::ballFor(4.5), 0.35);
+    CHECK(b.fit == 0.35);
+    CHECK(b.snap);
+    CHECK(socket::ballSeat(b).opening < b.size - 0.3);  // the ball can't come out
+    CHECK(b.ridges == 0);
+    const HingeFinish h = limbcut::inPlaceHinge(limbcut::hingeFor(4.5, HingeKind::Single), 0.35);
+    CHECK(h.pin == PinKind::Printed);
+    CHECK_FALSE(h.stiff);
+    CHECK(h.clicks == 0);
+
+    Document doc;
+    CommandStack stack(doc);
+    const ObjectId figure = addFigure(stack, doc, trianglesOf(tFigure()));
+    const PosedFinish skeleton = rig::fit(onPlate(doc, figure));
+    std::vector<limbcut::Choice> choices;
+    const auto add = [&](Joint j, limbcut::JointKind kind, HingeKind hk) {
+        limbcut::Choice c;
+        c.joint = j;
+        c.kind = kind;
+        c.ball = limbcut::ballFor(4.5);
+        c.hinge = limbcut::hingeFor(4.5, hk);
+        choices.push_back(c);
+    };
+    add(Joint::LeftShoulder, limbcut::JointKind::Ball, HingeKind::Single);
+    add(Joint::LeftElbow, limbcut::JointKind::Hinge, HingeKind::Single);
+    add(Joint::RightElbow, limbcut::JointKind::Hinge, HingeKind::Double);
+    limbcut::InPlace inPlace;
+    inPlace.on = true;
+    const limbcut::Made made =
+        limbcut::cutIntoParts(stack, doc, figure, skeleton.points, choices, 100, inPlace);
+    // Pins are part of their forks: only the double hinge's link is a piece of its own.
+    REQUIRE(made.extras.size() == 1);
+    CHECK(doc.find(made.extras[0])->name.rfind("Hinge link", 0) == 0);
+    // Nothing touches anything else: every pair of pieces (and the link) is apart.
+    std::vector<ObjectId> all = made.pieces;
+    all.push_back(made.extras[0]);
+    std::vector<MeshSolid> solids;
+    for (ObjectId id : all)
+        solids.push_back(meshkernel::transformed(doc.meshSolid(id), doc.worldTransform(id)));
+    for (std::size_t i = 0; i < solids.size(); ++i)
+        for (std::size_t j = i + 1; j < solids.size(); ++j) {
+            INFO(doc.find(all[i])->name << " and " << doc.find(all[j])->name);
+            CHECK(meshkernel::volume(meshkernel::intersected({solids[i], solids[j]})) < 0.01);
+        }
+    stack.undo();
+    CHECK(doc.topLevelIds() == std::vector<ObjectId>{figure});
+    inPlace.clearance = 0.05;
+    CHECK_THROWS_AS(limbcut::cutIntoParts(stack, doc, figure, skeleton.points, choices, 100, inPlace),
+                    std::invalid_argument);
 }

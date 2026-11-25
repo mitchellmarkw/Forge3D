@@ -13860,7 +13860,8 @@ void MainWindow::applyCutParts()
         struct RestoreCursor {
             ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
         } restore;
-        made = limbcut::cutIntoParts(m_stack, m_doc, target, points, choices, newJointLink());
+        made = limbcut::cutIntoParts(m_stack, m_doc, target, points, choices, newJointLink(),
+                                     m_cutPartsPanel->inPlace());
     } catch (const std::exception& e) {
         m_cutPartsPanel->setStatus(tr("It couldn't be cut: %1").arg(QString::fromUtf8(e.what())), true);
         refreshScene();

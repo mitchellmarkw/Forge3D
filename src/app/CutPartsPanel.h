@@ -54,6 +54,8 @@ public:
     void setJoint(int joint);
     bool mirror() const;
     bool resin() const;
+    // Print in place (slice 103): the joints built captive, for printing put together.
+    limbcut::InPlace inPlace() const;
     // A line under the choices: what will be made at this joint (its sizes).
     void setInfo(const QString& text);
     void setStatus(const QString& text, bool problem);
@@ -80,6 +82,9 @@ private:
     QDoubleSpinBox* m_side = nullptr;
     QWidget* m_tiltBox = nullptr;
     QComboBox* m_printer = nullptr;
+    QCheckBox* m_inPlace = nullptr;
+    QDoubleSpinBox* m_clearance = nullptr;
+    QWidget* m_clearanceRow = nullptr;
     QLabel* m_title = nullptr;
     QLabel* m_summary = nullptr;
     QLabel* m_info = nullptr;
