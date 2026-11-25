@@ -57,6 +57,8 @@
     <file alias="best-print.svg">icons/best-print.svg</file>
     <file alias="library.svg">icons/library.svg</file>
     <file alias="make-part.svg">icons/make-part.svg</file>
+    <file alias="eye.svg">icons/eye.svg</file>
+    <file alias="eye-off.svg">icons/eye-off.svg</file>
     <file alias="sketch.svg">icons/sketch.svg</file>
     <file alias="snap.svg">icons/snap.svg</file>
     <file alias="split.svg">icons/split.svg</file>

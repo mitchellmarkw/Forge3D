@@ -10,6 +10,8 @@ Blender and Lychee, and with how action figures are made):
 1. **Make Part from paint** (slice 95): paint where armour, a glove or a belt goes, give a thickness, and
    get a new separate part that hugs the body. Sits on top (a fit gap) or set into the body (the body
    cut back under it, so the outline stays). Pulling an existing detail off is Split by Mask.
+   (Slices 95-97 built items 1-3; slice 98 was showing and hiding shapes, asked for while testing; items 4-7
+   follow as slices 99-102.)
 2. **Toy joint recipes** in Cut into Parts: butterfly shoulder, drop-down hip, ankle rocker, ab crunch,
    double elbows and knees, built from the ball, hinge and swivel pieces.
 3. **Sculpt strength**: each sculpt step in the history gets a strength slider (0–150%).

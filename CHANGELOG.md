@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.106.0 Beta — Slice 98: Show and hide shapes (2026-11-24)
+
+- **An eye by every shape in Objects**: click it to hide the shape from the view, click again to show it. Hidden
+  shapes are greyed in the list with a crossed-out eye and can't be clicked in the view. Picking a hidden shape in
+  Objects shows it see-through, so you can still move or change it.
+- **Right-click a shape in Objects**: Hide / Show, **Show Only This** (hides everything else), and **Show All**.
+- **View → Hide Selected** (Ctrl+H) and **View → Show All** (Ctrl+Shift+H).
+- Hiding only changes what you see: a hidden shape is still saved, exported and printed, nothing goes on the undo
+  list, and everything shows again when a file is opened. A tool opened on a hidden shape shows it while it works.
+
 ## 0.105.0 Beta — Slice 97: Sculpt strength (2026-11-24)
 
 - **Sculpt strength**: click a sculpt step (in the Objects list or its history) and a **Sculpt strength** slider in
