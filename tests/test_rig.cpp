@@ -397,3 +397,22 @@ TEST_CASE("Proportions: saved with the step", "[rig][proportions]")
     CHECK(other.find(r.id)->boolean->posed->proportions == rig::heroic());
     CHECK_THAT(meshkernel::volume(other.meshSolid(r.id)), WithinRel(meshkernel::volume(doc.meshSolid(r.id)), 1e-6));
 }
+
+TEST_CASE("Pose Figure: a skeleton fitted to any shape can be used", "[rig]")
+{
+    // Shapes with no arms or legs to find: every bone still has a length.
+    const auto rodField = [](const Vec3& q) { return 10.0 - std::sqrt(q[0] * q[0] + q[1] * q[1]); };
+    Bounds box;
+    box.expand(-12, -12, 0);
+    box.expand(12, 12, 120);
+    const Mesh column = trianglesOf(meshkernel::levelSet(
+        [&](const Vec3& q) { return std::min(rodField(q), std::min(q[2], 118.0 - q[2])); }, box, 1.5, 0.0));
+    CHECK_NOTHROW(rig::check(rig::fit(column)));
+    Bounds small;
+    small.expand(-6, -6, 0);
+    small.expand(6, 6, 12);
+    const Mesh blob = trianglesOf(meshkernel::levelSet(
+        [](const Vec3& q) { return 5.0 - std::sqrt(q[0] * q[0] + q[1] * q[1] + (q[2] - 6) * (q[2] - 6)); }, small, 0.5,
+        0.0));
+    CHECK_NOTHROW(rig::check(rig::fit(blob)));
+}

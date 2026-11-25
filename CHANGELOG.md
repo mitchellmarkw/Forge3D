@@ -11,6 +11,10 @@
   - No clicks, ridges or relief cuts (they'd print joined), and the printer is set to filament.
 - The pieces stay put together where they were cut. If the joints print stuck, try a bigger clearance; if
   they're loose, a smaller one (the Tolerance Test Print helps find your printer's).
+- Fixed: on some figures the skeleton's balls in Cut into Parts and Pose Figure wouldn't move with "Move both
+  sides together" off. The skeleton was placed with two balls on top of each other (an arm not found), and every
+  move was refused for it. Now every bone is given some length when it's placed, and a move is only refused if it
+  puts two balls together itself.
 
 ## 0.110.0 Beta — Slice 102: Reshape box (2026-11-24)
 

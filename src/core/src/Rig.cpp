@@ -927,6 +927,32 @@ PosedFinish fit(const Mesh& mesh)
         set(left ? Point::LeftToe : Point::RightToe, toes);
     }
 
+    // No bone left with no length (an arm or leg not found where it was looked for): its
+    // end put a little way on, down the limb (or up, for the head), so every ball can be
+    // dragged where it belongs.
+    const double least = std::max(0.02 * h, 1e-2);
+    for (int b = Chest; b < kBoneCount; ++b) {
+        Vec3& end = p[std::size_t(kBones[b].end)];
+        const Vec3& from = p[std::size_t(kBones[b].origin)];
+        if (length(sub(end, from)) >= least)
+            continue;
+        Vec3 way{0, 0, -1};
+        if (b == Chest || b == HeadBone)
+            way = {0, 0, 1};
+        else if (b == LFoot || b == RFoot)
+            way = {0, -1, 0};
+        else if (kBones[b].parent >= Chest) {
+            const BoneInfo& up = kBones[kBones[b].parent];
+            if (up.origin >= 0)
+                way = unit(sub(from, p[std::size_t(up.origin)]), {0, 0, -1});
+        }
+        end = add(from, mul(way, least));
+    }
+    if (length(sub(at(p, Point::LeftHip), at(p, Point::RightHip))) < least) {
+        p[std::size_t(Point::LeftHip)][0] += least / 2.0;
+        p[std::size_t(Point::RightHip)][0] -= least / 2.0;
+    }
+
     PosedFinish f;
     f.points = p;
     f.angles = restAngles(p);

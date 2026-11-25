@@ -13831,11 +13831,19 @@ void MainWindow::cutPartsDrag(const QVector3D& origin, const QVector3D& directio
         const double middle = mode.points[std::size_t(rig::Point::Waist)][0];
         mode.points[std::size_t(other)] = {2 * middle - target[0], target[1], target[2]};
     }
-    PosedFinish f;
-    f.points = mode.points;
-    try {
-        rig::check(f);
-    } catch (const std::exception&) {
+    // A move that puts two balls on top of each other is refused; but one away from a
+    // skeleton that already had that is fine (so a bad fit can always be put right).
+    const auto sound = [](const rig::Points& points) {
+        PosedFinish f;
+        f.points = points;
+        try {
+            rig::check(f);
+            return true;
+        } catch (const std::exception&) {
+            return false;
+        }
+    };
+    if (!sound(mode.points) && sound(before)) {
         mode.points = before;
         return;
     }
@@ -16446,17 +16454,25 @@ void MainWindow::poseFigureDrag(const QVector3D& origin, const QVector3D& direct
     const auto point = rig::Point(mode.picked);
     if (!m_poseFigurePanel->posing()) {
         // Fitting: the ball goes where the mouse is (and its partner the same way, mirrored).
-        const Vec3 old = mode.finish.points[std::size_t(mode.picked)];
+        const PosedFinish before = mode.finish;
         mode.finish.points[std::size_t(mode.picked)] = target;
         const rig::Point other = rig::mirrored(point);
         if (m_poseFigurePanel->mirror() && other != point) {
             const double middle = mode.finish.points[std::size_t(rig::Point::Waist)][0];
             mode.finish.points[std::size_t(other)] = {2 * middle - target[0], target[1], target[2]};
         }
-        try {
-            rig::check(mode.finish);
-        } catch (const std::exception&) {
-            mode.finish.points[std::size_t(mode.picked)] = old;  // not on top of another
+        // Not on top of another ball (unless the skeleton already had that: the move may be
+        // putting it right).
+        const auto sound = [](const PosedFinish& f) {
+            try {
+                rig::check(f);
+                return true;
+            } catch (const std::exception&) {
+                return false;
+            }
+        };
+        if (!sound(mode.finish) && sound(before)) {
+            mode.finish = before;
             return;
         }
         if (!mode.posedYet)
