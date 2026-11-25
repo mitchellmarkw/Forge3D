@@ -2003,3 +2003,24 @@ and sharp across edges.
   lowest free). Every new shape and step is named through it.
 - Cut into Parts' joint line is worked out from `limbcut::inPlaceBall` / `inPlaceHinge` when Print in place is on,
   and the panel's in-place box and clearance send `changed` so it follows them.
+
+## Figure styles (slice 105, 0.113.0)
+
+- `Proportion` gains `LimbThickness` ("limbs") and `BodyWidth` ("body"); `kProportionCount` is 9.
+  `proportionMaps` builds each bone's linear part as round·I + (along − round)·aaᵀ + (across − 1)·round·ssᵀ: the
+  limbs thicker all round their bone, the chest and hips wider all round the line up through the waist (the
+  shoulders' extra width on top, across).
+- `PosedFinish::blocky` (0 to 1): after the proportions, each point's offset across each of its bones (in a frame
+  with u to the front where it can be) is pushed out to the square round its circle (× length / larger of its two
+  sideways parts), blended by the skin weights, then the normals again. `rig::shaped` is proportioned or blocky.
+  Saved as "blocky" only when it isn't 0 (file format 54).
+- `figurestyle::look(style, points, strength)`: each style's shares raised to the strength, rounded to whole
+  percent, kept in range; a caricature multiplies them by the figure's own measured lengths against the figure
+  guide's (from its skeleton's points), clamped to 0.5–2; Blocky sets blocky = strength.
+- `figurestyle::separateHead`: plans the neck cut, moves it down to where the neck is narrowest (median ring
+  radius, slice by slice down to 70% of the way to the shoulders' line), then in one macro Cut into Parts at the
+  neck (`limbcut::Choice::shift`, new) and two steps: a rounded rod socket (spring + 2·fit wide, 1.5 spring deep)
+  subtracted from the head, a post (spring − 2·wire − 0.1 wide, 1.2 spring tall) merged onto the neck.
+- App: Pose Figure's 4. Style stage (style, strength, blocky, the bobblehead's spring, remembered under
+  poseFigure/...); the Figure Style button opens Pose Figure on it (editing the tip if it's a Posed step). Apply
+  with the head cut off is one undo step with the pose; the step is named for the style.

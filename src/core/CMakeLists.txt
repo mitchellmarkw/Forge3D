@@ -73,6 +73,7 @@ add_library(forge_core STATIC
     src/MakePart.cpp
     src/Lasso.cpp
     src/Accessory.cpp
+    src/FigureStyle.cpp
     src/Reshape.cpp
     src/PrintOrient.cpp
     src/PrintSplit.cpp

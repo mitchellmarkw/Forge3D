@@ -511,37 +511,50 @@ std::array<Transform, kBoneCount> proportionMaps(const PosedFinish& f)
 {
     const Points& p = f.points;
     const auto& k = f.proportions;
-    const auto stretch = [](const Vec3& origin, const Vec3& to, const Vec3& axis, double along, const Vec3& side,
-                            double across) {
-        // x' = to + S (x - origin), S = I + (along-1) a a^T + (across-1) s s^T
+    using M3 = std::array<std::array<double, 3>, 3>;
+    // x' = to + L (x - origin)
+    const auto affine = [](const Vec3& origin, const Vec3& to, const M3& L) {
         Transform t;
         for (int r = 0; r < 3; ++r) {
-            for (int c = 0; c < 3; ++c)
-                t.m[std::size_t(r)][std::size_t(c)] = (r == c ? 1.0 : 0.0) +
-                                                      (along - 1.0) * axis[std::size_t(r)] * axis[std::size_t(c)] +
-                                                      (across - 1.0) * side[std::size_t(r)] * side[std::size_t(c)];
             double o = 0;
-            for (int c = 0; c < 3; ++c)
-                o += t.m[std::size_t(r)][std::size_t(c)] * origin[std::size_t(c)];
+            for (int c = 0; c < 3; ++c) {
+                t.m[std::size_t(r)][std::size_t(c)] = L[std::size_t(r)][std::size_t(c)];
+                o += L[std::size_t(r)][std::size_t(c)] * origin[std::size_t(c)];
+            }
             t.m[std::size_t(r)][3] = to[std::size_t(r)] - o;
         }
         return t;
+    };
+    // L = round I + (along - round) a a^T + (across - 1) round s s^T: `along` along a,
+    // `round` all round it, and along s (square to a) `across` times more.
+    const auto scaled = [](const Vec3& a, double along, double round, const Vec3& s, double across) {
+        M3 L{};
+        for (int r = 0; r < 3; ++r)
+            for (int c = 0; c < 3; ++c)
+                L[std::size_t(r)][std::size_t(c)] =
+                    (r == c ? round : 0.0) + (along - round) * a[std::size_t(r)] * a[std::size_t(c)] +
+                    (across - 1.0) * round * s[std::size_t(r)] * s[std::size_t(c)];
+        return L;
     };
     const Vec3 none{0, 0, 0};
     const auto unitOr = [](const Vec3& v, const Vec3& fallback) {
         const double l = length(v);
         return l > 1e-9 ? mul(v, 1.0 / l) : fallback;
     };
+    const double body = k[std::size_t(Proportion::BodyWidth)];
+    const double limbs = k[std::size_t(Proportion::LimbThickness)];
+    const Vec3 waist = at(p, Point::Waist);
+    const Vec3 up = unitOr(sub(at(p, Point::Neck), waist), {0, 0, 1});
     std::array<Transform, kBoneCount> m;
-    m[Hips] = Transform{};
+    // The hips wider all round the line up through the waist.
+    m[Hips] = body == 1.0 ? Transform{} : affine(waist, waist, scaled(up, 1.0, body, none, 1.0));
     {
-        // The torso longer from the waist up; the shoulders wider across it.
-        const Vec3 waist = at(p, Point::Waist);
-        const Vec3 up = unitOr(sub(at(p, Point::Neck), waist), {0, 0, 1});
+        // The torso longer from the waist up, wider all round; the shoulders wider across.
         Vec3 across = sub(at(p, Point::LeftShoulder), at(p, Point::RightShoulder));
         across = unitOr(sub(across, mul(up, dot(across, up))), {1, 0, 0});
-        m[Chest] = stretch(waist, waist, up, k[std::size_t(Proportion::Torso)], across,
-                           k[std::size_t(Proportion::Shoulders)]);
+        m[Chest] = affine(waist, waist,
+                          scaled(up, k[std::size_t(Proportion::Torso)], body, across,
+                                 k[std::size_t(Proportion::Shoulders)]));
     }
     const auto origin = [&](int b) { return p[std::size_t(kBones[b].origin)]; };
     const auto axisOf = [&](int b) {
@@ -550,7 +563,7 @@ std::array<Transform, kBoneCount> proportionMaps(const PosedFinish& f)
     for (int b = HeadBone; b < kBoneCount; ++b) {
         const Vec3 from = origin(b);
         const Vec3 to = m[std::size_t(kBones[b].parent)].apply(from);  // where the parent took it
-        double along = 1.0, all = 1.0;
+        double along = 1.0, round = 1.0, all = 0.0;
         switch (b) {
         case HeadBone: all = k[std::size_t(Proportion::Head)]; break;
         case LHandBone:
@@ -560,29 +573,65 @@ std::array<Transform, kBoneCount> proportionMaps(const PosedFinish& f)
         case LUpperArm:
         case RUpperArm:
         case LForearm:
-        case RForearm: along = k[std::size_t(Proportion::Arms)]; break;
-        default: along = k[std::size_t(Proportion::Legs)]; break;  // thighs and shins
+        case RForearm:
+            along = k[std::size_t(Proportion::Arms)];
+            round = limbs;
+            break;
+        default:  // thighs and shins
+            along = k[std::size_t(Proportion::Legs)];
+            round = limbs;
+            break;
         }
-        if (all != 1.0) {
-            Transform t;
-            for (int r = 0; r < 3; ++r) {
-                for (int c = 0; c < 3; ++c)
-                    t.m[std::size_t(r)][std::size_t(c)] = r == c ? all : 0.0;
-                t.m[std::size_t(r)][3] = to[std::size_t(r)] - all * from[std::size_t(r)];
-            }
-            m[std::size_t(b)] = t;
-        } else {
-            m[std::size_t(b)] = stretch(from, to, axisOf(b), along, none, 1.0);
-        }
+        if (all > 0.0)
+            m[std::size_t(b)] = affine(from, to, scaled(axisOf(b), all, all, none, 1.0));
+        else
+            m[std::size_t(b)] = affine(from, to, scaled(axisOf(b), along, round, none, 1.0));
     }
     return m;
 }
+
+namespace {
+
+// Each part's round sides squared off about its bone (`pts` the skeleton as proportioned):
+// a point's offset from the bone, seen across it, goes out to the square round the circle
+// it's on (by length / the larger of its two sideways parts), its bones' moves blended by
+// the skin weights, `amount` of the way.
+struct BoneFrame {
+    Vec3 origin, axis, u, v;
+};
+std::array<BoneFrame, kBoneCount> boneFrames(const Points& pts)
+{
+    std::array<BoneFrame, kBoneCount> out;
+    for (int b = 0; b < kBoneCount; ++b) {
+        Vec3 o, e;
+        if (b == Hips) {
+            o = mul(add(at(pts, Point::LeftHip), at(pts, Point::RightHip)), 0.5);
+            e = at(pts, Point::Waist);
+        } else {
+            o = pts[std::size_t(kBones[b].origin)];
+            e = pts[std::size_t(kBones[b].end)];
+        }
+        Vec3 a = sub(e, o);
+        const double l = length(a);
+        a = l > 1e-9 ? mul(a, 1.0 / l) : Vec3{0, 0, 1};
+        // Square to the front (the figure faces -Y) where it can, else to up.
+        Vec3 u = sub(Vec3{0, 1, 0}, mul(a, a[1]));
+        if (length(u) < 0.3)
+            u = sub(Vec3{0, 0, 1}, mul(a, a[2]));
+        u = mul(u, 1.0 / length(u));
+        out[std::size_t(b)] = {o, a, u, cross(a, u)};
+    }
+    return out;
+}
+
+}  // namespace
 
 }  // namespace
 
 const char* key(Proportion p)
 {
-    static constexpr const char* keys[kProportionCount] = {"head", "shoulders", "torso", "arms", "hands", "legs", "feet"};
+    static constexpr const char* keys[kProportionCount] = {"head", "shoulders", "torso", "arms", "hands",
+                                                         "legs", "feet",      "limbs", "body"};
     return keys[std::size_t(p)];
 }
 
@@ -590,19 +639,21 @@ const char* title(Proportion p)
 {
     static constexpr const char* titles[kProportionCount] = {"Head size",   "Shoulder width", "Torso length",
                                                              "Arm length",  "Hand size",      "Leg length",
-                                                             "Foot size"};
+                                                             "Foot size",   "Limb thickness", "Body width"};
     return titles[std::size_t(p)];
 }
 
-Proportions asMade() { return {1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0}; }
-// head, shoulders, torso, arms, hands, legs, feet
-Proportions heroic() { return {0.9, 1.15, 1.0, 1.08, 1.1, 1.12, 1.05}; }
-Proportions chibi() { return {1.8, 0.85, 0.75, 0.7, 1.2, 0.6, 1.2}; }
+Proportions asMade() { return {1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0}; }
+// head, shoulders, torso, arms, hands, legs, feet, limbs, body
+Proportions heroic() { return {0.9, 1.15, 1.0, 1.08, 1.1, 1.12, 1.05, 1.05, 1.0}; }
+Proportions chibi() { return {1.8, 0.85, 0.75, 0.7, 1.2, 0.6, 1.2, 1.15, 1.1}; }
 
 bool proportioned(const PosedFinish& f)
 {
     return std::any_of(f.proportions.begin(), f.proportions.end(), [](double v) { return std::abs(v - 1.0) > 1e-9; });
 }
+
+bool shaped(const PosedFinish& f) { return proportioned(f) || f.blocky > 1e-9; }
 
 Points proportionedPoints(const PosedFinish& f)
 {
@@ -634,6 +685,8 @@ void check(const PosedFinish& f)
     for (int i = 0; i < kProportionCount; ++i)
         if (!(f.proportions[std::size_t(i)] >= kLeastProportion && f.proportions[std::size_t(i)] <= kMostProportion))
             throw std::invalid_argument(std::string(title(Proportion(i))) + " must be from 30% to 300%.");
+    if (!(f.blocky >= 0.0 && f.blocky <= 1.0))
+        throw std::invalid_argument("How blocky it is must be from 0% to 100%.");
 }
 
 std::string describe(const PosedFinish& f)
@@ -658,6 +711,8 @@ std::string describe(const PosedFinish& f)
         s << ", feet flat";
     if (proportioned(f))
         s << ", new proportions";
+    if (f.blocky > 1e-9)
+        s << ", blocky";
     return s.str();
 }
 
@@ -1098,10 +1153,45 @@ Skin::Posed Skin::posed(const PosedFinish& f) const
                     reshaped.positions[3 * i + std::size_t(c)] = float(y[std::size_t(c)]);
             }
         });
-        reshaped.normals = smoothNormals(reshaped);
+    } else if (shaped(f)) {
+        reshaped.indices = m->rest.indices;
+        reshaped.positions = m->rest.positions;
     }
-    const auto& P = proportioned(f) ? reshaped.positions : m->rest.positions;
-    const auto& N = proportioned(f) ? reshaped.normals : m->rest.normals;
+    if (f.blocky > 1e-9) {
+        // Then squared off about the bones where they now are.
+        const auto frames = boneFrames(proportionedPoints(f));
+        const double amount = f.blocky;
+        auto& X = reshaped.positions;
+        inParallel(n, [&](std::size_t from, std::size_t to) {
+            for (std::size_t i = from; i < to; ++i) {
+                const Weights& w = m->weights[i];
+                const Vec3 x{X[3 * i], X[3 * i + 1], X[3 * i + 2]};
+                Vec3 move{0, 0, 0};
+                double total = 0;
+                for (int k = 0; k < kInfluences; ++k) {
+                    const double wt = w.weight[std::size_t(k)];
+                    if (wt <= 0)
+                        continue;
+                    const BoneFrame& fr = frames[std::size_t(w.bone[std::size_t(k)])];
+                    const Vec3 d = sub(x, fr.origin);
+                    const Vec3 r = sub(d, mul(fr.axis, dot(d, fr.axis)));
+                    const double ru = std::abs(dot(r, fr.u)), rv = std::abs(dot(r, fr.v));
+                    const double big = std::max(ru, rv);
+                    if (big > 1e-9)
+                        move = add(move, mul(r, wt * (length(r) / big - 1.0)));
+                    total += wt;
+                }
+                if (total > 0)
+                    move = mul(move, amount / total);
+                for (int c = 0; c < 3; ++c)
+                    X[3 * i + std::size_t(c)] = float(x[std::size_t(c)] + move[std::size_t(c)]);
+            }
+        });
+    }
+    if (shaped(f))
+        reshaped.normals = smoothNormals(reshaped);
+    const auto& P = shaped(f) ? reshaped.positions : m->rest.positions;
+    const auto& N = shaped(f) ? reshaped.normals : m->rest.normals;
     inParallel(n, [&](std::size_t from, std::size_t to) {
         for (std::size_t i = from; i < to; ++i) {
             const Weights& w = m->weights[i];

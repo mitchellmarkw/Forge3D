@@ -538,6 +538,8 @@ json bodyToJson(const Body& b)
                     sizes[rig::key(rig::Proportion(i))] = po->proportions[std::size_t(i)];
                 j["posed"]["proportions"] = std::move(sizes);
             }
+            if (po->blocky > 0)  // left out when it isn't, as files before 54
+                j["posed"]["blocky"] = po->blocky;
         }
         if (const auto& ho = b.boolean->hollow) {
             json holes = json::array();
@@ -1292,6 +1294,7 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
             if (const auto pr = pj->find("proportions"); pr != pj->end() && pr->is_object())
                 for (int i = 0; i < kProportionCount; ++i)
                     po.proportions[std::size_t(i)] = pr->value(rig::key(rig::Proportion(i)), 1.0);
+            po.blocky = pj->value("blocky", 0.0);
             try {
                 rig::check(po);
             } catch (const std::exception& e) {

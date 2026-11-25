@@ -9,6 +9,7 @@
 #include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QFormLayout>
+#include <QGridLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -64,16 +65,19 @@ PoseFigurePanel::PoseFigurePanel(QWidget* parent) : QWidget(parent)
                                  "on a figure standing straight, facing the front, with its arms away from its "
                                  "sides (an A or T pose).")));
 
-    // The two stages.
-    auto* stages = new QHBoxLayout;
+    // The stages, two to a row (so their names fit).
+    auto* stages = new QGridLayout;
     m_fitStage = new QPushButton(tr("1. Fit the Skeleton"));
     m_poseStage = new QPushButton(tr("2. Pose"));
     m_sizeStage = new QPushButton(tr("3. Proportions"));
+    m_styleStage = new QPushButton(tr("4. Style"));
     auto* group = new QButtonGroup(this);
-    for (QPushButton* b : {m_fitStage, m_poseStage, m_sizeStage}) {
+    int cell = 0;
+    for (QPushButton* b : {m_fitStage, m_poseStage, m_sizeStage, m_styleStage}) {
         b->setCheckable(true);
         group->addButton(b);
-        stages->addWidget(b);
+        stages->addWidget(b, cell / 2, cell % 2);
+        ++cell;
     }
     group->setExclusive(true);
     layout->addLayout(stages);
@@ -165,6 +169,80 @@ PoseFigurePanel::PoseFigurePanel(QWidget* parent) : QWidget(parent)
     layout->addWidget(m_sizeBox);
     m_sizeBox->hide();
 
+    // Figure styles.
+    m_styleBox = new QGroupBox(tr("Style"));
+    auto* style = new QVBoxLayout(m_styleBox);
+    style->addWidget(wrapped(tr("Turn the figure into a toy style in one go. A style sets the proportions (fine-tune "
+                                "them in 3. Proportions); the pose goes on from it.")));
+    m_style = new QComboBox;
+    m_style->addItem(tr("None (as it was made)"));
+    for (int s = 0; s < figurestyle::kStyleCount; ++s)
+        m_style->addItem(tr(figurestyle::title(figurestyle::Style(s))));
+    m_style->setToolTip(tr("The look to give the figure"));
+    style->addWidget(labelled(tr("Figure style:"), m_style));
+    m_styleBlurb = wrapped({});
+    style->addWidget(m_styleBlurb);
+    const auto sliderRow = [](QSlider*& slider, QSpinBox*& box, int most) {
+        auto* row = new QWidget;
+        auto* line = new QHBoxLayout(row);
+        line->setContentsMargins(0, 0, 0, 0);
+        slider = new QSlider(Qt::Horizontal);
+        slider->setRange(0, most);
+        slider->setSingleStep(5);
+        slider->setPageStep(10);
+        box = new QSpinBox;
+        box->setRange(0, most);
+        box->setSingleStep(5);
+        box->setSuffix(QStringLiteral(" %"));
+        box->setKeyboardTracking(false);
+        line->addWidget(slider, 1);
+        line->addWidget(box);
+        return row;
+    };
+    auto* styleForm = new QFormLayout;
+    styleForm->addRow(tr("Strength:"), sliderRow(m_strengthSlider, m_strength, int(figurestyle::kMostStrength * 100)));
+    m_strength->setToolTip(tr("How far to take the style: 100% is the style itself, less is nearer the figure as "
+                              "made, more goes further"));
+    styleForm->addRow(tr("Blocky:"), sliderRow(m_blockySlider, m_blocky, 100));
+    m_blocky->setToolTip(tr("How square the figure's round parts are made, about each bone: 0% as they are, 100% "
+                            "squared off"));
+    style->addLayout(styleForm);
+    m_bobbleBox = new QGroupBox(tr("Bobblehead spring"));
+    auto* bobble = new QVBoxLayout(m_bobbleBox);
+    m_separate = new QCheckBox(tr("Cut the head off to sit on a spring"));
+    m_separate->setToolTip(tr("On Apply, the head is cut off at the neck as a part of its own, with a socket in it "
+                              "for a spring, and a post on the neck for the spring's other end"));
+    bobble->addWidget(m_separate);
+    auto* springForm = new QFormLayout;
+    m_springSize = new QDoubleSpinBox;
+    m_springSize->setRange(figurestyle::kLeastSpring, figurestyle::kMostSpring);
+    m_springSize->setDecimals(1);
+    m_springSize->setSingleStep(0.5);
+    m_springSize->setSuffix(tr(" mm"));
+    m_springSize->setValue(5.0);
+    m_springSize->setToolTip(tr("How wide the spring is, outside (measure the spring you'll use)"));
+    springForm->addRow(tr("Spring diameter:"), m_springSize);
+    m_springWire = new QDoubleSpinBox;
+    m_springWire->setRange(0.1, 5.0);
+    m_springWire->setDecimals(2);
+    m_springWire->setSingleStep(0.05);
+    m_springWire->setSuffix(tr(" mm"));
+    m_springWire->setValue(0.5);
+    m_springWire->setToolTip(tr("How thick the spring's wire is: the post fits inside the spring"));
+    springForm->addRow(tr("Wire thickness:"), m_springWire);
+    m_springFit = new QDoubleSpinBox;
+    m_springFit->setRange(0.0, 1.0);
+    m_springFit->setDecimals(2);
+    m_springFit->setSingleStep(0.05);
+    m_springFit->setSuffix(tr(" mm"));
+    m_springFit->setValue(0.2);
+    m_springFit->setToolTip(tr("Room left round the spring in the head's socket"));
+    springForm->addRow(tr("Fit:"), m_springFit);
+    bobble->addLayout(springForm);
+    style->addWidget(m_bobbleBox);
+    layout->addWidget(m_styleBox);
+    m_styleBox->hide();
+
     m_status = new QLabel;
     m_status->setWordWrap(true);
     m_status->hide();
@@ -191,6 +269,7 @@ PoseFigurePanel::PoseFigurePanel(QWidget* parent) : QWidget(parent)
         m_fitBox->setVisible(!posing);
         m_poseBox->setVisible(b == m_poseStage);
         m_sizeBox->setVisible(b == m_sizeStage);
+        m_styleBox->setVisible(b == m_styleStage);
         if (!m_loading)
             emit stageChanged(posing);
     });
@@ -255,6 +334,55 @@ PoseFigurePanel::PoseFigurePanel(QWidget* parent) : QWidget(parent)
         m_loading = false;
         emit proportionsChanged();
     });
+    {
+        const auto s = preferences();
+        m_strength->setValue(s.value(QStringLiteral("poseFigure/styleStrength"), 100).toInt());
+        m_strengthSlider->setValue(m_strength->value());
+        m_separate->setChecked(s.value(QStringLiteral("poseFigure/separateHead"), true).toBool());
+        m_springSize->setValue(s.value(QStringLiteral("poseFigure/springSize"), 5.0).toDouble());
+        m_springWire->setValue(s.value(QStringLiteral("poseFigure/springWire"), 0.5).toDouble());
+        m_springFit->setValue(s.value(QStringLiteral("poseFigure/springFit"), 0.2).toDouble());
+    }
+    connect(m_style, &QComboBox::currentIndexChanged, this, [this] { showStyleOptions(); });
+    connect(m_style, &QComboBox::activated, this, [this] { useStyle(); });  // None again: back to as made
+    connect(m_strengthSlider, &QSlider::valueChanged, this, [this](int v) {
+        const QSignalBlocker block(m_strength);
+        m_strength->setValue(v);
+        if (!m_loading && !m_strengthSlider->isSliderDown())
+            useStyle();
+    });
+    connect(m_strengthSlider, &QSlider::sliderReleased, this, [this] { useStyle(); });
+    connect(m_strength, &QSpinBox::valueChanged, this, [this](int v) {
+        const QSignalBlocker block(m_strengthSlider);
+        m_strengthSlider->setValue(v);
+        preferences().setValue(QStringLiteral("poseFigure/styleStrength"), v);
+        if (!m_loading)
+            useStyle();
+    });
+    connect(m_blockySlider, &QSlider::valueChanged, this, [this](int v) {
+        const QSignalBlocker block(m_blocky);
+        m_blocky->setValue(v);
+        if (!m_loading && !m_blockySlider->isSliderDown())
+            emit proportionsChanged();
+    });
+    connect(m_blockySlider, &QSlider::sliderReleased, this, [this] { emit proportionsChanged(); });
+    connect(m_blocky, &QSpinBox::valueChanged, this, [this](int v) {
+        const QSignalBlocker block(m_blockySlider);
+        m_blockySlider->setValue(v);
+        if (!m_loading)
+            emit proportionsChanged();
+    });
+    connect(m_separate, &QCheckBox::toggled, this, [this](bool on) {
+        preferences().setValue(QStringLiteral("poseFigure/separateHead"), on);
+        showStyleOptions();
+    });
+    connect(m_springSize, &QDoubleSpinBox::valueChanged, this,
+            [](double v) { preferences().setValue(QStringLiteral("poseFigure/springSize"), v); });
+    connect(m_springWire, &QDoubleSpinBox::valueChanged, this,
+            [](double v) { preferences().setValue(QStringLiteral("poseFigure/springWire"), v); });
+    connect(m_springFit, &QDoubleSpinBox::valueChanged, this,
+            [](double v) { preferences().setValue(QStringLiteral("poseFigure/springFit"), v); });
+    showStyleOptions();
     connect(apply, &QPushButton::clicked, this, &PoseFigurePanel::applyRequested);
     connect(cancel, &QPushButton::clicked, this, &PoseFigurePanel::cancelRequested);
 }
@@ -262,6 +390,69 @@ PoseFigurePanel::PoseFigurePanel(QWidget* parent) : QWidget(parent)
 void PoseFigurePanel::showProportions()
 {
     m_sizeStage->setChecked(true);
+}
+
+void PoseFigurePanel::showStyle()
+{
+    m_styleStage->setChecked(true);
+}
+
+double PoseFigurePanel::blocky() const
+{
+    return m_blocky->value() / 100.0;
+}
+
+int PoseFigurePanel::style() const
+{
+    return m_style->currentIndex() - 1;
+}
+
+bool PoseFigurePanel::separateHead() const
+{
+    return style() == int(figurestyle::Style::Bobblehead) && m_separate->isChecked();
+}
+
+figurestyle::Spring PoseFigurePanel::spring() const
+{
+    figurestyle::Spring s;
+    s.diameter = m_springSize->value();
+    s.wire = m_springWire->value();
+    s.fit = m_springFit->value();
+    return s;
+}
+
+void PoseFigurePanel::showStyleOptions()
+{
+    const int s = style();
+    m_styleBlurb->setText(s < 0 ? (rig::shaped(m_f) ? tr("Proportions of your own: choose a style to replace them, "
+                                                         "or None to go back to the figure as made.")
+                                                      : tr("The figure's own proportions; nothing squared off."))
+                                : tr(figurestyle::blurb(figurestyle::Style(s))));
+    m_strength->setEnabled(s >= 0);
+    m_strengthSlider->setEnabled(s >= 0);
+    m_bobbleBox->setVisible(s == int(figurestyle::Style::Bobblehead));
+    for (QWidget* w : {static_cast<QWidget*>(m_springSize), static_cast<QWidget*>(m_springWire),
+                       static_cast<QWidget*>(m_springFit)})
+        w->setEnabled(m_separate->isChecked());
+}
+
+// The style's proportions and blockiness, from the skeleton as fitted.
+void PoseFigurePanel::useStyle()
+{
+    const int s = style();
+    const figurestyle::Look look = s < 0 ? figurestyle::Look{}
+                                         : figurestyle::look(figurestyle::Style(s), m_f.points, m_strength->value() / 100.0);
+    m_loading = true;
+    for (int k = 0; k < kProportionCount; ++k) {
+        const int v = int(std::lround(look.proportions[std::size_t(k)] * 100));
+        m_sizeSlider[k]->setValue(v);
+        m_sizePercent[k]->setValue(v);
+    }
+    m_blockySlider->setValue(int(std::lround(look.blocky * 100)));
+    m_blocky->setValue(int(std::lround(look.blocky * 100)));
+    m_loading = false;
+    showSizePreset();
+    emit proportionsChanged();
 }
 
 rig::Proportions PoseFigurePanel::proportions() const
@@ -301,9 +492,25 @@ void PoseFigurePanel::start(const QString& title, bool editing, const PosedFinis
     m_fitBox->setVisible(!editing);
     m_poseBox->setVisible(editing);
     m_sizeBox->setVisible(false);
+    m_styleBox->setVisible(false);
+    m_style->setCurrentIndex(0);  // none chosen yet (a style only sets the numbers)
     m_joint->setCurrentIndex(int(rig::Joint::LeftElbow));
     m_loading = false;
     setFinish(f);
+    // A step already in a style (at the strength last used) shows it.
+    for (int s = 0; s < figurestyle::kStyleCount; ++s) {
+        const figurestyle::Look look = figurestyle::look(figurestyle::Style(s), f.points, m_strength->value() / 100.0);
+        bool same = std::abs(look.blocky - f.blocky) < 0.005;
+        for (int k = 0; k < kProportionCount && same; ++k)
+            same = std::abs(look.proportions[std::size_t(k)] - f.proportions[std::size_t(k)]) < 0.005;
+        if (same && rig::shaped(f)) {
+            m_loading = true;
+            m_style->setCurrentIndex(s + 1);
+            m_loading = false;
+            break;
+        }
+    }
+    showStyleOptions();
     setStatus({}, false);
 }
 
@@ -319,6 +526,8 @@ void PoseFigurePanel::setFinish(const PosedFinish& f)
         m_sizeSlider[i]->setValue(v);
         m_sizePercent[i]->setValue(v);
     }
+    m_blockySlider->setValue(int(std::lround(f.blocky * 100)));
+    m_blocky->setValue(int(std::lround(f.blocky * 100)));
     showSizePreset();
     // Which pose it is, if it's one in the list.
     const auto same = [&](const rig::Angles& a) {

@@ -748,8 +748,9 @@ std::string toString(BooleanOp op);
 // angles, 0 standing straight).
 inline constexpr int kRigPointCount = 19;
 inline constexpr int kRigJointCount = 14;
-// Proportions (slice 101): head, shoulders, torso, arms, hands, legs, feet (rig::Proportion).
-inline constexpr int kProportionCount = 7;
+// Proportions (slice 101): head, shoulders, torso, arms, hands, legs, feet; limb thickness
+// and body width (slice 105) (rig::Proportion).
+inline constexpr int kProportionCount = 9;
 struct PosedFinish {
     std::array<std::array<double, 3>, kRigPointCount> points{};
     std::array<std::array<double, 2>, kRigJointCount> angles{};
@@ -757,8 +758,12 @@ struct PosedFinish {
     bool feetFlat = true;   // the feet keep their angle to the ground (ankle angles unused)
     bool onGround = true;   // moved up or down so it stands where it stood
     // How much bigger each part is than as made (1: as made), before it's posed: the head
-    // and hands and feet all round, the shoulders wider, the torso, arms and legs longer.
-    std::array<double, kProportionCount> proportions{1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0};
+    // and hands and feet all round, the shoulders wider, the torso, arms and legs longer,
+    // the arms and legs thicker, the torso and hips wider all round.
+    std::array<double, kProportionCount> proportions{1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0};
+    // How square it's made (slice 105): 0 as it is, 1 each part's round sides squared off
+    // about its bone (a blocky, toy-like figure). After the proportions, before the pose.
+    double blocky = 0.0;
     bool operator==(const PosedFinish&) const = default;
 };
 

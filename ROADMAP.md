@@ -133,7 +133,9 @@ Gate to Phase 2: a new user prints a customised part within 10 minutes.
 | 101 | Proportions: head, shoulders, torso, arms, hands, legs and feet sliders for a figure; Heroic and Chibi | Done (0.109.0) |
 | 102 | Reshape box: drag handles on a box round any shape to bend it smoothly (2, 3 or 4 a side, mirrored) | Done (0.110.0) |
 | 103 | Print-in-place joints in Cut into Parts: captive balls, hinges with pins built on, a clearance all round | Done (0.111.0) |
-| 104 | Rough edges: names without a needless " 1"; Cut into Parts' joint line shows the print-in-place clearance | **Delivered for testing** |
+| 104 | Rough edges: names without a needless " 1"; Cut into Parts' joint line shows the print-in-place clearance | Done (0.112.0) |
+| 105 | Figure styles: bobblehead (head on a spring), vinyl collectible, caricature, blocky; limb thickness and body width | **Delivered for testing** |
+| 106 | Brick figure: a new body of blocks, wearing the figure's own head | Planned |
 
 Slices 39–41 close the gaps found in the [Phase 1 gate review](docs/PHASE1_GATE.md).
 
