@@ -156,27 +156,6 @@ Mesh onPlate(const Document& doc, ObjectId id)
     return surface;
 }
 
-// How thick the neck is round `p` across `n`: the middle of the surface's distances from
-// the line, in a thin slice (no further out than `near`); 0 if too little is there.
-double ringAt(const Mesh& surface, const Vec3& p, const Vec3& n, double near)
-{
-    std::vector<double> ring;
-    for (std::size_t i = 0; i + 2 < surface.positions.size(); i += 3) {
-        const Vec3 e{surface.positions[i] - p[0], surface.positions[i + 1] - p[1], surface.positions[i + 2] - p[2]};
-        const double along = e[0] * n[0] + e[1] * n[1] + e[2] * n[2];
-        if (std::abs(along) > 0.75)
-            continue;
-        const Vec3 side{e[0] - along * n[0], e[1] - along * n[1], e[2] - along * n[2]};
-        const double r = std::sqrt(side[0] * side[0] + side[1] * side[1] + side[2] * side[2]);
-        if (r < near)
-            ring.push_back(r);
-    }
-    if (ring.size() < 8)
-        return 0.0;
-    std::nth_element(ring.begin(), ring.begin() + std::ptrdiff_t(ring.size() / 2), ring.end());
-    return ring[ring.size() / 2];
-}
-
 // A closed surface merged onto, or taken out of, a piece: the piece's next step, named.
 ObjectId withPart(CommandStack& stack, Document& doc, ObjectId piece, const Mesh& mesh, const std::string& partName,
                   BooleanOp op, const std::string& name)
@@ -227,6 +206,61 @@ Bobble springIn(CommandStack& stack, Document& doc, ObjectId head, ObjectId body
 
 }  // namespace
 
+namespace {
+
+// A slice across the line through `p` along `n`, `s` along it: the surface's points in it
+// no further than `near` from the line; their middle (in the slice) and how far they are
+// from it, typically. Radius 0 if too little is there.
+struct Slice {
+    Vec3 centre{0, 0, 0};
+    double radius = 0.0;
+};
+Slice sliceAt(const Mesh& surface, const Vec3& p, const Vec3& n, double s, double near)
+{
+    // Where the triangles' edges cross the slice's plane (the surface's outline there).
+    const Vec3 at = add(p, mul(n, s));
+    const auto& P = surface.positions;
+    const auto height = [&](std::uint32_t v) {
+        return (P[3 * v] - at[0]) * n[0] + (P[3 * v + 1] - at[1]) * n[1] + (P[3 * v + 2] - at[2]) * n[2];
+    };
+    std::vector<Vec3> in;
+    const auto& I = surface.indices;
+    for (std::size_t t = 0; t + 2 < I.size(); t += 3)
+        for (int k = 0; k < 3; ++k) {
+            const std::uint32_t va = I[t + std::size_t(k)], vb = I[t + std::size_t((k + 1) % 3)];
+            if (va > vb)
+                continue;  // each edge once (shared edges come both ways round)
+            const double ha = height(va), hb = height(vb);
+            if ((ha > 0) == (hb > 0))
+                continue;
+            const double f = ha / (ha - hb);
+            Vec3 e;
+            for (int c = 0; c < 3; ++c)
+                e[std::size_t(c)] = P[3 * va + std::size_t(c)] + f * (P[3 * vb + std::size_t(c)] - P[3 * va + std::size_t(c)]) -
+                                    at[std::size_t(c)];
+            if (e[0] * e[0] + e[1] * e[1] + e[2] * e[2] < near * near)
+                in.push_back(e);
+        }
+    Slice out;
+    if (in.size() < 8)
+        return out;
+    Vec3 c{0, 0, 0};
+    for (const Vec3& v : in)
+        c = add(c, v);
+    c = mul(c, 1.0 / double(in.size()));
+    std::vector<double> r;
+    r.reserve(in.size());
+    for (const Vec3& v : in)
+        r.push_back(std::sqrt((v[0] - c[0]) * (v[0] - c[0]) + (v[1] - c[1]) * (v[1] - c[1]) +
+                              (v[2] - c[2]) * (v[2] - c[2])));
+    std::nth_element(r.begin(), r.begin() + std::ptrdiff_t(r.size() / 2), r.end());
+    out.centre = add(at, c);
+    out.radius = r[r.size() / 2];
+    return out;
+}
+
+}  // namespace
+
 NeckCut neckCut(const Mesh& surface, const rig::Points& points, double raise, double tilt)
 {
     raise = std::clamp(raise, -kMostRaise, kMostRaise);
@@ -236,29 +270,63 @@ NeckCut neckCut(const Mesh& surface, const rig::Points& points, double raise, do
     const limbcut::Cut cut = limbcut::plan(surface, points, rig::Joint::Neck, t);
     const Vec3 n = unit(cut.finish.normal);
     const Vec3 p0 = cut.finish.point;
-    // Down from the neck's ball, most of the way to the shoulders' line.
-    const Vec3 mid = mul(add(at(points, Point::LeftShoulder), at(points, Point::RightShoulder)), 0.5);
-    const Vec3 d{mid[0] - p0[0], mid[1] - p0[1], mid[2] - p0[2]};
-    const double down = std::max(0.0, -(d[0] * n[0] + d[1] * n[1] + d[2] * n[2])) * 0.7;
-    const double near = 2.5 * cut.limbRadius;
-    double best = cut.limbRadius, bestShift = 0.0;
-    for (double s = -0.5; s >= -down; s -= 0.5) {
-        const double r = ringAt(surface, add(p0, mul(n, s)), n, near);
-        if (r > 0 && r < best - 0.05) {
-            best = r;
-            bestShift = s;
+    const auto along = [&](const Vec3& q) {
+        return (q[0] - p0[0]) * n[0] + (q[1] - p0[1]) * n[1] + (q[2] - p0[2]) * n[2];
+    };
+    // Down from the top of the head: wider and wider through the head, then narrower (the
+    // neck under the chin), the narrowest found until it widens again (the shoulders). The
+    // skeleton's neck ball may be up in a big head, so it isn't trusted for the height.
+    double top = along(at(points, Point::Head));
+    for (std::size_t i = 0; i + 2 < surface.positions.size(); i += 3) {
+        const Vec3 q{surface.positions[i], surface.positions[i + 1], surface.positions[i + 2]};
+        const Vec3 e{q[0] - p0[0], q[1] - p0[1], q[2] - p0[2]};
+        const double a = along(q);
+        const Vec3 side{e[0] - a * n[0], e[1] - a * n[1], e[2] - a * n[2]};
+        if (side[0] * side[0] + side[1] * side[1] + side[2] * side[2] < 4.0 * cut.limbRadius * cut.limbRadius)
+            top = std::max(top, a);
+    }
+    const double span = std::max(1.0, top - along(at(points, Point::Waist)));
+    const double near = 0.6 * span;
+    const double step = std::max(0.25, span / 160.0);
+    double shift = 0.0;
+    Slice found;
+    found.radius = cut.limbRadius;
+    found.centre = p0;
+    double widest = 0.0;
+    bool inNeck = false, seen = false;
+    for (double s = top - step; s >= top - 0.85 * span; s -= step) {
+        const Slice here = sliceAt(surface, p0, n, s, near);
+        if (here.radius <= 0)
+            continue;
+        if (!inNeck) {
+            widest = std::max(widest, here.radius);
+            if (here.radius < 0.8 * widest)
+                inNeck = true;  // narrowing under the head
+            else
+                continue;
+        }
+        if (!seen || here.radius < found.radius - 0.02) {
+            found = here;
+            shift = s;
+            seen = true;
+        } else if (here.radius > 1.4 * found.radius) {
+            break;  // the shoulders
         }
     }
+    if (!seen)
+        found.centre = p0;  // no neck to be seen: where the skeleton has it
     NeckCut out;
     out.normal = n;
     out.tilt = tilt;
-    out.shift = bestShift + raise;
-    out.point = add(p0, mul(n, out.shift));
-    out.radius = best;
+    out.shift = shift + raise;
+    out.radius = found.radius;
+    out.point = add(found.centre, mul(n, raise));
     if (raise != 0.0) {
-        const double r = ringAt(surface, out.point, n, std::max(near, 3.0 * cut.limbRadius));
-        if (r > 0)
-            out.radius = r;
+        const Slice there = sliceAt(surface, p0, n, out.shift, std::max(near, 3.0 * cut.limbRadius));
+        if (there.radius > 0) {
+            out.radius = there.radius;
+            out.point = there.centre;
+        }
     }
     return out;
 }

@@ -71,47 +71,47 @@ Mesh meshOf(const Field& f, const Vec3& lo, const Vec3& hi, double edge)
     return m;
 }
 
-// The body's sizes, as shares of the whole height T (the head, its neck included, the top
-// 30% of it, as usual).
+// The body's sizes, as shares of the whole height T, in the build of the familiar brick
+// toy figures (the generic, compatible kind): a torso narrower at the shoulders than the
+// waist, hips with an axle the legs hang from, square legs with flat fronts, arms that
+// angle out and bend forward, C-shaped hands. The head, its neck included, is the top 30%.
 struct Sizes {
     double T;
-    double legW, legD, legTop;        // each leg; its top (under the hips)
-    double footD, footH;              // the foot reaching forward
-    double hipW, hipBottom, hipTop;   // the hips, between the legs' side plates
-    double plate;                     // the legs' side plates, up beside the hips
-    double torsoW, torsoD, torsoTop;  // the torso
-    double armR, shoulderZ, elbowZ, handR, handForward, handZ;
-    double pegR, pegL;                // the pegs (hips and shoulders)
+    double legW, legD, axleZ, footH, footForward;  // each leg; the axle it turns on
+    double gap;                                     // between the legs (the hips' lug)
+    double hipW, hipBottom, hipTop;
+    double torsoBottomW, torsoTopW, torsoBottomD, torsoTopD, torsoTop;
+    double shoulderZ, armR, foreR, handR, handH;
+    double pegR, pegL;
     double postR, postH;
-    double round;                     // edges rounded
+    double round;
 };
 
 Sizes sizesFor(const Settings& s)
 {
     const double T = s.height;
-    // The body is 70% of the height with a head of the usual size; a bigger head leaves the
-    // body as it is (the figure taller).
     Sizes z{};
     z.T = T;
-    z.round = 0.02 * T;
-    z.legW = 0.15 * T;
-    z.legD = 0.14 * T;
-    z.legTop = 0.32 * T;
-    z.footD = 0.19 * T;
-    z.footH = 0.06 * T;
-    z.hipW = 0.20 * T;
+    z.round = 0.012 * T;
+    z.hipW = 0.39 * T;
     z.hipBottom = 0.30 * T;
-    z.hipTop = 0.40 * T;
-    z.plate = 0.05 * T;
-    z.torsoW = 0.36 * T;
-    z.torsoD = 0.16 * T;
+    z.hipTop = 0.38 * T;
+    z.gap = 0.03 * T;
+    z.legW = (z.hipW - z.gap) / 2;
+    z.legD = 0.20 * T;
+    z.axleZ = z.hipBottom - z.legD / 2;  // the leg's round top just under the hips (less the fit)
+    z.footH = 0.06 * T;
+    z.footForward = 0.015 * T;
+    z.torsoBottomW = 0.39 * T;
+    z.torsoTopW = 0.29 * T;
+    z.torsoBottomD = 0.20 * T;
+    z.torsoTopD = 0.18 * T;
     z.torsoTop = 0.70 * T;
-    z.armR = 0.045 * T;
-    z.shoulderZ = 0.64 * T;
-    z.elbowZ = 0.50 * T;
+    z.shoulderZ = 0.635 * T;
+    z.armR = 0.05 * T;
+    z.foreR = 0.045 * T;
     z.handR = 0.055 * T;
-    z.handForward = 0.09 * T;
-    z.handZ = 0.45 * T;
+    z.handH = 0.065 * T;
     z.pegR = std::max(0.9, 0.025 * T);
     z.pegL = 0.045 * T;
     z.postR = std::max(1.0, 0.04 * T);
@@ -119,50 +119,80 @@ Sizes sizesFor(const Settings& s)
     return z;
 }
 
+// The torso's half width and half depth at height zz (narrowing to the shoulders).
+double torsoHalfW(const Sizes& z, double zz)
+{
+    const double t = std::clamp((zz - z.hipTop) / (z.torsoTop - z.hipTop), 0.0, 1.0);
+    return (z.torsoBottomW + (z.torsoTopW - z.torsoBottomW) * t) / 2;
+}
+double torsoHalfD(const Sizes& z, double zz)
+{
+    const double t = std::clamp((zz - z.hipTop) / (z.torsoTop - z.hipTop), 0.0, 1.0);
+    return (z.torsoBottomD + (z.torsoTopD - z.torsoBottomD) * t) / 2;
+}
+
 // x: +1 the figure's left (+X), -1 its right.
 Field legField(const Sizes& z, double side, double fit, bool joints = true)
 {
     return [=](const Vec3& p) {
-        const double cx = side * (z.hipW / 2 + z.legW / 2 - z.plate);
-        // The leg, its foot forward, and its side plate up beside the hips (outside them).
-        double d = box(p, {cx, 0, z.legTop / 2}, {z.legW / 2, z.legD / 2, z.legTop / 2}, z.round);
-        d = std::min(d, box(p, {cx, -(z.footD - z.legD) / 2, z.footH / 2}, {z.legW / 2, z.footD / 2, z.footH / 2},
+        const double inner = z.gap / 2 + fit, outer = z.hipW / 2;
+        const double cx = side * (inner + outer) / 2, hw = (outer - inner) / 2;
+        const double axle = z.axleZ - fit;
+        // A square leg up to the axle, its top round about it (so it turns under the hips),
+        // the foot a little forward at the bottom.
+        double d = box(p, {cx, 0, axle / 2}, {hw, z.legD / 2, axle / 2}, z.round);
+        d = std::min(d, cylinderX(p, 0, axle, z.legD / 2, side > 0 ? inner : -outer, side > 0 ? outer : -inner) +
+                            0.0);
+        d = std::min(d, box(p, {cx, -z.footForward / 2, z.footH / 2}, {hw, z.legD / 2 + z.footForward / 2, z.footH / 2},
                             z.round));
-        // (from the hips' side, the fit away, to the leg's outside; up to just under the torso)
-        const double in = z.hipW / 2 + fit, out = std::abs(cx) + z.legW / 2;
-        const double top = z.hipTop - 0.01 * z.T - fit, bottom = z.legTop - 2 * z.round;
-        d = std::min(d, box(p, {side * (in + out) / 2, 0, (top + bottom) / 2}, {(out - in) / 2, z.legD / 2, (top - bottom) / 2},
-                            z.round));
-        // Kept clear of the hips (they turn under it) and its hole for the hip's peg.
-        const double clear = -box(p, {0, 0, (z.hipBottom + z.hipTop) / 2 + z.T},
-                                  {z.hipW / 2 + fit, z.legD, (z.hipTop - z.hipBottom) / 2 + z.T}, 0.0);
-        d = std::max(d, clear);
-        // (only as deep as the peg reaches, so it doesn't show outside)
-        const double reach = z.hipW / 2 + z.pegL + fit;
+        // A step in at the back of the leg, above the heel (as the toys have).
+        d = std::max(d, -box(p, {cx, z.legD / 2, (z.footH + axle) / 2 - 0.02 * z.T},
+                              {hw + 1.0, 0.02 * z.T, (axle - z.footH) / 2 - 0.05 * z.T}, 0.0));
         if (!joints)
             return d;
-        const double hole = -cylinderX(p, 0, (z.hipBottom + z.hipTop) / 2, z.pegR + fit, side > 0 ? -z.T : -reach,
-                                       side > 0 ? reach : z.T);
-        return std::max(d, hole);
+        // The hole for the axle's stub, from the inside only.
+        const double reach = z.gap / 2 + z.pegL + fit;
+        return std::max(d, -cylinderX(p, 0, axle, z.pegR + fit, side > 0 ? -z.T : -reach, side > 0 ? reach : z.T));
     };
+}
+
+// Where an arm's parts are: the shoulder (on the peg), the elbow (out and down, along the
+// torso's slanting side), the wrist (forward) and the hand's middle.
+struct ArmLine {
+    Vec3 shoulder, elbow, wrist, hand;
+};
+ArmLine armLine(const Sizes& z, double side, double fit)
+{
+    const double sx = torsoHalfW(z, z.shoulderZ) + fit + z.armR;
+    ArmLine a;
+    a.shoulder = {side * sx, 0, z.shoulderZ};
+    a.elbow = {side * (sx + 0.035 * z.T), 0, 0.48 * z.T};
+    a.wrist = {side * (sx + 0.04 * z.T), -0.07 * z.T, 0.43 * z.T};
+    a.hand = {side * (sx + 0.045 * z.T), -0.07 * z.T - z.handR, 0.41 * z.T};
+    return a;
 }
 
 Field armField(const Sizes& z, double side, double fit, double grip, bool joints = true)
 {
     return [=](const Vec3& p) {
-        const double x = side * (z.torsoW / 2 + fit + z.armR);
-        const Vec3 shoulder{x, 0, z.shoulderZ}, elbow{x, 0, z.elbowZ}, hand{x, -z.handForward, z.handZ};
-        double d = capsule(p, shoulder, elbow, z.armR);
-        d = smoothUnion(d, capsule(p, elbow, hand, z.armR * 0.9), z.armR * 0.3);
-        d = std::min(d, capsule(p, {x, 0, z.shoulderZ}, {x, 0, z.shoulderZ + 0.02 * z.T}, z.armR * 1.15));
-        d = smoothUnion(d, len3(p[0] - hand[0], p[1] - hand[1], p[2] - (hand[2] - z.handR * 0.6)) - z.handR,
-                        z.armR * 0.3);
-        // The hole for the shoulder's peg, and the grip hole down through the hand.
-        const double reach = std::abs(x) + fit;  // the peg reaches the arm's middle
-        if (joints)
+        const ArmLine a = armLine(z, side, fit);
+        double d = capsule(p, a.shoulder, a.elbow, z.armR);
+        d = smoothUnion(d, capsule(p, a.elbow, a.wrist, z.foreR), z.foreR * 0.4);
+        // The hand: a C, its hole up and down through it, open at the front.
+        const double ring = cylinderZ(p, a.hand[0], a.hand[1], z.handR, a.hand[2] - z.handH / 2, a.hand[2] + z.handH / 2);
+        double hand = ring;
+        if (grip > 0) {
+            hand = std::max(hand, -cylinderZ(p, a.hand[0], a.hand[1], grip / 2 + fit, -z.T, z.T));
+            const double slot = 0.75 * grip / 2;
+            hand = std::max(hand, -box(p, {a.hand[0], a.hand[1] - z.handR, a.hand[2]}, {slot, z.handR, z.T}, 0.0));
+        }
+        d = std::min(d, std::max(capsule(p, a.wrist, a.hand, z.foreR * 0.7),
+                                 -cylinderZ(p, a.hand[0], a.hand[1], grip > 0 ? grip / 2 + fit : 0.0, -z.T, z.T)));
+        d = std::min(d, hand);
+        if (joints) {
+            const double reach = std::abs(a.shoulder[0]) + fit;  // the peg reaches the shoulder's middle
             d = std::max(d, -cylinderX(p, 0, z.shoulderZ, z.pegR + fit, side > 0 ? -z.T : -reach, side > 0 ? reach : z.T));
-        if (grip > 0)
-            d = std::max(d, -cylinderZ(p, hand[0], hand[1], grip / 2 + fit, -z.T, z.T));
+        }
         return d;
     };
 }
@@ -170,21 +200,26 @@ Field armField(const Sizes& z, double side, double fit, double grip, bool joints
 Field torsoField(const Sizes& z, bool pegs)
 {
     return [=](const Vec3& p) {
-        // The torso a little narrower at the top than at the waist, its shoulders rounded.
-        const double t = std::clamp((p[2] - z.hipTop) / (z.torsoTop - z.hipTop), 0.0, 1.0);
-        const double halfW = z.torsoW / 2 * (1.0 - 0.06 * t);
-        double d = box(p, {0, 0, (z.hipTop + z.torsoTop) / 2}, {halfW, z.torsoD / 2, (z.torsoTop - z.hipTop) / 2},
-                       0.06 * z.T);
-        d = std::min(d, box(p, {0, 0, (z.hipBottom + z.hipTop) / 2 + 0.01 * z.T},
-                            {z.hipW / 2, z.legD / 2, (z.hipTop - z.hipBottom) / 2 + 0.01 * z.T}, z.round));
-        // The neck's post the head sits on.
+        // The torso: narrower and a little thinner at the shoulders than at the waist.
+        const double hw = torsoHalfW(z, p[2]), hd = torsoHalfD(z, p[2]);
+        const double r = 0.02 * z.T;
+        const double qx = std::abs(p[0]) - hw + r, qy = std::abs(p[1]) - hd + r;
+        const double qz = std::max(z.hipTop - p[2], p[2] - z.torsoTop) + r;
+        double d = len3(std::max(qx, 0.0), std::max(qy, 0.0), std::max(qz, 0.0)) +
+                   std::min(std::max({qx, qy, qz}), 0.0) - r;
+        // The hips, and the lug between the legs that carries their axle.
+        d = std::min(d, box(p, {0, 0, (z.hipBottom + z.hipTop) / 2 + 0.005 * z.T},
+                            {z.hipW / 2, z.torsoBottomD / 2, (z.hipTop - z.hipBottom) / 2 + 0.005 * z.T}, z.round));
+        // The post the head sits on.
         d = std::min(d, cylinderZ(p, 0, 0, z.postR, z.torsoTop - z.round, z.torsoTop + z.postH));
         if (pegs) {
-            // Pegs out of the hips' sides, and the shoulders'.
-            const double hz = (z.hipBottom + z.hipTop) / 2;
-            d = std::min(d, cylinderX(p, 0, hz, z.pegR, -(z.hipW / 2 + z.pegL), z.hipW / 2 + z.pegL));
-            const double sx = z.torsoW / 2 - 0.02 * z.T;
-            d = std::min(d, cylinderX(p, 0, z.shoulderZ, z.pegR, -(sx + 0.02 * z.T + z.pegL), sx + 0.02 * z.T + z.pegL));
+            const double lugR = z.pegR + 0.012 * z.T;
+            d = std::min(d, box(p, {0, 0, (z.axleZ + z.hipBottom) / 2}, {z.gap / 2 - 0.15, lugR, (z.hipBottom - z.axleZ) / 2 + lugR / 2},
+                                0.0));
+            d = std::min(d, cylinderX(p, 0, z.axleZ, z.pegR, -(z.gap / 2 + z.pegL), z.gap / 2 + z.pegL));
+            // The shoulders' pegs, out to the arms' middles.
+            const double sx = torsoHalfW(z, z.shoulderZ) + z.armR;
+            d = std::min(d, cylinderX(p, 0, z.shoulderZ, z.pegR, -sx, sx));
         }
         return d;
     };
@@ -205,10 +240,12 @@ void check(const Settings& s)
         throw std::invalid_argument("The brick figure must be from 20 to 400 mm tall.");
     if (!(s.headSize >= kLeastHeadSize && s.headSize <= kMostHeadSize))
         throw std::invalid_argument("The head's size must be from 60% to 160%.");
+    if (!(std::abs(s.headForward) <= 0.2 * s.height))
+        throw std::invalid_argument("The head can be moved at most a fifth of the height forward or back.");
     if (!(s.fit >= 0.0 && s.fit <= 1.0))
         throw std::invalid_argument("The fit must be from 0 to 1 mm.");
     const Sizes z = sizesFor(s);
-    if (!(s.grip >= 0.0 && s.grip + 2 * s.fit <= 1.4 * z.handR))
+    if (!(s.grip >= 0.0 && s.grip / 2 + s.fit <= 0.7 * z.handR))
         throw std::invalid_argument("The grip hole is too big for the hands at this height: make it smaller, or the "
                                     "figure taller.");
 }
@@ -226,24 +263,28 @@ std::vector<Part> body(const Settings& s)
     const double T = z.T;
     const double edge = std::clamp(T / 220.0, 0.1, 1.0);
     const double grip = s.grip;
-    const double W = z.torsoW / 2 + 2 * z.armR + 0.05 * T;
-    const Vec3 lo{-W, -z.footD, -0.01 * T}, hi{W, z.torsoD, z.torsoTop + z.postH + 0.01 * T};
+    const double W = torsoHalfW(z, z.shoulderZ) + 0.12 * T + 2 * z.handR;
+    const Vec3 lo{-W, -0.25 * T, -0.01 * T}, hi{W, 0.15 * T, z.torsoTop + z.postH + 0.01 * T};
     if (s.build == Build::OnePiece) {
         const Field torso = torsoField(z, false);
         const Field left = legField(z, 1, 0, false), right = legField(z, -1, 0, false);
         const Field la = armField(z, 1, 0, grip, false), ra = armField(z, -1, 0, grip, false);
+        // The legs joined to the hips (the axle's room filled).
+        const Field fill = [&](const Vec3& p) {
+            return box(p, {0, 0, (z.axleZ + z.hipBottom) / 2}, {z.hipW / 2, z.legD / 2 - z.round, (z.hipBottom - z.axleZ) / 2 + 0.01 * T},
+                       z.round);
+        };
         const Field all = [&](const Vec3& p) {
-            return std::min({torso(p), left(p), right(p), la(p), ra(p)});
+            return std::min({torso(p), left(p), right(p), la(p), ra(p), fill(p)});
         };
         return {{"Body", meshOf(all, lo, hi, edge)}};
     }
     std::vector<Part> out;
-    out.push_back({"Torso", meshOf(torsoField(z, true), {-W, -z.torsoD, z.hipBottom - z.round}, hi, edge)});
-    out.push_back({"Left arm", meshOf(armField(z, 1, s.fit, grip), {0, -z.T * 0.2, z.handZ - 2 * z.handR}, hi, edge)});
-    out.push_back({"Right arm", meshOf(armField(z, -1, s.fit, grip), {-W, -z.T * 0.2, z.handZ - 2 * z.handR},
-                                       {0, hi[1], hi[2]}, edge)});
-    out.push_back({"Left leg", meshOf(legField(z, 1, s.fit), {0, lo[1], lo[2]}, {W, hi[1], z.hipTop + z.round}, edge)});
-    out.push_back({"Right leg", meshOf(legField(z, -1, s.fit), {-W, lo[1], lo[2]}, {0, hi[1], z.hipTop + z.round},
+    out.push_back({"Torso", meshOf(torsoField(z, true), {-W, -0.15 * T, z.axleZ - 0.05 * T}, hi, edge)});
+    out.push_back({"Left arm", meshOf(armField(z, 1, s.fit, grip), {0, lo[1], 0.3 * T}, hi, edge)});
+    out.push_back({"Right arm", meshOf(armField(z, -1, s.fit, grip), {-W, lo[1], 0.3 * T}, {0, hi[1], hi[2]}, edge)});
+    out.push_back({"Left leg", meshOf(legField(z, 1, s.fit), {0, lo[1], lo[2]}, {W, hi[1], z.hipBottom + z.round}, edge)});
+    out.push_back({"Right leg", meshOf(legField(z, -1, s.fit), {-W, lo[1], lo[2]}, {0, hi[1], z.hipBottom + z.round},
                                        edge)});
     for (const Part& p : out)
         if (p.mesh.empty())
@@ -264,10 +305,16 @@ Made make(CommandStack& stack, Document& doc, ObjectId figure, const rig::Points
         for (std::size_t k = 0; k < 3; ++k)
             surface.positions[i + k] = float(p[k]);
     }
-    const figurestyle::NeckCut nc = figurestyle::neckCut(surface, points);
-    limbcut::Cut cut = limbcut::plan(surface, points, rig::Joint::Neck);
-    for (int k = 0; k < 3; ++k)
+    const figurestyle::NeckCut nc = figurestyle::neckCut(surface, points, s.raise, s.tilt);
+    limbcut::Tilt tilt;
+    tilt.forward = nc.tilt;
+    limbcut::Cut cut = limbcut::plan(surface, points, rig::Joint::Neck, tilt);
+    for (int k = 0; k < 3; ++k) {
         cut.finish.point[std::size_t(k)] = nc.point[std::size_t(k)];
+        cut.finish.normal[std::size_t(k)] = nc.normal[std::size_t(k)];
+    }
+    for (LimbRod& r : cut.finish.reach)
+        r.radius *= 1.3;  // all the head, hair and all
     cut.finish.limb = true;
     cut.finish.gap = 0.0;
     const MeshSolid whole = meshkernel::transformed(doc.meshSolid(figure), toPlate);
@@ -311,21 +358,26 @@ Made make(CommandStack& stack, Document& doc, ObjectId figure, const rig::Points
     Transform grow;
     for (int r = 0; r < 3; ++r)
         grow.m[std::size_t(r)][std::size_t(r)] = scale;
+    grow.m[1][3] = -s.headForward;  // the figure faces -Y
     grow.m[2][3] = z.torsoTop;
     head = meshkernel::transformed(head, grow);
     // The socket for the post, the fit all round and above it (one piece: none, the post
     // goes in solid).
     if (s.build == Build::Parts) {
         const double r = z.postR + s.fit;
+        // A neck too thin round the socket gets a collar (as the toys' heads have).
+        const double wall = std::max(0.8, 0.02 * z.T);
+        if (nc.radius * scale < r + wall) {
+            const double cr = r + wall, ctop = z.torsoTop + z.postH + s.fit + wall;
+            const Field collar = [&](const Vec3& p) { return cylinderZ(p, 0, 0, cr, z.torsoTop, ctop); };
+            const Mesh cm = meshOf(collar, {-cr, -cr, z.torsoTop}, {cr, cr, ctop}, std::max(0.05, cr / 14.0));
+            head = meshkernel::merged({head, meshkernel::fromTriangles(cm.positions, cm.indices)});
+        }
         const double top = z.torsoTop + z.postH + s.fit;
         const Field socket = [&](const Vec3& p) { return cylinderZ(p, 0, 0, r, z.torsoTop - 1.0, top); };
         const Mesh sm = meshOf(socket, {-r, -r, z.torsoTop - 1.0}, {r, r, top}, std::max(0.05, r / 12.0));
         head = meshkernel::subtracted(head, {meshkernel::fromTriangles(sm.positions, sm.indices)});
     }
-    const double neckWidth = 2.0 * nc.radius * scale;
-    if (neckWidth < 2.0 * z.postR + 2.0 * s.fit + 0.8)
-        throw std::invalid_argument("The head's neck is too thin round the post at this size: make the head bigger, "
-                                    "or the figure taller.");
     Mesh headMesh;
     meshkernel::triangles(head, headMesh.positions, headMesh.indices);
 
