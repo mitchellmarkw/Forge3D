@@ -3,6 +3,7 @@
 
 #include "forge/core/FigureStyle.h"
 
+#include <QCheckBox>
 #include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QFormLayout>
@@ -60,8 +61,23 @@ BrickFigurePanel::BrickFigurePanel(QWidget* parent) : QWidget(parent)
 
     auto* cutBox = new QGroupBox(tr("Where the head comes off"));
     auto* cut = new QVBoxLayout(cutBox);
-    cut->addWidget(wrapped(tr("The orange disc on the figure is the cut: found under the chin, where the neck is "
-                              "narrowest. Move it until it's where the head should come off.")));
+    // The way it's chosen, its label resting on its list.
+    m_headCut = new QComboBox;
+    m_headCut->addItem(tr("A flat cut at the neck (the orange disc)"));
+    m_headCut->addItem(tr("A mask painted over the head"));
+    m_headCut->setToolTip(tr("A flat cut you move up or down the neck and tip; or a mask you paint over the head "
+                             "(for hair or a collar a flat cut wouldn't follow): the cut goes flat through the paint's "
+                             "edge"));
+    auto* headCutColumn = new QVBoxLayout;
+    headCutColumn->setSpacing(0);
+    headCutColumn->addWidget(new QLabel(tr("Choose the head by:")));
+    headCutColumn->addWidget(m_headCut);
+    cut->addLayout(headCutColumn);
+    m_cutPlace = new QWidget;
+    auto* cutColumn = new QVBoxLayout(m_cutPlace);
+    cutColumn->setContentsMargins(0, 0, 0, 0);
+    cutColumn->addWidget(wrapped(tr("The orange disc on the figure is the cut: found under the chin, where the neck "
+                                    "is narrowest. Move it until it's where the head should come off.")));
     auto* cutForm = new QFormLayout;
     m_raise = spin(-figurestyle::kMostRaise, figurestyle::kMostRaise, 1, 0.5, tr(" mm"),
                    tr("Move the cut up the neck (more) or down it (less than 0) from where Forge3D found it"));
@@ -70,7 +86,19 @@ BrickFigurePanel::BrickFigurePanel(QWidget* parent) : QWidget(parent)
                   tr("Tip the cut forward, lower at the front (more), or back (less than 0): under a chin, or along "
                      "a jaw"));
     cutForm->addRow(tr("Tip forward:"), m_tilt);
-    cut->addLayout(cutForm);
+    cutColumn->addLayout(cutForm);
+    cut->addWidget(m_cutPlace);
+    m_maskPlace = new QWidget;
+    auto* maskColumn = new QVBoxLayout(m_maskPlace);
+    maskColumn->setContentsMargins(0, 0, 0, 0);
+    maskColumn->addWidget(wrapped(tr("Paint over the whole head, down to where it should come off the neck. The cut "
+                                     "goes flat through the paint's edge.")));
+    m_maskState = wrapped({});
+    maskColumn->addWidget(m_maskState);
+    auto* paint = new QPushButton(tr("Paint the Head..."));
+    paint->setToolTip(tr("Paint the mask over the head (the lasso works well from the front), then come back here"));
+    maskColumn->addWidget(paint);
+    cut->addWidget(m_maskPlace);
     layout->addWidget(cutBox);
 
     auto* headBox = new QGroupBox(tr("The head on the body"));
@@ -117,6 +145,11 @@ BrickFigurePanel::BrickFigurePanel(QWidget* parent) : QWidget(parent)
     bodyLayout->addLayout(bodyForm);
     layout->addWidget(bodyBox);
 
+    m_preview = new QCheckBox(tr("Show the brick figure beside the figure"));
+    m_preview->setToolTip(tr("A quick, rougher look at the brick figure where it will be made, following every change "
+                             "(the head's socket isn't shown)"));
+    m_preview->setChecked(preferences().value(QStringLiteral("brickFigure/preview"), true).toBool());
+    layout->addWidget(m_preview);
     m_status = wrapped({});
     m_status->hide();
     layout->addWidget(m_status);
@@ -132,6 +165,21 @@ BrickFigurePanel::BrickFigurePanel(QWidget* parent) : QWidget(parent)
 
     for (QDoubleSpinBox* box : {m_raise, m_tilt})
         connect(box, &QDoubleSpinBox::valueChanged, this, &BrickFigurePanel::cutChanged);
+    for (QDoubleSpinBox* box : {m_raise, m_tilt, m_forward, m_height, m_fit, m_grip})
+        connect(box, &QDoubleSpinBox::valueChanged, this, &BrickFigurePanel::changed);
+    connect(m_headSize, &QSpinBox::valueChanged, this, &BrickFigurePanel::changed);
+    connect(m_build, &QComboBox::currentIndexChanged, this, &BrickFigurePanel::changed);
+    connect(m_headCut, &QComboBox::currentIndexChanged, this, [this] {
+        showHeadCut();
+        emit cutChanged();
+        emit changed();
+    });
+    connect(m_preview, &QCheckBox::toggled, this, [this](bool on) {
+        preferences().setValue(QStringLiteral("brickFigure/preview"), on);
+        emit changed();
+    });
+    connect(paint, &QPushButton::clicked, this, &BrickFigurePanel::paintHeadRequested);
+    showHeadCut();
     connect(apply, &QPushButton::clicked, this, [this] {
         remember();
         emit applyRequested();
@@ -143,10 +191,15 @@ void BrickFigurePanel::start(const QString& title, double figureHeight)
 {
     m_title->setText(title);
     const auto s = preferences();
+    const QSignalBlocker e(m_height), f(m_headSize), g(m_build), h(m_fit), i(m_grip);
     const QSignalBlocker a(m_raise), b(m_tilt);
     m_raise->setValue(0.0);  // each figure's own cut
     m_tilt->setValue(0.0);
+    const QSignalBlocker c(m_forward), d(m_headCut);
     m_forward->setValue(0.0);
+    m_headCut->setCurrentIndex(0);
+    showHeadCut();
+    setMaskStrokes(0);
     const double offered = std::clamp(figureHeight, brickfig::kLeastHeight, brickfig::kMostHeight);
     m_height->setValue(s.value(QStringLiteral("brickFigure/height"), offered).toDouble());
     m_headSize->setValue(s.value(QStringLiteral("brickFigure/headSize"), 100).toInt());
@@ -154,6 +207,28 @@ void BrickFigurePanel::start(const QString& title, double figureHeight)
     m_fit->setValue(s.value(QStringLiteral("brickFigure/fit"), 0.15).toDouble());
     m_grip->setValue(s.value(QStringLiteral("brickFigure/grip"), 3.0).toDouble());
     setStatus({}, false);
+}
+
+bool BrickFigurePanel::headByMask() const
+{
+    return m_headCut->currentIndex() == 1;
+}
+
+bool BrickFigurePanel::showPreview() const
+{
+    return m_preview->isChecked();
+}
+
+void BrickFigurePanel::showHeadCut()
+{
+    m_cutPlace->setVisible(!headByMask());
+    m_maskPlace->setVisible(headByMask());
+}
+
+void BrickFigurePanel::setMaskStrokes(int strokes)
+{
+    m_maskState->setText(strokes > 0 ? tr("Painted (%n stroke(s)).", nullptr, strokes)
+                                     : tr("Nothing painted yet: click Paint the Head."));
 }
 
 void BrickFigurePanel::remember() const

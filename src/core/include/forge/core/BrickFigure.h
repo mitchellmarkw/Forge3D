@@ -33,6 +33,9 @@ struct Settings {
     double raise = 0.0;
     double tilt = 0.0;
     double headForward = 0.0;  // mm the head sits forward of the post's middle (less: back)
+    // Or the head is what's masked (slice 109; plate coordinates): cut flat through the
+    // mask's edge. Empty: the neck's cut above.
+    std::vector<MaskDab> headMask;
     bool operator==(const Settings&) const = default;
 };
 inline constexpr double kLeastHeight = 20.0, kMostHeight = 400.0;
@@ -48,7 +51,8 @@ struct Part {
     std::string name;
     Mesh mesh;
 };
-std::vector<Part> body(const Settings& s);
+// `coarseness`: how much bigger than usual the surfaces' steps are (a quick preview: 3).
+std::vector<Part> body(const Settings& s, double coarseness = 1.0);
 // Where the head sits on the body: the middle of the torso's top, and its post.
 struct Seat {
     double z = 0.0;           // the torso's top
@@ -56,6 +60,14 @@ struct Seat {
     double postHeight = 0.0;
 };
 Seat seatFor(const Settings& s);
+
+// Every part as it will be made (the head first; one piece: one part), where it will be on
+// the plate, beside the figure. `preview`: quickly, coarser, the head without its socket.
+// Throws std::invalid_argument (in plain words) if it can't be made.
+std::vector<Part> build(const Document& doc, ObjectId figure, const rig::Points& points, const Settings& s,
+                        bool preview = false);
+// The preview's parts as one surface (for showing).
+Mesh preview(const Document& doc, ObjectId figure, const rig::Points& points, const Settings& s);
 
 struct Made {
     std::vector<ObjectId> parts;  // the head first

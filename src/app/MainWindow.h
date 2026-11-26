@@ -12,6 +12,7 @@
 #include "forge/core/Join.h"
 #include "forge/core/Measure.h"
 #include "forge/core/JointStandard.h"
+#include "forge/core/BrickFigure.h"
 #include "forge/core/FigureStyle.h"
 #include "forge/core/LimbCut.h"
 #include "forge/core/Paint.h"
@@ -753,6 +754,7 @@ private:
         bool makingPart = false;       // Make Part (slice 95), not a split
         bool head = false;             // a bobblehead's head (slice 106), not a split
         figurestyle::Spring spring;    // for the head
+        bool brickHead = false;        // a brick figure's head (slice 109): painted, then back
         ObjectId target = kInvalidId;  // the shape being split, or the Split by Mask step being changed
         ObjectId object = kInvalidId;  // the shape on the plate it's shown as
         ObjectId part = kInvalidId;    // whose surface is painted
@@ -1005,8 +1007,15 @@ private:
         std::shared_ptr<const Mesh> surface;  // the figure, plate coordinates
         rig::Points points{};                 // its skeleton, plate coordinates
         std::shared_ptr<const Mesh> disc;     // the head's cut
+        std::vector<MaskDab> headMask;        // the head painted (plate coordinates), slice 109
+        std::shared_ptr<const Mesh> preview;  // the brick figure, quickly
     };
     BrickMode m_brickMode;
+    std::optional<BrickMode> m_brickPainting;  // Brick Figure set aside while the head's painted
+    QTimer* m_brickTimer = nullptr;
+    void paintBrickHead();
+    void resumeBrickFigure(const std::vector<MaskDab>* painted);
+    brickfig::Settings brickSettings() const;
     void startBrickFigure();
     void endBrickFigure();
     void updateBrickPreview();

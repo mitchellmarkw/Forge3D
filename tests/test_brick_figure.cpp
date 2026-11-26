@@ -236,3 +236,50 @@ TEST_CASE("Brick figure: a big head cut under its chin, centred on the post", "[
     const brickfig::Made back = brickfig::make(stack, doc, figure, skeleton.points, s);
     CHECK_THAT(double(doc.worldBounds(back.parts[0]).center()[1]), WithinAbs(double(head.center()[1]) + 2.0, 0.3));
 }
+
+TEST_CASE("Brick figure: a quick preview, and a head marked with a mask", "[brickfig]")
+{
+    Document doc;
+    CommandStack stack(doc);
+    const ObjectId figure = addFigure(stack, doc, trianglesOf(tFigure()));
+    const PosedFinish skeleton = rig::fit(onPlate(doc, figure));
+    brickfig::Settings s;
+    s.height = 60.0;
+    // The preview: where the parts will be made, nothing added.
+    const std::size_t before = stack.count();
+    const auto start = std::chrono::steady_clock::now();
+    const Mesh shown = brickfig::preview(doc, figure, skeleton.points, s);
+    const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+    WARN("preview: " << seconds << " s, " << shown.triangleCount() << " triangles");
+    CHECK(stack.count() == before);
+    const Bounds pb = shown.bounds();
+    const auto made = brickfig::build(doc, figure, skeleton.points, s);
+    Bounds mb;
+    for (const auto& p : made) {
+        const Bounds b = p.mesh.bounds();
+        mb.expand(b.min[0], b.min[1], b.min[2]);
+        mb.expand(b.max[0], b.max[1], b.max[2]);
+    }
+    for (int k = 0; k < 3; ++k) {
+        CHECK_THAT(double(pb.min[std::size_t(k)]), WithinAbs(double(mb.min[std::size_t(k)]), 1.0));
+        CHECK_THAT(double(pb.max[std::size_t(k)]), WithinAbs(double(mb.max[std::size_t(k)]), 1.0));
+    }
+    CHECK(shown.triangleCount() < made[1].mesh.triangleCount());  // coarser
+
+    // The head as masked: a ball of mask over it, down to the neck.
+    const Bounds b = doc.worldBounds(figure);
+    MaskDab dab;
+    dab.centre = {b.center()[0], b.center()[1], b.max[2] - 12.0};
+    dab.radius = 17.0;
+    s.headMask = {dab};
+    const auto masked = brickfig::build(doc, figure, skeleton.points, s);
+    const Bounds head = masked[0].mesh.bounds();
+    CHECK_THAT(double(head.size()[2]), WithinAbs(0.30 * s.height, 1.0));
+    CHECK_THAT(double(head.min[2]), WithinAbs(0.70 * s.height, 0.8));
+    // Nothing masked round the neck (a speck on the foot): refused, plainly.
+    MaskDab speck;
+    speck.centre = {b.center()[0] + 12.0, b.min[1], 3.0};
+    speck.radius = 0.5;
+    s.headMask = {speck};
+    CHECK_THROWS_AS(brickfig::build(doc, figure, skeleton.points, s), std::invalid_argument);
+}

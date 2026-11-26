@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.117.0 Beta — Slice 109: Brick figure preview and head mask (2026-11-25)
+
+- **See the brick figure while you set it up**: Brick Figure shows the brick figure beside your figure, where it
+  will be made, and it follows every change (the cut, head size, head forward, height, build). It's a quicker,
+  rougher version of what's made (the head's socket isn't shown). Untick **Show the brick figure beside the
+  figure** to hide it.
+- **Choose the head with a mask**: under **Choose the head by**, pick **A mask painted over the head**, then
+  **Paint the Head...**. Paint the head (or click Lasso and draw round it from the front) and click **Use This
+  Mask**: you're back in Brick Figure, the preview showing the painted head. Paint the Head again to change it;
+  Esc while painting goes back without changing it. The cut goes flat through the paint's edge.
+
 ## 0.116.0 Beta — Slice 108: Brick figure, reworked (2026-11-25)
 
 - **A brick-compatible body**: in the build of the generic brick figures. A torso narrower at the shoulders than

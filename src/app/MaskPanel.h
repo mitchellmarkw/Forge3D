@@ -34,6 +34,8 @@ public:
     bool makingPart() const { return m_makingPart; }
     // A bobblehead's head marked by paint (slice 106): just the painting, then Cut Off Head.
     void startHead(const QString& title);
+    // A brick figure's head (slice 109): just the painting, then back to Brick Figure.
+    void startBrickHead(const QString& title);
     struct PartOptions {
         bool setIn = false;
         double thickness = 1.5;
