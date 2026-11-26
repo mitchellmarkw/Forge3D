@@ -25,6 +25,11 @@ TEST_CASE("Model scales: reading, writing and working out sizes", "[scale]")
     CHECK(modelscale::format({35}) == "1:35");
     for (const char* bad : {"", "2:35", "1:0.5", "1:5000", "abc", "1:"})
         CHECK_FALSE(modelscale::parse(bad));
+    // 1:60 is among the usual ones, between 1:56 and 1:64.
+    bool sixty = false;
+    for (const auto& n : modelscale::common())
+        sixty = sixty || (n.scale.ratio == 60.0 && n.name == "1:60");
+    CHECK(sixty);
     // The usual ones read back as themselves.
     for (const auto& n : modelscale::common())
         CHECK(*modelscale::parse(n.name) == n.scale);
