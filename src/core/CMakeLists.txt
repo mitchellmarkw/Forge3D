@@ -76,6 +76,7 @@ add_library(forge_core STATIC
     src/FigureStyle.cpp
     src/BrickFigure.cpp
     src/ModelScale.cpp
+    src/Building.cpp
     src/Reshape.cpp
     src/PrintOrient.cpp
     src/PrintSplit.cpp

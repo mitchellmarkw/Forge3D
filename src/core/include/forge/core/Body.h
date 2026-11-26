@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "forge/core/BuildingSpec.h"
 #include "forge/core/Sketch.h"
 
 #include <array>
@@ -988,6 +989,10 @@ struct Body {
     // Made by a joint at a split (a step, the ball, a gap, a pin): its CutJoint's link, so
     // it's taken out and put in again when the cut moves (slice 94). 0: not.
     std::uint32_t jointFor = 0;
+    // Made by Forge3D Scenery's building designer (slice 111): its description, to change
+    // and make again. A roof made as its own shape names its building here.
+    std::optional<BuildingSpec> building{};
+    ObjectId roofOf = kInvalidId;
 
     bool isBoolean() const { return boolean.has_value(); }
     bool isOff() const { return boolean.has_value() && (suppressed || rolledBack); }
