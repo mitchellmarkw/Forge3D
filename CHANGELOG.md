@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.115.0 Beta — Slice 107: Brick figure (2026-11-25)
+
+- **Brick Figure** (Figure Design tab → Figure): puts the selected figure's own head on a new toy body of blocks:
+  square legs with feet, hips, a torso with rounded shoulders, arms with round hands, and a post the head sits on.
+  The figure stays as it is; the brick figure is made beside it.
+  - **Build as**: **Parts that go together** (head, torso, two arms, two legs: the arms and legs turn on pegs, the
+    head on its post) or **One piece**.
+  - **Height** (the whole figure, head included), **Head size** (100% is the top 30% of the height), **Fit** (room
+    round the pegs and post) and **Grip holes** (a hole down through each hand; Accessories' handles are 3 mm).
+  - The head comes off where the neck is narrowest, stood upright and sized to the body.
+- File format unchanged (the parts are plain shapes).
+
 ## 0.114.0 Beta — Slice 106: Figure styles, refined (2026-11-25)
 
 - **Bobblehead: you choose where the head comes off.** Under **Where the head comes off**:

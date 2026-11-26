@@ -21,6 +21,7 @@
 #include "forge/core/MaskSplit.h"
 #include "forge/core/Lasso.h"
 #include "forge/core/Accessory.h"
+#include "forge/core/BrickFigure.h"
 #include "forge/core/FigureStyle.h"
 #include "forge/core/Reshape.h"
 #include "forge/core/Hinge.h"
@@ -59,6 +60,7 @@
 #include "MaskPanel.h"
 #include "LassoPanel.h"
 #include "AccessoryPanel.h"
+#include "BrickFigureDialog.h"
 #include "ReshapePanel.h"
 #include "ReferencePanel.h"
 #include "ScaleCalculator.h"
@@ -1297,6 +1299,10 @@ void MainWindow::createActions()
                                      "figure's scale, its handle fitting the hands' grip holes; or add one of your "
                                      "own saved accessories"));
     connect(m_accessoryAction, &QAction::triggered, this, &MainWindow::startAccessories);
+    m_brickFigureAction = new QAction(tr("Brick Figure"), this);
+    m_brickFigureAction->setToolTip(tr("Brick Figure: put the selected figure's head on a new toy body of blocks, in "
+                                       "parts that go together on pegs or in one piece"));
+    connect(m_brickFigureAction, &QAction::triggered, this, &MainWindow::makeBrickFigure);
     m_lassoCutAction = new QAction(tr("Lasso Cut"), this);
     m_lassoCutAction->setToolTip(tr("Lasso Cut: drag a loop round part of the selected shape, as you see it, and cut "
                                     "straight through: cut away what's inside, keep only that, or both pieces"));
@@ -1666,6 +1672,7 @@ void MainWindow::createToolBar()
         {m_makePartAction, "make-part"},
         {m_lassoCutAction, "lasso"},
         {m_accessoryAction, "accessory"},
+        {m_brickFigureAction, "brick-figure"},
         {m_mirrorMenu->menuAction(), "mirror"},
         {m_patternAction, "pattern"},
         {m_group, "group"},
@@ -1864,7 +1871,7 @@ void MainWindow::createToolBar()
 
     Page figure = page(tr("Figure Design"), tr("Action figures: cut into parts, hands, posing and the figure guide"));
     group(figure, tr("Figure"), {button(m_cutPartsAction), button(m_lassoCutAction), button(m_handAction),
-                                    button(m_makePartAction), button(m_accessoryAction)});
+                                    button(m_makePartAction), button(m_accessoryAction), button(m_brickFigureAction)});
     group(figure, tr("Position"), {button(m_poseFigureAction), button(m_proportionsAction), button(m_figureStyleAction),
                                    named(m_mannequinAction, tr("Figure Guide"))});
     common(figure);
@@ -8895,6 +8902,7 @@ void MainWindow::refreshScene()
     m_portAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_handAction->setEnabled(!toolOpen());
     m_accessoryAction->setEnabled(!toolOpen());
+    m_brickFigureAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_poseFigureAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_proportionsAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
     m_figureStyleAction->setEnabled(m_selection.size() == 1 && allTopLevel && !toolOpen());
@@ -12909,6 +12917,50 @@ std::uint64_t maskCellKey(std::int64_t i, std::int64_t j, std::int64_t k)
 }
 
 }  // namespace
+
+void MainWindow::makeBrickFigure()
+{
+    const ObjectId id = selectedOne();
+    if (id == kInvalidId || m_selection.size() != 1 || !m_doc.isTopLevel(id) || toolOpen()) {
+        statusBar()->showMessage(tr("Brick Figure: select one figure on the plate first."), 6000);
+        return;
+    }
+    BrickFigureDialog dialog(double(m_doc.worldBounds(id).size()[2]), this);
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+    brickfig::Made made;
+    try {
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        struct RestoreCursor {
+            ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
+        } restore;
+        Mesh surface = *m_doc.mesh(id);
+        const Transform t = m_doc.worldTransform(id);
+        for (std::size_t i = 0; i + 2 < surface.positions.size(); i += 3) {
+            const Vec3 p = t.apply(Vec3{surface.positions[i], surface.positions[i + 1], surface.positions[i + 2]});
+            for (std::size_t k = 0; k < 3; ++k)
+                surface.positions[i + k] = float(p[k]);
+        }
+        if (surface.empty())
+            throw std::invalid_argument("There's no surface to take the head from.");
+        made = brickfig::make(m_stack, m_doc, id, rig::fit(surface).points, dialog.settings());
+    } catch (const std::exception& e) {
+        QMessageBox::information(this, tr("Forge3D"),
+                                 tr("The brick figure couldn't be made:\n%1").arg(QString::fromUtf8(e.what())));
+        refreshScene();
+        return;
+    }
+    qInfo().noquote() << "Command:" << QString::fromStdString(m_stack.undoLabel());
+    refreshScene();
+    refreshCommandState();
+    if (!made.parts.empty())
+        setSelection(made.parts.front());
+    statusBar()->showMessage(made.parts.size() > 1
+                                 ? tr("Brick figure made beside the figure: the head, torso, arms and legs. Print them "
+                                      "(Arrange or Kit Layout lays them out), then press them together on the pegs.")
+                                 : tr("Brick figure made beside the figure, in one piece."),
+                             10000);
+}
 
 void MainWindow::startHeadMask(ObjectId figure, const figurestyle::Spring& spring)
 {

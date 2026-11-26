@@ -2042,3 +2042,18 @@ and sharp across edges.
 - App: the Style stage's "Where the head comes off" (remembered as poseFigure/headByMask), Cut higher by and Tip
   forward; the disc is drawn with the skeleton. Mask mode gains `head` (with the spring): `MaskPanel::startHead`,
   Apply calls separateHeadByMask.
+
+## Brick figure (slice 107, 0.115.0)
+
+- `brickfig::body(settings)`: the body's parts from signed distance fields (rounded boxes, capsules, flat-ended
+  cylinders) meshed with `levelSet`, all sizes shares of the height T: legs (with feet and side plates up beside
+  the hips, kept clear of them by the fit, a blind hole for the hip's peg), torso (narrowing 6% to the top, rounded
+  shoulders; hips; the head's post; pegs out of the hips' sides and the shoulders), arms (shoulder to elbow to a
+  round hand forward, a blind hole for the shoulder's peg, a grip hole down through the hand). One piece: one field,
+  the parts' minimum, without holes or fit. Parts are made standing put together, the fit apart.
+- `brickfig::make`: the head is the figure's solid beyond the neck's cut (`limbcut::plan` with the point moved to
+  `figurestyle::neckCut`'s narrowest), turned so the cut faces down (Rodrigues), scaled so it's 30% of T × head
+  size, set on the torso's top (70% of T) with a socket for the post (Parts only); every part added beside the
+  figure as a mesh shape, one undo step.
+- App: `BrickFigureDialog` (settings remembered under brickFigure/...); the skeleton is fitted to the figure as it
+  stands (`rig::fit`).

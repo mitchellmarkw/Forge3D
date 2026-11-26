@@ -996,6 +996,8 @@ private:
 
     // Accessories (slice 100)
     QAction* m_accessoryAction = nullptr;
+    QAction* m_brickFigureAction = nullptr;  // slice 107
+    void makeBrickFigure();
     AccessoryPanel* m_accessoryPanel = nullptr;
     QTimer* m_accessoryTimer = nullptr;
     struct AccessoryMode {

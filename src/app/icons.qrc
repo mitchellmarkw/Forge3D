@@ -62,6 +62,7 @@
     <file alias="accessory.svg">icons/accessory.svg</file>
     <file alias="proportions.svg">icons/proportions.svg</file>
     <file alias="figure-style.svg">icons/figure-style.svg</file>
+    <file alias="brick-figure.svg">icons/brick-figure.svg</file>
     <file alias="reshape.svg">icons/reshape.svg</file>
     <file alias="eye-off.svg">icons/eye-off.svg</file>
     <file alias="sketch.svg">icons/sketch.svg</file>
