@@ -2,12 +2,17 @@
 cmake_minimum_required(VERSION 3.21)
 
 project(Forge3D
-    VERSION 0.117.0
+    VERSION 0.118.0
     DESCRIPTION "Parametric 3D modeling with sculpting"
     LANGUAGES CXX)
 
 # Shown after the version number ("0.25.0 Beta"); empty for a plain release.
 set(FORGE_RELEASE_LABEL "Beta")
+
+# The companion app, Forge3D Scenery (src/scenery): its own version and releases
+# (tagged scenery-vX.Y.Z), the same engine and files.
+set(SCENERY_VERSION "0.1.0")
+set(SCENERY_RELEASE_LABEL "Beta")
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -48,7 +53,9 @@ if(FORGE3D_BUILD_APP OR FORGE3D_BUILD_TESTS)
 endif()
 
 if(FORGE3D_BUILD_APP)
+    add_subdirectory(src/shell)
     add_subdirectory(src/app)
+    add_subdirectory(src/scenery)
 endif()
 
 if(FORGE3D_BUILD_TESTS)

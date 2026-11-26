@@ -138,7 +138,8 @@ Gate to Phase 2: a new user prints a customised part within 10 minutes.
 | 106 | Figure styles refined: the bobblehead's cut moved by hand or painted as a mask; no lip under a big head; gentler vinyl and caricature; Blocky dropped | Done (0.114.0) |
 | 107 | Brick figure: a new body of blocks, wearing the figure's own head; parts on pegs or one piece | Done (0.115.0) |
 | 108 | Brick figure reworked: a brick-compatible body; the head's cut placed by hand and found under the chin; the head centred on the post | Done (0.116.0) |
-| 109 | Brick figure: a live preview beside the figure; the head chosen by a painted mask | **Delivered for testing** |
+| 109 | Brick figure: a live preview beside the figure; the head chosen by a painted mask | Done (0.117.0) |
+| 110 | Forge3D Scenery groundwork: the companion app (docs/scenery/ROADMAP.md); each app's update check sees only its own releases | **Delivered for testing** |
 
 Slices 39–41 close the gaps found in the [Phase 1 gate review](docs/PHASE1_GATE.md).
 

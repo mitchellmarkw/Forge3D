@@ -1,9 +1,11 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Builds Forge3D on Windows, runs the unit tests, and uploads a ready-to-run zip (for
-# testing) and the installer. Download them from the run's "Artifacts" section.
+# Builds Forge3D and Forge3D Scenery on Windows, runs the unit tests, and uploads, for
+# each app, a ready-to-run folder (for testing) and the installer. Download them from the
+# run's "Artifacts" section.
 # Publishing a release: Actions -> Windows build -> Run workflow on main with "Publish"
-# ticked (or push a version tag, v0.25.0). It makes the tag and a GitHub release with the
-# installer and a portable zip; see docs/RELEASING.md.
+# (Forge3D: tag vX.Y.Z) or "Publish Scenery" (tag scenery-vX.Y.Z) ticked, or push such a
+# tag. It makes the tag and a GitHub release with that app's installer and portable zip;
+# see docs/RELEASING.md. The two apps' releases are separate (Forge3D's stays "Latest").
 
 name: Windows build
 
@@ -14,7 +16,11 @@ on:
   workflow_dispatch:
     inputs:
       publish:
-        description: "Publish a GitHub release of this version (tag vX.Y.Z from CMakeLists.txt)"
+        description: "Publish a Forge3D release of this version (tag vX.Y.Z from CMakeLists.txt)"
+        type: boolean
+        default: false
+      publish_scenery:
+        description: "Publish a Forge3D Scenery release (tag scenery-vX.Y.Z, SCENERY_VERSION in CMakeLists.txt)"
         type: boolean
         default: false
 
@@ -146,6 +152,18 @@ jobs:
           Copy-Item -Recurse docs\test-sheets\samples "$dist\test-sheets\samples"
           Get-ChildItem -Recurse $dist | Select-Object -ExpandProperty FullName
 
+          # Forge3D Scenery: the same libraries, plugins and licenses, its own program and
+          # test sheets.
+          $scenery = 'dist\Scenery'
+          New-Item -ItemType Directory -Force -Path $scenery | Out-Null
+          Copy-Item -Recurse "$dist\*" $scenery -Exclude 'Forge3D.exe', 'Forge3D.pdb', 'test-sheets'
+          Copy-Item "$build\bin\Forge3D Scenery.exe" $scenery
+          Copy-Item "$build\bin\Forge3D Scenery.pdb" $scenery -ErrorAction SilentlyContinue
+          if (-not (Test-Path "$scenery\Forge3D Scenery.exe")) { throw 'Forge3D Scenery.exe missing from its package' }
+          if (-not (Test-Path "$scenery\platforms\qwindows.dll")) { throw 'qwindows.dll missing from the Scenery package' }
+          New-Item -ItemType Directory -Force -Path "$scenery\test-sheets" | Out-Null
+          if (Test-Path docs\scenery\test-sheets) { Copy-Item docs\scenery\test-sheets\*.md "$scenery\test-sheets" }
+
       - name: Version
         id: version
         shell: pwsh
@@ -157,6 +175,12 @@ jobs:
           "version=$version" >> $env:GITHUB_OUTPUT
           "label=$label" >> $env:GITHUB_OUTPUT
           Write-Host "Forge3D $version $label"
+          $sversion = [regex]::Match($cmake, 'set\(SCENERY_VERSION\s+"([0-9.]+)"\)').Groups[1].Value
+          $slabel = [regex]::Match($cmake, 'set\(SCENERY_RELEASE_LABEL\s+"([^"]*)"\)').Groups[1].Value
+          if (-not $sversion) { throw 'SCENERY_VERSION not found in CMakeLists.txt' }
+          "scenery_version=$sversion" >> $env:GITHUB_OUTPUT
+          "scenery_label=$slabel" >> $env:GITHUB_OUTPUT
+          Write-Host "Forge3D Scenery $sversion $slabel"
 
       - name: Installer and portable zip
         shell: pwsh
@@ -179,6 +203,19 @@ jobs:
           Compress-Archive -Path $portable -DestinationPath "$out\Forge3D-$version-portable.zip" -CompressionLevel Optimal
           Get-ChildItem $out | Format-Table Name, Length
 
+          # Forge3D Scenery's, in a folder of their own.
+          $sversion = '${{ steps.version.outputs.scenery_version }}'
+          $slabel = '${{ steps.version.outputs.scenery_label }}'
+          $sout = (New-Item -ItemType Directory -Force -Path release-scenery).FullName
+          & $iscc "/DAppVersion=$sversion" "/DAppLabel=$slabel" "/DSourceDir=$((Resolve-Path dist\Scenery).Path)" "/DOutputDir=$sout" installer\Scenery.iss
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed for Scenery ($LASTEXITCODE)" }
+          $sportable = 'portable-scenery\Forge3D Scenery'
+          New-Item -ItemType Directory -Force -Path $sportable | Out-Null
+          Copy-Item -Recurse dist\Scenery\* $sportable -Exclude 'test-sheets'
+          Get-ChildItem -Recurse $sportable -Filter *.pdb | Remove-Item
+          Compress-Archive -Path $sportable -DestinationPath "$sout\Forge3D-Scenery-$sversion-portable.zip" -CompressionLevel Optimal
+          Get-ChildItem $sout | Format-Table Name, Length
+
       - name: Upload Forge3D for testing
         uses: actions/upload-artifact@v4
         with:
@@ -191,6 +228,20 @@ jobs:
         with:
           name: Forge3D-Setup-${{ steps.version.outputs.version }}-${{ github.sha }}
           path: release
+          retention-days: 30
+
+      - name: Upload Forge3D Scenery for testing
+        uses: actions/upload-artifact@v4
+        with:
+          name: Forge3D-Scenery-windows-x64-${{ github.sha }}
+          path: dist/Scenery
+          retention-days: 30
+
+      - name: Upload the Scenery installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: Forge3D-Scenery-Setup-${{ steps.version.outputs.scenery_version }}-${{ github.sha }}
+          path: release-scenery
           retention-days: 30
 
       # For a version tag (v0.25.0) pushed by hand, or Run workflow with "Publish" ticked
@@ -213,4 +264,26 @@ jobs:
           gh release view $tag 2>$null | Out-Null
           if ($LASTEXITCODE -eq 0) { throw "There's already a release $tag. Bump the version first." }
           gh release create $tag (Get-ChildItem release\*).FullName --title $title --notes-file $notes --target '${{ github.sha }}'
+          if ($LASTEXITCODE -ne 0) { throw "Publishing failed ($LASTEXITCODE)" }
+
+      # Forge3D Scenery: a scenery-vX.Y.Z tag, or Run workflow with "Publish Scenery" ticked.
+      # Not marked "Latest", so Forge3D's releases stay at the top of the releases page.
+      - name: Publish the Scenery release
+        if: startsWith(github.ref, 'refs/tags/scenery-v') || (github.event_name == 'workflow_dispatch' && inputs.publish_scenery)
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = '${{ steps.version.outputs.scenery_version }}'
+          $label = '${{ steps.version.outputs.scenery_label }}'
+          $tag = "scenery-v$version"
+          if ('${{ github.ref_type }}' -eq 'tag' -and '${{ github.ref_name }}' -ne $tag) {
+            throw "Tag ${{ github.ref_name }} doesn't match SCENERY_VERSION in CMakeLists.txt ($tag)"
+          }
+          $title = "Forge3D Scenery $version $label".Trim()
+          $notes = "docs\scenery\release-notes\$tag.md"
+          if (-not (Test-Path $notes)) { throw "Release notes $notes are missing" }
+          gh release view $tag 2>$null | Out-Null
+          if ($LASTEXITCODE -eq 0) { throw "There's already a release $tag. Bump SCENERY_VERSION first." }
+          gh release create $tag (Get-ChildItem release-scenery\*).FullName --title $title --notes-file $notes --target '${{ github.sha }}' --latest=false
           if ($LASTEXITCODE -ne 0) { throw "Publishing failed ($LASTEXITCODE)" }

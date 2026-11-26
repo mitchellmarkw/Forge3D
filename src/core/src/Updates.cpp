@@ -48,7 +48,8 @@ int compareVersions(const std::string& a, const std::string& b)
     return 0;
 }
 
-std::optional<Release> newerRelease(const std::string& releasesJson, const std::string& current)
+std::optional<Release> newerRelease(const std::string& releasesJson, const std::string& current,
+                                    const std::string& tags, const std::string& appName)
 {
     nlohmann::json list;
     try {
@@ -63,13 +64,17 @@ std::optional<Release> newerRelease(const std::string& releasesJson, const std::
         if (!r.is_object() || r.value("draft", false))
             continue;
         const std::string tag = r.value("tag_name", std::string());
-        if (parts(tag).empty())
+        // This app's tags only: the prefix, then a digit ("v0.118.0", not "scenery-v0.1.0").
+        if (tag.size() <= tags.size() || tag.compare(0, tags.size(), tags) != 0 ||
+            !std::isdigit(static_cast<unsigned char>(tag[tags.size()])))
             continue;
         Release release;
-        release.version = (!tag.empty() && (tag[0] == 'v' || tag[0] == 'V')) ? tag.substr(1) : tag;
+        release.version = tag.substr(tags.size());
+        if (parts(release.version).empty())
+            continue;
         release.name = r.value("name", std::string());
         if (release.name.empty())
-            release.name = "Forge3D " + release.version;
+            release.name = appName + " " + release.version;
         release.url = r.value("html_url", std::string(kReleasesPage));
         if (!best || compareVersions(release.version, best->version) > 0)
             best = std::move(release);

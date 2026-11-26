@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.118.0 Beta — Slice 110: Forge3D Scenery groundwork (2026-11-26)
+
+- **Forge3D Scenery**, a companion app for scenery (buildings, trees, rocks, terrain), starts here: it shares
+  Forge3D's engine, 3D view and .f3d files, and has its own download, version and changelog
+  (docs/scenery/CHANGELOG.md). Forge3D itself is unchanged to use.
+- Check for Updates looks only at Forge3D's own releases, so it never offers a Scenery release.
+- Under the hood: the 3D view, themes, log and crash handler moved into a library both apps use.
+
 ## 0.117.0 Beta — Slice 109: Brick figure preview and head mask (2026-11-25)
 
 - **See the brick figure while you set it up**: Brick Figure shows the brick figure beside your figure, where it

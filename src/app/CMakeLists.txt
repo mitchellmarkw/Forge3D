@@ -8,10 +8,6 @@ configure_file(BuildInfo.h.in ${CMAKE_CURRENT_BINARY_DIR}/generated/BuildInfo.h 
 
 add_executable(Forge3D WIN32
     main.cpp
-    Log.h
-    Log.cpp
-    CrashHandler.h
-    CrashHandler.cpp
     MainWindow.h
     MainWindow.cpp
     PropertiesPanel.h
@@ -37,8 +33,6 @@ add_executable(Forge3D WIN32
     ShellPanel.cpp
     MeasurePanel.h
     SectionPanel.h
-    Theme.h
-    Theme.cpp
     SectionPanel.cpp
     MeasurePanel.cpp
     ThreadPanel.h
@@ -121,11 +115,7 @@ add_executable(Forge3D WIN32
     EmbossPanel.cpp
     WordsEditor.h
     WordsEditor.cpp
-    Viewport.h
-    Viewport.cpp
     Tour.h
-    ViewCube.h
-    ViewCube.cpp
     SculptPanel.h
     SculptPanel.cpp
     Tour.cpp
@@ -150,6 +140,7 @@ target_include_directories(Forge3D PRIVATE
 target_link_libraries(Forge3D PRIVATE
     Forge3D::core
     Forge3D::view
+    Forge3D::shell
     Qt6::Widgets
     Qt6::OpenGLWidgets
     Qt6::Svg

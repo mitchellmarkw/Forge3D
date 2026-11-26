@@ -2085,3 +2085,16 @@ and sharp across edges.
 - App: Brick Figure mode keeps the head's mask and a preview mesh (a 300 ms timer after any change). Paint the
   Head sets Brick Figure aside (`m_brickPainting`), opens mask painting with `MaskMode::brickHead`; Use This Mask,
   or cancelling, resumes it (`resumeBrickFigure`).
+
+## Forge3D Scenery groundwork (slice 110, 0.118.0)
+
+- Two apps, one engine: `src/core` (the engine) and `src/view` (camera maths) as before; `src/shell` (new,
+  `forge_shell`) holds the window pieces both apps use: `Viewport`, `ViewCube`, `Theme`, `Log`, `CrashHandler`
+  (still in `forge::app`). `src/app` is Forge3D's window; `src/scenery` is Forge3D Scenery's
+  (`SceneryWindow`), built as "Forge3D Scenery.exe" with its own BuildInfo (`SCENERY_VERSION`).
+- `modelscale` (core): a scale 1:ratio, the usual named ones, parsing and formatting. Scenery remembers its scale
+  in its own settings ("Forge3D"/"Forge3D Scenery"); the plate size and theme come from Forge3D's.
+- `updates::newerRelease(json, current, tags, appName)`: only tags that are the prefix and then a digit
+  (`v` for Forge3D, `scenery-v` for Scenery).
+- CI packages dist/Scenery from Forge3D's package (the same DLLs, plugins and licenses) with its exe;
+  installer/Scenery.iss (its own AppId); Scenery releases are tagged scenery-vX.Y.Z and not marked Latest.

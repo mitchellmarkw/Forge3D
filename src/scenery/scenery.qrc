@@ -1,0 +1,5 @@
+<RCC>
+  <qresource prefix="/scenery">
+    <file alias="scenery.png">appicon/scenery.png</file>
+  </qresource>
+</RCC>

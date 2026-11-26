@@ -19,6 +19,10 @@ click **More info**, then **Run anyway**.
 
 New to Forge3D? See the **[Quick Start](docs/QUICK_START.md)**: your first print in about ten minutes.
 
+**Forge3D Scenery**, the companion app for scenery (buildings, trees, rocks and terrain, to your model's scale),
+is on its way. It shares Forge3D's engine and .f3d files, so a model opens in either, and has its own download
+(`Forge3D-Scenery-x.y.z-Setup.exe`) on the same Releases page. See [its roadmap](docs/scenery/ROADMAP.md).
+
 ## What it can do so far
 
 - **Shapes:** box, cylinder, sphere, cone, torus, tube, wedge, pyramid (oval versions
@@ -90,7 +94,9 @@ Attach both when reporting a problem.
 | --- | --- |
 | `src/core` | Geometry and document logic (OpenCASCADE for solids, Manifold for meshes; no Qt) |
 | `src/view` | Camera and viewport maths (Qt GUI types, no window) |
-| `src/app` | The Windows application: main window, menus, OpenGL viewport |
+| `src/shell` | Window pieces both apps share: the OpenGL viewport, view cube, themes, log, crash handler |
+| `src/app` | Forge3D: the main window, its tools and panels |
+| `src/scenery` | Forge3D Scenery, the companion app for scenery |
 | `tests` | Catch2 unit tests |
 | `docs/test-sheets` | Manual test steps for each delivered slice |
 
