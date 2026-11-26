@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.116.0 Beta — Slice 108: Brick figure, reworked (2026-11-25)
+
+- **A brick-compatible body**: in the build of the generic brick figures. A torso narrower at the shoulders than
+  at the waist, hips with a lug and axle the square legs hang from (their tops round, so they turn), flat-fronted
+  legs with a step at the back, arms angled out and bent forward, and C-shaped hands (Grip holes sets their hole;
+  None gives solid hands).
+- **You place the head's cut**: Brick Figure opens a panel with the figure see-through and an orange disc where
+  the head comes off. **Cut higher by** and **Tip forward** move it before anything is made.
+- **The cut is found under the chin**: it now follows the surface from the top of the head down: through the
+  head's widest, then the narrowest point below it (the neck), stopping at the shoulders. A big head no longer
+  gets cut through the face. (Bobblehead's flat cut uses the same.)
+- **The head is centred**: the middle of its neck sits on the post's middle. **Head forward by** nudges it
+  forward or back.
+- A neck too thin round the post's socket gets a collar instead of an error.
+
 ## 0.115.0 Beta — Slice 107: Brick figure (2026-11-25)
 
 - **Brick Figure** (Figure Design tab → Figure): puts the selected figure's own head on a new toy body of blocks:

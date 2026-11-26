@@ -8,10 +8,12 @@
 #include <string>
 #include <vector>
 
-// Brick figure (slice 107): a figure's own head on a new, simple toy body of blocks: legs,
-// hips and torso, arms with round hands (a grip hole through each for the accessories'
-// handles), and a post the head sits on. Made in one piece, or as parts that go together
-// on pegs (the arms and legs turn on them, the head on its post).
+// Brick figure (slice 107, its body reworked in 108): a figure's own head on a new toy body
+// in the build of the generic brick-compatible figures: a torso narrower at the shoulders,
+// hips with an axle the square legs hang from, arms angled out and bent forward with
+// C-shaped hands (their hole takes the accessories' handles), and a post the head sits on.
+// Made in one piece, or as parts that go together (the arms and legs turn on pegs, the
+// head on its post).
 namespace forge {
 
 class CommandStack;
@@ -27,6 +29,10 @@ struct Settings {
     Build build = Build::Parts;
     double fit = 0.15;       // mm: room round each peg in its hole
     double grip = 3.0;       // mm: the hands' grip holes (0: none); Accessories' handles are 3 mm
+    // Where the head comes off (figurestyle::neckCut): moved up the neck, tipped forward.
+    double raise = 0.0;
+    double tilt = 0.0;
+    double headForward = 0.0;  // mm the head sits forward of the post's middle (less: back)
     bool operator==(const Settings&) const = default;
 };
 inline constexpr double kLeastHeight = 20.0, kMostHeight = 400.0;
@@ -55,9 +61,10 @@ struct Made {
     std::vector<ObjectId> parts;  // the head first
 };
 // Takes the head off the figure (a shape on the plate; `points` its skeleton in plate
-// coordinates) where its neck is narrowest, sizes it for the body, a socket in it for the
-// post, and adds it with the body beside the figure (which stays as it is), as one undo
-// step. Throws (changing nothing) if it can't be made.
+// coordinates) at the neck's cut, stands it up, sizes it for the body and sets the middle
+// of its neck on the post (moved forward by headForward), a socket in it for the post,
+// and adds it with the body beside the figure (which stays as it is), as one undo step.
+// Throws (changing nothing) if it can't be made.
 Made make(CommandStack& stack, Document& doc, ObjectId figure, const rig::Points& points, const Settings& s);
 
 }  // namespace brickfig

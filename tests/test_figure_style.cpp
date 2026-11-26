@@ -341,3 +341,28 @@ TEST_CASE("Figure styles: a bobblehead's head marked with a mask", "[figurestyle
     // Nothing masked: refused.
     CHECK_THROWS_AS(figurestyle::separateHeadByMask(stack, doc, made.body, {}, {}), std::invalid_argument);
 }
+TEST_CASE("Figure styles: the neck found under a big head", "[figurestyle]")
+{
+    // A big head (36 mm across) on a short neck: the skeleton's neck ball lands up in the
+    // head, but the cut goes under the chin.
+    MeshSolid big = tFigure();
+    const MeshSolid head = meshkernel::levelSet(
+        [](const Vec3& q) { return 18.0 - std::sqrt(q[0] * q[0] + (q[1] + 2.0) * (q[1] + 2.0) + (q[2] - 142.0) * (q[2] - 142.0)); },
+        [] {
+            Bounds b;
+            b.expand(-20, -22, 122);
+            b.expand(20, 18, 162);
+            return b;
+        }(),
+        1.0, 0.0);
+    big = meshkernel::merged({big, head});
+    const Mesh figure = trianglesOf(big);
+    const PosedFinish f = rig::fit(figure);
+    const figurestyle::NeckCut nc = figurestyle::neckCut(figure, f.points);
+    CHECK(nc.point[2] < 125.0);  // under the chin (the head's bottom is at 124)
+    CHECK(nc.point[2] > 114.0);  // above the shoulders
+    CHECK_THAT(nc.radius, WithinAbs(5.0, 1.0));
+    // The middle of the neck, not of the skeleton's line.
+    CHECK_THAT(nc.point[0], WithinAbs(0.0, 0.5));
+    CHECK_THAT(nc.point[1], WithinAbs(0.0, 1.0));
+}

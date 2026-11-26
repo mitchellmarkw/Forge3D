@@ -200,3 +200,39 @@ TEST_CASE("Brick figure: the figure's head on a brick body", "[brickfig]")
     CHECK(doc.find(one.parts[0])->name == "Brick figure");
     CHECK_THAT(double(doc.worldBounds(one.parts[0]).size()[2]), WithinAbs(s.height, 1.5));
 }
+TEST_CASE("Brick figure: a big head cut under its chin, centred on the post", "[brickfig]")
+{
+    Document doc;
+    CommandStack stack(doc);
+    MeshSolid big = tFigure();
+    Bounds hb;
+    hb.expand(-20, -24, 122);
+    hb.expand(20, 18, 164);
+    // A big head, set a little forward of the neck.
+    big = meshkernel::merged({big, meshkernel::levelSet(
+                                       [](const Vec3& q) {
+                                           return 18.0 - std::sqrt(q[0] * q[0] + (q[1] + 3.0) * (q[1] + 3.0) +
+                                                                   (q[2] - 142.0) * (q[2] - 142.0));
+                                       },
+                                       hb, 1.0, 0.0)});
+    const ObjectId figure = addFigure(stack, doc, trianglesOf(big));
+    const PosedFinish skeleton = rig::fit(onPlate(doc, figure));
+    brickfig::Settings s;
+    s.height = 60.0;
+    const brickfig::Made made = brickfig::make(stack, doc, figure, skeleton.points, s);
+    const Bounds head = doc.worldBounds(made.parts[0]);
+    const Bounds torso = doc.worldBounds(made.parts[1]);
+    // All the head (36 mm round, cut under it): 30% of the height, a sphere's width.
+    CHECK_THAT(double(head.size()[2]), WithinAbs(0.30 * s.height, 1.0));
+    CHECK(head.size()[0] > 0.8 * head.size()[2]);
+    // Its neck on the post's middle: the head a little forward of the torso's middle (as it
+    // was of its neck), not more.
+    CHECK_THAT(double(head.center()[0]), WithinAbs(double(torso.center()[0]), 0.5));
+    CHECK(head.center()[1] < torso.center()[1] + 0.5);
+    CHECK(head.center()[1] > torso.center()[1] - 3.0);
+    // Moved back by hand.
+    stack.undo();
+    s.headForward = -2.0;
+    const brickfig::Made back = brickfig::make(stack, doc, figure, skeleton.points, s);
+    CHECK_THAT(double(doc.worldBounds(back.parts[0]).center()[1]), WithinAbs(double(head.center()[1]) + 2.0, 0.3));
+}

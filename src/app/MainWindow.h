@@ -98,6 +98,7 @@ class JoinPanel;
 class MaskPanel;
 class LassoPanel;
 class AccessoryPanel;
+class BrickFigurePanel;
 class ReshapePanel;
 class ReferencePanel;
 class ScaleCalculator;
@@ -997,7 +998,19 @@ private:
     // Accessories (slice 100)
     QAction* m_accessoryAction = nullptr;
     QAction* m_brickFigureAction = nullptr;  // slice 107
-    void makeBrickFigure();
+    BrickFigurePanel* m_brickPanel = nullptr;  // a panel since 108
+    struct BrickMode {
+        bool active = false;
+        ObjectId target = kInvalidId;
+        std::shared_ptr<const Mesh> surface;  // the figure, plate coordinates
+        rig::Points points{};                 // its skeleton, plate coordinates
+        std::shared_ptr<const Mesh> disc;     // the head's cut
+    };
+    BrickMode m_brickMode;
+    void startBrickFigure();
+    void endBrickFigure();
+    void updateBrickPreview();
+    void applyBrickFigure();
     AccessoryPanel* m_accessoryPanel = nullptr;
     QTimer* m_accessoryTimer = nullptr;
     struct AccessoryMode {

@@ -2057,3 +2057,18 @@ and sharp across edges.
   figure as a mesh shape, one undo step.
 - App: `BrickFigureDialog` (settings remembered under brickFigure/...); the skeleton is fitted to the figure as it
   stands (`rig::fit`).
+
+## Brick figure reworked (slice 108, 0.116.0)
+
+- `figurestyle::neckCut` finds the neck from the surface: the plane's outline (triangle edges crossing it, within
+  60% of the head-to-waist span of the neck's line) sliced every span/160 from the top of the head down; the
+  running widest until a slice is under 80% of it, then the narrowest (its outline's middle and median distance
+  from it) until a slice is 1.4 times wider (the shoulders), at most 85% of the span. No narrowing: the skeleton's
+  neck ball. `point` is the outline's middle (raise and tilt applied after).
+- `brickfig` body: the torso's half width and depth taper linearly from waist to shoulders; legs: a box to the
+  axle (hips' bottom less half the leg's depth, less the fit) and a cylinder along X round it; the hips' lug and
+  axle stubs between the legs; arms: shoulder → elbow along the torso's slant, → wrist forward, a C-hand (vertical
+  tube, the grip hole, a slot 0.75 × grip to the front). `Settings` gain raise, tilt and headForward.
+- `brickfig::make`: the head's cut uses the neck cut's middle and normal, its reach 1.3× (all the head); the cut's
+  middle goes on the post's middle; a collar (the socket's radius + a wall) when the neck is thinner.
+- App: `BrickFigurePanel` (replacing the dialog) and Brick Figure mode: the figure see-through, the cut's disc.

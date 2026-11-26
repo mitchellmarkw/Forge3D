@@ -57,10 +57,12 @@ struct Bobble {
     ObjectId head = kInvalidId;
 };
 
-// Where the head comes off: a flat cut at the neck. Found where the neck's narrowest
-// between the neck's ball and the shoulders (a big head widens the neck just under it),
-// then moved by hand: `raise` mm up the neck (down if less than 0), tipped `tilt` degrees
-// forward (the face down; less than 0 back). `radius`: the neck's there, typically.
+// Where the head comes off: a flat cut at the neck. Found from the surface (slice 108):
+// slices across the neck's line from the top of the head down, the head's widest found,
+// then the narrowest below it (the neck, under the chin) before the shoulders; then moved
+// by hand: `raise` mm up the neck (down if less than 0), tipped `tilt` degrees forward
+// (the face down; less than 0 back). `radius`: the neck's there, typically; `point` the
+// middle of the neck's slice there (so a head set on a post sits square on it).
 struct NeckCut {
     Vec3 point{0, 0, 0};
     Vec3 normal{0, 0, 1};  // up into the head

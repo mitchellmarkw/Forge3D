@@ -60,7 +60,7 @@
 #include "MaskPanel.h"
 #include "LassoPanel.h"
 #include "AccessoryPanel.h"
-#include "BrickFigureDialog.h"
+#include "BrickFigurePanel.h"
 #include "ReshapePanel.h"
 #include "ReferencePanel.h"
 #include "ScaleCalculator.h"
@@ -680,6 +680,8 @@ void MainWindow::createActions()
             endHand();
         else if (m_accessoryMode.active)
             endAccessories();
+        else if (m_brickMode.active)
+            endBrickFigure();
         else if (m_reshapeMode.active)
             endReshape();
         else if (m_poseFigureMode.active)
@@ -1302,7 +1304,7 @@ void MainWindow::createActions()
     m_brickFigureAction = new QAction(tr("Brick Figure"), this);
     m_brickFigureAction->setToolTip(tr("Brick Figure: put the selected figure's head on a new toy body of blocks, in "
                                        "parts that go together on pegs or in one piece"));
-    connect(m_brickFigureAction, &QAction::triggered, this, &MainWindow::makeBrickFigure);
+    connect(m_brickFigureAction, &QAction::triggered, this, &MainWindow::startBrickFigure);
     m_lassoCutAction = new QAction(tr("Lasso Cut"), this);
     m_lassoCutAction->setToolTip(tr("Lasso Cut: drag a loop round part of the selected shape, as you see it, and cut "
                                     "straight through: cut away what's inside, keep only that, or both pieces"));
@@ -2673,6 +2675,12 @@ void MainWindow::createDocks()
     m_accessoryPanel = new AccessoryPanel;
     stackLayout->addWidget(m_accessoryPanel);
     m_accessoryPanel->hide();
+    m_brickPanel = new BrickFigurePanel;
+    stackLayout->addWidget(m_brickPanel);
+    m_brickPanel->hide();
+    connect(m_brickPanel, &BrickFigurePanel::cutChanged, this, &MainWindow::updateBrickPreview);
+    connect(m_brickPanel, &BrickFigurePanel::applyRequested, this, &MainWindow::applyBrickFigure);
+    connect(m_brickPanel, &BrickFigurePanel::cancelRequested, this, &MainWindow::endBrickFigure);
     m_accessoryTimer = new QTimer(this);
     m_accessoryTimer->setSingleShot(true);
     m_accessoryTimer->setInterval(250);
@@ -3547,7 +3555,7 @@ void MainWindow::onLeftPressed(const QVector3D& origin, const QVector3D& directi
         m_patternMode.active || m_threadMode.active || m_socketMode.active || m_joinMode.active ||
         m_maskMode.active || m_hollowMode.active || m_panelLineMode.active || m_poseFigureMode.active ||
         m_paintMode.active || m_cutPartsMode.active || m_mouldMode.active ||
-        m_portMode.active || m_handMode.active)
+        m_portMode.active || m_handMode.active || m_brickMode.active)
         return;  // shapes stay put while the tool is open
 
     if (handle.valid() && multiSelection()) {
@@ -5722,7 +5730,8 @@ bool MainWindow::toolOpen() const
            m_hingeMode.active || m_poseMode.active || m_printCheckMode.active || m_mannequinOpen ||
            m_hollowMode.active || m_stampMode.active || m_panelLineMode.active || m_poseFigureMode.active ||
            m_paintMode.active || m_cutPartsMode.active || m_mouldMode.active || m_portMode.active ||
-           m_handMode.active || m_lassoCutMode.active || m_accessoryMode.active || m_reshapeMode.active;
+           m_handMode.active || m_lassoCutMode.active || m_accessoryMode.active || m_reshapeMode.active ||
+           m_brickMode.active;
 }
 
 void MainWindow::startEmboss(ObjectId target, bool editing)
@@ -8398,6 +8407,20 @@ void MainWindow::refreshScene()
                     extra.ghost = true;
                     extra.helper = true;
                     items.push_back(extra);
+                }
+            }
+            if (m_brickMode.active && id == m_brickMode.target) {
+                // See-through, the head's cut (an orange disc) inside.
+                item.alpha = 0.45f;
+                item.selected = false;
+                if (m_brickMode.disc) {
+                    DisplayItem disc;
+                    disc.id = kEdgesHoverItem;
+                    disc.mesh = m_brickMode.disc;
+                    disc.color = QVector3D(1.0f, 0.55f, 0.1f);
+                    disc.ghost = true;
+                    disc.helper = true;
+                    items.push_back(disc);
                 }
             }
             if (m_poseFigureMode.active && id == history::objectOf(m_doc, m_poseFigureMode.target)) {
@@ -12918,46 +12941,105 @@ std::uint64_t maskCellKey(std::int64_t i, std::int64_t j, std::int64_t k)
 
 }  // namespace
 
-void MainWindow::makeBrickFigure()
+void MainWindow::startBrickFigure()
 {
     const ObjectId id = selectedOne();
     if (id == kInvalidId || m_selection.size() != 1 || !m_doc.isTopLevel(id) || toolOpen()) {
         statusBar()->showMessage(tr("Brick Figure: select one figure on the plate first."), 6000);
         return;
     }
-    BrickFigureDialog dialog(double(m_doc.worldBounds(id).size()[2]), this);
-    if (dialog.exec() != QDialog::Accepted)
+    if (m_dragState.kind != Drag::Kind::None)
+        cancelDrag();
+    BrickMode mode;
+    mode.active = true;
+    mode.target = id;
+    try {
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        struct RestoreCursor {
+            ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
+        } restore;
+        auto surface = std::make_shared<Mesh>(*m_doc.mesh(id));
+        const Transform t = m_doc.worldTransform(id);
+        for (std::size_t i = 0; i + 2 < surface->positions.size(); i += 3) {
+            const Vec3 p = t.apply(Vec3{surface->positions[i], surface->positions[i + 1], surface->positions[i + 2]});
+            for (std::size_t k = 0; k < 3; ++k)
+                surface->positions[i + k] = float(p[k]);
+        }
+        if (surface->empty())
+            throw std::invalid_argument("There's no surface to take the head from.");
+        mode.points = rig::fit(*surface).points;
+        mode.surface = std::move(surface);
+    } catch (const std::exception& e) {
+        QMessageBox::information(this, tr("Forge3D"),
+                                 tr("A brick figure can't be made from this shape:\n%1").arg(QString::fromUtf8(e.what())));
         return;
+    }
+    m_brickMode = std::move(mode);
+    m_brickPanel->start(tr("Brick figure from '%1'").arg(QString::fromStdString(m_doc.find(id)->name)),
+                        double(m_doc.worldBounds(id).size()[2]));
+    m_propsDockWidth = m_propsDock->width();
+    m_properties->hide();
+    m_brickPanel->show();
+    statusBar()->showMessage(tr("Brick Figure: move the orange disc to where the head should come off, set the body, "
+                                "then Make Brick Figure. Esc cancels."));
+    updateBrickPreview();
+    refreshCommandState();
+}
+
+void MainWindow::endBrickFigure()
+{
+    if (!m_brickMode.active)
+        return;
+    m_brickMode = BrickMode{};
+    m_brickPanel->hide();
+    m_properties->show();
+    QTimer::singleShot(0, this, [this] { resizeDocks({m_propsDock}, {m_propsDockWidth}, Qt::Horizontal); });
+    statusBar()->clearMessage();
+    refreshScene();
+    refreshCommandState();
+}
+
+void MainWindow::updateBrickPreview()
+{
+    auto& mode = m_brickMode;
+    if (!mode.active)
+        return;
+    const brickfig::Settings s = m_brickPanel->settings();
+    try {
+        const figurestyle::NeckCut nc = figurestyle::neckCut(*mode.surface, mode.points, s.raise, s.tilt);
+        mode.disc = std::make_shared<const Mesh>(figurestyle::cutDisc(nc, std::max(2.4 * nc.radius, 4.0)));
+        m_brickPanel->setStatus({}, false);
+    } catch (const std::exception& e) {
+        mode.disc.reset();
+        m_brickPanel->setStatus(QString::fromUtf8(e.what()), true);
+    }
+    refreshScene();
+}
+
+void MainWindow::applyBrickFigure()
+{
+    auto& mode = m_brickMode;
+    if (!mode.active)
+        return;
+    const ObjectId id = mode.target;
     brickfig::Made made;
     try {
         QApplication::setOverrideCursor(Qt::WaitCursor);
         struct RestoreCursor {
             ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
         } restore;
-        Mesh surface = *m_doc.mesh(id);
-        const Transform t = m_doc.worldTransform(id);
-        for (std::size_t i = 0; i + 2 < surface.positions.size(); i += 3) {
-            const Vec3 p = t.apply(Vec3{surface.positions[i], surface.positions[i + 1], surface.positions[i + 2]});
-            for (std::size_t k = 0; k < 3; ++k)
-                surface.positions[i + k] = float(p[k]);
-        }
-        if (surface.empty())
-            throw std::invalid_argument("There's no surface to take the head from.");
-        made = brickfig::make(m_stack, m_doc, id, rig::fit(surface).points, dialog.settings());
+        made = brickfig::make(m_stack, m_doc, id, mode.points, m_brickPanel->settings());
     } catch (const std::exception& e) {
-        QMessageBox::information(this, tr("Forge3D"),
-                                 tr("The brick figure couldn't be made:\n%1").arg(QString::fromUtf8(e.what())));
-        refreshScene();
+        m_brickPanel->setStatus(tr("It couldn't be made: %1").arg(QString::fromUtf8(e.what())), true);
         return;
     }
     qInfo().noquote() << "Command:" << QString::fromStdString(m_stack.undoLabel());
-    refreshScene();
-    refreshCommandState();
+    endBrickFigure();
     if (!made.parts.empty())
         setSelection(made.parts.front());
     statusBar()->showMessage(made.parts.size() > 1
                                  ? tr("Brick figure made beside the figure: the head, torso, arms and legs. Print them "
-                                      "(Arrange or Kit Layout lays them out), then press them together on the pegs.")
+                                      "(Arrange or Kit Layout lays them out), then press them together.")
                                  : tr("Brick figure made beside the figure, in one piece."),
                              10000);
 }
