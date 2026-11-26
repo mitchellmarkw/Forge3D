@@ -25,3 +25,18 @@ people see the new version as soon as it's published (drafts are ignored).
 
 The installer isn't code-signed, so Windows SmartScreen warns on first run ("More info",
 "Run anyway"). Signing can be added later in the "Installer and portable zip" step.
+
+## Forge3D Scenery
+
+Forge3D Scenery (`src/scenery`) lives in the same repository and is built by the same
+workflow, but is released on its own:
+
+- Its version is `SCENERY_VERSION` (and `SCENERY_RELEASE_LABEL`) in `CMakeLists.txt`; its
+  changelog is `docs/scenery/CHANGELOG.md`.
+- Release notes go in `docs/scenery/release-notes/scenery-vX.Y.Z.md`.
+- **Run workflow** with **Publish a Forge3D Scenery release** ticked (or push a tag
+  `scenery-vX.Y.Z`). It publishes "Forge3D Scenery X.Y.Z Beta" with
+  `Forge3D-Scenery-X.Y.Z-Setup.exe` and `Forge3D-Scenery-X.Y.Z-portable.zip`, not marked
+  "Latest" (Forge3D's releases stay at the top).
+- Each app's Check for Updates looks only at its own tags (`v…` for Forge3D,
+  `scenery-v…` for Scenery), so neither offers the other's releases.

@@ -4,12 +4,16 @@
 #include <optional>
 #include <string>
 
-// Is there a newer Forge3D? Worked out from GitHub's list of releases.
+// Is there a newer Forge3D (or Forge3D Scenery)? Worked out from GitHub's list of
+// releases. The two apps share the repository; each one's releases are told apart by
+// their tags: Forge3D's "v0.118.0", Scenery's "scenery-v0.1.0".
 namespace forge::updates {
 
 // Where the list comes from (GitHub's API) and where people download from.
 inline constexpr const char* kReleasesApi = "https://api.github.com/repos/mitchellmarkw/Forge3D/releases?per_page=20";
 inline constexpr const char* kReleasesPage = "https://github.com/mitchellmarkw/Forge3D/releases";
+inline constexpr const char* kForgeTags = "v";
+inline constexpr const char* kSceneryTags = "scenery-v";
 
 struct Release {
     std::string version;  // "0.26.0" (the tag without its "v")
@@ -21,8 +25,10 @@ struct Release {
 // dot-separated numbers ("0.25.0", a leading "v" is ignored); missing parts count as 0.
 int compareVersions(const std::string& a, const std::string& b);
 
-// The newest published release in GitHub's release list (JSON), if it's newer than
-// `current`. Drafts are skipped. Throws std::runtime_error if the list can't be read.
-std::optional<Release> newerRelease(const std::string& releasesJson, const std::string& current);
+// The newest published release in GitHub's release list (JSON) whose tag is `tags`
+// followed by its version, if it's newer than `current`. Drafts are skipped. Throws
+// std::runtime_error if the list can't be read.
+std::optional<Release> newerRelease(const std::string& releasesJson, const std::string& current,
+                                    const std::string& tags = kForgeTags, const std::string& appName = "Forge3D");
 
 }  // namespace forge::updates
