@@ -51,6 +51,7 @@ add_executable(forge_tests
     test_lasso.cpp
     test_accessory.cpp
     test_figure_style.cpp
+    test_brick_figure.cpp
     test_reshape.cpp
     test_reference.cpp
     test_hinge.cpp

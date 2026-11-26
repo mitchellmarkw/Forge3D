@@ -74,6 +74,7 @@ add_library(forge_core STATIC
     src/Lasso.cpp
     src/Accessory.cpp
     src/FigureStyle.cpp
+    src/BrickFigure.cpp
     src/Reshape.cpp
     src/PrintOrient.cpp
     src/PrintSplit.cpp

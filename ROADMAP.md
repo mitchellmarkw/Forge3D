@@ -135,8 +135,8 @@ Gate to Phase 2: a new user prints a customised part within 10 minutes.
 | 103 | Print-in-place joints in Cut into Parts: captive balls, hinges with pins built on, a clearance all round | Done (0.111.0) |
 | 104 | Rough edges: names without a needless " 1"; Cut into Parts' joint line shows the print-in-place clearance | Done (0.112.0) |
 | 105 | Figure styles: bobblehead (head on a spring), vinyl collectible, caricature, blocky; limb thickness and body width | Done (0.113.0) |
-| 106 | Figure styles refined: the bobblehead's cut moved by hand or painted as a mask; no lip under a big head; gentler vinyl and caricature; Blocky dropped | **Delivered for testing** |
-| 107 | Brick figure: a new body of blocks, wearing the figure's own head | Planned |
+| 106 | Figure styles refined: the bobblehead's cut moved by hand or painted as a mask; no lip under a big head; gentler vinyl and caricature; Blocky dropped | Done (0.114.0) |
+| 107 | Brick figure: a new body of blocks, wearing the figure's own head; parts on pegs or one piece | **Delivered for testing** |
 
 Slices 39–41 close the gaps found in the [Phase 1 gate review](docs/PHASE1_GATE.md).
 
