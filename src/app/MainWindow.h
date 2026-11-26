@@ -12,6 +12,7 @@
 #include "forge/core/Join.h"
 #include "forge/core/Measure.h"
 #include "forge/core/JointStandard.h"
+#include "forge/core/FigureStyle.h"
 #include "forge/core/LimbCut.h"
 #include "forge/core/Paint.h"
 #include "forge/core/Rig.h"
@@ -749,6 +750,8 @@ private:
         bool active = false;
         bool editing = false;
         bool makingPart = false;       // Make Part (slice 95), not a split
+        bool head = false;             // a bobblehead's head (slice 106), not a split
+        figurestyle::Spring spring;    // for the head
         ObjectId target = kInvalidId;  // the shape being split, or the Split by Mask step being changed
         ObjectId object = kInvalidId;  // the shape on the plate it's shown as
         ObjectId part = kInvalidId;    // whose surface is painted
@@ -1034,6 +1037,8 @@ private:
     PoseFigureMode m_poseFigureMode;
     // openOn: 3 the proportions, 4 the figure styles; else fitting (posing if editing).
     void startPoseFigure(ObjectId target, bool editing, int openOn = 0);
+    // Mask painting for a bobblehead's head, then cut off with this spring.
+    void startHeadMask(ObjectId figure, const figurestyle::Spring& spring);
     QAction* m_proportionsAction = nullptr;
     QAction* m_figureStyleAction = nullptr;
     void endPoseFigure();

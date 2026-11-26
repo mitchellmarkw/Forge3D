@@ -91,8 +91,6 @@ Proportions heroic();
 Proportions chibi();
 // Whether any part's size is changed.
 bool proportioned(const PosedFinish& f);
-// Whether it's reshaped at all before it's posed (new proportions, or made blocky).
-bool shaped(const PosedFinish& f);
 // The skeleton's points with the proportions (before posing).
 Points proportionedPoints(const PosedFinish& f);
 

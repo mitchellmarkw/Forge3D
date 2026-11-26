@@ -32,6 +32,8 @@ public:
     // Make Part from paint (slice 95): the same painting, with the part's options.
     void startPart(const QString& title);
     bool makingPart() const { return m_makingPart; }
+    // A bobblehead's head marked by paint (slice 106): just the painting, then Cut Off Head.
+    void startHead(const QString& title);
     struct PartOptions {
         bool setIn = false;
         double thickness = 1.5;

@@ -35,12 +35,17 @@ public:
     rig::Proportions proportions() const;
     // Opens straight on the figure styles (slice 105).
     void showStyle();
-    double blocky() const;
+    bool showingStyle() const;
     // The style chosen (-1: none) and, for a bobblehead, whether its head is cut off to
     // sit on a spring, and the spring.
     int style() const;
     bool separateHead() const;
     figurestyle::Spring spring() const;
+    // How the head's cut is chosen (slice 106): at the neck, moved by hand; or painted on
+    // after Apply (a mask over the head).
+    bool headByMask() const;
+    double cutRaise() const;  // mm up the neck from where it's found
+    double cutTilt() const;   // degrees, forward
     // The settings now (after a ball was dragged, a pose chosen...).
     void setFinish(const PosedFinish& f);
     bool posing() const;
@@ -66,6 +71,7 @@ signals:
     void jointChosen(int joint);
     void applyRequested();
     void cancelRequested();
+    void neckCutChanged();
 
 private:
     void showJoint();
@@ -83,8 +89,10 @@ private:
     QLabel* m_styleBlurb = nullptr;
     QSlider* m_strengthSlider = nullptr;
     QSpinBox* m_strength = nullptr;
-    QSlider* m_blockySlider = nullptr;
-    QSpinBox* m_blocky = nullptr;
+    QComboBox* m_headCut = nullptr;
+    QWidget* m_cutPlace = nullptr;
+    QDoubleSpinBox* m_cutRaise = nullptr;
+    QDoubleSpinBox* m_cutTilt = nullptr;
     QWidget* m_bobbleBox = nullptr;
     QCheckBox* m_separate = nullptr;
     QDoubleSpinBox* m_springSize = nullptr;

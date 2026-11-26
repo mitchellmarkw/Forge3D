@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.114.0 Beta — Slice 106: Figure styles, refined (2026-11-25)
+
+- **Bobblehead: you choose where the head comes off.** Under **Where the head comes off**:
+  - **A flat cut at the neck**: an orange disc in the view shows the cut. **Cut higher by** moves it up or down the
+    neck; **Tip forward** tilts it (lower at the front, or back). It starts where the neck's narrowest, and warns
+    if the neck's too thin there for the spring.
+  - **Paint a mask over the head after Apply**: the styled figure opens in mask painting; paint the head (or click
+    Lasso and draw round it from the front) and click **Cut Off Head**. The cut goes flat through the paint's edge.
+  - Either way the pieces are named **Head** and **Body**.
+- **No more lip under a big head**: a bigger (or smaller) head now changes size right at the neck's ball, so the
+  neck under it keeps its own thickness instead of flaring out into the bottom of the head.
+- **Vinyl collectible and Caricature are gentler**: 100% is what 50% was. Strength now goes to 200% for more.
+- **Blocky is gone**: it didn't look good squaring off a sculpt. The brick figure (next) builds a proper body of
+  blocks instead.
+
 ## 0.113.0 Beta — Slice 105: Figure styles (2026-11-25)
 
 - **Figure Style** (Figure Design tab → Position): turn a figure sculpted in one piece into a toy style in one go.

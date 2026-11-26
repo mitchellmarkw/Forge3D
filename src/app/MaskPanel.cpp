@@ -378,6 +378,22 @@ void MaskPanel::startPart(const QString& title)
     setStatus({}, false);
 }
 
+void MaskPanel::startHead(const QString& title)
+{
+    m_title->setText(title);
+    m_makingPart = false;
+    m_splitOptions->hide();
+    m_keepBox->hide();
+    m_partOptions->hide();
+    m_apply->setText(tr("Cut Off Head"));
+    m_apply->setToolTip(tr("Cut the head off along the paint's edge, with the spring's socket and post"));
+    m_help->setText(tr("Paint over the whole head, down to where it should come off the neck: drag on the shape, or "
+                       "click Lasso and draw round the head from the front. Hold <b>Ctrl</b> to rub paint out. The "
+                       "cut is flat, through the paint's edge, so keep the edge going once round the neck. [ and ] "
+                       "change the brush size."));
+    setStatus({}, false);
+}
+
 MaskPanel::PartOptions MaskPanel::partOptions() const
 {
     PartOptions o;
