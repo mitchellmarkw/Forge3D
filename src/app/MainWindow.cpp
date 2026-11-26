@@ -2679,6 +2679,32 @@ void MainWindow::createDocks()
     stackLayout->addWidget(m_brickPanel);
     m_brickPanel->hide();
     connect(m_brickPanel, &BrickFigurePanel::cutChanged, this, &MainWindow::updateBrickPreview);
+    m_brickTimer = new QTimer(this);
+    m_brickTimer->setSingleShot(true);
+    m_brickTimer->setInterval(300);
+    connect(m_brickTimer, &QTimer::timeout, this, [this] {
+        // The brick figure beside the figure, quickly.
+        auto& mode = m_brickMode;
+        if (!mode.active)
+            return;
+        mode.preview.reset();
+        if (m_brickPanel->showPreview() && !(m_brickPanel->headByMask() && mode.headMask.empty())) {
+            try {
+                QApplication::setOverrideCursor(Qt::WaitCursor);
+                struct RestoreCursor {
+                    ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
+                } restore;
+                mode.preview =
+                    std::make_shared<const Mesh>(brickfig::preview(m_doc, mode.target, mode.points, brickSettings()));
+                m_brickPanel->setStatus({}, false);
+            } catch (const std::exception& e) {
+                m_brickPanel->setStatus(QString::fromUtf8(e.what()), true);
+            }
+        }
+        refreshScene();
+    });
+    connect(m_brickPanel, &BrickFigurePanel::changed, this, [this] { m_brickTimer->start(); });
+    connect(m_brickPanel, &BrickFigurePanel::paintHeadRequested, this, &MainWindow::paintBrickHead);
     connect(m_brickPanel, &BrickFigurePanel::applyRequested, this, &MainWindow::applyBrickFigure);
     connect(m_brickPanel, &BrickFigurePanel::cancelRequested, this, &MainWindow::endBrickFigure);
     m_accessoryTimer = new QTimer(this);
@@ -8578,6 +8604,16 @@ void MainWindow::refreshScene()
             h.helper = true;
             items.push_back(h);
         }
+        // Brick Figure: the brick figure where it will be made, quickly.
+        if (m_brickMode.active && m_brickMode.preview && !m_brickMode.preview->empty()) {
+            DisplayItem b;
+            b.id = kMouldItem - 12;
+            b.mesh = m_brickMode.preview;
+            b.color = QVector3D(0.93f, 0.72f, 0.2f);
+            b.alpha = 0.8f;
+            b.helper = true;
+            items.push_back(b);
+        }
         // Accessories: the one to be made, see-through.
         if (m_accessoryMode.active && m_accessoryMode.preview && !m_accessoryMode.preview->empty()) {
             DisplayItem a;
@@ -12983,13 +13019,71 @@ void MainWindow::startBrickFigure()
     statusBar()->showMessage(tr("Brick Figure: move the orange disc to where the head should come off, set the body, "
                                 "then Make Brick Figure. Esc cancels."));
     updateBrickPreview();
+    m_brickTimer->start();
     refreshCommandState();
+}
+
+brickfig::Settings MainWindow::brickSettings() const
+{
+    brickfig::Settings s = m_brickPanel->settings();
+    if (m_brickPanel->headByMask())
+        s.headMask = m_brickMode.headMask;
+    return s;
+}
+
+void MainWindow::paintBrickHead()
+{
+    if (!m_brickMode.active)
+        return;
+    m_brickTimer->stop();
+    const ObjectId target = m_brickMode.target;
+    m_brickPainting = m_brickMode;
+    m_brickMode = BrickMode{};  // set aside (no tool open), back when the painting's done
+    m_brickPanel->hide();
+    m_properties->show();
+    startMask(target, false, false);
+    if (!m_maskMode.active) {
+        resumeBrickFigure(nullptr);
+        return;
+    }
+    m_maskMode.brickHead = true;
+    // What was painted before, to change.
+    m_maskMode.dabs = m_brickPainting->headMask;
+    if (!m_maskMode.dabs.empty())
+        m_maskMode.strokeStarts.push_back(0);
+    repaintMask();
+    m_maskPanel->startBrickHead(tr("Paint the head of '%1'").arg(QString::fromStdString(m_doc.find(target)->name)));
+    statusBar()->showMessage(tr("Brick Figure: paint over the whole head (or click Lasso and draw round it from the "
+                                "front), then Use This Mask. Esc goes back without changing it."));
+}
+
+void MainWindow::resumeBrickFigure(const std::vector<MaskDab>* painted)
+{
+    if (!m_brickPainting)
+        return;
+    BrickMode mode = std::move(*m_brickPainting);
+    m_brickPainting.reset();
+    if (!m_doc.find(mode.target))
+        return;
+    if (painted)
+        mode.headMask = *painted;
+    mode.preview.reset();
+    m_brickMode = std::move(mode);
+    m_brickPanel->setMaskStrokes(m_brickMode.headMask.empty() ? 0 : int(m_brickMode.headMask.size()));
+    m_propsDockWidth = m_propsDock->width();
+    m_properties->hide();
+    m_brickPanel->show();
+    statusBar()->showMessage(tr("Brick Figure: set the body, then Make Brick Figure. Esc cancels."));
+    refreshCommandState();
+    updateBrickPreview();
+    m_brickTimer->start();
 }
 
 void MainWindow::endBrickFigure()
 {
     if (!m_brickMode.active)
         return;
+    m_brickTimer->stop();
     m_brickMode = BrickMode{};
     m_brickPanel->hide();
     m_properties->show();
@@ -13005,6 +13099,11 @@ void MainWindow::updateBrickPreview()
     if (!mode.active)
         return;
     const brickfig::Settings s = m_brickPanel->settings();
+    if (m_brickPanel->headByMask()) {
+        mode.disc.reset();  // the painted head instead
+        refreshScene();
+        return;
+    }
     try {
         const figurestyle::NeckCut nc = figurestyle::neckCut(*mode.surface, mode.points, s.raise, s.tilt);
         mode.disc = std::make_shared<const Mesh>(figurestyle::cutDisc(nc, std::max(2.4 * nc.radius, 4.0)));
@@ -13028,7 +13127,9 @@ void MainWindow::applyBrickFigure()
         struct RestoreCursor {
             ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
         } restore;
-        made = brickfig::make(m_stack, m_doc, id, mode.points, m_brickPanel->settings());
+        if (m_brickPanel->headByMask() && mode.headMask.empty())
+            throw std::invalid_argument("Paint the head first (Paint the Head...).");
+        made = brickfig::make(m_stack, m_doc, id, mode.points, brickSettings());
     } catch (const std::exception& e) {
         m_brickPanel->setStatus(tr("It couldn't be made: %1").arg(QString::fromUtf8(e.what())), true);
         return;
@@ -13278,6 +13379,12 @@ void MainWindow::applyMask()
     }
     const ObjectId target = mode.target;
     const std::vector<MaskDab> dabs = mode.dabs;
+    if (mode.brickHead) {
+        m_maskMode.brickHead = false;  // ended here, not cancelled
+        endMask();
+        resumeBrickFigure(&dabs);
+        return;
+    }
     if (mode.head) {
         figurestyle::Bobble made;
         try {
@@ -13375,6 +13482,7 @@ void MainWindow::endMask()
 {
     if (!m_maskMode.active)
         return;
+    const bool backToBrick = m_maskMode.brickHead;  // cancelled: back to Brick Figure as it was
     m_maskMode = MaskMode{};
     m_lassoDraw = LassoDraw{};
     showLasso({}, false);
@@ -13385,6 +13493,8 @@ void MainWindow::endMask()
     statusBar()->clearMessage();
     refreshScene();
     refreshCommandState();
+    if (backToBrick)
+        resumeBrickFigure(nullptr);
 }
 
 // ---- Lasso ---------------------------------------------------------------------------------

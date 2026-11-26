@@ -5,6 +5,7 @@
 
 #include <QWidget>
 
+class QCheckBox;
 class QComboBox;
 class QDoubleSpinBox;
 class QLabel;
@@ -21,16 +22,28 @@ public:
     explicit BrickFigurePanel(QWidget* parent = nullptr);
     // `figureHeight`: offered as the height the first time.
     void start(const QString& title, double figureHeight);
-    brickfig::Settings settings() const;
+    brickfig::Settings settings() const;  // the head's mask isn't here (MainWindow has it)
+    bool headByMask() const;
+    bool showPreview() const;
+    // How much of the head is painted (0: none yet).
+    void setMaskStrokes(int strokes);
     void setStatus(const QString& text, bool problem);
 
 signals:
     void cutChanged();
+    void changed();  // anything that changes the brick figure (its preview follows)
+    void paintHeadRequested();
     void applyRequested();
     void cancelRequested();
 
 private:
     QLabel* m_title = nullptr;
+    QComboBox* m_headCut = nullptr;
+    QWidget* m_cutPlace = nullptr;
+    QWidget* m_maskPlace = nullptr;
+    QLabel* m_maskState = nullptr;
+    QCheckBox* m_preview = nullptr;
+    void showHeadCut();
     QDoubleSpinBox* m_raise = nullptr;
     QDoubleSpinBox* m_tilt = nullptr;
     QSpinBox* m_headSize = nullptr;

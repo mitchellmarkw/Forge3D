@@ -7,6 +7,7 @@
 #include "forge/core/FigureStyle.h"
 #include "forge/core/Hinge.h"
 #include "forge/core/LimbCut.h"
+#include "forge/core/MaskSplit.h"
 #include "forge/core/MeshKernel.h"
 
 #include <algorithm>
@@ -256,12 +257,12 @@ Seat seatFor(const Settings& s)
     return {z.torsoTop, z.postR, z.postH};
 }
 
-std::vector<Part> body(const Settings& s)
+std::vector<Part> body(const Settings& s, double coarseness)
 {
     check(s);
     const Sizes z = sizesFor(s);
     const double T = z.T;
-    const double edge = std::clamp(T / 220.0, 0.1, 1.0);
+    const double edge = std::clamp(T / 220.0 * coarseness, 0.1, 3.0);
     const double grip = s.grip;
     const double W = torsoHalfW(z, z.shoulderZ) + 0.12 * T + 2 * z.handR;
     const Vec3 lo{-W, -0.25 * T, -0.01 * T}, hi{W, 0.15 * T, z.torsoTop + z.postH + 0.01 * T};
@@ -292,40 +293,102 @@ std::vector<Part> body(const Settings& s)
     return out;
 }
 
-Made make(CommandStack& stack, Document& doc, ObjectId figure, const rig::Points& points, const Settings& s)
+namespace {
+
+// The head as it comes off the figure (plate coordinates): the solid, the middle of its
+// cut, the way up into it, and the neck's thickness there.
+struct Cut {
+    MeshSolid head;
+    Vec3 point{0, 0, 0};
+    Vec3 up{0, 0, 1};
+    double neck = 0.0;
+};
+
+Cut headOf(const Document& doc, ObjectId figure, const rig::Points& points, const Settings& s)
+{
+    const Transform toPlate = doc.worldTransform(figure);
+    Cut out;
+    if (!s.headMask.empty()) {
+        // What's masked, cut flat through the mask's edge (joined-up triangles, so the edge
+        // can be followed round).
+        std::vector<float> pos;
+        std::vector<std::uint32_t> idx;
+        meshkernel::triangles(doc.meshSolid(figure), pos, idx);
+        for (std::size_t i = 0; i + 2 < pos.size(); i += 3) {
+            const Vec3 p = toPlate.apply(Vec3{pos[i], pos[i + 1], pos[i + 2]});
+            for (std::size_t k = 0; k < 3; ++k)
+                pos[i + k] = float(p[k]);
+        }
+        const mask::Pieces pieces = mask::split(pos, idx, s.headMask, MaskCut::Flat);
+        if (pieces.keySpots.empty())
+            throw std::invalid_argument("The mask's edge must go round the neck once: paint the whole head.");
+        const mask::KeySpot spot = *std::max_element(pieces.keySpots.begin(), pieces.keySpots.end(),
+                                                     [](const auto& a, const auto& b) { return a.reach < b.reach; });
+        out.head = meshkernel::fromTriangles(pieces.masked.positions, pieces.masked.indices);
+        out.point = spot.point;
+        out.neck = spot.room;
+        Vec3 c{0, 0, 0};
+        const std::size_t count = pieces.masked.positions.size() / 3;
+        for (std::size_t i = 0; i < count; ++i)
+            for (int k = 0; k < 3; ++k)
+                c[std::size_t(k)] += pieces.masked.positions[3 * i + std::size_t(k)] / double(count);
+        // The head is up above the shoulders: a mask anywhere else isn't on it.
+        const Vec3 waist = points[std::size_t(rig::Point::Waist)], neck = points[std::size_t(rig::Point::Neck)];
+        const Vec3 rise{neck[0] - waist[0], neck[1] - waist[1], neck[2] - waist[2]};
+        const double r2 = rise[0] * rise[0] + rise[1] * rise[1] + rise[2] * rise[2];
+        if (r2 > 1e-12 && ((c[0] - waist[0]) * rise[0] + (c[1] - waist[1]) * rise[1] + (c[2] - waist[2]) * rise[2]) / r2 < 0.6)
+            throw std::invalid_argument("The mask isn't over the head: paint the whole head, down to where it should "
+                                        "come off the neck.");
+        const double l = len3(spot.normal[0], spot.normal[1], spot.normal[2]);
+        out.up = l > 1e-9 ? Vec3{spot.normal[0] / l, spot.normal[1] / l, spot.normal[2] / l} : Vec3{0, 0, 1};
+        if ((c[0] - out.point[0]) * out.up[0] + (c[1] - out.point[1]) * out.up[1] + (c[2] - out.point[2]) * out.up[2] < 0)
+            out.up = {-out.up[0], -out.up[1], -out.up[2]};
+    } else {
+        // What's beyond the neck's cut (see figurestyle::neckCut).
+        Mesh surface = *doc.mesh(figure);
+        for (std::size_t i = 0; i + 2 < surface.positions.size(); i += 3) {
+            const Vec3 p = toPlate.apply(Vec3{surface.positions[i], surface.positions[i + 1], surface.positions[i + 2]});
+            for (std::size_t k = 0; k < 3; ++k)
+                surface.positions[i + k] = float(p[k]);
+        }
+        const figurestyle::NeckCut nc = figurestyle::neckCut(surface, points, s.raise, s.tilt);
+        limbcut::Tilt tilt;
+        tilt.forward = nc.tilt;
+        limbcut::Cut cut = limbcut::plan(surface, points, rig::Joint::Neck, tilt);
+        for (int k = 0; k < 3; ++k) {
+            cut.finish.point[std::size_t(k)] = nc.point[std::size_t(k)];
+            cut.finish.normal[std::size_t(k)] = nc.normal[std::size_t(k)];
+        }
+        for (LimbRod& r : cut.finish.reach)
+            r.radius *= 1.3;  // all the head, hair and all
+        cut.finish.limb = true;
+        cut.finish.gap = 0.0;
+        out.head = limbcut::apply(meshkernel::transformed(doc.meshSolid(figure), toPlate), cut.finish);
+        out.point = nc.point;
+        out.up = nc.normal;
+        out.neck = nc.radius;
+    }
+    if (meshkernel::isEmpty(out.head))
+        throw std::invalid_argument("The head couldn't be found: check the figure stands up straight, facing the "
+                                    "front, or paint a mask over the head.");
+    return out;
+}
+
+}  // namespace
+
+std::vector<Part> build(const Document& doc, ObjectId figure, const rig::Points& points, const Settings& s,
+                        bool preview)
 {
     check(s);
     if (!doc.find(figure) || !doc.isTopLevel(figure))
         throw std::invalid_argument("Choose a figure on the plate.");
-    // The figure on the plate, and its head: what's beyond the neck's narrowest point.
-    Mesh surface = *doc.mesh(figure);
-    const Transform toPlate = doc.worldTransform(figure);
-    for (std::size_t i = 0; i + 2 < surface.positions.size(); i += 3) {
-        const Vec3 p = toPlate.apply(Vec3{surface.positions[i], surface.positions[i + 1], surface.positions[i + 2]});
-        for (std::size_t k = 0; k < 3; ++k)
-            surface.positions[i + k] = float(p[k]);
-    }
-    const figurestyle::NeckCut nc = figurestyle::neckCut(surface, points, s.raise, s.tilt);
-    limbcut::Tilt tilt;
-    tilt.forward = nc.tilt;
-    limbcut::Cut cut = limbcut::plan(surface, points, rig::Joint::Neck, tilt);
-    for (int k = 0; k < 3; ++k) {
-        cut.finish.point[std::size_t(k)] = nc.point[std::size_t(k)];
-        cut.finish.normal[std::size_t(k)] = nc.normal[std::size_t(k)];
-    }
-    for (LimbRod& r : cut.finish.reach)
-        r.radius *= 1.3;  // all the head, hair and all
-    cut.finish.limb = true;
-    cut.finish.gap = 0.0;
-    const MeshSolid whole = meshkernel::transformed(doc.meshSolid(figure), toPlate);
-    MeshSolid head = limbcut::apply(whole, cut.finish);
-    if (meshkernel::isEmpty(head))
-        throw std::invalid_argument("The head couldn't be found: check the figure stands up straight, facing the front.");
+    Cut cut = headOf(doc, figure, points, s);
+    MeshSolid head = cut.head;
 
     // Sized and set on the body: its cut face down on the torso's top, upright, facing the
     // front as it did.
     const Sizes z = sizesFor(s);
-    const Vec3 n = nc.normal;
+    const Vec3 n = cut.up;
     // Rotation taking n to +Z (Rodrigues), then the scale, about the cut's middle.
     const Vec3 up{0, 0, 1};
     const Vec3 k{n[1] * up[2] - n[2] * up[1], n[2] * up[0] - n[0] * up[2], n[0] * up[1] - n[1] * up[0]};
@@ -347,7 +410,7 @@ Made make(CommandStack& stack, Document& doc, ObjectId figure, const rig::Points
         double o = 0;
         for (int c = 0; c < 3; ++c) {
             turn.m[std::size_t(r)][std::size_t(c)] = R[r][c];
-            o += R[r][c] * nc.point[std::size_t(c)];
+            o += R[r][c] * cut.point[std::size_t(c)];
         }
         turn.m[std::size_t(r)][3] = -o;  // the cut's middle to the origin
     }
@@ -363,11 +426,11 @@ Made make(CommandStack& stack, Document& doc, ObjectId figure, const rig::Points
     head = meshkernel::transformed(head, grow);
     // The socket for the post, the fit all round and above it (one piece: none, the post
     // goes in solid).
-    if (s.build == Build::Parts) {
+    if (s.build == Build::Parts && !preview) {
         const double r = z.postR + s.fit;
         // A neck too thin round the socket gets a collar (as the toys' heads have).
         const double wall = std::max(0.8, 0.02 * z.T);
-        if (nc.radius * scale < r + wall) {
+        if (cut.neck * scale < r + wall) {
             const double cr = r + wall, ctop = z.torsoTop + z.postH + s.fit + wall;
             const Field collar = [&](const Vec3& p) { return cylinderZ(p, 0, 0, cr, z.torsoTop, ctop); };
             const Mesh cm = meshOf(collar, {-cr, -cr, z.torsoTop}, {cr, cr, ctop}, std::max(0.05, cr / 14.0));
@@ -381,12 +444,9 @@ Made make(CommandStack& stack, Document& doc, ObjectId figure, const rig::Points
     Mesh headMesh;
     meshkernel::triangles(head, headMesh.positions, headMesh.indices);
 
-    // Beside the figure, to its right on the plate.
-    const Bounds fb = doc.worldBounds(figure);
-    const Vec3 at{double(fb.max[0]) + 0.3 * z.T + 5.0, double(fb.center()[1]), 0.0};
-    std::vector<Part> parts = body(s);
+    std::vector<Part> parts = body(s, preview ? 3.0 : 1.0);
     parts.insert(parts.begin(), Part{"Head", std::move(headMesh)});
-    if (s.build == Build::OnePiece) {
+    if (s.build == Build::OnePiece && !preview) {
         // The head on the body as one shape too.
         const MeshSolid joined = meshkernel::merged(
             {meshkernel::fromTriangles(parts[0].mesh.positions, parts[0].mesh.indices),
@@ -395,11 +455,36 @@ Made make(CommandStack& stack, Document& doc, ObjectId figure, const rig::Points
         meshkernel::triangles(joined, m.positions, m.indices);
         parts = {Part{"Brick figure", std::move(m)}};
     }
+    // Beside the figure, to its right on the plate.
+    const Bounds fb = doc.worldBounds(figure);
+    const Vec3 at{double(fb.max[0]) + 0.3 * z.T + 5.0, double(fb.center()[1]), 0.0};
+    for (Part& p : parts)
+        moveBy(p.mesh, at);
+    return parts;
+}
+
+Mesh preview(const Document& doc, ObjectId figure, const rig::Points& points, const Settings& s)
+{
+    Mesh out;
+    for (const Part& part : build(doc, figure, points, s, true)) {
+        // Shaded (with its facings), as a shape is shown.
+        const Mesh p = meshkernel::displayMesh(meshkernel::fromTriangles(part.mesh.positions, part.mesh.indices));
+        const auto base = std::uint32_t(out.positions.size() / 3);
+        out.positions.insert(out.positions.end(), p.positions.begin(), p.positions.end());
+        out.normals.insert(out.normals.end(), p.normals.begin(), p.normals.end());
+        for (std::uint32_t i : p.indices)
+            out.indices.push_back(base + i);
+    }
+    return out;
+}
+
+Made make(CommandStack& stack, Document& doc, ObjectId figure, const rig::Points& points, const Settings& s)
+{
+    std::vector<Part> parts = build(doc, figure, points, s);
     Made made;
     stack.beginMacro("Brick Figure");
     try {
         for (Part& p : parts) {
-            moveBy(p.mesh, at);
             const std::string name = parts.size() == 1 ? p.name : "Brick " + [&] {
                 std::string lower = p.name;
                 lower[0] = char(std::tolower(static_cast<unsigned char>(lower[0])));

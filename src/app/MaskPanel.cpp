@@ -394,6 +394,13 @@ void MaskPanel::startHead(const QString& title)
     setStatus({}, false);
 }
 
+void MaskPanel::startBrickHead(const QString& title)
+{
+    startHead(title);
+    m_apply->setText(tr("Use This Mask"));
+    m_apply->setToolTip(tr("Back to Brick Figure, the head being what's painted"));
+}
+
 MaskPanel::PartOptions MaskPanel::partOptions() const
 {
     PartOptions o;

@@ -2072,3 +2072,16 @@ and sharp across edges.
 - `brickfig::make`: the head's cut uses the neck cut's middle and normal, its reach 1.3× (all the head); the cut's
   middle goes on the post's middle; a collar (the socket's radius + a wall) when the neck is thinner.
 - App: `BrickFigurePanel` (replacing the dialog) and Brick Figure mode: the figure see-through, the cut's disc.
+
+## Brick figure preview and head mask (slice 109, 0.117.0)
+
+- `brickfig::build(doc, figure, points, settings, preview)` makes every part where it will be on the plate (the
+  head first); `make` adds them. With `preview` the body's surfaces are 3× coarser (about 0.35 s at 60 mm) and
+  the head has no collar or socket; `brickfig::preview` joins them with display normals.
+- `Settings::headMask` (plate coordinates): the head is `mask::split`'s masked piece (Flat) on the figure's
+  joined-up plate triangles; its main cap's middle is the cut's middle, its normal (turned towards the head) the
+  way up, its room the neck. A mask whose piece's middle isn't above 60% of the way from the waist to the neck
+  is refused.
+- App: Brick Figure mode keeps the head's mask and a preview mesh (a 300 ms timer after any change). Paint the
+  Head sets Brick Figure aside (`m_brickPainting`), opens mask painting with `MaskMode::brickHead`; Use This Mask,
+  or cancelling, resumes it (`resumeBrickFigure`).
