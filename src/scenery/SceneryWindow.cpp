@@ -5,6 +5,7 @@
 #include "BuildingPanel.h"
 #include "RockPanel.h"
 #include "TerrainPanel.h"
+#include "TreePanel.h"
 #include "Theme.h"
 #include "Viewport.h"
 #include "forge/core/Commands.h"
@@ -110,7 +111,7 @@ SceneryWindow::SceneryWindow()
     dock->setFeatures(QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable);
     m_objects = new QListWidget;
     m_objects->setSelectionMode(QAbstractItemView::SingleSelection);
-    m_objects->setToolTip(tr("Click a shape to pick it; double-click a building, rock or terrain to change it"));
+    m_objects->setToolTip(tr("Click a shape to pick it; double-click a building, rock, terrain or tree to change it"));
     dock->setWidget(m_objects);
     addDockWidget(Qt::LeftDockWidgetArea, dock);
     connect(m_objects, &QListWidget::currentRowChanged, this, [this](int row) {
@@ -183,6 +184,30 @@ SceneryWindow::SceneryWindow()
     connect(m_rockPanel, &RockPanel::applyRequested, this, [this] { applyRock(); });
     connect(m_rockPanel, &RockPanel::cancelRequested, this, [this] { endRock(); });
 
+    // The tree designer's panel, in the same place.
+    m_treeDock = new QDockWidget(tr("Tree"), this);
+    m_treeDock->setObjectName(QStringLiteral("tree"));
+    m_treeDock->setFeatures(QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable);
+    auto* treeScroll = new QScrollArea;
+    treeScroll->setWidgetResizable(true);
+    treeScroll->setFrameShape(QFrame::NoFrame);
+    m_treePanel = new TreePanel;
+    treeScroll->setWidget(m_treePanel);
+    treeScroll->setMinimumWidth(330);
+    m_treeDock->setWidget(treeScroll);
+    addDockWidget(Qt::RightDockWidgetArea, m_treeDock);
+    m_treeDock->hide();
+    m_treeTimer = new QTimer(this);
+    m_treeTimer->setSingleShot(true);
+    m_treeTimer->setInterval(500);
+    connect(m_treeTimer, &QTimer::timeout, this, [this] { requestTreeDetail(); });
+    connect(m_treePanel, &TreePanel::changed, this, [this] {
+        updateTreePreview();
+        m_treeTimer->start();
+    });
+    connect(m_treePanel, &TreePanel::applyRequested, this, [this] { applyTree(); });
+    connect(m_treePanel, &TreePanel::cancelRequested, this, [this] { endTree(); });
+
     // The terrain designer's panel, in the same place.
     m_terrainDock = new QDockWidget(tr("Terrain"), this);
     m_terrainDock->setObjectName(QStringLiteral("terrain"));
@@ -226,6 +251,10 @@ SceneryWindow::SceneryWindow()
     connect(escape, &QShortcut::activated, this, [this] {
         if (m_rock.active) {
             endRock();
+            return;
+        }
+        if (m_tree.active) {
+            endTree();
             return;
         }
         if (m_terrain.active) {
@@ -273,7 +302,7 @@ SceneryWindow::SceneryWindow()
     refreshScene();
     refreshTitle();
     statusBar()->showMessage(tr("Welcome to Forge3D Scenery. Open a model, or set the scale the scenery tools will "
-                                "build to: New Building, New Rock and New Terrain make scenery at it."),
+                                "build to: New Building, New Rock, New Terrain and New Tree make scenery at it."),
                              12000);
     if (preferences().value(QStringLiteral("updates/checkAtStart"), true).toBool())
         checkForUpdates(true);
@@ -287,6 +316,8 @@ SceneryWindow::~SceneryWindow()
         m_rockDetail.wait();
     if (m_terrainDetail.valid())
         m_terrainDetail.wait();
+    if (m_treeDetail.valid())
+        m_treeDetail.wait();
 }
 
 QWidget* SceneryWindow::buildRibbon()
@@ -346,17 +377,25 @@ QWidget* SceneryWindow::buildRibbon()
     auto* changing = new QVBoxLayout;
     changing->setSpacing(4);
     m_editBuilding = new QPushButton(tr("Change"));
-    m_editBuilding->setToolTip(tr("Change the building, rock or terrain picked in Objects (or double-click it there)"));
+    m_editBuilding->setToolTip(tr("Change the building, rock, terrain or tree picked in Objects (or double-click it there)"));
+    m_newTree = new QPushButton(tr("New Tree"));
+    m_newTree->setToolTip(tr("Design a tree: broadleaf, conifer, dead or palm, from real sizes at the model scale"));
     changing->addWidget(m_newTerrain);
-    changing->addWidget(m_editBuilding);
+    changing->addWidget(m_newTree);
     changing->addStretch(1);
     row->addLayout(changing);
+    auto* editing = new QVBoxLayout;
+    editing->setSpacing(4);
+    editing->addWidget(m_editBuilding);
+    editing->addStretch(1);
+    row->addLayout(editing);
     connect(m_newBuilding, &QPushButton::clicked, this, [this] { startBuilding(kInvalidId); });
     connect(m_newRock, &QPushButton::clicked, this, [this] { startRock(kInvalidId); });
     connect(m_newTerrain, &QPushButton::clicked, this, [this] { startTerrain(kInvalidId); });
+    connect(m_newTree, &QPushButton::clicked, this, [this] { startTree(kInvalidId); });
     connect(m_editBuilding, &QPushButton::clicked, this, [this] { changeSelected(); });
 
-    auto* coming = new QLabel(tr("<b>Coming next:</b> trees."));
+    auto* coming = new QLabel(tr("Double-click a shape in Objects to change it."));
     coming->setWordWrap(true);
     coming->setStyleSheet(QStringLiteral("color: palette(mid);"));
     row->addSpacing(24);
@@ -449,7 +488,8 @@ void SceneryWindow::refreshScene()
             if (id == m_selected)
                 m_objects->setCurrentRow(m_objects->count() - 1);
             if ((m_build.active && (id == m_build.editing || id == m_build.roof)) ||
-                (m_rock.active && id == m_rock.editing) || (m_terrain.active && id == m_terrain.editing)) {
+                (m_rock.active && id == m_rock.editing) || (m_terrain.active && id == m_terrain.editing) ||
+                (m_tree.active && id == m_tree.editing)) {
                 if (m_build.active)
                     triangles += mesh->triangleCount();
                 continue;  // shown as it's being changed instead
@@ -505,6 +545,17 @@ void SceneryWindow::refreshScene()
                     triangles += m->triangleCount();
             }
         }
+        if (m_tree.active && m_tree.mesh && !m_tree.mesh->empty()) {
+            app::DisplayItem item;
+            item.id = 0xB0000007ull;
+            item.mesh = m_tree.mesh;
+            item.model.translate(float(m_tree.x), float(m_tree.y), float(m_tree.z));
+            const TreeSpec spec = m_treePanel->spec();
+            item.color = spec.leaves && spec.kind != TreeKind::Dead ? QVector3D(0.33f, 0.44f, 0.25f)
+                                                                     : QVector3D(0.43f, 0.35f, 0.26f);
+            items.push_back(std::move(item));
+            triangles += m_tree.mesh->triangleCount();
+        }
         if (m_rock.active && m_rock.mesh && !m_rock.mesh->empty()) {
             app::DisplayItem item;
             item.id = 0xB0000004ull;
@@ -555,6 +606,7 @@ void SceneryWindow::newModel()
     endBuilding();
     endRock();
     endTerrain();
+    endTree();
     m_stack.clear();
     m_doc.replaceAll({});
     m_filePath.clear();
@@ -590,6 +642,7 @@ void SceneryWindow::openFile(const QString& path)
         endBuilding();
         endRock();
         endTerrain();
+        endTree();
         m_stack.clear();
         m_doc.replaceAll(std::move(bodies));
     } catch (const std::exception& e) {
@@ -753,7 +806,8 @@ void SceneryWindow::refreshCommands()
     m_newBuilding->setEnabled(!designing());
     m_newRock->setEnabled(!designing());
     m_newTerrain->setEnabled(!designing());
-    m_editBuilding->setEnabled(!designing() && (building || (b && (b->rock || b->terrain))));
+    m_newTree->setEnabled(!designing());
+    m_editBuilding->setEnabled(!designing() && (building || (b && (b->rock || b->terrain || b->tree))));
 }
 
 void SceneryWindow::changeSelected()
@@ -763,6 +817,8 @@ void SceneryWindow::changeSelected()
         startRock(m_selected);
     else if (b && b->terrain)
         startTerrain(m_selected);
+    else if (b && b->tree)
+        startTree(m_selected);
     else
         startBuilding(m_selected);
 }
@@ -1048,7 +1104,7 @@ void SceneryWindow::deleteSelected()
         }
         return;
     }
-    if (m_rock.active)
+    if (m_rock.active || m_tree.active)
         return;
     if (m_build.active) {
         // The picked door or window.
@@ -1074,6 +1130,7 @@ void SceneryWindow::closeEvent(QCloseEvent* event)
     endBuilding();
     endRock();
     endTerrain();
+    endTree();
     if (askToSave())
         event->accept();
     else
@@ -1209,6 +1266,142 @@ void SceneryWindow::requestRockDetail()
                     return;
                 }
                 self->m_rock.mesh = mesh;
+                self->refreshScene();
+            },
+            Qt::QueuedConnection);
+    });
+}
+
+// ---- The tree designer ------------------------------------------------------------------
+
+void SceneryWindow::startTree(ObjectId editing)
+{
+    if (designing())
+        return;
+    TreeMode mode;
+    mode.active = true;
+    TreeSpec spec;
+    if (editing != kInvalidId) {
+        const Body* b = m_doc.find(editing);
+        if (!b || !b->tree)
+            return;
+        mode.editing = b->id;
+        spec = *b->tree;
+        mode.x = b->placement.x - spec.offset[0];
+        mode.y = b->placement.y - spec.offset[1];
+        mode.z = b->placement.z - spec.offset[2];
+    } else {
+        spec = tree::defaults(TreeKind::Broadleaf);
+        spec.scale = m_scale.ratio;
+        if (!m_doc.empty()) {  // beside what's there
+            Bounds all;
+            for (ObjectId id : m_doc.topLevelIds()) {
+                const Bounds b = m_doc.worldBounds(id);
+                all.expand(b.min[0], b.min[1], b.min[2]);
+                all.expand(b.max[0], b.max[1], b.max[2]);
+            }
+            mode.x = all.max[0] + spec.crownWidth / spec.scale / 2 + 10.0;
+            mode.y = all.center()[1];
+        }
+    }
+    m_tree = mode;
+    m_treePanel->setPrinter(m_viewport->plateHeight(), std::min(m_viewport->plateSize().width(), m_viewport->plateSize().height()));
+    m_treePanel->start(spec, editing != kInvalidId);
+    m_treeDock->show();
+    if (auto* scroll = qobject_cast<QScrollArea*>(m_treeDock->widget()))
+        scroll->verticalScrollBar()->setValue(0);
+    m_viewport->setFocus();
+    statusBar()->showMessage(tr("Tree: set it up on the right; New Shape for another like it. Esc cancels."));
+    updateTreePreview();
+    if (editing == kInvalidId)
+        m_viewport->fitView();
+    requestTreeDetail();
+    refreshCommands();
+}
+
+void SceneryWindow::endTree()
+{
+    if (!m_tree.active)
+        return;
+    m_treeTimer->stop();
+    m_tree = TreeMode{};
+    m_treeDock->hide();
+    statusBar()->clearMessage();
+    refreshScene();
+}
+
+void SceneryWindow::applyTree()
+{
+    if (!m_tree.active)
+        return;
+    const TreeSpec spec = m_treePanel->spec();
+    try {
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        struct RestoreCursor {
+            ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
+        } restore;
+        if (m_tree.editing != kInvalidId) {
+            tree::update(m_stack, m_doc, m_tree.editing, spec);
+            m_selected = m_tree.editing;
+        } else {
+            const QString name = tr(tree::title(spec.kind)).section(QStringLiteral(" ("), 0, 0);  // "Conifer"
+            m_selected = tree::add(m_stack, m_doc, spec, name.toStdString(), m_tree.x, m_tree.y);
+        }
+    } catch (const std::exception& e) {
+        m_treePanel->setStatus(tr("It couldn't be made: %1").arg(QString::fromUtf8(e.what())), true);
+        return;
+    }
+    endTree();
+    statusBar()->showMessage(tr("Tree made. Double-click it in Objects to change it."), 8000);
+}
+
+// The tree as it's set up: coarsely now, in full a moment later.
+void SceneryWindow::updateTreePreview()
+{
+    if (!m_tree.active)
+        return;
+    const TreeSpec spec = m_treePanel->spec();
+    ++m_tree.generation;
+    try {
+        const Mesh made = tree::make(spec, true);
+        m_tree.mesh = std::make_shared<const Mesh>(
+            meshkernel::displayMesh(meshkernel::fromTriangles(made.positions, made.indices)));
+        m_treePanel->setStatus({}, false);
+    } catch (const std::exception& e) {
+        m_treePanel->setStatus(QString::fromUtf8(e.what()), true);
+    }
+    refreshScene();
+}
+
+void SceneryWindow::requestTreeDetail()
+{
+    if (!m_tree.active)
+        return;
+    const TreeSpec spec = m_treePanel->spec();
+    const int generation = m_tree.generation;
+    QPointer<SceneryWindow> self(this);
+    if (m_treeDetail.valid())
+        m_treeDetail.wait();  // one at a time
+    m_treeDetail = std::async(std::launch::async, [self, spec, generation] {
+        std::shared_ptr<const Mesh> mesh;
+        QString problem;
+        try {
+            const Mesh made = tree::make(spec);
+            mesh = std::make_shared<const Mesh>(
+                meshkernel::displayMesh(meshkernel::fromTriangles(made.positions, made.indices)));
+        } catch (const std::exception& e) {
+            problem = QString::fromUtf8(e.what());
+        }
+        QMetaObject::invokeMethod(
+            qApp,
+            [self, generation, mesh, problem] {
+                if (!self || !self->m_tree.active || self->m_tree.generation != generation)
+                    return;
+                if (!problem.isEmpty()) {
+                    self->m_treePanel->setStatus(problem, true);
+                    return;
+                }
+                self->m_tree.mesh = mesh;
                 self->refreshScene();
             },
             Qt::QueuedConnection);

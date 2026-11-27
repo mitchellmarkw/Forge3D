@@ -2151,3 +2151,17 @@ and sharp across edges.
   `marker` (a see-through column) serve the panel.
 - Scenery: `TerrainPanel` and a terrain mode beside build and rock modes, the same quick and full previews;
   clicks place (a path: two), drags move (a path: whole, or the end nearest).
+
+## Tree designer (slice 114, Forge3D 0.122.0, Scenery 0.5.0)
+
+- `TreeSpec` (core, TreeSpec.h; real mm and a scale): kept on the tree's shape as `Body::tree`; file format 58.
+- `tree::make` (Tree.cpp) builds a skeleton of tapered segments and foliage clumps, then meshes them directly (no
+  level set): each segment a frustum with a ball at its joint, each clump a noise-displaced icosphere (the noise
+  is RockField.h's). Broadleaf and dead trees branch recursively (a Grower: wander, tropism, children along the
+  branch, a da Vinci-like radius rule); conifers are a trunk with tiers of drooping branches and flattened
+  clumps; palms a bent trunk with arching fronds of flattened leaf blobs. The skeleton is stretched (positions,
+  not thicknesses) to the height and crown width asked for, and a broadleaf's crown drawn in from a box to an
+  ellipsoid (a warp, so branches still meet their clumps). Branches are thickened to `thinnest` (2.5 x smallest,
+  at least 0.8 mm). Roots flare from the foot below Z = 0; the union (`merged`) is trimmed at Z = 0. `quick` skips
+  the union (overlapping parts, for the preview) and uses coarser spheres.
+- Scenery: `TreePanel` (sizes a new tree, or another kind, to fit the printer) and a tree mode beside the others.

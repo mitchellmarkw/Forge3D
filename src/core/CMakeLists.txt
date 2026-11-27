@@ -79,6 +79,7 @@ add_library(forge_core STATIC
     src/Building.cpp
     src/Rock.cpp
     src/Terrain.cpp
+    src/Tree.cpp
     src/Reshape.cpp
     src/PrintOrient.cpp
     src/PrintSplit.cpp
