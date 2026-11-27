@@ -4,6 +4,7 @@
 #include "BuildInfo.h"
 #include "BuildingPanel.h"
 #include "RockPanel.h"
+#include "TerrainPanel.h"
 #include "Theme.h"
 #include "Viewport.h"
 #include "forge/core/Commands.h"
@@ -18,6 +19,7 @@
 #include <QComboBox>
 #include <QDesktopServices>
 #include <QDockWidget>
+#include <tuple>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QHBoxLayout>
@@ -108,7 +110,7 @@ SceneryWindow::SceneryWindow()
     dock->setFeatures(QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable);
     m_objects = new QListWidget;
     m_objects->setSelectionMode(QAbstractItemView::SingleSelection);
-    m_objects->setToolTip(tr("Click a shape to pick it; double-click a building or rock to change it"));
+    m_objects->setToolTip(tr("Click a shape to pick it; double-click a building, rock or terrain to change it"));
     dock->setWidget(m_objects);
     addDockWidget(Qt::LeftDockWidgetArea, dock);
     connect(m_objects, &QListWidget::currentRowChanged, this, [this](int row) {
@@ -180,6 +182,38 @@ SceneryWindow::SceneryWindow()
     });
     connect(m_rockPanel, &RockPanel::applyRequested, this, [this] { applyRock(); });
     connect(m_rockPanel, &RockPanel::cancelRequested, this, [this] { endRock(); });
+
+    // The terrain designer's panel, in the same place.
+    m_terrainDock = new QDockWidget(tr("Terrain"), this);
+    m_terrainDock->setObjectName(QStringLiteral("terrain"));
+    m_terrainDock->setFeatures(QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable);
+    auto* terrainScroll = new QScrollArea;
+    terrainScroll->setWidgetResizable(true);
+    terrainScroll->setFrameShape(QFrame::NoFrame);
+    m_terrainPanel = new TerrainPanel;
+    terrainScroll->setWidget(m_terrainPanel);
+    terrainScroll->setMinimumWidth(340);
+    m_terrainDock->setWidget(terrainScroll);
+    addDockWidget(Qt::RightDockWidgetArea, m_terrainDock);
+    m_terrainDock->hide();
+    m_terrainTimer = new QTimer(this);
+    m_terrainTimer->setSingleShot(true);
+    m_terrainTimer->setInterval(500);
+    connect(m_terrainTimer, &QTimer::timeout, this, [this] { requestTerrainDetail(); });
+    connect(m_terrainPanel, &TerrainPanel::changed, this, [this] {
+        updateTerrainPreview(true);
+        m_terrainTimer->start();
+    });
+    connect(m_terrainPanel, &TerrainPanel::placeRequested, this, [this](int kind) {
+        m_terrain.placing = kind;
+        m_terrain.pathStart.reset();
+        statusBar()->showMessage(kind < 0                                    ? QString()
+                                 : kind == int(TerrainFeatureKind::Path) ? tr("Click on the ground where the path starts.")
+                                                                         : tr("Click on the ground where it goes."));
+    });
+    connect(m_terrainPanel, &TerrainPanel::selectionChanged, this, [this] { updateTerrainPreview(false); });
+    connect(m_terrainPanel, &TerrainPanel::applyRequested, this, [this] { applyTerrain(); });
+    connect(m_terrainPanel, &TerrainPanel::cancelRequested, this, [this] { endTerrain(); });
     connect(m_viewport, &app::Viewport::clicked, this,
             [this](const QVector3D& o, const QVector3D& d, Qt::KeyboardModifiers) { onViewClicked(o, d); });
     connect(m_viewport, &app::Viewport::leftPressed, this,
@@ -192,6 +226,17 @@ SceneryWindow::SceneryWindow()
     connect(escape, &QShortcut::activated, this, [this] {
         if (m_rock.active) {
             endRock();
+            return;
+        }
+        if (m_terrain.active) {
+            if (m_terrain.placing >= 0) {  // stop placing first
+                m_terrain.placing = -1;
+                m_terrain.pathStart.reset();
+                m_terrainPanel->setPlacing(-1);
+                statusBar()->clearMessage();
+            } else {
+                endTerrain();
+            }
             return;
         }
         if (!m_build.active)
@@ -228,7 +273,7 @@ SceneryWindow::SceneryWindow()
     refreshScene();
     refreshTitle();
     statusBar()->showMessage(tr("Welcome to Forge3D Scenery. Open a model, or set the scale the scenery tools will "
-                                "build to: New Building and New Rock make scenery at it."),
+                                "build to: New Building, New Rock and New Terrain make scenery at it."),
                              12000);
     if (preferences().value(QStringLiteral("updates/checkAtStart"), true).toBool())
         checkForUpdates(true);
@@ -240,6 +285,8 @@ SceneryWindow::~SceneryWindow()
         m_detail.wait();
     if (m_rockDetail.valid())
         m_rockDetail.wait();
+    if (m_terrainDetail.valid())
+        m_terrainDetail.wait();
 }
 
 QWidget* SceneryWindow::buildRibbon()
@@ -289,6 +336,9 @@ QWidget* SceneryWindow::buildRibbon()
     m_newRock = new QPushButton(tr("New Rock"));
     m_newRock->setToolTip(tr("Design a rock: a boulder, a crag, a slab or a pile of rocks, from real sizes at the "
                              "model scale, sunk into the ground"));
+    m_newTerrain = new QPushButton(tr("New Terrain"));
+    m_newTerrain->setToolTip(tr("Design a terrain piece: a base with rolling hills, craters, crags and paths, from "
+                                "real sizes at the model scale"));
     buildings->addWidget(m_newBuilding);
     buildings->addWidget(m_newRock);
     buildings->addStretch(1);
@@ -296,15 +346,17 @@ QWidget* SceneryWindow::buildRibbon()
     auto* changing = new QVBoxLayout;
     changing->setSpacing(4);
     m_editBuilding = new QPushButton(tr("Change"));
-    m_editBuilding->setToolTip(tr("Change the building or rock picked in Objects (or double-click it there)"));
+    m_editBuilding->setToolTip(tr("Change the building, rock or terrain picked in Objects (or double-click it there)"));
+    changing->addWidget(m_newTerrain);
     changing->addWidget(m_editBuilding);
     changing->addStretch(1);
     row->addLayout(changing);
     connect(m_newBuilding, &QPushButton::clicked, this, [this] { startBuilding(kInvalidId); });
     connect(m_newRock, &QPushButton::clicked, this, [this] { startRock(kInvalidId); });
+    connect(m_newTerrain, &QPushButton::clicked, this, [this] { startTerrain(kInvalidId); });
     connect(m_editBuilding, &QPushButton::clicked, this, [this] { changeSelected(); });
 
-    auto* coming = new QLabel(tr("<b>Coming next:</b> terrain, and trees."));
+    auto* coming = new QLabel(tr("<b>Coming next:</b> trees."));
     coming->setWordWrap(true);
     coming->setStyleSheet(QStringLiteral("color: palette(mid);"));
     row->addSpacing(24);
@@ -397,8 +449,8 @@ void SceneryWindow::refreshScene()
             if (id == m_selected)
                 m_objects->setCurrentRow(m_objects->count() - 1);
             if ((m_build.active && (id == m_build.editing || id == m_build.roof)) ||
-                (m_rock.active && id == m_rock.editing)) {
-                if (!m_rock.active)
+                (m_rock.active && id == m_rock.editing) || (m_terrain.active && id == m_terrain.editing)) {
+                if (m_build.active)
                     triangles += mesh->triangleCount();
                 continue;  // shown as it's being changed instead
             }
@@ -432,6 +484,26 @@ void SceneryWindow::refreshScene()
             add(m_build.walls, 0xB0000001ull, QVector3D(0.72f, 0.42f, 0.32f), 1.0f);
             add(m_build.roofMesh, 0xB0000002ull, QVector3D(0.45f, 0.38f, 0.36f), 1.0f);
             add(m_build.marker, 0xB0000003ull, QVector3D(1.0f, 0.6f, 0.1f), 0.6f);
+        }
+        if (m_terrain.active) {
+            QMatrix4x4 at;
+            at.translate(float(m_terrain.x), float(m_terrain.y), float(m_terrain.z));
+            for (const auto& [m, id, colour, alpha] :
+                 {std::tuple{m_terrain.mesh, 0xB0000005ull, QVector3D(0.49f, 0.42f, 0.31f), 1.0f},
+                  std::tuple{m_terrain.marker, 0xB0000006ull, QVector3D(1.0f, 0.6f, 0.1f), 0.35f}}) {
+                if (!m || m->empty())
+                    continue;
+                app::DisplayItem item;
+                item.id = id;
+                item.mesh = m;
+                item.model = at;
+                item.color = colour;
+                item.alpha = alpha;
+                item.helper = alpha < 1.0f;
+                items.push_back(std::move(item));
+                if (alpha >= 1.0f)
+                    triangles += m->triangleCount();
+            }
         }
         if (m_rock.active && m_rock.mesh && !m_rock.mesh->empty()) {
             app::DisplayItem item;
@@ -482,6 +554,7 @@ void SceneryWindow::newModel()
         return;
     endBuilding();
     endRock();
+    endTerrain();
     m_stack.clear();
     m_doc.replaceAll({});
     m_filePath.clear();
@@ -516,6 +589,7 @@ void SceneryWindow::openFile(const QString& path)
         std::vector<Body> bodies = file::load(toPath(path));
         endBuilding();
         endRock();
+        endTerrain();
         m_stack.clear();
         m_doc.replaceAll(std::move(bodies));
     } catch (const std::exception& e) {
@@ -678,7 +752,8 @@ void SceneryWindow::refreshCommands()
     const bool building = b && (b->building || (b->roofOf != kInvalidId && m_doc.find(b->roofOf)));
     m_newBuilding->setEnabled(!designing());
     m_newRock->setEnabled(!designing());
-    m_editBuilding->setEnabled(!designing() && (building || (b && b->rock)));
+    m_newTerrain->setEnabled(!designing());
+    m_editBuilding->setEnabled(!designing() && (building || (b && (b->rock || b->terrain))));
 }
 
 void SceneryWindow::changeSelected()
@@ -686,6 +761,8 @@ void SceneryWindow::changeSelected()
     const Body* b = m_doc.find(m_selected);
     if (b && b->rock)
         startRock(m_selected);
+    else if (b && b->terrain)
+        startTerrain(m_selected);
     else
         startBuilding(m_selected);
 }
@@ -858,6 +935,10 @@ std::optional<building::Spot> SceneryWindow::spotFromRay(const QVector3D& origin
 
 void SceneryWindow::onViewClicked(const QVector3D& origin, const QVector3D& direction)
 {
+    if (m_terrain.active) {
+        terrainClicked(origin, direction);
+        return;
+    }
     if (!m_build.active) {
         return;
     }
@@ -890,6 +971,10 @@ void SceneryWindow::onViewClicked(const QVector3D& origin, const QVector3D& dire
 
 void SceneryWindow::onViewPressed(const QVector3D& origin, const QVector3D& direction)
 {
+    if (m_terrain.active) {
+        terrainPressed(origin, direction);
+        return;
+    }
     if (!m_build.active || m_build.placing >= 0)
         return;
     const auto spot = spotFromRay(origin, direction);
@@ -908,6 +993,10 @@ void SceneryWindow::onViewPressed(const QVector3D& origin, const QVector3D& dire
 
 void SceneryWindow::onViewDragged(const QVector3D& origin, const QVector3D& direction)
 {
+    if (m_terrain.active) {
+        terrainDragged(origin, direction);
+        return;
+    }
     if (!m_build.active || m_build.dragging < 0)
         return;
     BuildingSpec spec = m_buildingPanel->spec();
@@ -931,6 +1020,13 @@ void SceneryWindow::onViewDragged(const QVector3D& origin, const QVector3D& dire
 
 void SceneryWindow::onViewReleased()
 {
+    if (m_terrain.active) {
+        if (m_terrain.dragging >= 0) {
+            m_terrain.dragging = -1;
+            m_terrainTimer->start();
+        }
+        return;
+    }
     if (!m_build.active || m_build.dragging < 0)
         return;
     m_build.dragging = -1;
@@ -939,6 +1035,21 @@ void SceneryWindow::onViewReleased()
 
 void SceneryWindow::deleteSelected()
 {
+    if (m_terrain.active) {
+        // The picked crater, crag or path.
+        TerrainSpec spec = m_terrainPanel->spec();
+        const int i = m_terrainPanel->selectedFeature();
+        if (i >= 0 && i < int(spec.features.size())) {
+            spec.features.erase(spec.features.begin() + i);
+            m_terrainPanel->setSpec(spec);
+            m_terrainPanel->selectFeature(-1);
+            updateTerrainPreview(true);
+            m_terrainTimer->start();
+        }
+        return;
+    }
+    if (m_rock.active)
+        return;
     if (m_build.active) {
         // The picked door or window.
         BuildingSpec spec = m_buildingPanel->spec();
@@ -960,8 +1071,9 @@ void SceneryWindow::deleteSelected()
 
 void SceneryWindow::closeEvent(QCloseEvent* event)
 {
-    if (m_build.active)
-        endBuilding();
+    endBuilding();
+    endRock();
+    endTerrain();
     if (askToSave())
         event->accept();
     else
@@ -1101,6 +1213,260 @@ void SceneryWindow::requestRockDetail()
             },
             Qt::QueuedConnection);
     });
+}
+
+// ---- The terrain designer ---------------------------------------------------------------
+
+void SceneryWindow::startTerrain(ObjectId editing)
+{
+    if (designing())
+        return;
+    TerrainMode mode;
+    mode.active = true;
+    TerrainSpec spec;
+    if (editing != kInvalidId) {
+        const Body* b = m_doc.find(editing);
+        if (!b || !b->terrain)
+            return;
+        mode.editing = b->id;
+        spec = *b->terrain;
+        mode.x = b->placement.x - spec.offset[0];
+        mode.y = b->placement.y - spec.offset[1];
+        mode.z = b->placement.z - spec.offset[2];
+    } else {
+        spec = terrain::defaults();
+        spec.scale = m_scale.ratio;
+        // Most of the printer's plate, whatever the scale.
+        const QSizeF plate = m_viewport->plateSize();
+        spec.width = std::max(100.0, std::floor(plate.width() * 0.8 * spec.scale / 100.0) * 100.0);
+        spec.depth = std::max(100.0, std::floor(std::min(plate.height() * 0.8, plate.width() * 0.6) * spec.scale / 100.0) * 100.0);
+        spec.hillSize = std::round(spec.width * 0.7 / 100.0) * 100.0;
+        spec.hillHeight = std::round(spec.depth * 0.18 / 100.0) * 100.0;
+        if (!m_doc.empty()) {  // beside what's there
+            Bounds all;
+            for (ObjectId id : m_doc.topLevelIds()) {
+                const Bounds b = m_doc.worldBounds(id);
+                all.expand(b.min[0], b.min[1], b.min[2]);
+                all.expand(b.max[0], b.max[1], b.max[2]);
+            }
+            mode.x = all.max[0] + spec.width / spec.scale / 2 + 10.0;
+            mode.y = all.center()[1];
+        }
+    }
+    m_terrain = mode;
+    m_terrainPanel->start(spec, editing != kInvalidId);
+    m_terrainDock->show();
+    if (auto* scroll = qobject_cast<QScrollArea*>(m_terrainDock->widget()))
+        scroll->verticalScrollBar()->setValue(0);
+    m_viewport->setFocus();
+    statusBar()->showMessage(tr("Terrain: set it up on the right; Add Crater, Add Crag or Add Path, then click on the "
+                                "ground, or Scatter. Esc cancels."));
+    updateTerrainPreview(true);
+    if (editing == kInvalidId)
+        m_viewport->fitView();
+    requestTerrainDetail();
+    refreshCommands();
+}
+
+void SceneryWindow::endTerrain()
+{
+    if (!m_terrain.active)
+        return;
+    m_terrainTimer->stop();
+    m_terrain = TerrainMode{};
+    m_terrainDock->hide();
+    statusBar()->clearMessage();
+    refreshScene();
+}
+
+void SceneryWindow::applyTerrain()
+{
+    if (!m_terrain.active)
+        return;
+    const TerrainSpec spec = m_terrainPanel->spec();
+    try {
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        struct RestoreCursor {
+            ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
+        } restore;
+        if (m_terrain.editing != kInvalidId) {
+            terrain::update(m_stack, m_doc, m_terrain.editing, spec);
+            m_selected = m_terrain.editing;
+        } else {
+            m_selected = terrain::add(m_stack, m_doc, spec, tr("Terrain").toStdString(), m_terrain.x, m_terrain.y);
+        }
+    } catch (const std::exception& e) {
+        m_terrainPanel->setStatus(tr("It couldn't be made: %1").arg(QString::fromUtf8(e.what())), true);
+        return;
+    }
+    endTerrain();
+    statusBar()->showMessage(tr("Terrain made. Double-click it in Objects to change it."), 8000);
+}
+
+// The terrain as it's set up: coarsely now (and the picked one's marker), in full a moment later.
+void SceneryWindow::updateTerrainPreview(bool quick)
+{
+    if (!m_terrain.active)
+        return;
+    const TerrainSpec spec = m_terrainPanel->spec();
+    try {
+        if (quick) {
+            ++m_terrain.generation;
+            const Mesh made = terrain::make(spec, true);
+            m_terrain.mesh = std::make_shared<const Mesh>(
+                meshkernel::displayMesh(meshkernel::fromTriangles(made.positions, made.indices)));
+        }
+        const int picked = m_terrainPanel->selectedFeature();
+        if (picked >= 0 && picked < int(spec.features.size())) {
+            const Mesh m = terrain::marker(spec, spec.features[std::size_t(picked)]);
+            m_terrain.marker =
+                std::make_shared<const Mesh>(meshkernel::displayMesh(meshkernel::fromTriangles(m.positions, m.indices)));
+        } else {
+            m_terrain.marker = nullptr;
+        }
+        m_terrainPanel->setStatus({}, false);
+    } catch (const std::exception& e) {
+        m_terrainPanel->setStatus(QString::fromUtf8(e.what()), true);
+    }
+    refreshScene();
+}
+
+void SceneryWindow::requestTerrainDetail()
+{
+    if (!m_terrain.active)
+        return;
+    const TerrainSpec spec = m_terrainPanel->spec();
+    const int generation = m_terrain.generation;
+    QPointer<SceneryWindow> self(this);
+    if (m_terrainDetail.valid())
+        m_terrainDetail.wait();  // one at a time
+    m_terrainDetail = std::async(std::launch::async, [self, spec, generation] {
+        std::shared_ptr<const Mesh> mesh;
+        QString problem;
+        try {
+            const Mesh made = terrain::make(spec);
+            mesh = std::make_shared<const Mesh>(
+                meshkernel::displayMesh(meshkernel::fromTriangles(made.positions, made.indices)));
+        } catch (const std::exception& e) {
+            problem = QString::fromUtf8(e.what());
+        }
+        QMetaObject::invokeMethod(
+            qApp,
+            [self, generation, mesh, problem] {
+                if (!self || !self->m_terrain.active || self->m_terrain.generation != generation)
+                    return;
+                if (!problem.isEmpty()) {
+                    self->m_terrainPanel->setStatus(problem, true);
+                    return;
+                }
+                self->m_terrain.mesh = mesh;
+                self->refreshScene();
+            },
+            Qt::QueuedConnection);
+    });
+}
+
+std::optional<std::array<double, 2>> SceneryWindow::terrainSpot(const QVector3D& origin,
+                                                                const QVector3D& direction) const
+{
+    return terrain::hitAt(m_terrainPanel->spec(),
+                          {origin.x() - m_terrain.x, origin.y() - m_terrain.y, origin.z() - m_terrain.z},
+                          {direction.x(), direction.y(), direction.z()});
+}
+
+void SceneryWindow::terrainClicked(const QVector3D& origin, const QVector3D& direction)
+{
+    const auto spot = terrainSpot(origin, direction);
+    TerrainSpec spec = m_terrainPanel->spec();
+    if (m_terrain.placing >= 0) {
+        if (!spot) {
+            statusBar()->showMessage(tr("Click on the ground."), 4000);
+            return;
+        }
+        const auto kind = TerrainFeatureKind(m_terrain.placing);
+        if (kind == TerrainFeatureKind::Path && !m_terrain.pathStart) {
+            m_terrain.pathStart = spot;
+            statusBar()->showMessage(tr("Now click where the path ends."));
+            return;
+        }
+        TerrainFeature f = kind == TerrainFeatureKind::Path
+                               ? terrain::feature(spec, kind, (*m_terrain.pathStart)[0], (*m_terrain.pathStart)[1],
+                                                  (*spot)[0], (*spot)[1])
+                               : terrain::feature(spec, kind, (*spot)[0], (*spot)[1]);
+        spec.features.push_back(f);
+        m_terrain.placing = -1;
+        m_terrain.pathStart.reset();
+        m_terrainPanel->setPlacing(-1);
+        m_terrainPanel->setSpec(spec);
+        m_terrainPanel->selectFeature(int(spec.features.size()) - 1);
+        statusBar()->clearMessage();
+        updateTerrainPreview(true);
+        m_terrainTimer->start();
+        return;
+    }
+    const auto picked = spot ? terrain::pickedFeature(spec, (*spot)[0], (*spot)[1]) : std::nullopt;
+    m_terrainPanel->selectFeature(picked ? int(*picked) : -1);
+    updateTerrainPreview(false);
+}
+
+void SceneryWindow::terrainPressed(const QVector3D& origin, const QVector3D& direction)
+{
+    if (m_terrain.placing >= 0)
+        return;
+    const auto spot = terrainSpot(origin, direction);
+    if (!spot)
+        return;
+    const TerrainSpec spec = m_terrainPanel->spec();
+    const auto picked = terrain::pickedFeature(spec, (*spot)[0], (*spot)[1]);
+    if (!picked)
+        return;
+    const TerrainFeature& f = spec.features[*picked];
+    m_terrain.dragging = int(*picked);
+    m_terrain.dragEnd = 0;
+    m_terrain.grabX = (*spot)[0] - f.x;
+    m_terrain.grabY = (*spot)[1] - f.y;
+    if (f.kind == TerrainFeatureKind::Path) {
+        const double toStart = std::hypot((*spot)[0] - f.x, (*spot)[1] - f.y);
+        const double toEnd = std::hypot((*spot)[0] - f.x2, (*spot)[1] - f.y2);
+        const double length = std::hypot(f.x2 - f.x, f.y2 - f.y);
+        const double near = std::min(f.size * 1.5, length / 4);
+        if (toStart < near && toStart <= toEnd)
+            m_terrain.dragEnd = 1;
+        else if (toEnd < near)
+            m_terrain.dragEnd = 2;
+        if (m_terrain.dragEnd == 2) {
+            m_terrain.grabX = (*spot)[0] - f.x2;
+            m_terrain.grabY = (*spot)[1] - f.y2;
+        }
+    }
+    m_terrainPanel->selectFeature(int(*picked));
+    updateTerrainPreview(false);
+}
+
+void SceneryWindow::terrainDragged(const QVector3D& origin, const QVector3D& direction)
+{
+    if (m_terrain.dragging < 0)
+        return;
+    TerrainSpec spec = m_terrainPanel->spec();
+    if (m_terrain.dragging >= int(spec.features.size()))
+        return;
+    const auto spot = terrainSpot(origin, direction);
+    if (!spot)
+        return;
+    TerrainFeature& f = spec.features[std::size_t(m_terrain.dragging)];
+    const double nx = (*spot)[0] - m_terrain.grabX, ny = (*spot)[1] - m_terrain.grabY;
+    if (m_terrain.dragEnd == 2) {
+        f.x2 = nx, f.y2 = ny;
+    } else if (m_terrain.dragEnd == 1) {
+        f.x = nx, f.y = ny;
+    } else {
+        f.x2 += nx - f.x, f.y2 += ny - f.y;
+        f.x = nx, f.y = ny;
+    }
+    f.scattered = false;  // moved by hand: it stays
+    m_terrainPanel->setSpec(spec);
+    m_terrainPanel->selectFeature(m_terrain.dragging);
+    updateTerrainPreview(true);
 }
 
 }  // namespace forge::scenery

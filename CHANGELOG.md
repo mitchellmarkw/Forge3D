@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.121.0 Beta — Slice 113: opens Scenery's terrain (2026-11-26)
+
+- Forge3D opens models with terrain made in Forge3D Scenery (0.4): shapes like any other here; their description
+  comes along when saved, so Scenery can still change them.
+- File format 57 (a terrain piece's description).
+
 ## 0.120.0 Beta — Slice 112: opens Scenery's rocks (2026-11-26)
 
 - Forge3D opens models with rocks made in Forge3D Scenery (0.3): shapes like any other here; their description

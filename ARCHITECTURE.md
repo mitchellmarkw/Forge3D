@@ -2135,3 +2135,19 @@ and sharp across edges.
 - Scenery: `RockPanel` in a right dock, and a rock mode beside build mode (one at a time: `designing()`): a quick
   preview at once, the full one on a thread 500 ms after the last change (a generation counter drops stale ones).
   Change opens the picked shape's designer, whichever it is.
+
+## Terrain designer (slice 113, Forge3D 0.121.0, Scenery 0.4.0)
+
+- `TerrainSpec` (core, TerrainSpec.h): ground sizes in real mm and a scale; base thickness and bevel in model mm.
+  Its craters, crags and paths are `TerrainFeature`s (real mm from the base's middle; a path runs to x2, y2;
+  `scattered` ones are replaced by the next Scatter). Kept on the shape as `Body::terrain`; file format 57.
+- `terrain::make` (Terrain.cpp): the ground's height is a 2D function (hills: value-noise fbm, stretched and
+  lowered; roughness; faded to the base's height at the edge when `levelEdges`; craters a bowl and rim; paths
+  levelled to their centre line and sunk, the banks smoothstepped), sampled on a grid at half the mesh's step
+  and looked up between. Crags are rock fields (RockField.h, shared with the rock designer) smooth-unioned
+  with it. The 3D field is meshed by `levelSet`; the base's rim is a separate exact loft (outline to inset
+  outline) unioned on, so a round or bevelled edge stays clean, the ground tucked inside it below the base's
+  top. `hitAt` marches a ray against the height function (the view's clicks); `pickedFeature`, `scatter`,
+  `marker` (a see-through column) serve the panel.
+- Scenery: `TerrainPanel` and a terrain mode beside build and rock modes, the same quick and full previews;
+  clicks place (a path: two), drags move (a path: whole, or the end nearest).

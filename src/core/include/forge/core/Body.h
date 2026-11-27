@@ -3,6 +3,7 @@
 
 #include "forge/core/BuildingSpec.h"
 #include "forge/core/RockSpec.h"
+#include "forge/core/TerrainSpec.h"
 #include "forge/core/Sketch.h"
 
 #include <array>
@@ -996,6 +997,8 @@ struct Body {
     ObjectId roofOf = kInvalidId;
     // Made by Scenery's rock designer (slice 112).
     std::optional<RockSpec> rock{};
+    // Made by Scenery's terrain designer (slice 113).
+    std::optional<TerrainSpec> terrain{};
 
     bool isBoolean() const { return boolean.has_value(); }
     bool isOff() const { return boolean.has_value() && (suppressed || rolledBack); }

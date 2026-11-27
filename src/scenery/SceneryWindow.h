@@ -5,6 +5,7 @@
 #include "forge/core/Document.h"
 #include "forge/core/Building.h"
 #include "forge/core/Rock.h"
+#include "forge/core/Terrain.h"
 #include "forge/core/ModelScale.h"
 
 #include <QMainWindow>
@@ -28,6 +29,7 @@ namespace forge::scenery {
 
 class BuildingPanel;
 class RockPanel;
+class TerrainPanel;
 
 // Forge3D Scenery's window (slice 110: the groundwork). The same 3D view and .f3d files as
 // Forge3D: open a model, see it on the plate, save it, export it for printing; and the
@@ -59,6 +61,7 @@ private:
     std::vector<ObjectId> m_rows;  // Objects' rows' shapes
     QPushButton* m_newBuilding = nullptr;
     QPushButton* m_newRock = nullptr;
+    QPushButton* m_newTerrain = nullptr;
     QPushButton* m_editBuilding = nullptr;  // Change: the picked building or rock
 
     // The building designer (slice 111).
@@ -92,7 +95,35 @@ private:
     RockMode m_rock;
     QTimer* m_rockTimer = nullptr;
     std::future<void> m_rockDetail;
-    bool designing() const { return m_build.active || m_rock.active; }
+    // The terrain designer (slice 113).
+    TerrainPanel* m_terrainPanel = nullptr;
+    QDockWidget* m_terrainDock = nullptr;
+    struct TerrainMode {
+        bool active = false;
+        ObjectId editing = kInvalidId;
+        double x = 0.0, y = 0.0, z = 0.0;  // the terrain's own origin on the plate
+        int placing = -1;                   // the next click puts a TerrainFeatureKind
+        std::optional<std::array<double, 2>> pathStart;  // a path's first click (real mm)
+        int dragging = -1;                  // the feature being dragged
+        int dragEnd = 0;                    // a path's: 0 all of it, 1 its start, 2 its end
+        double grabX = 0.0, grabY = 0.0;    // where it was held, from its point
+        std::shared_ptr<const Mesh> mesh, marker;
+        int generation = 0;
+    };
+    TerrainMode m_terrain;
+    QTimer* m_terrainTimer = nullptr;
+    std::future<void> m_terrainDetail;
+    void startTerrain(ObjectId editing);
+    void endTerrain();
+    void applyTerrain();
+    void updateTerrainPreview(bool quick);
+    void requestTerrainDetail();
+    std::optional<std::array<double, 2>> terrainSpot(const QVector3D& origin, const QVector3D& direction) const;
+    void terrainClicked(const QVector3D& origin, const QVector3D& direction);
+    void terrainPressed(const QVector3D& origin, const QVector3D& direction);
+    void terrainDragged(const QVector3D& origin, const QVector3D& direction);
+
+    bool designing() const { return m_build.active || m_rock.active || m_terrain.active; }
     void startRock(ObjectId editing);
     void endRock();
     void applyRock();
