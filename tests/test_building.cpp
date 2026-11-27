@@ -295,3 +295,42 @@ TEST_CASE("Buildings: L, T, U and courtyard shapes", "[building]")
     CHECK(other.find(id)->building == doc.find(id)->building);
     CHECK(other.find(id)->building->shape == BuildingShape::U);
 }
+
+TEST_CASE("Buildings: rough-hewn stone and fieldstone", "[building]")
+{
+    for (WallMaterial m : {WallMaterial::RoughStone, WallMaterial::Fieldstone}) {
+        INFO(building::title(m));
+        BuildingSpec s = building::defaults(m);
+        s.roof = RoofKind::None;
+        const double k = 1.0 / s.scale;
+        const auto start = std::chrono::steady_clock::now();
+        const building::Made made = building::make(s);
+        const double took = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+        INFO("made in " << took << " s, " << made.walls.triangleCount() << " triangles");
+        CHECK(took < 30.0);
+        const MeshSolid walls = meshkernel::fromTriangles(made.walls.positions, made.walls.indices);
+        CHECK(meshkernel::volume(walls) > 0);
+        // The stones stand out of the face, a little.
+        const Bounds b = made.walls.bounds();
+        CHECK(double(b.max[0] - b.min[0]) > s.width * k);
+        CHECK(double(b.max[0] - b.min[0]) < s.width * k + 2 * 0.3 * s.wallThickness * k);
+        CHECK_THAT(double(b.min[2]), WithinAbs(0.0, 0.01));
+        // Another seed, other stones; the quick one plain.
+        BuildingSpec other = s;
+        other.seed = 9;
+        CHECK(std::abs(meshkernel::volume(meshkernel::fromTriangles(building::make(other).walls.positions,
+                                                                    building::make(other).walls.indices)) -
+                       meshkernel::volume(walls)) > 1e-3);
+        CHECK(building::make(s, true).walls.triangleCount() < made.walls.triangleCount() / 10);
+        // With a door, an L, and dry-laid.
+        BuildingSpec more = building::withShape(s, BuildingShape::L);
+        more.openings.push_back(building::openingAt(more, OpeningKind::Door, {0, 2000, 0}));
+        more.mortar = false;
+        CHECK_NOTHROW(building::make(more));
+        // Too small to show: plain, with a note.
+        BuildingSpec tiny = s;
+        tiny.scale = 220;
+        const building::Made plain = building::make(tiny);
+        CHECK_FALSE(plain.notes.empty());
+    }
+}

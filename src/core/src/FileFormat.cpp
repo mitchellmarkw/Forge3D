@@ -275,7 +275,7 @@ json bodyToJson(const Body& b)
         j["jointFor"] = b.jointFor;
     if (b.building) {
         const BuildingSpec& s = *b.building;
-        static const char* materials[] = {"brick", "stone", "logs", "planks"};
+        static const char* materials[] = {"brick", "stone", "logs", "planks", "rough", "fieldstone"};
         static const char* roofs[] = {"none", "flat", "gable", "hip"};
         json openings = json::array();
         for (const auto& o : s.openings)
@@ -770,8 +770,10 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
             s.depth = bj->value("depth", s.depth);
             s.height = bj->value("height", s.height);
             const std::string m = bj->value("material", std::string("brick"));
-            s.material = m == "stone" ? WallMaterial::Stone
-                         : m == "logs" ? WallMaterial::Logs
+            s.material = m == "stone"        ? WallMaterial::Stone
+                         : m == "rough"      ? WallMaterial::RoughStone
+                         : m == "fieldstone" ? WallMaterial::Fieldstone
+                         : m == "logs"       ? WallMaterial::Logs
                          : m == "planks" ? WallMaterial::Planks
                                          : WallMaterial::Brick;
             if (const auto u = bj->find("unit"); u != bj->end() && u->is_array() && u->size() == 3) {

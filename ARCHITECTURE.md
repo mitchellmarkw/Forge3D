@@ -2181,3 +2181,13 @@ and sharp across edges.
 - `corners`, `movedCorner`, `cornerMarker`, `pickedCorner`: the footprint's draggable corners (outside: width
   and depth, about the middle; inside: the wings). Scenery shows them as posts and drags one on the plane at the
   height it was grabbed.
+
+## Rough stone walls (slice 116, Forge3D 0.124.0, Scenery 0.7.0)
+
+- `WallMaterial::RoughStone` and `Fieldstone` (file format 60). Their faces aren't laid unit by unit: each wall's
+  face is a height field, `faceSkin` (a closed slab on a grid, from inside the wall out to the height), unioned
+  over the shell set in by the mortar's recess. The height: below the mortar's level in the joints, a rounded
+  dome with noise on each stone. Rough-hewn stones are found by course (random heights) and joint (random
+  lengths); fieldstones are cells round jittered points (distance to the nearest two: the border). The grid is
+  at least 0.75 x the smallest detail and 1/12 of a stone; joints are widened to 1.6 grid steps. Skins reach past
+  outside corners by the relief, so corners close.

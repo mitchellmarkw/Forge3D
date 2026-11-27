@@ -521,7 +521,14 @@ void SceneryWindow::refreshScene()
                 item.helper = alpha < 1.0f;
                 items.push_back(std::move(item));
             };
-            add(m_build.walls, 0xB0000001ull, QVector3D(0.72f, 0.42f, 0.32f), 1.0f);
+            {
+                // The material's own colour, as the made shape gets.
+                static const std::uint32_t colours[] = {0xB5563A, 0x9C978F, 0x8B5A2B, 0xC9B48C, 0x8F8579, 0x86735F};
+                const std::uint32_t c = colours[std::clamp(int(m_buildingPanel->spec().material), 0, 5)];
+                add(m_build.walls, 0xB0000001ull,
+                    QVector3D(float((c >> 16) & 0xFF) / 255.0f, float((c >> 8) & 0xFF) / 255.0f, float(c & 0xFF) / 255.0f),
+                    1.0f);
+            }
             add(m_build.roofMesh, 0xB0000002ull, QVector3D(0.45f, 0.38f, 0.36f), 1.0f);
             add(m_build.marker, 0xB0000003ull, QVector3D(1.0f, 0.6f, 0.1f), 0.6f);
             add(m_build.posts, 0xB0000008ull, QVector3D(1.0f, 0.55f, 0.1f), 0.45f);

@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <functional>
 #include <random>
 #include <stdexcept>
 
@@ -79,6 +80,73 @@ MeshSolid wallBox(const Face& f, double a, double b, double z0, double z1, doubl
     const double from = axisWay[2] < 0 ? z1 : z0;
     return prism({{a, out0}, {b, out0}, {b, out1}, {a, out1}}, add(start, {0, 0, from}), mul(axisWay, z1 - z0), along,
                  out);
+}
+
+// A wall's face made rough (slice 116): a slab from `back` (out of the face; negative: in
+// it) to `out(u, v)` (model mm out of the face), u from -e0 to the length + e1, v from 0 to
+// `height`, on a grid `step` apart.
+MeshSolid faceSkin(const Face& f, double e0, double e1, double height, double back, double step,
+                   const std::function<double(double, double)>& out)
+{
+    const int nu = std::max(1, int(std::ceil((f.length + e0 + e1) / step)));
+    const int nv = std::max(1, int(std::ceil(height / step)));
+    const double du = (f.length + e0 + e1) / nu, dv = height / nv;
+    const V3 along{f.along[0], f.along[1], f.along[2]}, outWay{f.out[0], f.out[1], f.out[2]};
+    const V3 start{f.start[0], f.start[1], f.start[2]};
+    Mesh m;
+    const auto put = [&](double u, double v, double w) {
+        const V3 p = add(add(start, mul(along, u)), add(V3{0, 0, v}, mul(outWay, w)));
+        for (double c : p)
+            m.positions.push_back(float(c));
+        return std::uint32_t(m.positions.size() / 3 - 1);
+    };
+    std::vector<std::uint32_t> front, rear;
+    for (int j = 0; j <= nv; ++j)
+        for (int i = 0; i <= nu; ++i) {
+            const double u = -e0 + i * du, v = j * dv;
+            front.push_back(put(u, v, std::max(out(u, v), back + 0.05)));
+            rear.push_back(put(u, v, back));
+        }
+    const auto at = [nu](const std::vector<std::uint32_t>& g, int i, int j) { return g[std::size_t(j * (nu + 1) + i)]; };
+    const auto pos = [&](std::uint32_t i) { return V3{m.positions[3 * i], m.positions[3 * i + 1], m.positions[3 * i + 2]}; };
+    // Two triangles for a quad, turned to face `facing`.
+    const auto quad = [&](std::uint32_t a, std::uint32_t b, std::uint32_t c, std::uint32_t d, const V3& facing) {
+        const V3 pa = pos(a), pb = pos(b), pc = pos(c);
+        const V3 n = cross({pb[0] - pa[0], pb[1] - pa[1], pb[2] - pa[2]}, {pc[0] - pa[0], pc[1] - pa[1], pc[2] - pa[2]});
+        if (dot(n, facing) < 0)
+            std::swap(b, d);
+        for (std::uint32_t k : {a, b, c, a, c, d})
+            m.indices.push_back(k);
+    };
+    const V3 up{0, 0, 1}, down{0, 0, -1}, left = mul(along, -1), in = mul(outWay, -1);
+    for (int j = 0; j < nv; ++j)
+        for (int i = 0; i < nu; ++i) {
+            quad(at(front, i, j), at(front, i + 1, j), at(front, i + 1, j + 1), at(front, i, j + 1), outWay);
+            quad(at(rear, i, j), at(rear, i + 1, j), at(rear, i + 1, j + 1), at(rear, i, j + 1), in);
+        }
+    for (int i = 0; i < nu; ++i) {
+        quad(at(front, i, 0), at(front, i + 1, 0), at(rear, i + 1, 0), at(rear, i, 0), down);
+        quad(at(front, i, nv), at(front, i + 1, nv), at(rear, i + 1, nv), at(rear, i, nv), up);
+    }
+    for (int j = 0; j < nv; ++j) {
+        quad(at(front, 0, j), at(front, 0, j + 1), at(rear, 0, j + 1), at(rear, 0, j), left);
+        quad(at(front, nu, j), at(front, nu, j + 1), at(rear, nu, j + 1), at(rear, nu, j), along);
+    }
+    return meshkernel::fromTriangles(m.positions, m.indices);
+}
+
+// Hashed noise in 2D, -1..1, smooth.
+double noise2(double x, double y, std::uint32_t seed)
+{
+    const auto h = [seed](int i, int j) {
+        std::uint32_t v = std::uint32_t(i) * 374761393u + std::uint32_t(j) * 668265263u + seed * 2246822519u;
+        v = (v ^ (v >> 13)) * 1274126177u;
+        return double((v ^ (v >> 16)) & 0xFFFF) / 32767.5 - 1.0;
+    };
+    const int i = int(std::floor(x)), j = int(std::floor(y));
+    const double fx = x - i, fy = y - j, sx = fx * fx * (3 - 2 * fx), sy = fy * fy * (3 - 2 * fy);
+    const double a = h(i, j) + (h(i + 1, j) - h(i, j)) * sx, b = h(i, j + 1) + (h(i + 1, j + 1) - h(i, j + 1)) * sx;
+    return a + (b - a) * sy;
 }
 
 Mesh meshOf(const MeshSolid& s)
@@ -426,6 +494,8 @@ const char* title(WallMaterial m)
     case WallMaterial::Stone: return "Stone blocks";
     case WallMaterial::Logs: return "Logs";
     case WallMaterial::Planks: return "Wood planks";
+    case WallMaterial::RoughStone: return "Rough-hewn stone";
+    case WallMaterial::Fieldstone: return "Fieldstone (irregular)";
     }
     return "";
 }
@@ -458,6 +528,12 @@ BuildingSpec defaults(WallMaterial m, const BuildingSpec& from)
     case WallMaterial::Planks:  // 150 mm showing, on a 150 mm wall
         s.unitLength = 0, s.unitHeight = 150, s.unitDepth = 25, s.joint = 0, s.wallThickness = 150, s.mortar = false;
         break;
+    case WallMaterial::RoughStone:  // roughly squared stones, rock-faced, courses of varying height
+        s.unitLength = 550, s.unitHeight = 320, s.unitDepth = 350, s.joint = 30, s.wallThickness = 450, s.mortar = true;
+        break;
+    case WallMaterial::Fieldstone:  // rounded stones of every shape, wide mortar: a "giraffe" stone house
+        s.unitLength = 400, s.unitHeight = 400, s.unitDepth = 300, s.joint = 40, s.wallThickness = 450, s.mortar = true;
+        break;
     }
     return s;
 }
@@ -475,7 +551,9 @@ void check(const BuildingSpec& s)
         throw std::invalid_argument("The walls are too thick for the building's size (or thinner than 20 mm).");
     if (!(s.unitHeight >= 10))
         throw std::invalid_argument("The units (bricks, blocks, logs or planks) must be at least 10 mm high.");
-    if ((s.material == WallMaterial::Brick || s.material == WallMaterial::Stone) && !(s.unitLength >= 20))
+    if ((s.material == WallMaterial::Brick || s.material == WallMaterial::Stone ||
+         s.material == WallMaterial::RoughStone || s.material == WallMaterial::Fieldstone) &&
+        !(s.unitLength >= 20))
         throw std::invalid_argument("The bricks or blocks must be at least 20 mm long.");
     if (!(s.joint >= 0 && s.joint <= 100))
         throw std::invalid_argument("The joint must be from 0 to 100 mm.");
@@ -681,6 +759,104 @@ Made make(const BuildingSpec& s, bool quick)
         }
         break;
     }
+    case WallMaterial::RoughStone:
+    case WallMaterial::Fieldstone: {
+        // Stones standing out of the mortar, each domed and rough: the wall's face as a
+        // height field, a skin over the plain shell.
+        const bool field = s.material == WallMaterial::Fieldstone;
+        const double size = field ? ul : std::min(ul, uh);
+        const double step = std::max(0.75 * sm, size / 12.0);
+        double jw = s.mortar ? std::max(s.joint * k, sm) : 0.6 * sm;
+        if (s.mortar && jw < 1.6 * step) {
+            jw = 1.6 * step;
+            made.notes.push_back("Mortar joints widened to " + mm(jw) + " so they print.");
+        }
+        const double relief = std::clamp(0.14 * size, sm, 0.25 * T);
+        const double recess = s.mortar ? std::clamp(0.4 * relief, 0.5 * sm, 0.15 * T) : 0.0;
+        if (size < 4 * sm) {
+            pattern = false;
+            char buf[160];
+            std::snprintf(buf, sizeof buf, "The stones are too small to print at 1:%g (%.2f mm): plain walls.", s.scale,
+                          size);
+            made.notes.push_back(buf);
+        }
+        if (!pattern) {
+            for (auto& p : shells(0))
+                parts.push_back(std::move(p));
+            break;
+        }
+        if (!s.mortar)
+            made.notes.push_back("Laid dry (no mortar): the stones touch, the joints shown as fine lines.");
+        for (auto& p : shells(recess))
+            parts.push_back(std::move(p));
+        int wallNo = 0;
+        for (const Wall& wl : wallList) {
+            const Face& f = wl.f;
+            const std::uint32_t seed = s.seed * 7919u + std::uint32_t(wallNo++) * 104729u;
+            // How far a point is inside its stone (model mm; below 0: in the mortar).
+            std::function<double(double, double)> inside;
+            if (field) {
+                // Irregular stones: the cells round points scattered a stone apart.
+                inside = [=](double u, double v) {
+                    const double cu = u / size, cv = v / size;
+                    const int i0 = int(std::floor(cu)), j0 = int(std::floor(cv));
+                    double f1 = 1e9, f2 = 1e9;
+                    for (int j = j0 - 1; j <= j0 + 1; ++j)
+                        for (int i = i0 - 1; i <= i0 + 1; ++i) {
+                            const double px = i + 0.5 + 0.42 * noise2(i * 1.7, j * 1.3, seed),
+                                         py = j + 0.5 + 0.42 * noise2(i * 1.1 + 9.0, j * 1.9, seed + 1);
+                            const double d = std::hypot(cu - px, (cv - py) * 1.15);
+                            if (d < f1)
+                                f2 = f1, f1 = d;
+                            else if (d < f2)
+                                f2 = d;
+                        }
+                    return (f2 - f1) / 2 * size - jw / 2;
+                };
+            } else {
+                // Courses of varying height; stones of varying length in each.
+                std::vector<double> courses{0.0};
+                std::mt19937 rng(seed);
+                std::uniform_real_distribution<double> vary(0.0, 1.0);
+                while (courses.back() < f.height)
+                    courses.push_back(courses.back() + uh * (0.7 + 0.6 * vary(rng)));
+                std::vector<std::vector<double>> joints(courses.size());
+                for (std::size_t c = 0; c + 1 < courses.size(); ++c) {
+                    double a = -T - ul * vary(rng);
+                    joints[c].push_back(a);
+                    while (a < f.length + T + ul) {
+                        a += ul * (0.55 + 0.9 * vary(rng));
+                        joints[c].push_back(a);
+                    }
+                }
+                inside = [courses, joints, jw](double u, double v) {
+                    const auto c = std::size_t(std::max<std::ptrdiff_t>(
+                        0, std::upper_bound(courses.begin(), courses.end(), v) - courses.begin() - 1));
+                    if (c + 1 >= courses.size())
+                        return -1.0;
+                    const auto& js = joints[c];
+                    const auto b = std::upper_bound(js.begin(), js.end(), u);
+                    if (b == js.begin() || b == js.end())
+                        return -1.0;
+                    const double u0 = *(b - 1), u1 = *b;
+                    return std::min({u - u0, u1 - u, v - courses[c], courses[c + 1] - v}) - jw / 2;
+                };
+            }
+            const double ramp = 0.3 * size;
+            const auto out = [=](double u, double v) {
+                const double d = inside(u, v);
+                if (d <= 0)
+                    return -recess;  // the mortar
+                const double dome = std::sqrt(std::clamp(d / ramp, 0.0, 1.0));  // rounded at its edges
+                const double rough = 0.5 * noise2(u / (0.18 * size), v / (0.18 * size), seed + 7) +
+                                     0.25 * noise2(u / (0.07 * size), v / (0.07 * size), seed + 8);
+                return -recess + (recess + relief) * dome * (0.8 + (field ? 0.25 : 0.45) * rough);
+            };
+            parts.push_back(faceSkin(f, wl.convexStart ? relief : 0.0, wl.convexEnd ? relief : 0.0, H,
+                                     -std::min(0.5 * T, 2 * relief + recess), step, out));
+        }
+        break;
+    }
     case WallMaterial::Logs: {
         const double d = T;
         if (d < 3 * sm) {
@@ -868,7 +1044,7 @@ std::vector<Body> bodies(const BuildingSpec& spec, const Made& made, const std::
     s.offset = {walls.placement.x, walls.placement.y, walls.placement.z};
     walls.building = s;
     // The material's own colour (bricks red, stone grey, logs and planks wood).
-    static const std::uint32_t colours[] = {0xB5563A, 0x9C978F, 0x8B5A2B, 0xC9B48C};
+    static const std::uint32_t colours[] = {0xB5563A, 0x9C978F, 0x8B5A2B, 0xC9B48C, 0x8F8579, 0x86735F};
     walls.colour = colours[int(s.material)];
     walls.placement.x += x;
     walls.placement.y += y;

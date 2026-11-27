@@ -20,7 +20,7 @@ section; move an item to the roadmap when it's picked up.
 - **Walls and fences as building types:** free-standing walls (garden, boundary, field and castle curtain walls)
   and fences (picket, post-and-rail, wattle, chain-link, barbed wire), in the same materials and real sizes as
   buildings, drawn along a line with corners, gates and gaps.
-- More wall materials: rough stone (rubble), timber framing, plaster or render, concrete block.
+- More wall materials: timber framing, plaster or render, concrete block. (Rough-hewn stone and fieldstone: done, S7.)
 - Damage and weathering: broken wall tops, missing bricks, battle damage (for ruins and wargaming).
 - Changing a building rotated in Forge3D: the preview while changing it doesn't follow the rotation yet.
 - A building's parts printed apart and laid out flat (walls as panels) for easier printing.

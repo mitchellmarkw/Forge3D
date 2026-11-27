@@ -9,7 +9,8 @@ Scenery for models and dioramas, built to scale, in the same .f3d files as Forge
 | S3 (Forge3D 112) | Rocks: boulder, crag, slab or pile from real sizes; roughness, layers, sunk with a flat base; a new shape at a click; changeable | Done (0.3.0) |
 | S4 (Forge3D 113) | Terrain: rectangle or round base, plain or bevelled; rolling hills; craters, crags and paths by a click or scattered; changeable | Done (0.4.0) |
 | S5 (Forge3D 114) | Trees: broadleaf, conifer, dead or palm; height, crown, trunk, branches, lean; foliage clumps or bare; flared roots; changeable | Done (0.5.0) |
-| S6 (Forge3D 115) | Building shapes: L, T, U and courtyard footprints, joined walls, a roof over each wing; sized by fields or by dragging the corners | **Delivered for testing** |
+| S6 (Forge3D 115) | Building shapes: L, T, U and courtyard footprints, joined walls, a roof over each wing; sized by fields or by dragging the corners | Done |
+| S7 (Forge3D 116) | Wall materials: rough-hewn stone (rock-faced, random courses) and fieldstone (irregular, "giraffe" stonework) | **Delivered for testing** |
 
 Small details are checked against the printer: a mortar line too fine to print becomes an engraved line, or is
 warned about.

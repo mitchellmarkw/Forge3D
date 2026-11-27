@@ -84,7 +84,8 @@ BuildingPanel::BuildingPanel(QWidget* parent) : QWidget(parent)
                            "and its wings"));
     walls->addWidget(labelled(tr("Shape:"), m_shape));
     m_material = new QComboBox;
-    for (WallMaterial m : {WallMaterial::Brick, WallMaterial::Stone, WallMaterial::Logs, WallMaterial::Planks})
+    for (WallMaterial m : {WallMaterial::Brick, WallMaterial::Stone, WallMaterial::Logs, WallMaterial::Planks,
+                           WallMaterial::RoughStone, WallMaterial::Fieldstone})
         m_material->addItem(tr(building::title(m)));
     m_material->setToolTip(tr("What the walls are built of. Choosing one sets its usual sizes (a standard brick is "
                               "194 x 92 x 57 mm)"));
@@ -395,9 +396,11 @@ void BuildingPanel::readFields()
     m_spec.depth = m_depth->value();
     m_spec.height = m_height->value();
     m_spec.wallThickness = m_thickness->value();
-    if (m_spec.material == WallMaterial::Brick || m_spec.material == WallMaterial::Stone)
+    const WallMaterial mat = m_spec.material;
+    if (mat == WallMaterial::Brick || mat == WallMaterial::Stone || mat == WallMaterial::RoughStone ||
+        mat == WallMaterial::Fieldstone)
         m_spec.unitLength = m_unitLength->value();
-    m_spec.unitHeight = m_unitHeight->value();
+    m_spec.unitHeight = mat == WallMaterial::Fieldstone ? m_spec.unitLength : m_unitHeight->value();
     m_spec.mortar = m_mortar->isChecked();
     m_spec.joint = m_joint->value();
     m_spec.roof = RoofKind(m_roof->currentIndex());
@@ -420,18 +423,26 @@ void BuildingPanel::readFields()
 void BuildingPanel::showMaterial()
 {
     const WallMaterial m = m_spec.material;
-    const bool laid = m == WallMaterial::Brick || m == WallMaterial::Stone;
-    m_unitsBox->setTitle(m == WallMaterial::Brick   ? tr("Bricks")
-                         : m == WallMaterial::Stone ? tr("Stone blocks")
+    const bool field = m == WallMaterial::Fieldstone;
+    const bool laid = m == WallMaterial::Brick || m == WallMaterial::Stone || m == WallMaterial::RoughStone || field;
+    m_unitsBox->setTitle(m == WallMaterial::Brick        ? tr("Bricks")
+                         : m == WallMaterial::Stone      ? tr("Stone blocks")
+                         : m == WallMaterial::RoughStone ? tr("Rough-hewn stones")
+                         : field                         ? tr("Fieldstones")
                          : m == WallMaterial::Logs  ? tr("Logs")
                                                     : tr("Planks"));
-    m_unitLengthLabel->setText(m == WallMaterial::Stone ? tr("Block length (average):") : tr("Brick length:"));
+    m_unitLengthLabel->setText(m == WallMaterial::Stone        ? tr("Block length (average):")
+                               : m == WallMaterial::RoughStone ? tr("Stone length (average):")
+                               : field                         ? tr("Stone size (average):")
+                                                               : tr("Brick length:"));
     m_unitHeightLabel->setText(m == WallMaterial::Brick   ? tr("Brick height:")
-                               : m == WallMaterial::Stone ? tr("Course height:")
+                               : m == WallMaterial::Stone || m == WallMaterial::RoughStone ? tr("Course height (average):")
                                : m == WallMaterial::Logs  ? tr("Log diameter:")
                                                           : tr("Plank width (showing):"));
     m_unitHeight->setToolTip(m == WallMaterial::Logs ? tr("The logs' thickness: the walls are this thick")
                                                      : tr("How tall each course is"));
+    m_unitHeightLabel->setVisible(!field);
+    m_unitHeight->setVisible(!field);
     m_unitLengthLabel->setVisible(laid);
     m_unitLength->setVisible(laid);
     m_mortar->setVisible(laid);
