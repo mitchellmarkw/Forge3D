@@ -4,6 +4,7 @@
 #include "forge/core/BuildingSpec.h"
 #include "forge/core/RockSpec.h"
 #include "forge/core/TerrainSpec.h"
+#include "forge/core/TreeSpec.h"
 #include "forge/core/Sketch.h"
 
 #include <array>
@@ -999,6 +1000,8 @@ struct Body {
     std::optional<RockSpec> rock{};
     // Made by Scenery's terrain designer (slice 113).
     std::optional<TerrainSpec> terrain{};
+    // Made by Scenery's tree designer (slice 114).
+    std::optional<TreeSpec> tree{};
 
     bool isBoolean() const { return boolean.has_value(); }
     bool isOff() const { return boolean.has_value() && (suppressed || rolledBack); }

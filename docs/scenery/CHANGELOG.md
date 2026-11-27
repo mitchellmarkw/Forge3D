@@ -1,5 +1,19 @@
 # Forge3D Scenery changelog
 
+## 0.5.0 Beta — Trees (2026-11-26)
+
+- **New Tree** (Scenery tab): a tree from real-world sizes, made at the model scale.
+  - Kinds: **Broadleaf** (spreading branches, a rounded crown), **Conifer** (a straight trunk, tiers of drooping
+    branches, a cone), **Dead tree** (bare, gnarled branches, some broken off) and **Palm** (a curved trunk,
+    arching fronds).
+  - Height, crown width, trunk diameter; **Branches** (how many; a conifer's tiers, a palm's fronds); **Lean**.
+  - **Leaves**: lumpy foliage clumps, made to print (untick for a bare tree); **Foliage** sets how full they are.
+  - It stands on flared roots, cut flat. Branches too thin to print are thickened to 2.5 times the smallest
+    detail (at least 0.8 mm), so the thinnest twigs are a little heavy at small scales.
+  - A new tree (or another kind) is sized to fit under your printer.
+  - **New Shape**: another of the same kind and size; its **Number** makes the same one again.
+- **Change** (or double-click in Objects) now changes trees too.
+
 ## 0.4.0 Beta — Terrain (2026-11-26)
 
 - **New Terrain** (Scenery tab): a terrain piece from real-world sizes, made at the model scale.

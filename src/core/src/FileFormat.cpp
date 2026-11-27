@@ -335,6 +335,16 @@ json bodyToJson(const Body& b)
                             {"smallest", t.smallest},
                             {"offset", t.offset}};
     }
+    if (b.tree) {
+        const TreeSpec& t = *b.tree;
+        static const char* kinds[] = {"broadleaf", "conifer", "dead", "palm"};
+        j["tree"] = json{{"scale", t.scale},       {"kind", kinds[int(t.kind)]},
+                         {"height", t.height},     {"crownWidth", t.crownWidth},
+                         {"trunkDiameter", t.trunkDiameter}, {"branches", t.branches},
+                         {"leaves", t.leaves},     {"foliage", t.foliage},
+                         {"lean", t.lean},         {"seed", t.seed},
+                         {"smallest", t.smallest}, {"offset", t.offset}};
+    }
     if (b.isBoolean() && b.boolean->cutJoint) {
         const CutJoint& c = *b.boolean->cutJoint;
         j["cutJoint"] = json{{"kind", c.kind}, {"size", c.size}, {"fit", c.fit}, {"link", c.link}, {"first", c.first}};
@@ -850,6 +860,31 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
             b.terrain = t;
         } catch (const json::exception&) {
             damaged(where + ": terrain is not readable");
+        }
+    }
+    if (const auto tj = j.find("tree"); tj != j.end() && tj->is_object()) {
+        try {
+            TreeSpec t;
+            t.scale = tj->value("scale", t.scale);
+            const std::string k = tj->value("kind", std::string("broadleaf"));
+            t.kind = k == "conifer" ? TreeKind::Conifer
+                     : k == "dead"  ? TreeKind::Dead
+                     : k == "palm"  ? TreeKind::Palm
+                                    : TreeKind::Broadleaf;
+            t.height = tj->value("height", t.height);
+            t.crownWidth = tj->value("crownWidth", t.crownWidth);
+            t.trunkDiameter = tj->value("trunkDiameter", t.trunkDiameter);
+            t.branches = tj->value("branches", t.branches);
+            t.leaves = tj->value("leaves", t.leaves);
+            t.foliage = tj->value("foliage", t.foliage);
+            t.lean = tj->value("lean", t.lean);
+            t.seed = tj->value("seed", t.seed);
+            t.smallest = tj->value("smallest", t.smallest);
+            if (const auto off = tj->find("offset"); off != tj->end() && off->is_array() && off->size() == 3)
+                t.offset = {(*off)[0].get<double>(), (*off)[1].get<double>(), (*off)[2].get<double>()};
+            b.tree = t;
+        } catch (const json::exception&) {
+            damaged(where + ": tree is not readable");
         }
     }
     if (const auto piece = j.find("jointPiece"); piece != j.end() && piece->is_object()) {
@@ -2032,6 +2067,7 @@ std::string resultKey(const Document& doc, ObjectId id)
         j.erase("roofOf");
         j.erase("rock");
         j.erase("terrain");
+        j.erase("tree");
         j.erase("cutJoint");    // nor the joint a cut keeps
         if (part == id)
             j.erase("placement");  // nor does moving the whole thing

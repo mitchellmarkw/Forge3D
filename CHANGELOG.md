@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.122.0 Beta — Slice 114: opens Scenery's trees (2026-11-26)
+
+- Forge3D opens models with trees made in Forge3D Scenery (0.5): shapes like any other here; their description
+  comes along when saved, so Scenery can still change them.
+- File format 58 (a tree's description).
+
 ## 0.121.0 Beta — Slice 113: opens Scenery's terrain (2026-11-26)
 
 - Forge3D opens models with terrain made in Forge3D Scenery (0.4): shapes like any other here; their description

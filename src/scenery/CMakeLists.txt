@@ -17,6 +17,8 @@ add_executable(Scenery WIN32
     RockPanel.cpp
     TerrainPanel.h
     TerrainPanel.cpp
+    TreePanel.h
+    TreePanel.cpp
     scenery.qrc
 )
 # Forge3D Scenery.exe

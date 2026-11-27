@@ -192,7 +192,7 @@ void EditBodyCommand::apply(Document& doc, const Body& state)
         doc.setHardware(state.id, state.hardware);
         doc.setFormulas(state.id, state.formulas);
         doc.setJointPiece(state.id, state.jointPiece);
-        doc.setDesign(state.id, state.building, state.roofOf, state.rock, state.terrain);
+        doc.setDesign(state.id, state.building, state.roofOf, state.rock, state.terrain, state.tree);
         if (state.colour != doc.find(state.id)->colour)
             doc.setColour(state.id, state.colour);
         if (doc.find(state.id) && doc.find(state.id)->name != state.name)

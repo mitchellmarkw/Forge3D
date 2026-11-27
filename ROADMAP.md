@@ -142,7 +142,8 @@ Gate to Phase 2: a new user prints a customised part within 10 minutes.
 | 110 | Forge3D Scenery groundwork: the companion app (docs/scenery/ROADMAP.md); each app's update check sees only its own releases | Done (unreleased) |
 | 111 | Scenery's building designer (Scenery 0.2.0); Forge3D opens its buildings (file format 55) | Done (unreleased) |
 | 112 | Scenery's rock designer (Scenery 0.3.0); Forge3D opens its rocks (file format 56) | Done (unreleased) |
-| 113 | Scenery's terrain designer (Scenery 0.4.0); Forge3D opens its terrain (file format 57) | **Delivered for testing** |
+| 113 | Scenery's terrain designer (Scenery 0.4.0); Forge3D opens its terrain (file format 57) | Done (unreleased) |
+| 114 | Scenery's tree designer (Scenery 0.5.0); Forge3D opens its trees (file format 58) | **Delivered for testing** |
 
 Slices 39–41 close the gaps found in the [Phase 1 gate review](docs/PHASE1_GATE.md).
 

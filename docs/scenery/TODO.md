@@ -24,7 +24,7 @@ section; move an item to the roadmap when it's picked up.
 
 ## Scenery in general
 
-- Trees: on the roadmap.
+- Trees: more kinds (willow, birch, bushes and hedges), trunk and foliage as two shapes (two colours), a peg or base under one.
 - Terrain: rivers and water, trenches and shell-scarred battlefields, ground textures (grass, gravel, cobbles,
   mud), terrain pieces that join (matching edges and pegs), a building or rock set onto the ground.
 - Bases: round, square or shaped bases for figures and dioramas, with a ground texture.
@@ -40,4 +40,4 @@ section; move an item to the roadmap when it's picked up.
 
 ## Releases
 
-- Publish Forge3D 0.119.0–0.121.0 and the first Forge3D Scenery release (so 0.4.0) when wanted.
+- Publish Forge3D 0.119.0–0.122.0 and the first Forge3D Scenery release (so 0.5.0) when wanted.
