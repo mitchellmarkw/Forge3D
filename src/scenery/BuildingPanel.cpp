@@ -60,12 +60,6 @@ QWidget* labelled(const QString& text, QWidget* field)
     return w;
 }
 
-const char* wallName(int wall)
-{
-    static const char* names[] = {"front", "right", "back", "left"};
-    return names[std::clamp(wall, 0, 3)];
-}
-
 }  // namespace
 
 BuildingPanel::BuildingPanel(QWidget* parent) : QWidget(parent)
@@ -82,6 +76,13 @@ BuildingPanel::BuildingPanel(QWidget* parent) : QWidget(parent)
     // The walls.
     auto* wallsBox = new QGroupBox(tr("Walls"));
     auto* walls = new QVBoxLayout(wallsBox);
+    m_shape = new QComboBox;
+    for (BuildingShape s : {BuildingShape::Rectangle, BuildingShape::L, BuildingShape::T, BuildingShape::U,
+                            BuildingShape::Courtyard})
+        m_shape->addItem(tr(building::title(s)));
+    m_shape->setToolTip(tr("The building's footprint. Drag the orange posts at its corners in the view to size it "
+                           "and its wings"));
+    walls->addWidget(labelled(tr("Shape:"), m_shape));
     m_material = new QComboBox;
     for (WallMaterial m : {WallMaterial::Brick, WallMaterial::Stone, WallMaterial::Logs, WallMaterial::Planks})
         m_material->addItem(tr(building::title(m)));
@@ -99,6 +100,17 @@ BuildingPanel::BuildingPanel(QWidget* parent) : QWidget(parent)
     m_thicknessLabel = new QLabel(tr("Wall thickness:"));
     wallForm->addRow(m_thicknessLabel, m_thickness);
     walls->addLayout(wallForm);
+    m_wingFields = new QWidget;
+    auto* wingForm = new QFormLayout(m_wingFields);
+    wingForm->setContentsMargins(0, 0, 0, 0);
+    m_wingDepth = spin(100, 200000, 0, 100, real, {});
+    m_wingDepthLabel = new QLabel;
+    wingForm->addRow(m_wingDepthLabel, m_wingDepth);
+    m_wingWidth = spin(100, 200000, 0, 100, real, {});
+    m_wingWidthLabel = new QLabel;
+    wingForm->addRow(m_wingWidthLabel, m_wingWidth);
+    wingForm->addRow(wrapped(tr("Or drag the orange posts at the corners in the view.")));
+    walls->addWidget(m_wingFields);
     layout->addWidget(wallsBox);
 
     // Their units.
@@ -201,7 +213,7 @@ BuildingPanel::BuildingPanel(QWidget* parent) : QWidget(parent)
 
     // Any field: the description again.
     for (QDoubleSpinBox* b : {m_width, m_depth, m_height, m_thickness, m_unitLength, m_unitHeight, m_joint, m_pitch,
-                              m_overhang, m_smallest})
+                              m_overhang, m_smallest, m_wingDepth, m_wingWidth})
         connect(b, &QDoubleSpinBox::valueChanged, this, [this] {
             if (m_loading)
                 return;
@@ -222,6 +234,16 @@ BuildingPanel::BuildingPanel(QWidget* parent) : QWidget(parent)
         readFields();
         showMaterial();
         emit changed();
+    });
+    connect(m_shape, &QComboBox::currentIndexChanged, this, [this](int i) {
+        if (m_loading)
+            return;
+        readFields();
+        m_spec = building::withShape(m_spec, BuildingShape(i));  // its usual wings; doors and windows go
+        m_selected = -1;
+        load();
+        emit changed();
+        emit selectionChanged(-1);
     });
     connect(m_material, &QComboBox::currentIndexChanged, this, [this](int i) {
         if (m_loading)
@@ -342,6 +364,9 @@ void BuildingPanel::load()
 {
     m_loading = true;
     m_material->setCurrentIndex(int(m_spec.material));
+    m_shape->setCurrentIndex(int(m_spec.shape));
+    m_wingDepth->setValue(m_spec.wingDepth);
+    m_wingWidth->setValue(m_spec.wingWidth);
     m_width->setValue(m_spec.width);
     m_depth->setValue(m_spec.depth);
     m_height->setValue(m_spec.height);
@@ -363,6 +388,9 @@ void BuildingPanel::load()
 void BuildingPanel::readFields()
 {
     m_spec.material = WallMaterial(m_material->currentIndex());
+    m_spec.shape = BuildingShape(m_shape->currentIndex());
+    m_spec.wingDepth = m_wingDepth->value();
+    m_spec.wingWidth = m_wingWidth->value();
     m_spec.width = m_width->value();
     m_spec.depth = m_depth->value();
     m_spec.height = m_height->value();
@@ -378,6 +406,13 @@ void BuildingPanel::readFields()
     m_spec.roofSeparate = m_roofSeparate->isChecked();
     m_spec.smallest = m_smallest->value();
     preferences().setValue(QStringLiteral("building/smallest"), m_spec.smallest);
+    // The wings kept buildable (a smaller building, thicker walls): shown as they are.
+    m_spec = building::kept(m_spec);
+    {
+        const QSignalBlocker a(m_wingDepth), b(m_wingWidth);
+        m_wingDepth->setValue(m_spec.wingDepth);
+        m_wingWidth->setValue(m_spec.wingWidth);
+    }
     for (auto& o : m_spec.openings)
         o = building::keptIn(m_spec, o);
 }
@@ -405,6 +440,28 @@ void BuildingPanel::showMaterial()
     m_thicknessLabel->setVisible(m != WallMaterial::Logs);
     m_thickness->setVisible(m != WallMaterial::Logs);
     m_roofDetails->setVisible(m_spec.roof != RoofKind::None);
+    m_wingFields->setVisible(m_spec.shape != BuildingShape::Rectangle);
+    switch (m_spec.shape) {
+    case BuildingShape::Rectangle: break;
+    case BuildingShape::L:
+        m_wingDepthLabel->setText(tr("Front wing depth:"));
+        m_wingWidthLabel->setText(tr("Side wing width:"));
+        break;
+    case BuildingShape::T:
+        m_wingDepthLabel->setText(tr("Back bar depth:"));
+        m_wingWidthLabel->setText(tr("Stem width:"));
+        break;
+    case BuildingShape::U:
+        m_wingDepthLabel->setText(tr("Back bar depth:"));
+        m_wingWidthLabel->setText(tr("Arm width:"));
+        break;
+    case BuildingShape::Courtyard:
+        m_wingDepthLabel->setText(tr("Front and back wings:"));
+        m_wingWidthLabel->setText(tr("Side wings:"));
+        break;
+    }
+    m_wingDepth->setToolTip(tr("How deep the wing is, front to back"));
+    m_wingWidth->setToolTip(tr("How wide the wing is, side to side"));
     const double k = 1.0 / m_spec.scale;
     m_size->setText(tr("On the plate: %1 x %2 x %3 mm walls, at 1:%4")
                         .arg(m_spec.width * k, 0, 'f', 1)
@@ -421,7 +478,7 @@ void BuildingPanel::fillOpenings()
     for (const auto& o : m_spec.openings)
         m_openings->addItem(tr("%1, %2 wall, %3 x %4 mm")
                                 .arg(o.kind == OpeningKind::Door ? tr("Door") : tr("Window"),
-                                     tr(wallName(o.wall)))
+                                     QString::fromStdString(building::wallName(m_spec, o.wall)))
                                 .arg(o.width, 0, 'f', 0)
                                 .arg(o.height, 0, 'f', 0));
     if (m_selected >= int(m_spec.openings.size()))

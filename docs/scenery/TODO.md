@@ -9,7 +9,7 @@ section; move an item to the roadmap when it's picked up.
   - Parapets and battlements (crenellations) along wall tops; walkways behind them.
   - Towers: round, square and polygonal; with or without a roof (conical, pyramid), attached at corners or
     along walls.
-  - Other footprints: L, T, U and courtyard (hollow) plans; any polygon drawn on the plate; curved walls.
+  - Other footprints: any polygon drawn on the plate; curved walls. (L, T, U and courtyard: done, S6.)
   - Joining buildings and walls together (a curtain wall between towers; a gatehouse with an arch).
   - Storeys: floors, storey heights, upper windows lined up, a floor slab inside to stand figures on.
   - Arched doors and windows; shutters; a shop front (big window, sign board); loading doors for factories.

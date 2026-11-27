@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.123.0 Beta — Slice 115: Scenery's building shapes (2026-11-26)
+
+- Forge3D opens Scenery 0.6's L, T, U and courtyard buildings like its other scenery.
+- File format 59 (a building's shape and wings).
+
 ## 0.122.0 Beta — Slice 114: opens Scenery's trees (2026-11-26)
 
 - Forge3D opens models with trees made in Forge3D Scenery (0.5): shapes like any other here; their description

@@ -196,3 +196,102 @@ TEST_CASE("Buildings: doors and windows kept apart", "[building]")
     CHECK_FALSE(building::clashes(s, window));  // another wall
     CHECK_FALSE(building::clashes(s, door, 0));  // itself
 }
+
+TEST_CASE("Buildings: L, T, U and courtyard shapes", "[building]")
+{
+    BuildingSpec base = building::defaults(WallMaterial::Brick);
+    base.width = 10000;
+    base.depth = 8000;
+    base.roof = RoofKind::Flat;
+    base.overhang = 0;
+    const double k = 1.0 / base.scale;
+    const auto plainVolume = [&](BuildingSpec s) {
+        s.roof = RoofKind::None;
+        return meshkernel::volume(meshkernel::fromTriangles(building::make(s, true).walls.positions,
+                                                            building::make(s, true).walls.indices));
+    };
+    struct Case {
+        BuildingShape shape;
+        int walls;
+        std::size_t wings, corners;
+    };
+    for (const Case c : {Case{BuildingShape::L, 6, 2, 5}, Case{BuildingShape::T, 8, 2, 6}, Case{BuildingShape::U, 8, 3, 6},
+                         Case{BuildingShape::Courtyard, 8, 4, 8}}) {
+        INFO(building::title(c.shape));
+        const BuildingSpec s = building::withShape(base, c.shape);
+        CHECK(building::wallCount(s) == c.walls);
+        CHECK(building::wings(s).size() == c.wings);
+        CHECK(building::corners(s).size() == c.corners);
+        // The footprint's area: the walls' length times their thickness, about.
+        double length = 0;
+        for (int w = 0; w < c.walls; ++w)
+            length += building::face(s, w).length;
+        const double t = s.wallThickness * k, h = s.height * k;
+        CHECK_THAT(plainVolume(s), WithinRel(length * t * h, 0.12));
+        const building::Made made = building::make(s);
+        REQUIRE_FALSE(made.walls.indices.empty());
+        REQUIRE_FALSE(made.roof.indices.empty());
+        const Bounds b = made.walls.bounds();
+        CHECK_THAT(double(b.max[0] - b.min[0]), WithinAbs(s.width * k, 0.3));
+        CHECK_THAT(double(b.max[1] - b.min[1]), WithinAbs(s.depth * k, 0.3));
+        // Every wall takes a window.
+        BuildingSpec windows = s;
+        for (int w = 0; w < c.walls; ++w) {
+            const building::Face f = building::face(s, w);
+            if (f.length * s.scale > 2000)
+                windows.openings.push_back(building::openingAt(s, OpeningKind::Window, {w, f.length * s.scale / 2, 1500}));
+        }
+        CHECK(windows.openings.size() >= 4);
+        CHECK_NOTHROW(building::make(windows, true));
+        // Gable and hip roofs over the wings, joined.
+        for (RoofKind r : {RoofKind::Gable, RoofKind::Hip}) {
+            BuildingSpec roofed = s;
+            roofed.roof = r;
+            roofed.overhang = 300;
+            CHECK_FALSE(building::make(roofed, true).roof.indices.empty());
+        }
+        // Logs and planks follow the shape too.
+        for (WallMaterial m : {WallMaterial::Logs, WallMaterial::Planks, WallMaterial::Stone}) {
+            BuildingSpec other = building::withShape(building::defaults(m, base), c.shape);
+            CHECK_NOTHROW(building::make(other));
+        }
+    }
+    // Courtyard: the middle's open (a ray straight down there meets no wall).
+    const BuildingSpec court = building::withShape(base, BuildingShape::Courtyard);
+    CHECK_FALSE(building::spotAt(court, {0, 0, 50}, {0, 0, -1}));
+    CHECK(building::wallName(court, 4).rfind("inner", 0) == 0);
+    // Dragging corners: the outside one widens it; the L's inside one sets its wings.
+    BuildingSpec l = building::withShape(base, BuildingShape::L);
+    BuildingSpec wider = building::movedCorner(l, 1, 6000, -4000);
+    CHECK(wider.width == 12000);
+    CHECK(wider.wingWidth == l.wingWidth);
+    BuildingSpec wings = building::movedCorner(l, 4, -5000 + 2500, -4000 + 3500);
+    CHECK(wings.wingWidth == 2500);
+    CHECK(wings.wingDepth == 3500);
+    // Kept buildable: a wing can't be thinner than 2.5 walls.
+    BuildingSpec thin = building::movedCorner(l, 4, -5000 + 100, -4000 + 100);
+    CHECK(thin.wingWidth >= 2.5 * thin.wallThickness);
+    BuildingSpec bad = l;
+    bad.wingWidth = 50;
+    CHECK_THROWS_AS(building::make(bad), std::invalid_argument);
+    // A post at each corner, found by a ray down it.
+    const auto corner = building::corners(l)[4];
+    double z = 0;
+    const auto picked = building::pickedCorner(l, {corner[0] * k + 0.1, corner[1] * k, 200}, {0, 0, -1}, &z);
+    REQUIRE(picked);
+    CHECK(*picked == 4);
+    CHECK_FALSE(building::cornerMarker(l, 4).indices.empty());
+    // Saved and read back.
+    const auto path = std::filesystem::temp_directory_path() / "forge_building_shapes.f3d";
+    Document doc;
+    CommandStack stack(doc);
+    BuildingSpec u = building::withShape(base, BuildingShape::U);
+    u.openings.push_back(building::openingAt(u, OpeningKind::Door, {6, 2000, 0}));
+    const ObjectId id = building::add(stack, doc, u, "U", 0, 0);
+    file::save(doc, path, "test");
+    Document other;
+    other.replaceAll(file::load(path));
+    std::filesystem::remove(path);
+    CHECK(other.find(id)->building == doc.find(id)->building);
+    CHECK(other.find(id)->building->shape == BuildingShape::U);
+}

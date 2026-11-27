@@ -524,6 +524,7 @@ void SceneryWindow::refreshScene()
             add(m_build.walls, 0xB0000001ull, QVector3D(0.72f, 0.42f, 0.32f), 1.0f);
             add(m_build.roofMesh, 0xB0000002ull, QVector3D(0.45f, 0.38f, 0.36f), 1.0f);
             add(m_build.marker, 0xB0000003ull, QVector3D(1.0f, 0.6f, 0.1f), 0.6f);
+            add(m_build.posts, 0xB0000008ull, QVector3D(1.0f, 0.55f, 0.1f), 0.45f);
         }
         if (m_terrain.active) {
             QMatrix4x4 at;
@@ -926,6 +927,19 @@ void SceneryWindow::updateBuildingPreview(bool quick)
                                   : std::make_shared<const Mesh>(meshkernel::displayMesh(
                                         meshkernel::fromTriangles(made.roof.positions, made.roof.indices)));
         }
+        {
+            // The posts at the footprint's corners, to drag.
+            Mesh posts;
+            for (std::size_t i = 0; i < building::corners(spec).size(); ++i) {
+                const Mesh one = building::cornerMarker(spec, i);
+                const auto base = std::uint32_t(posts.positions.size() / 3);
+                posts.positions.insert(posts.positions.end(), one.positions.begin(), one.positions.end());
+                for (std::uint32_t v : one.indices)
+                    posts.indices.push_back(base + v);
+            }
+            m_build.posts = std::make_shared<const Mesh>(
+                meshkernel::displayMesh(meshkernel::fromTriangles(posts.positions, posts.indices)));
+        }
         const int picked = m_buildingPanel->selectedOpening();
         m_build.marker = picked >= 0 && picked < int(spec.openings.size())
                              ? std::make_shared<const Mesh>(meshkernel::displayMesh(meshkernel::fromTriangles(
@@ -1033,6 +1047,17 @@ void SceneryWindow::onViewPressed(const QVector3D& origin, const QVector3D& dire
     }
     if (!m_build.active || m_build.placing >= 0)
         return;
+    {
+        // A corner's post first: drag it to size the footprint.
+        const BuildingSpec spec = m_buildingPanel->spec();
+        double z = 0;
+        if (const auto c = building::pickedCorner(spec, {origin.x() - m_build.x, origin.y() - m_build.y, origin.z() - m_build.z},
+                                                  {direction.x(), direction.y(), direction.z()}, &z)) {
+            m_build.corner = int(*c);
+            m_build.cornerZ = z;
+            return;
+        }
+    }
     const auto spot = spotFromRay(origin, direction);
     if (!spot)
         return;
@@ -1051,6 +1076,23 @@ void SceneryWindow::onViewDragged(const QVector3D& origin, const QVector3D& dire
 {
     if (m_terrain.active) {
         terrainDragged(origin, direction);
+        return;
+    }
+    if (m_build.active && m_build.corner >= 0) {
+        // Where the ray crosses the height it was grabbed at.
+        if (std::abs(direction.z()) < 1e-9)
+            return;
+        const double t = (m_build.cornerZ + m_build.z - origin.z()) / direction.z();
+        if (t < 0)
+            return;
+        BuildingSpec spec = m_buildingPanel->spec();
+        const double x = (origin.x() + direction.x() * t - m_build.x) * spec.scale;
+        const double y = (origin.y() + direction.y() * t - m_build.y) * spec.scale;
+        const BuildingSpec moved = building::movedCorner(spec, std::size_t(m_build.corner), x, y);
+        if (moved == spec)
+            return;
+        m_buildingPanel->setSpec(moved);
+        updateBuildingPreview(true);
         return;
     }
     if (!m_build.active || m_build.dragging < 0)
@@ -1081,6 +1123,11 @@ void SceneryWindow::onViewReleased()
             m_terrain.dragging = -1;
             m_terrainTimer->start();
         }
+        return;
+    }
+    if (m_build.active && m_build.corner >= 0) {
+        m_build.corner = -1;
+        m_detailTimer->start();
         return;
     }
     if (!m_build.active || m_build.dragging < 0)

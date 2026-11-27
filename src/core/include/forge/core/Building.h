@@ -22,6 +22,33 @@ namespace building {
 BuildingSpec defaults(WallMaterial m, const BuildingSpec& from = {});
 const char* title(WallMaterial m);  // "Brick", "Stone blocks"...
 const char* title(RoofKind r);
+const char* title(BuildingShape s);
+
+// The footprint (real mm, the building's middle at 0, 0): its outline counter-clockwise from
+// the front-left corner, then a courtyard's inner outline (clockwise). Its sides are the walls.
+std::vector<std::vector<std::array<double, 2>>> outlines(const BuildingSpec& s);
+int wallCount(const BuildingSpec& s);
+// A name for a wall ("front", "right"..., or "inner front"...).
+std::string wallName(const BuildingSpec& s, int wall);
+// The wings (real mm: x0, y0, x1, y1), rectangles that make up the footprint: each gets its
+// own roof.
+std::vector<std::array<double, 4>> wings(const BuildingSpec& s);
+// A shape's usual wing sizes for this width and depth.
+BuildingSpec withShape(const BuildingSpec& s, BuildingShape shape);
+// The wing sizes kept to what can be built (each wing at least 2.5 walls thick, an open
+// middle at least 500 mm across); openings on walls it hasn't got dropped.
+BuildingSpec kept(BuildingSpec s);
+
+// The footprint's corners that can be dragged (real mm): the four outside corners (width
+// and depth) first, then the inner ones (the wings' sizes).
+std::vector<std::array<double, 2>> corners(const BuildingSpec& s);
+// The spec with corner `i` dragged to (x, y), real mm (kept buildable).
+BuildingSpec movedCorner(const BuildingSpec& s, std::size_t i, double x, double y);
+// A see-through post at a corner, up past the roof (model mm): to grab and drag.
+Mesh cornerMarker(const BuildingSpec& s, std::size_t i);
+// Which corner's post a ray (model mm) passes, if any, and how high (model mm).
+std::optional<std::size_t> pickedCorner(const BuildingSpec& s, const std::array<double, 3>& origin,
+                                        const std::array<double, 3>& direction, double* height = nullptr);
 
 // Throws std::invalid_argument, in plain words, if it can't be made.
 void check(const BuildingSpec& s);

@@ -51,6 +51,12 @@ private:
     bool m_loading = false;
 
     QLabel* m_title = nullptr;
+    QComboBox* m_shape = nullptr;
+    QWidget* m_wingFields = nullptr;
+    QLabel* m_wingDepthLabel = nullptr;
+    QDoubleSpinBox* m_wingDepth = nullptr;
+    QLabel* m_wingWidthLabel = nullptr;
+    QDoubleSpinBox* m_wingWidth = nullptr;
     QComboBox* m_material = nullptr;
     QDoubleSpinBox* m_width = nullptr;
     QDoubleSpinBox* m_depth = nullptr;
