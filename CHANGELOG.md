@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.120.0 Beta — Slice 112: opens Scenery's rocks (2026-11-26)
+
+- Forge3D opens models with rocks made in Forge3D Scenery (0.3): shapes like any other here; their description
+  comes along when saved, so Scenery can still change them.
+- File format 56 (a rock's description).
+
 ## 0.119.0 Beta — Slice 111: opens Scenery's buildings (2026-11-26)
 
 - Forge3D opens models with buildings made in Forge3D Scenery (0.2): they're shapes like any other here (move,

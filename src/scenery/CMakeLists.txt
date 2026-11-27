@@ -13,6 +13,8 @@ add_executable(Scenery WIN32
     SceneryWindow.cpp
     BuildingPanel.h
     BuildingPanel.cpp
+    RockPanel.h
+    RockPanel.cpp
     scenery.qrc
 )
 # Forge3D Scenery.exe

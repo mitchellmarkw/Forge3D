@@ -2118,3 +2118,20 @@ and sharp across edges.
   build mode in `SceneryWindow`: the edited shapes hidden, the preview drawn (quick at once; in full on a
   background thread 0.5 s later, dropped if the description changed since), clicks place or pick openings, drags
   move them.
+
+## Rock designer (slice 112, Forge3D 0.120.0, Scenery 0.3.0)
+
+- `RockSpec` (core, RockSpec.h; real mm and a scale): kept on the rock's shape as `Body::rock`; file format 56
+  writes it ("rock"). `offset` is where the made mesh's middle was put, so `rock::update` makes it again where the
+  shape is now, even after it's moved (in Forge3D too).
+- `rock::make` (Rock.cpp) builds a signed field and meshes it with `meshkernel::levelSet`: an ellipsoid (boulder) or
+  a rounded block cut by 9–14 random planes (crag, slab: flattened), roughened by hashed value noise (fbm), seeded
+  by `seed`. A pile is up to 40 such rocks joined by a smooth minimum; each rock's field is skipped where a lower
+  bound of it (its distance past its reach, scaled) can't change the result, which keeps big piles quick and
+  seamless. Layers are grooves every `layerThickness`. The field is cut at the ground (`sunk` of the height) for
+  a flat base; the mesh edge is max(smallest x 0.75, smallest half-size / 18, extent / 90), x2.5 when `quick`.
+- `EditBodyCommand` now carries a body's design (`Document::setDesign`: building, roofOf, rock) and colour, so
+  changing a building or rock updates its stored description (before, a building's stayed as first made).
+- Scenery: `RockPanel` in a right dock, and a rock mode beside build mode (one at a time: `designing()`): a quick
+  preview at once, the full one on a thread 500 ms after the last change (a generation counter drops stale ones).
+  Change opens the picked shape's designer, whichever it is.
