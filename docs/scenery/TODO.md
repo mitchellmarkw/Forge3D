@@ -17,6 +17,9 @@ section; move an item to the roadmap when it's picked up.
   - Factory roofs (sawtooth), lean-to roofs, dome roofs.
 - Roof coverings: tiles, slates, shingles, thatch, corrugated metal (like the wall materials: real sizes,
   checked against the smallest detail).
+- **Walls and fences as building types:** free-standing walls (garden, boundary, field and castle curtain walls)
+  and fences (picket, post-and-rail, wattle, chain-link, barbed wire), in the same materials and real sizes as
+  buildings, drawn along a line with corners, gates and gaps.
 - More wall materials: rough stone (rubble), timber framing, plaster or render, concrete block.
 - Damage and weathering: broken wall tops, missing bricks, battle damage (for ruins and wargaming).
 - Changing a building rotated in Forge3D: the preview while changing it doesn't follow the rotation yet.
@@ -24,11 +27,13 @@ section; move an item to the roadmap when it's picked up.
 
 ## Scenery in general
 
-- Trees: more kinds (willow, birch, bushes and hedges), trunk and foliage as two shapes (two colours), a peg or base under one.
+- **More tree types:** willow, birch, cypress, fruit trees, bushes and hedges, and **alien** trees (strange
+  shapes and growths for sci-fi and fantasy worlds).
+- Trees: trunk and foliage as two shapes (two colours), a peg or base under one.
 - Terrain: rivers and water, trenches and shell-scarred battlefields, ground textures (grass, gravel, cobbles,
   mud), terrain pieces that join (matching edges and pegs), a building or rock set onto the ground.
 - Bases: round, square or shaped bases for figures and dioramas, with a ground texture.
-- Fences, walls and hedges along a line; roads and paths.
+- Hedges along a line; roads and paths.
 - Kit layout: lay a model's parts out on the plate for printing (as Forge3D's Kit Layout).
 - Picking shapes by clicking them in the view (only in Objects for now); moving and turning them in Scenery.
 
