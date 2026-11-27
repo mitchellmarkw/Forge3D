@@ -1,5 +1,21 @@
 # Forge3D Scenery changelog
 
+## 0.3.0 Beta — Rocks and boulders (2026-11-26)
+
+- **New Rock** (Scenery tab): design a rock from real-world sizes, made at the model scale.
+  - Kinds: **Boulder** (rounded and worn), **Crag** (broken rock: flat faces, sharp edges), **Slab** (a flat stone)
+    and **Pile of rocks** (2 to 40 rocks heaped together, the big ones lower and in the middle).
+  - Length, width and height; **Roughness** (from smooth to lumpy and pitted); **Layers** (bedding lines across
+    it, as in sandstone or shale) and how far apart they are.
+  - **Sunk into the ground**: its base cut flat that far up, so it sits on the ground (and prints flat).
+  - **New Shape**: another rock of the same kind and size. Its **Number** makes the same one again.
+  - **Smallest detail**: no finer surface is made than your printer can print.
+  - It shows at once roughly, then in full a moment later.
+- **Change** (was Change Building), or double-click in Objects: changes the picked building or rock, made again
+  where it is. Undo takes it back.
+- Fixed: changing a building kept its old settings in the file, so changing it a second time (or after opening the
+  file) started from the first ones.
+
 ## 0.2.0 Beta — Building designer (2026-11-26)
 
 - **New Building** (Scenery tab): design a building from real-world sizes, made at the model scale.

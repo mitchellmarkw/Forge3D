@@ -54,6 +54,7 @@ add_executable(forge_tests
     test_brick_figure.cpp
     test_model_scale.cpp
     test_building.cpp
+    test_rock.cpp
     test_reshape.cpp
     test_reference.cpp
     test_hinge.cpp

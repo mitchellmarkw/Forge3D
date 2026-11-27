@@ -192,6 +192,9 @@ void EditBodyCommand::apply(Document& doc, const Body& state)
         doc.setHardware(state.id, state.hardware);
         doc.setFormulas(state.id, state.formulas);
         doc.setJointPiece(state.id, state.jointPiece);
+        doc.setDesign(state.id, state.building, state.roofOf, state.rock);
+        if (state.colour != doc.find(state.id)->colour)
+            doc.setColour(state.id, state.colour);
         if (doc.find(state.id) && doc.find(state.id)->name != state.name)
             doc.rename(state.id, state.name);
     } catch (...) {

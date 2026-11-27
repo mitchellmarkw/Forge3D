@@ -3,6 +3,7 @@
 
 #include "BuildInfo.h"
 #include "BuildingPanel.h"
+#include "RockPanel.h"
 #include "Theme.h"
 #include "Viewport.h"
 #include "forge/core/Commands.h"
@@ -107,19 +108,19 @@ SceneryWindow::SceneryWindow()
     dock->setFeatures(QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable);
     m_objects = new QListWidget;
     m_objects->setSelectionMode(QAbstractItemView::SingleSelection);
-    m_objects->setToolTip(tr("Click a shape to pick it; double-click a building to change it"));
+    m_objects->setToolTip(tr("Click a shape to pick it; double-click a building or rock to change it"));
     dock->setWidget(m_objects);
     addDockWidget(Qt::LeftDockWidgetArea, dock);
     connect(m_objects, &QListWidget::currentRowChanged, this, [this](int row) {
-        if (m_build.active)
+        if (designing())
             return;
         m_selected = row >= 0 && row < int(m_rows.size()) ? m_rows[std::size_t(row)] : kInvalidId;
         refreshScene();
         refreshCommands();
     });
     connect(m_objects, &QListWidget::itemDoubleClicked, this, [this] {
-        if (!m_build.active && m_editBuilding->isEnabled())
-            startBuilding(m_selected);
+        if (!designing() && m_editBuilding->isEnabled())
+            changeSelected();
     });
 
     // The building designer's panel, on the right while it's open.
@@ -155,6 +156,30 @@ SceneryWindow::SceneryWindow()
     });
     connect(m_buildingPanel, &BuildingPanel::applyRequested, this, [this] { applyBuilding(); });
     connect(m_buildingPanel, &BuildingPanel::cancelRequested, this, [this] { endBuilding(); });
+
+    // The rock designer's panel, in the same place.
+    m_rockDock = new QDockWidget(tr("Rock"), this);
+    m_rockDock->setObjectName(QStringLiteral("rock"));
+    m_rockDock->setFeatures(QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable);
+    auto* rockScroll = new QScrollArea;
+    rockScroll->setWidgetResizable(true);
+    rockScroll->setFrameShape(QFrame::NoFrame);
+    m_rockPanel = new RockPanel;
+    rockScroll->setWidget(m_rockPanel);
+    rockScroll->setMinimumWidth(330);
+    m_rockDock->setWidget(rockScroll);
+    addDockWidget(Qt::RightDockWidgetArea, m_rockDock);
+    m_rockDock->hide();
+    m_rockTimer = new QTimer(this);
+    m_rockTimer->setSingleShot(true);
+    m_rockTimer->setInterval(500);
+    connect(m_rockTimer, &QTimer::timeout, this, [this] { requestRockDetail(); });
+    connect(m_rockPanel, &RockPanel::changed, this, [this] {
+        updateRockPreview();
+        m_rockTimer->start();
+    });
+    connect(m_rockPanel, &RockPanel::applyRequested, this, [this] { applyRock(); });
+    connect(m_rockPanel, &RockPanel::cancelRequested, this, [this] { endRock(); });
     connect(m_viewport, &app::Viewport::clicked, this,
             [this](const QVector3D& o, const QVector3D& d, Qt::KeyboardModifiers) { onViewClicked(o, d); });
     connect(m_viewport, &app::Viewport::leftPressed, this,
@@ -165,6 +190,10 @@ SceneryWindow::SceneryWindow()
     connect(m_viewport, &app::Viewport::leftReleased, this, [this](bool) { onViewReleased(); });
     auto* escape = new QShortcut(QKeySequence(Qt::Key_Escape), this);
     connect(escape, &QShortcut::activated, this, [this] {
+        if (m_rock.active) {
+            endRock();
+            return;
+        }
         if (!m_build.active)
             return;
         if (m_build.placing >= 0) {  // stop placing first
@@ -199,7 +228,7 @@ SceneryWindow::SceneryWindow()
     refreshScene();
     refreshTitle();
     statusBar()->showMessage(tr("Welcome to Forge3D Scenery. Open a model, or set the scale the scenery tools will "
-                                "build to. Buildings, trees, rocks and terrain are on their way."),
+                                "build to: New Building and New Rock make scenery at it."),
                              12000);
     if (preferences().value(QStringLiteral("updates/checkAtStart"), true).toBool())
         checkForUpdates(true);
@@ -209,6 +238,8 @@ SceneryWindow::~SceneryWindow()
 {
     if (m_detail.valid())
         m_detail.wait();
+    if (m_rockDetail.valid())
+        m_rockDetail.wait();
 }
 
 QWidget* SceneryWindow::buildRibbon()
@@ -255,16 +286,25 @@ QWidget* SceneryWindow::buildRibbon()
     m_newBuilding = new QPushButton(tr("New Building"));
     m_newBuilding->setToolTip(tr("Design a building: brick, stone blocks, logs or wood planks, from real sizes at the "
                                  "model scale, with doors, windows and a roof"));
-    m_editBuilding = new QPushButton(tr("Change Building"));
-    m_editBuilding->setToolTip(tr("Change the building picked in Objects (or double-click it there)"));
+    m_newRock = new QPushButton(tr("New Rock"));
+    m_newRock->setToolTip(tr("Design a rock: a boulder, a crag, a slab or a pile of rocks, from real sizes at the "
+                             "model scale, sunk into the ground"));
     buildings->addWidget(m_newBuilding);
-    buildings->addWidget(m_editBuilding);
+    buildings->addWidget(m_newRock);
     buildings->addStretch(1);
     row->addLayout(buildings);
+    auto* changing = new QVBoxLayout;
+    changing->setSpacing(4);
+    m_editBuilding = new QPushButton(tr("Change"));
+    m_editBuilding->setToolTip(tr("Change the building or rock picked in Objects (or double-click it there)"));
+    changing->addWidget(m_editBuilding);
+    changing->addStretch(1);
+    row->addLayout(changing);
     connect(m_newBuilding, &QPushButton::clicked, this, [this] { startBuilding(kInvalidId); });
-    connect(m_editBuilding, &QPushButton::clicked, this, [this] { startBuilding(m_selected); });
+    connect(m_newRock, &QPushButton::clicked, this, [this] { startRock(kInvalidId); });
+    connect(m_editBuilding, &QPushButton::clicked, this, [this] { changeSelected(); });
 
-    auto* coming = new QLabel(tr("<b>Coming next:</b> rocks and boulders, terrain, and trees."));
+    auto* coming = new QLabel(tr("<b>Coming next:</b> terrain, and trees."));
     coming->setWordWrap(true);
     coming->setStyleSheet(QStringLiteral("color: palette(mid);"));
     row->addSpacing(24);
@@ -356,8 +396,10 @@ void SceneryWindow::refreshScene()
             m_objects->addItem(QString::fromStdString(m_doc.find(id)->name));
             if (id == m_selected)
                 m_objects->setCurrentRow(m_objects->count() - 1);
-            if (m_build.active && (id == m_build.editing || id == m_build.roof)) {
-                triangles += mesh->triangleCount();
+            if ((m_build.active && (id == m_build.editing || id == m_build.roof)) ||
+                (m_rock.active && id == m_rock.editing)) {
+                if (!m_rock.active)
+                    triangles += mesh->triangleCount();
                 continue;  // shown as it's being changed instead
             }
             app::DisplayItem item;
@@ -367,7 +409,7 @@ void SceneryWindow::refreshScene()
             const std::uint32_t c = m_doc.colourOf(id);
             item.color = QVector3D(float((c >> 16) & 0xFF) / 255.0f, float((c >> 8) & 0xFF) / 255.0f,
                                    float(c & 0xFF) / 255.0f);
-            item.selected = !m_build.active && id == m_selected;
+            item.selected = !designing() && id == m_selected;
             items.push_back(std::move(item));
             triangles += mesh->triangleCount();
         }
@@ -390,6 +432,15 @@ void SceneryWindow::refreshScene()
             add(m_build.walls, 0xB0000001ull, QVector3D(0.72f, 0.42f, 0.32f), 1.0f);
             add(m_build.roofMesh, 0xB0000002ull, QVector3D(0.45f, 0.38f, 0.36f), 1.0f);
             add(m_build.marker, 0xB0000003ull, QVector3D(1.0f, 0.6f, 0.1f), 0.6f);
+        }
+        if (m_rock.active && m_rock.mesh && !m_rock.mesh->empty()) {
+            app::DisplayItem item;
+            item.id = 0xB0000004ull;
+            item.mesh = m_rock.mesh;
+            item.model.translate(float(m_rock.x), float(m_rock.y), float(m_rock.z));
+            item.color = QVector3D(0.54f, 0.53f, 0.50f);
+            items.push_back(std::move(item));
+            triangles += m_rock.mesh->triangleCount();
         }
     } catch (const std::exception& e) {
         statusBar()->showMessage(tr("Something couldn't be shown: %1").arg(QString::fromUtf8(e.what())), 8000);
@@ -430,6 +481,7 @@ void SceneryWindow::newModel()
     if (!askToSave())
         return;
     endBuilding();
+    endRock();
     m_stack.clear();
     m_doc.replaceAll({});
     m_filePath.clear();
@@ -463,6 +515,7 @@ void SceneryWindow::openFile(const QString& path)
         } restore;
         std::vector<Body> bodies = file::load(toPath(path));
         endBuilding();
+        endRock();
         m_stack.clear();
         m_doc.replaceAll(std::move(bodies));
     } catch (const std::exception& e) {
@@ -623,13 +676,23 @@ void SceneryWindow::refreshCommands()
 {
     const Body* b = m_doc.find(m_selected);
     const bool building = b && (b->building || (b->roofOf != kInvalidId && m_doc.find(b->roofOf)));
-    m_newBuilding->setEnabled(!m_build.active);
-    m_editBuilding->setEnabled(!m_build.active && building);
+    m_newBuilding->setEnabled(!designing());
+    m_newRock->setEnabled(!designing());
+    m_editBuilding->setEnabled(!designing() && (building || (b && b->rock)));
+}
+
+void SceneryWindow::changeSelected()
+{
+    const Body* b = m_doc.find(m_selected);
+    if (b && b->rock)
+        startRock(m_selected);
+    else
+        startBuilding(m_selected);
 }
 
 void SceneryWindow::startBuilding(ObjectId editing)
 {
-    if (m_build.active)
+    if (designing())
         return;
     BuildMode mode;
     mode.active = true;
@@ -903,6 +966,141 @@ void SceneryWindow::closeEvent(QCloseEvent* event)
         event->accept();
     else
         event->ignore();
+}
+
+// ---- The rock designer ------------------------------------------------------------------
+
+void SceneryWindow::startRock(ObjectId editing)
+{
+    if (designing())
+        return;
+    RockMode mode;
+    mode.active = true;
+    RockSpec spec;
+    if (editing != kInvalidId) {
+        const Body* b = m_doc.find(editing);
+        if (!b || !b->rock)
+            return;
+        mode.editing = b->id;
+        spec = *b->rock;
+        mode.x = b->placement.x - spec.offset[0];
+        mode.y = b->placement.y - spec.offset[1];
+        mode.z = b->placement.z - spec.offset[2];
+    } else {
+        spec = rock::defaults(RockKind::Boulder);
+        spec.scale = m_scale.ratio;
+        if (!m_doc.empty()) {  // beside what's there
+            Bounds all;
+            for (ObjectId id : m_doc.topLevelIds()) {
+                const Bounds b = m_doc.worldBounds(id);
+                all.expand(b.min[0], b.min[1], b.min[2]);
+                all.expand(b.max[0], b.max[1], b.max[2]);
+            }
+            mode.x = all.max[0] + spec.length / spec.scale / 2 + 10.0;
+            mode.y = all.center()[1];
+        }
+    }
+    m_rock = mode;
+    m_rockPanel->start(spec, editing != kInvalidId);
+    m_rockDock->show();
+    if (auto* scroll = qobject_cast<QScrollArea*>(m_rockDock->widget()))
+        scroll->verticalScrollBar()->setValue(0);
+    m_viewport->setFocus();
+    statusBar()->showMessage(tr("Rock: set it up on the right; New Shape for another like it. Esc cancels."));
+    updateRockPreview();
+    if (editing == kInvalidId)
+        m_viewport->fitView();
+    requestRockDetail();
+    refreshCommands();
+}
+
+void SceneryWindow::endRock()
+{
+    if (!m_rock.active)
+        return;
+    m_rockTimer->stop();
+    m_rock = RockMode{};
+    m_rockDock->hide();
+    statusBar()->clearMessage();
+    refreshScene();
+}
+
+void SceneryWindow::applyRock()
+{
+    if (!m_rock.active)
+        return;
+    const RockSpec spec = m_rockPanel->spec();
+    try {
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        struct RestoreCursor {
+            ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
+        } restore;
+        if (m_rock.editing != kInvalidId) {
+            rock::update(m_stack, m_doc, m_rock.editing, spec);
+            m_selected = m_rock.editing;
+        } else {
+            const QString name = tr(rock::title(spec.kind)).section(QStringLiteral(" ("), 0, 0);  // "Crag"
+            m_selected = rock::add(m_stack, m_doc, spec, name.toStdString(), m_rock.x, m_rock.y);
+        }
+    } catch (const std::exception& e) {
+        m_rockPanel->setStatus(tr("It couldn't be made: %1").arg(QString::fromUtf8(e.what())), true);
+        return;
+    }
+    endRock();
+    statusBar()->showMessage(tr("Rock made. Double-click it in Objects to change it."), 8000);
+}
+
+// The rock as it's set up: coarsely now, in full a moment later.
+void SceneryWindow::updateRockPreview()
+{
+    if (!m_rock.active)
+        return;
+    const RockSpec spec = m_rockPanel->spec();
+    ++m_rock.generation;
+    try {
+        const Mesh made = rock::make(spec, true);
+        m_rock.mesh = std::make_shared<const Mesh>(
+            meshkernel::displayMesh(meshkernel::fromTriangles(made.positions, made.indices)));
+        m_rockPanel->setStatus({}, false);
+    } catch (const std::exception& e) {
+        m_rockPanel->setStatus(QString::fromUtf8(e.what()), true);
+    }
+    refreshScene();
+}
+
+void SceneryWindow::requestRockDetail()
+{
+    if (!m_rock.active)
+        return;
+    const RockSpec spec = m_rockPanel->spec();
+    const int generation = m_rock.generation;
+    QPointer<SceneryWindow> self(this);
+    if (m_rockDetail.valid())
+        m_rockDetail.wait();  // one at a time
+    m_rockDetail = std::async(std::launch::async, [self, spec, generation] {
+        std::shared_ptr<const Mesh> mesh;
+        QString problem;
+        try {
+            const Mesh made = rock::make(spec);
+            mesh = std::make_shared<const Mesh>(
+                meshkernel::displayMesh(meshkernel::fromTriangles(made.positions, made.indices)));
+        } catch (const std::exception& e) {
+            problem = QString::fromUtf8(e.what());
+        }
+        QMetaObject::invokeMethod(
+            qApp,
+            [self, generation, mesh, problem] {
+                if (!self || !self->m_rock.active || self->m_rock.generation != generation)
+                    return;
+                if (!problem.isEmpty()) {
+                    self->m_rockPanel->setStatus(problem, true);
+                    return;
+                }
+                self->m_rock.mesh = mesh;
+                self->refreshScene();
+            },
+            Qt::QueuedConnection);
+    });
 }
 
 }  // namespace forge::scenery

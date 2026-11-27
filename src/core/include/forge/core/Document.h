@@ -103,6 +103,9 @@ public:
     void setFormulas(ObjectId id, std::map<std::string, std::string> formulas);
     // Which hinge piece it is (Body::jointPiece). Only records it.
     void setJointPiece(ObjectId id, std::optional<JointPiece> piece);
+    // What Scenery's designers keep on a shape (slices 111-112): a building's or rock's
+    // description, and a roof's building.
+    void setDesign(ObjectId id, std::optional<BuildingSpec> building, ObjectId roofOf, std::optional<RockSpec> rock);
     // The colour a body shows in, 0xRRGGBB: its own, else (a combined shape) its first
     // part's, else one of the default colours, picked by its id.
     std::uint32_t colourOf(ObjectId id) const;

@@ -110,7 +110,8 @@ namespace forge::file {
 //      wrote "blocky", no longer used)
 //  55  Forge3D Scenery's buildings: a shape's "building" (its description) and a roof's
 //      "roofOf" (its building's id)
-inline constexpr int kFormatVersion = 55;
+//  56  Forge3D Scenery's rocks: a shape's "rock" (its description)
+inline constexpr int kFormatVersion = 56;
 // The highest sculpt::Brush number a file may hold (Pattern).
 inline constexpr int kLastSculptBrush = 14;
 inline constexpr const char* kExtension = ".f3d";

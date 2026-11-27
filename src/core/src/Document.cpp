@@ -624,6 +624,18 @@ void Document::setJointPiece(ObjectId id, std::optional<JointPiece> piece)
     notify(ChangeKind::Modified, id);
 }
 
+void Document::setDesign(ObjectId id, std::optional<BuildingSpec> building, ObjectId roofOf,
+                         std::optional<RockSpec> rock)
+{
+    Body& body = require(id);
+    if (body.building == building && body.roofOf == roofOf && body.rock == rock)
+        return;
+    body.building = std::move(building);
+    body.roofOf = roofOf;
+    body.rock = std::move(rock);
+    notify(ChangeKind::Modified, id);
+}
+
 void Document::setVariables(std::vector<Variable> table)
 {
     variables::checkTable(table);

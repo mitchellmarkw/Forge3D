@@ -2,6 +2,7 @@
 #pragma once
 
 #include "forge/core/BuildingSpec.h"
+#include "forge/core/RockSpec.h"
 #include "forge/core/Sketch.h"
 
 #include <array>
@@ -993,6 +994,8 @@ struct Body {
     // and make again. A roof made as its own shape names its building here.
     std::optional<BuildingSpec> building{};
     ObjectId roofOf = kInvalidId;
+    // Made by Scenery's rock designer (slice 112).
+    std::optional<RockSpec> rock{};
 
     bool isBoolean() const { return boolean.has_value(); }
     bool isOff() const { return boolean.has_value() && (suppressed || rolledBack); }

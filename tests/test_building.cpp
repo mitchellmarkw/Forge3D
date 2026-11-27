@@ -158,6 +158,8 @@ TEST_CASE("Buildings: added, changed and saved", "[building]")
     t.roofSeparate = false;
     building::update(stack, doc, walls, t);
     CHECK(doc.find(roof) == nullptr);
+    CHECK(doc.find(walls)->building->width == 9000.0);  // its description too
+    CHECK_FALSE(doc.find(walls)->building->roofSeparate);
     CHECK_THAT(double(doc.worldBounds(walls).size()[0]), WithinAbs((9000.0 + 600.0) / 87, 0.1));
     CHECK_THAT(double(doc.worldBounds(walls).center()[0]), WithinAbs(20.0, 0.1));
     stack.undo();

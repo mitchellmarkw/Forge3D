@@ -305,6 +305,14 @@ json bodyToJson(const Body& b)
     }
     if (b.roofOf != kInvalidId)
         j["roofOf"] = b.roofOf;
+    if (b.rock) {
+        const RockSpec& r = *b.rock;
+        static const char* kinds[] = {"boulder", "crag", "slab", "pile"};
+        j["rock"] = json{{"scale", r.scale},   {"kind", kinds[int(r.kind)]},   {"size", {r.length, r.width, r.height}},
+                         {"roughness", r.roughness}, {"layers", r.layers},      {"layerThickness", r.layerThickness},
+                         {"sunk", r.sunk},     {"count", r.count},             {"seed", r.seed},
+                         {"smallest", r.smallest}, {"offset", r.offset}};
+    }
     if (b.isBoolean() && b.boolean->cutJoint) {
         const CutJoint& c = *b.boolean->cutJoint;
         j["cutJoint"] = json{{"kind", c.kind}, {"size", c.size}, {"fit", c.fit}, {"link", c.link}, {"first", c.first}};
@@ -756,6 +764,31 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
     }
     if (const auto ro = j.find("roofOf"); ro != j.end() && ro->is_number_unsigned())
         b.roofOf = ro->get<ObjectId>();
+    if (const auto rj = j.find("rock"); rj != j.end() && rj->is_object()) {
+        try {
+            RockSpec r;
+            r.scale = rj->value("scale", r.scale);
+            const std::string k = rj->value("kind", std::string("boulder"));
+            r.kind = k == "crag" ? RockKind::Crag : k == "slab" ? RockKind::Slab : k == "pile" ? RockKind::Pile : RockKind::Boulder;
+            if (const auto sz = rj->find("size"); sz != rj->end() && sz->is_array() && sz->size() == 3) {
+                r.length = (*sz)[0].get<double>();
+                r.width = (*sz)[1].get<double>();
+                r.height = (*sz)[2].get<double>();
+            }
+            r.roughness = rj->value("roughness", r.roughness);
+            r.layers = rj->value("layers", r.layers);
+            r.layerThickness = rj->value("layerThickness", r.layerThickness);
+            r.sunk = rj->value("sunk", r.sunk);
+            r.count = rj->value("count", r.count);
+            r.seed = rj->value("seed", r.seed);
+            r.smallest = rj->value("smallest", r.smallest);
+            if (const auto off = rj->find("offset"); off != rj->end() && off->is_array() && off->size() == 3)
+                r.offset = {(*off)[0].get<double>(), (*off)[1].get<double>(), (*off)[2].get<double>()};
+            b.rock = r;
+        } catch (const json::exception&) {
+            damaged(where + ": rock is not readable");
+        }
+    }
     if (const auto piece = j.find("jointPiece"); piece != j.end() && piece->is_object()) {
         JointPiece p;
         try {
@@ -1934,6 +1967,7 @@ std::string resultKey(const Document& doc, ObjectId id)
         j.erase("jointFor");    // nor which cut's joint made it
         j.erase("building");    // the shape is its mesh; the description is for changing it
         j.erase("roofOf");
+        j.erase("rock");
         j.erase("cutJoint");    // nor the joint a cut keeps
         if (part == id)
             j.erase("placement");  // nor does moving the whole thing
