@@ -273,6 +273,38 @@ json bodyToJson(const Body& b)
     }
     if (b.jointFor != 0)
         j["jointFor"] = b.jointFor;
+    if (b.building) {
+        const BuildingSpec& s = *b.building;
+        static const char* materials[] = {"brick", "stone", "logs", "planks"};
+        static const char* roofs[] = {"none", "flat", "gable", "hip"};
+        json openings = json::array();
+        for (const auto& o : s.openings)
+            openings.push_back({{"kind", o.kind == OpeningKind::Door ? "door" : "window"},
+                                {"wall", o.wall},
+                                {"along", o.along},
+                                {"bottom", o.bottom},
+                                {"width", o.width},
+                                {"height", o.height}});
+        j["building"] = json{{"scale", s.scale},
+                             {"width", s.width},
+                             {"depth", s.depth},
+                             {"height", s.height},
+                             {"material", materials[int(s.material)]},
+                             {"unit", {s.unitLength, s.unitHeight, s.unitDepth}},
+                             {"mortar", s.mortar},
+                             {"joint", s.joint},
+                             {"thickness", s.wallThickness},
+                             {"roof", roofs[int(s.roof)]},
+                             {"pitch", s.pitch},
+                             {"overhang", s.overhang},
+                             {"roofSeparate", s.roofSeparate},
+                             {"openings", openings},
+                             {"seed", s.seed},
+                             {"smallest", s.smallest},
+                             {"offset", s.offset}};
+    }
+    if (b.roofOf != kInvalidId)
+        j["roofOf"] = b.roofOf;
     if (b.isBoolean() && b.boolean->cutJoint) {
         const CutJoint& c = *b.boolean->cutJoint;
         j["cutJoint"] = json{{"kind", c.kind}, {"size", c.size}, {"fit", c.fit}, {"link", c.link}, {"first", c.first}};
@@ -677,6 +709,53 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
     b.hardware = j.value("hardware", false);
     if (const auto jf = j.find("jointFor"); jf != j.end() && jf->is_number_unsigned())
         b.jointFor = jf->get<std::uint32_t>();
+    if (const auto bj = j.find("building"); bj != j.end() && bj->is_object()) {
+        try {
+            BuildingSpec s;
+            s.scale = bj->value("scale", s.scale);
+            s.width = bj->value("width", s.width);
+            s.depth = bj->value("depth", s.depth);
+            s.height = bj->value("height", s.height);
+            const std::string m = bj->value("material", std::string("brick"));
+            s.material = m == "stone" ? WallMaterial::Stone
+                         : m == "logs" ? WallMaterial::Logs
+                         : m == "planks" ? WallMaterial::Planks
+                                         : WallMaterial::Brick;
+            if (const auto u = bj->find("unit"); u != bj->end() && u->is_array() && u->size() == 3) {
+                s.unitLength = (*u)[0].get<double>();
+                s.unitHeight = (*u)[1].get<double>();
+                s.unitDepth = (*u)[2].get<double>();
+            }
+            s.mortar = bj->value("mortar", s.mortar);
+            s.joint = bj->value("joint", s.joint);
+            s.wallThickness = bj->value("thickness", s.wallThickness);
+            const std::string r = bj->value("roof", std::string("gable"));
+            s.roof = r == "none" ? RoofKind::None : r == "flat" ? RoofKind::Flat : r == "hip" ? RoofKind::Hip : RoofKind::Gable;
+            s.pitch = bj->value("pitch", s.pitch);
+            s.overhang = bj->value("overhang", s.overhang);
+            s.roofSeparate = bj->value("roofSeparate", s.roofSeparate);
+            if (const auto os = bj->find("openings"); os != bj->end() && os->is_array())
+                for (const auto& oj : *os) {
+                    BuildingOpening o;
+                    o.kind = oj.value("kind", std::string("window")) == "door" ? OpeningKind::Door : OpeningKind::Window;
+                    o.wall = oj.value("wall", 0);
+                    o.along = oj.value("along", o.along);
+                    o.bottom = oj.value("bottom", o.bottom);
+                    o.width = oj.value("width", o.width);
+                    o.height = oj.value("height", o.height);
+                    s.openings.push_back(o);
+                }
+            s.seed = bj->value("seed", s.seed);
+            s.smallest = bj->value("smallest", s.smallest);
+            if (const auto off = bj->find("offset"); off != bj->end() && off->is_array() && off->size() == 3)
+                s.offset = {(*off)[0].get<double>(), (*off)[1].get<double>(), (*off)[2].get<double>()};
+            b.building = s;
+        } catch (const json::exception&) {
+            damaged(where + ": building is not readable");
+        }
+    }
+    if (const auto ro = j.find("roofOf"); ro != j.end() && ro->is_number_unsigned())
+        b.roofOf = ro->get<ObjectId>();
     if (const auto piece = j.find("jointPiece"); piece != j.end() && piece->is_object()) {
         JointPiece p;
         try {
@@ -1853,6 +1932,8 @@ std::string resultKey(const Document& doc, ObjectId id)
         j.erase("formulas");  // nor where its sizes come from
         j.erase("jointPiece");  // nor which hinge it goes with
         j.erase("jointFor");    // nor which cut's joint made it
+        j.erase("building");    // the shape is its mesh; the description is for changing it
+        j.erase("roofOf");
         j.erase("cutJoint");    // nor the joint a cut keeps
         if (part == id)
             j.erase("placement");  // nor does moving the whole thing

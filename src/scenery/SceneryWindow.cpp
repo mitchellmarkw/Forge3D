@@ -2,9 +2,12 @@
 #include "SceneryWindow.h"
 
 #include "BuildInfo.h"
+#include "BuildingPanel.h"
 #include "Theme.h"
 #include "Viewport.h"
+#include "forge/core/Commands.h"
 #include "forge/core/Export.h"
+#include "forge/core/MeshKernel.h"
 #include "forge/core/FileFormat.h"
 #include "forge/core/Updates.h"
 
@@ -25,14 +28,20 @@
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QPushButton>
+#include <QScrollArea>
+#include <QScrollBar>
+#include <QShortcut>
 #include <QSettings>
 #include <QStandardPaths>
 #include <QStatusBar>
 #include <QTabWidget>
+#include <QTimer>
+#include <QPointer>
 #include <QUrl>
 #include <QVBoxLayout>
 
 #include <filesystem>
+#include <thread>
 
 namespace forge::scenery {
 
@@ -97,9 +106,75 @@ SceneryWindow::SceneryWindow()
     dock->setObjectName(QStringLiteral("objects"));
     dock->setFeatures(QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable);
     m_objects = new QListWidget;
-    m_objects->setSelectionMode(QAbstractItemView::NoSelection);
+    m_objects->setSelectionMode(QAbstractItemView::SingleSelection);
+    m_objects->setToolTip(tr("Click a shape to pick it; double-click a building to change it"));
     dock->setWidget(m_objects);
     addDockWidget(Qt::LeftDockWidgetArea, dock);
+    connect(m_objects, &QListWidget::currentRowChanged, this, [this](int row) {
+        if (m_build.active)
+            return;
+        m_selected = row >= 0 && row < int(m_rows.size()) ? m_rows[std::size_t(row)] : kInvalidId;
+        refreshScene();
+        refreshCommands();
+    });
+    connect(m_objects, &QListWidget::itemDoubleClicked, this, [this] {
+        if (!m_build.active && m_editBuilding->isEnabled())
+            startBuilding(m_selected);
+    });
+
+    // The building designer's panel, on the right while it's open.
+    m_panelDock = new QDockWidget(tr("Building"), this);
+    m_panelDock->setObjectName(QStringLiteral("building"));
+    m_panelDock->setFeatures(QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable);
+    auto* scroll = new QScrollArea;
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    m_buildingPanel = new BuildingPanel;
+    scroll->setWidget(m_buildingPanel);
+    scroll->setMinimumWidth(330);
+    m_panelDock->setWidget(scroll);
+    addDockWidget(Qt::RightDockWidgetArea, m_panelDock);
+    m_panelDock->hide();
+    m_detailTimer = new QTimer(this);
+    m_detailTimer->setSingleShot(true);
+    m_detailTimer->setInterval(500);
+    connect(m_detailTimer, &QTimer::timeout, this, [this] { requestDetail(); });
+    connect(m_buildingPanel, &BuildingPanel::changed, this, [this] {
+        updateBuildingPreview(true);
+        m_detailTimer->start();
+    });
+    connect(m_buildingPanel, &BuildingPanel::placeRequested, this, [this](int kind) {
+        m_build.placing = kind;
+        statusBar()->showMessage(kind < 0 ? QString()
+                                          : tr("Click on a wall where the %1 goes.")
+                                                .arg(kind == int(OpeningKind::Door) ? tr("door") : tr("window")));
+    });
+    connect(m_buildingPanel, &BuildingPanel::selectionChanged, this, [this] {
+        updateBuildingPreview(true);  // the marker
+        m_detailTimer->start();
+    });
+    connect(m_buildingPanel, &BuildingPanel::applyRequested, this, [this] { applyBuilding(); });
+    connect(m_buildingPanel, &BuildingPanel::cancelRequested, this, [this] { endBuilding(); });
+    connect(m_viewport, &app::Viewport::clicked, this,
+            [this](const QVector3D& o, const QVector3D& d, Qt::KeyboardModifiers) { onViewClicked(o, d); });
+    connect(m_viewport, &app::Viewport::leftPressed, this,
+            [this](const QVector3D& o, const QVector3D& d, const view::GizmoHandle&, const QPointF&,
+                   Qt::KeyboardModifiers) { onViewPressed(o, d); });
+    connect(m_viewport, &app::Viewport::leftDragged, this,
+            [this](const QVector3D& o, const QVector3D& d, const QPointF&, Qt::KeyboardModifiers) { onViewDragged(o, d); });
+    connect(m_viewport, &app::Viewport::leftReleased, this, [this](bool) { onViewReleased(); });
+    auto* escape = new QShortcut(QKeySequence(Qt::Key_Escape), this);
+    connect(escape, &QShortcut::activated, this, [this] {
+        if (!m_build.active)
+            return;
+        if (m_build.placing >= 0) {  // stop placing first
+            m_build.placing = -1;
+            m_buildingPanel->setPlacing(-1);
+            statusBar()->clearMessage();
+        } else {
+            endBuilding();
+        }
+    });
 
     m_status = new QLabel;
     statusBar()->addPermanentWidget(m_status);
@@ -130,7 +205,11 @@ SceneryWindow::SceneryWindow()
         checkForUpdates(true);
 }
 
-SceneryWindow::~SceneryWindow() = default;
+SceneryWindow::~SceneryWindow()
+{
+    if (m_detail.valid())
+        m_detail.wait();
+}
 
 QWidget* SceneryWindow::buildRibbon()
 {
@@ -169,8 +248,23 @@ QWidget* SceneryWindow::buildRibbon()
             useScale(m_scale);  // back to what it was
     });
 
-    auto* coming = new QLabel(tr("<b>Coming next:</b> a building designer (brick, stone, logs; doors and windows), "
-                                 "trees, rocks and boulders, and terrain."));
+    // Buildings.
+    row->addSpacing(18);
+    auto* buildings = new QVBoxLayout;
+    buildings->setSpacing(4);
+    m_newBuilding = new QPushButton(tr("New Building"));
+    m_newBuilding->setToolTip(tr("Design a building: brick, stone blocks, logs or wood planks, from real sizes at the "
+                                 "model scale, with doors, windows and a roof"));
+    m_editBuilding = new QPushButton(tr("Change Building"));
+    m_editBuilding->setToolTip(tr("Change the building picked in Objects (or double-click it there)"));
+    buildings->addWidget(m_newBuilding);
+    buildings->addWidget(m_editBuilding);
+    buildings->addStretch(1);
+    row->addLayout(buildings);
+    connect(m_newBuilding, &QPushButton::clicked, this, [this] { startBuilding(kInvalidId); });
+    connect(m_editBuilding, &QPushButton::clicked, this, [this] { startBuilding(m_selected); });
+
+    auto* coming = new QLabel(tr("<b>Coming next:</b> rocks and boulders, terrain, and trees."));
     coming->setWordWrap(true);
     coming->setStyleSheet(QStringLiteral("color: palette(mid);"));
     row->addSpacing(24);
@@ -195,6 +289,8 @@ void SceneryWindow::buildMenus()
     QMenu* edit = menuBar()->addMenu(tr("&Edit"));
     QAction* undo = edit->addAction(tr("&Undo"), QKeySequence::Undo, this, [this] { m_stack.undo(); });
     QAction* redo = edit->addAction(tr("&Redo"), QKeySequence::Redo, this, [this] { m_stack.redo(); });
+    edit->addSeparator();
+    edit->addAction(tr("&Delete"), QKeySequence::Delete, this, [this] { deleteSelected(); });
     connect(edit, &QMenu::aboutToShow, this, [this, undo, redo] {
         undo->setEnabled(m_stack.canUndo());
         redo->setEnabled(m_stack.canRedo());
@@ -246,12 +342,24 @@ void SceneryWindow::refreshScene()
 {
     std::vector<app::DisplayItem> items;
     std::size_t triangles = 0;
+    if (m_selected != kInvalidId && !m_doc.find(m_selected))
+        m_selected = kInvalidId;
+    const QSignalBlocker block(m_objects);
     m_objects->clear();
+    m_rows.clear();
     try {
         for (ObjectId id : m_doc.topLevelIds()) {
             const auto mesh = m_doc.mesh(id);
             if (!mesh)
                 continue;
+            m_rows.push_back(id);
+            m_objects->addItem(QString::fromStdString(m_doc.find(id)->name));
+            if (id == m_selected)
+                m_objects->setCurrentRow(m_objects->count() - 1);
+            if (m_build.active && (id == m_build.editing || id == m_build.roof)) {
+                triangles += mesh->triangleCount();
+                continue;  // shown as it's being changed instead
+            }
             app::DisplayItem item;
             item.id = id;
             item.mesh = mesh;
@@ -259,14 +367,35 @@ void SceneryWindow::refreshScene()
             const std::uint32_t c = m_doc.colourOf(id);
             item.color = QVector3D(float((c >> 16) & 0xFF) / 255.0f, float((c >> 8) & 0xFF) / 255.0f,
                                    float(c & 0xFF) / 255.0f);
+            item.selected = !m_build.active && id == m_selected;
             items.push_back(std::move(item));
             triangles += mesh->triangleCount();
-            m_objects->addItem(QString::fromStdString(m_doc.find(id)->name));
+        }
+        if (m_build.active) {
+            QMatrix4x4 at;
+            at.translate(float(m_build.x), float(m_build.y), float(m_build.z));
+            const auto add = [&](const std::shared_ptr<const Mesh>& m, std::uint64_t id, const QVector3D& colour,
+                                 float alpha) {
+                if (!m || m->empty())
+                    return;
+                app::DisplayItem item;
+                item.id = id;
+                item.mesh = m;
+                item.model = at;
+                item.color = colour;
+                item.alpha = alpha;
+                item.helper = alpha < 1.0f;
+                items.push_back(std::move(item));
+            };
+            add(m_build.walls, 0xB0000001ull, QVector3D(0.72f, 0.42f, 0.32f), 1.0f);
+            add(m_build.roofMesh, 0xB0000002ull, QVector3D(0.45f, 0.38f, 0.36f), 1.0f);
+            add(m_build.marker, 0xB0000003ull, QVector3D(1.0f, 0.6f, 0.1f), 0.6f);
         }
     } catch (const std::exception& e) {
         statusBar()->showMessage(tr("Something couldn't be shown: %1").arg(QString::fromUtf8(e.what())), 8000);
     }
     m_viewport->setItems(std::move(items));
+    refreshCommands();
     const int shapes = m_objects->count();
     m_status->setText((shapes == 1 ? tr("1 shape") : tr("%1 shapes").arg(shapes)) + QStringLiteral("  |  ") +
                       tr("%1 triangles").arg(triangles));
@@ -300,6 +429,7 @@ void SceneryWindow::newModel()
 {
     if (!askToSave())
         return;
+    endBuilding();
     m_stack.clear();
     m_doc.replaceAll({});
     m_filePath.clear();
@@ -332,6 +462,7 @@ void SceneryWindow::openFile(const QString& path)
             ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
         } restore;
         std::vector<Body> bodies = file::load(toPath(path));
+        endBuilding();
         m_stack.clear();
         m_doc.replaceAll(std::move(bodies));
     } catch (const std::exception& e) {
@@ -486,8 +617,288 @@ void SceneryWindow::showAbout()
                            .arg(versionText()));
 }
 
+// ---- The building designer --------------------------------------------------------------
+
+void SceneryWindow::refreshCommands()
+{
+    const Body* b = m_doc.find(m_selected);
+    const bool building = b && (b->building || (b->roofOf != kInvalidId && m_doc.find(b->roofOf)));
+    m_newBuilding->setEnabled(!m_build.active);
+    m_editBuilding->setEnabled(!m_build.active && building);
+}
+
+void SceneryWindow::startBuilding(ObjectId editing)
+{
+    if (m_build.active)
+        return;
+    BuildMode mode;
+    mode.active = true;
+    BuildingSpec spec;
+    if (editing != kInvalidId) {
+        const Body* b = m_doc.find(editing);
+        if (b && b->roofOf != kInvalidId)  // the roof picked: its building
+            b = m_doc.find(b->roofOf);
+        if (!b || !b->building)
+            return;
+        mode.editing = b->id;
+        spec = *b->building;
+        mode.x = b->placement.x - spec.offset[0];
+        mode.y = b->placement.y - spec.offset[1];
+        mode.z = b->placement.z - spec.offset[2];
+        for (ObjectId id : m_doc.topLevelIds())
+            if (const Body* r = m_doc.find(id); r && r->roofOf == b->id)
+                mode.roof = id;
+    } else {
+        spec = building::defaults(WallMaterial::Brick);
+        spec.scale = m_scale.ratio;
+        // On the plate's middle, or beside what's there.
+        if (!m_doc.empty()) {
+            Bounds all;
+            for (ObjectId id : m_doc.topLevelIds()) {
+                const Bounds b = m_doc.worldBounds(id);
+                all.expand(b.min[0], b.min[1], b.min[2]);
+                all.expand(b.max[0], b.max[1], b.max[2]);
+            }
+            mode.x = all.max[0] + spec.width / spec.scale / 2 + spec.overhang / spec.scale + 10.0;
+            mode.y = all.center()[1];
+        }
+    }
+    m_build = mode;
+    m_buildingPanel->start(spec, editing != kInvalidId);
+    m_panelDock->show();
+    if (auto* scroll = qobject_cast<QScrollArea*>(m_panelDock->widget()))
+        scroll->verticalScrollBar()->setValue(0);
+    m_viewport->setFocus();
+    statusBar()->showMessage(tr("Building: set it up on the right; Add Door or Add Window, then click on a wall. Esc "
+                                "cancels."));
+    updateBuildingPreview(true);
+    if (editing == kInvalidId)
+        m_viewport->fitView();
+    requestDetail();
+    refreshCommands();
+}
+
+void SceneryWindow::endBuilding()
+{
+    if (!m_build.active)
+        return;
+    m_detailTimer->stop();
+    m_build = BuildMode{};
+    m_panelDock->hide();
+    statusBar()->clearMessage();
+    refreshScene();
+}
+
+void SceneryWindow::applyBuilding()
+{
+    if (!m_build.active)
+        return;
+    const BuildingSpec spec = m_buildingPanel->spec();
+    try {
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        struct RestoreCursor {
+            ~RestoreCursor() { QApplication::restoreOverrideCursor(); }
+        } restore;
+        if (m_build.editing != kInvalidId) {
+            building::update(m_stack, m_doc, m_build.editing, spec);
+            m_selected = m_build.editing;
+        } else {
+            m_selected = building::add(m_stack, m_doc, spec, tr("Building").toStdString(), m_build.x, m_build.y);
+        }
+    } catch (const std::exception& e) {
+        m_buildingPanel->setStatus(tr("It couldn't be made: %1").arg(QString::fromUtf8(e.what())), true);
+        return;
+    }
+    endBuilding();
+    statusBar()->showMessage(tr("Building made. Double-click it in Objects to change it."), 8000);
+}
+
+// The building as it's set up: quickly (plain walls) now, in full a moment later.
+void SceneryWindow::updateBuildingPreview(bool quick)
+{
+    if (!m_build.active)
+        return;
+    const BuildingSpec spec = m_buildingPanel->spec();
+    ++m_build.generation;
+    try {
+        if (quick) {
+            const building::Made made = building::make(spec, true);
+            m_build.walls = std::make_shared<const Mesh>(
+                meshkernel::displayMesh(meshkernel::fromTriangles(made.walls.positions, made.walls.indices)));
+            m_build.roofMesh =
+                made.roof.empty() ? nullptr
+                                  : std::make_shared<const Mesh>(meshkernel::displayMesh(
+                                        meshkernel::fromTriangles(made.roof.positions, made.roof.indices)));
+        }
+        const int picked = m_buildingPanel->selectedOpening();
+        m_build.marker = picked >= 0 && picked < int(spec.openings.size())
+                             ? std::make_shared<const Mesh>(meshkernel::displayMesh(meshkernel::fromTriangles(
+                                   building::openingMarker(spec, spec.openings[std::size_t(picked)]).positions,
+                                   building::openingMarker(spec, spec.openings[std::size_t(picked)]).indices)))
+                             : nullptr;
+        m_buildingPanel->setStatus({}, false);
+    } catch (const std::exception& e) {
+        m_buildingPanel->setStatus(QString::fromUtf8(e.what()), true);
+    }
+    refreshScene();
+}
+
+void SceneryWindow::requestDetail()
+{
+    if (!m_build.active)
+        return;
+    const BuildingSpec spec = m_buildingPanel->spec();
+    const int generation = m_build.generation;
+    QPointer<SceneryWindow> self(this);
+    if (m_detail.valid())
+        m_detail.wait();  // one at a time
+    m_detail = std::async(std::launch::async, [self, spec, generation] {
+        std::shared_ptr<const Mesh> walls, roof;
+        QStringList notes;
+        QString problem;
+        try {
+            const building::Made made = building::make(spec);
+            walls = std::make_shared<const Mesh>(
+                meshkernel::displayMesh(meshkernel::fromTriangles(made.walls.positions, made.walls.indices)));
+            if (!made.roof.empty())
+                roof = std::make_shared<const Mesh>(
+                    meshkernel::displayMesh(meshkernel::fromTriangles(made.roof.positions, made.roof.indices)));
+            for (const auto& n : made.notes)
+                notes << QString::fromStdString(n);
+        } catch (const std::exception& e) {
+            problem = QString::fromUtf8(e.what());
+        }
+        QMetaObject::invokeMethod(
+            qApp,
+            [self, generation, walls, roof, notes, problem] {
+                if (!self || !self->m_build.active || self->m_build.generation != generation)
+                    return;  // changed since: a newer one is on its way
+                if (!problem.isEmpty()) {
+                    self->m_buildingPanel->setStatus(problem, true);
+                    return;
+                }
+                self->m_build.walls = walls;
+                self->m_build.roofMesh = roof;
+                self->m_buildingPanel->setNotes(notes);
+                self->refreshScene();
+            },
+            Qt::QueuedConnection);
+    });
+}
+
+std::optional<building::Spot> SceneryWindow::spotFromRay(const QVector3D& origin, const QVector3D& direction) const
+{
+    const BuildingSpec spec = m_buildingPanel->spec();
+    return building::spotAt(spec, {origin.x() - m_build.x, origin.y() - m_build.y, origin.z() - m_build.z},
+                            {direction.x(), direction.y(), direction.z()});
+}
+
+void SceneryWindow::onViewClicked(const QVector3D& origin, const QVector3D& direction)
+{
+    if (!m_build.active) {
+        return;
+    }
+    const auto spot = spotFromRay(origin, direction);
+    BuildingSpec spec = m_buildingPanel->spec();
+    if (m_build.placing >= 0) {
+        if (!spot) {
+            statusBar()->showMessage(tr("That's not on a wall: click on the outside of one."), 5000);
+            return;
+        }
+        const BuildingOpening o = building::openingAt(spec, OpeningKind(m_build.placing), *spot);
+        if (building::clashes(spec, o)) {
+            statusBar()->showMessage(tr("That's on top of another door or window: click somewhere clear."), 5000);
+            return;
+        }
+        spec.openings.push_back(o);
+        m_build.placing = -1;
+        m_buildingPanel->setPlacing(-1);
+        m_buildingPanel->setSpec(spec);
+        m_buildingPanel->selectOpening(int(spec.openings.size()) - 1);
+        statusBar()->showMessage(tr("Placed. Drag it to move it; set its size on the right."), 6000);
+        updateBuildingPreview(true);
+        m_detailTimer->start();
+        return;
+    }
+    const auto picked = spot ? building::pickedOpening(spec, *spot) : std::nullopt;
+    m_buildingPanel->selectOpening(picked ? int(*picked) : -1);
+    updateBuildingPreview(false);
+}
+
+void SceneryWindow::onViewPressed(const QVector3D& origin, const QVector3D& direction)
+{
+    if (!m_build.active || m_build.placing >= 0)
+        return;
+    const auto spot = spotFromRay(origin, direction);
+    if (!spot)
+        return;
+    const BuildingSpec spec = m_buildingPanel->spec();
+    const auto picked = building::pickedOpening(spec, *spot);
+    if (!picked)
+        return;
+    const BuildingOpening& o = spec.openings[*picked];
+    m_build.dragging = int(*picked);
+    m_build.grabAlong = spot->along - o.along;
+    m_build.grabUp = spot->up - o.bottom;
+    m_buildingPanel->selectOpening(int(*picked));
+}
+
+void SceneryWindow::onViewDragged(const QVector3D& origin, const QVector3D& direction)
+{
+    if (!m_build.active || m_build.dragging < 0)
+        return;
+    BuildingSpec spec = m_buildingPanel->spec();
+    if (m_build.dragging >= int(spec.openings.size()))
+        return;
+    const auto spot = spotFromRay(origin, direction);
+    if (!spot)
+        return;
+    BuildingOpening& o = spec.openings[std::size_t(m_build.dragging)];
+    o.wall = spot->wall;  // onto another wall, if it's dragged round a corner
+    o.along = spot->along - m_build.grabAlong;
+    if (o.kind == OpeningKind::Window)
+        o.bottom = spot->up - m_build.grabUp;
+    o = building::keptIn(spec, o);
+    if (building::clashes(spec, o, std::size_t(m_build.dragging)))
+        return;  // kept where it was: it would be on top of another
+    m_buildingPanel->setSpec(spec);
+    m_buildingPanel->selectOpening(m_build.dragging);
+    updateBuildingPreview(true);
+}
+
+void SceneryWindow::onViewReleased()
+{
+    if (!m_build.active || m_build.dragging < 0)
+        return;
+    m_build.dragging = -1;
+    m_detailTimer->start();
+}
+
+void SceneryWindow::deleteSelected()
+{
+    if (m_build.active) {
+        // The picked door or window.
+        BuildingSpec spec = m_buildingPanel->spec();
+        const int i = m_buildingPanel->selectedOpening();
+        if (i >= 0 && i < int(spec.openings.size())) {
+            spec.openings.erase(spec.openings.begin() + i);
+            m_buildingPanel->setSpec(spec);
+            m_buildingPanel->selectOpening(-1);
+            updateBuildingPreview(true);
+            m_detailTimer->start();
+        }
+        return;
+    }
+    if (m_selected == kInvalidId)
+        return;
+    m_stack.execute(std::make_unique<RemoveBodyCommand>(m_selected));
+    m_selected = kInvalidId;
+}
+
 void SceneryWindow::closeEvent(QCloseEvent* event)
 {
+    if (m_build.active)
+        endBuilding();
     if (askToSave())
         event->accept();
     else

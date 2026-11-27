@@ -2098,3 +2098,23 @@ and sharp across edges.
   (`v` for Forge3D, `scenery-v` for Scenery).
 - CI packages dist/Scenery from Forge3D's package (the same DLLs, plugins and licenses) with its exe;
   installer/Scenery.iss (its own AppId); Scenery releases are tagged scenery-vX.Y.Z and not marked Latest.
+
+## Building designer (slice 111, Forge3D 0.119.0, Scenery 0.2.0)
+
+- `BuildingSpec` (core, BuildingSpec.h; real mm and a scale): kept on the walls' shape as `Body::building`; a roof
+  made as its own shape has `Body::roofOf` (its walls' id). File format 55 writes them ("building", "roofOf");
+  they're left out of a step's results key (the shape is its mesh).
+- `building::make(spec, quick)` (Building.cpp) builds in model mm with Manifold: plain shells (inset by the mortar's
+  recess) merged with the units composed together (bricks and blocks: full-thickness boxes along each wall's run,
+  running bond, corners bonded by alternating which walls run through; stone lengths from a seeded random 0.6-1.4);
+  logs: 12-32-sided prisms, the sides half a log higher, ends crossing 0.5 d past the corners, chinking shells;
+  planks: a shell, bevelled planks along each outside face (convex prisms), corner boards. Openings: boxes
+  subtracted (composed), then frames, a window's sill and bars (if printable), a door's leaf merged. Roofs: a slab;
+  a gable prism (pentagon: eave thickness, ridge) along the longer side; a hip roof is the two gables
+  intersected. Details under `smallest` are widened (mortar) or dropped (plain walls), with `notes`.
+- `building::spotAt` (a ray against the four outside faces), `openingAt`, `keptIn`, `clashes`, `pickedOpening`,
+  `openingMarker`. `add` / `update` (one undo step; `spec.offset` keeps the building where it was).
+- Scenery: `BuildingPanel` (a scroll area in a right dock; wheel scrolls the panel, not the fields under it) and
+  build mode in `SceneryWindow`: the edited shapes hidden, the preview drawn (quick at once; in full on a
+  background thread 0.5 s later, dropped if the description changed since), clicks place or pick openings, drags
+  move them.

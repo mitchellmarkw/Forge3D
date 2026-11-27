@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.119.0 Beta — Slice 111: opens Scenery's buildings (2026-11-26)
+
+- Forge3D opens models with buildings made in Forge3D Scenery (0.2): they're shapes like any other here (move,
+  cut, combine, print them); their description comes along when saved, so Scenery can still change them.
+- File format 55 (a building's description, and which building a roof belongs to).
+
 ## 0.118.0 Beta — Slice 110: Forge3D Scenery groundwork (2026-11-26)
 
 - **Forge3D Scenery**, a companion app for scenery (buildings, trees, rocks, terrain), starts here: it shares
