@@ -1,5 +1,17 @@
 # Forge3D Scenery changelog
 
+## 0.7.0 Beta — Rough stone walls (2026-11-27)
+
+- Two new wall materials:
+  - **Rough-hewn stone**: roughly squared, rock-faced stones in courses of varying height, each stone a different
+    length, standing out of the mortar with a rough, domed face.
+  - **Fieldstone (irregular)**: rounded stones of every shape in wide mortar lines, like a "giraffe" stone house.
+    One size sets them (the average stone's).
+  - Both with mortar (set back) or laid dry; another stone pattern with each building's number; any building
+    shape; doors and windows cut through as usual. Mortar lines too fine to print are widened; stones too small
+    to print at the scale give plain walls (with a note).
+- The building's preview shows its material's colour (it was always brick red).
+
 ## 0.6.0 Beta — Building shapes (2026-11-26)
 
 - **Shape** (Building, under Walls): **Rectangle**, **L-shape**, **T-shape**, **U-shape** or **Courtyard** (wings

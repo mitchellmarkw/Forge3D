@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.124.0 Beta — Slice 116: opens Scenery's rough stone walls (2026-11-27)
+
+- Forge3D opens Scenery 0.7's rough-hewn stone and fieldstone buildings.
+- File format 60 (the two new wall materials).
+
 ## 0.123.0 Beta — Slice 115: Scenery's building shapes (2026-11-26)
 
 - Forge3D opens Scenery 0.6's L, T, U and courtyard buildings like its other scenery.

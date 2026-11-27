@@ -10,7 +10,9 @@
 // `scale` turns them into the model's (1:scale).
 namespace forge {
 
-enum class WallMaterial { Brick, Stone, Logs, Planks };
+// RoughStone: roughly squared, rock-faced stones in courses of varying height. Fieldstone:
+// rounded stones of every shape set in wide mortar (a "giraffe" stone house). (Slice 116.)
+enum class WallMaterial { Brick, Stone, Logs, Planks, RoughStone, Fieldstone };
 enum class RoofKind { None, Flat, Gable, Hip };
 enum class OpeningKind { Door, Window };
 // The footprint (slice 115). L: a wing along the front and one up the left side. T: a bar
