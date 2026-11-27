@@ -93,7 +93,331 @@ double thicknessOf(const BuildingSpec& s)
     return s.material == WallMaterial::Logs ? s.unitHeight : s.wallThickness;
 }
 
+using P2 = std::array<double, 2>;
+using Ring = std::vector<P2>;
+
+// A ring moved in towards its material (on its left) by d: each side moved, the corners where
+// the moved sides meet.
+Ring offsetRing(const Ring& r, double d)
+{
+    const std::size_t n = r.size();
+    Ring out(n);
+    for (std::size_t i = 0; i < n; ++i) {
+        const P2 prev = r[(i + n - 1) % n], cur = r[i], next = r[(i + 1) % n];
+        const auto unit2 = [](P2 v) {
+            const double l = std::hypot(v[0], v[1]);
+            return l > 1e-12 ? P2{v[0] / l, v[1] / l} : P2{1, 0};
+        };
+        const P2 e1 = unit2({cur[0] - prev[0], cur[1] - prev[1]}), e2 = unit2({next[0] - cur[0], next[1] - cur[1]});
+        const P2 n1{-e1[1], e1[0]}, n2{-e2[1], e2[0]};  // their left: the material's side
+        const double c1 = n1[0] * prev[0] + n1[1] * prev[1] + d, c2 = n2[0] * cur[0] + n2[1] * cur[1] + d;
+        const double det = n1[0] * n2[1] - n1[1] * n2[0];
+        out[i] = std::abs(det) < 1e-12 ? P2{cur[0] + n1[0] * d, cur[1] + n1[1] * d}
+                                       : P2{(c1 * n2[1] - c2 * n1[1]) / det, (n1[0] * c2 - n2[0] * c1) / det};
+    }
+    return out;
+}
+
+// What's inside the rings (even-odd; their sides along X or Y) as rectangles: x0, y0, x1, y1.
+std::vector<std::array<double, 4>> rectsOf(const std::vector<Ring>& rings)
+{
+    std::vector<double> xs;
+    for (const Ring& r : rings)
+        for (const P2& p : r)
+            xs.push_back(p[0]);
+    std::sort(xs.begin(), xs.end());
+    xs.erase(std::unique(xs.begin(), xs.end(), [](double a, double b) { return std::abs(a - b) < 1e-9; }), xs.end());
+    std::vector<std::array<double, 4>> out;
+    std::vector<double> lastYs;
+    for (std::size_t i = 0; i + 1 < xs.size(); ++i) {
+        const double xm = (xs[i] + xs[i + 1]) / 2;
+        std::vector<double> ys;
+        for (const Ring& r : rings)
+            for (std::size_t j = 0; j < r.size(); ++j) {
+                const P2 a = r[j], b = r[(j + 1) % r.size()];
+                if (std::abs(a[1] - b[1]) < 1e-9 && std::min(a[0], b[0]) < xm && xm < std::max(a[0], b[0]))
+                    ys.push_back(a[1]);
+            }
+        std::sort(ys.begin(), ys.end());
+        // The same as the slab before: widen its rectangles.
+        const bool same = ys.size() == lastYs.size() &&
+                          std::equal(ys.begin(), ys.end(), lastYs.begin(), [](double a, double b) { return std::abs(a - b) < 1e-9; });
+        if (same && !ys.empty()) {
+            for (std::size_t k = out.size() - ys.size() / 2; k < out.size(); ++k)
+                out[k][2] = xs[i + 1];
+        } else {
+            for (std::size_t k = 0; k + 1 < ys.size(); k += 2)
+                out.push_back({xs[i], ys[k], xs[i + 1], ys[k + 1]});
+        }
+        lastYs = ys;
+    }
+    return out;
+}
+
+MeshSolid regionOf(const std::vector<Ring>& rings, double z0, double z1)
+{
+    std::vector<MeshSolid> boxes;
+    for (const auto& r : rectsOf(rings))
+        boxes.push_back(box({r[0], r[1], z0}, {r[2], r[3], z1}));
+    return boxes.size() == 1 ? boxes[0] : meshkernel::merged(boxes);
+}
+
+// A wall: its face, whether its ends are outside corners (a turn to the left, walking the
+// outline) or inside ones, and whether it runs along X.
+struct Wall {
+    Face f;
+    bool convexStart = true, convexEnd = true, alongX = true;
+};
+
+std::vector<Ring> modelRings(const BuildingSpec& s)
+{
+    std::vector<Ring> rings = outlines(s);
+    for (Ring& r : rings)
+        for (P2& p : r)
+            p = {p[0] / s.scale, p[1] / s.scale};
+    return rings;
+}
+
+std::vector<Wall> wallsOf(const BuildingSpec& s)
+{
+    std::vector<Wall> out;
+    const double H = s.height / s.scale;
+    for (const Ring& r : modelRings(s)) {
+        const std::size_t n = r.size();
+        for (std::size_t i = 0; i < n; ++i) {
+            const P2 prev = r[(i + n - 1) % n], a = r[i], b = r[(i + 1) % n], next = r[(i + 2) % n];
+            const double len = std::hypot(b[0] - a[0], b[1] - a[1]);
+            const V3 along{(b[0] - a[0]) / len, (b[1] - a[1]) / len, 0};
+            Wall w;
+            w.f.start = {a[0], a[1], 0};
+            w.f.along = along;
+            w.f.out = {along[1], -along[0], 0};
+            w.f.length = len;
+            w.f.height = H;
+            const auto turn = [](P2 p, P2 q, P2 r2) {
+                return (q[0] - p[0]) * (r2[1] - q[1]) - (q[1] - p[1]) * (r2[0] - q[0]);
+            };
+            w.convexStart = turn(prev, a, b) > 0;
+            w.convexEnd = turn(a, b, next) > 0;
+            w.alongX = std::abs(along[0]) > 0.5;
+            out.push_back(w);
+        }
+    }
+    return out;
+}
+
 }  // namespace
+
+const char* title(BuildingShape s)
+{
+    switch (s) {
+    case BuildingShape::Rectangle: return "Rectangle";
+    case BuildingShape::L: return "L-shape";
+    case BuildingShape::T: return "T-shape";
+    case BuildingShape::U: return "U-shape";
+    case BuildingShape::Courtyard: return "Courtyard (wings all round)";
+    }
+    return "";
+}
+
+std::vector<std::vector<std::array<double, 2>>> outlines(const BuildingSpec& s)
+{
+    const double w = s.width / 2, d = s.depth / 2, a = s.wingDepth, b = s.wingWidth;
+    switch (s.shape) {
+    case BuildingShape::Rectangle: break;
+    case BuildingShape::L: return {{{-w, -d}, {w, -d}, {w, -d + a}, {-w + b, -d + a}, {-w + b, d}, {-w, d}}};
+    case BuildingShape::T:
+        return {{{-b / 2, -d}, {b / 2, -d}, {b / 2, d - a}, {w, d - a}, {w, d}, {-w, d}, {-w, d - a}, {-b / 2, d - a}}};
+    case BuildingShape::U:
+        return {{{-w, -d}, {-w + b, -d}, {-w + b, d - a}, {w - b, d - a}, {w - b, -d}, {w, -d}, {w, d}, {-w, d}}};
+    case BuildingShape::Courtyard:
+        return {{{-w, -d}, {w, -d}, {w, d}, {-w, d}}, {{-w + b, -d + a}, {-w + b, d - a}, {w - b, d - a}, {w - b, -d + a}}};
+    }
+    return {{{-w, -d}, {w, -d}, {w, d}, {-w, d}}};
+}
+
+int wallCount(const BuildingSpec& s)
+{
+    int n = 0;
+    for (const auto& r : outlines(s))
+        n += int(r.size());
+    return n;
+}
+
+std::string wallName(const BuildingSpec& s, int wall)
+{
+    const auto rings = outlines(s);
+    int i = wall;
+    for (std::size_t ring = 0; ring < rings.size(); ++ring) {
+        const int n = int(rings[ring].size());
+        if (i < n) {
+            const P2 a = rings[ring][std::size_t(i)], b = rings[ring][std::size_t((i + 1) % n)];
+            // Which way its outside faces.
+            const double ox = b[1] - a[1], oy = -(b[0] - a[0]);
+            const char* side = std::abs(ox) > std::abs(oy) ? (ox > 0 ? "right" : "left") : (oy > 0 ? "back" : "front");
+            std::string name = ring > 0 ? std::string("inner ") + side : std::string(side);
+            if (s.shape != BuildingShape::Rectangle)
+                name += " (" + std::to_string(wall + 1) + ")";
+            return name;
+        }
+        i -= n;
+    }
+    return "?";
+}
+
+std::vector<std::array<double, 4>> wings(const BuildingSpec& s)
+{
+    const double w = s.width / 2, d = s.depth / 2, a = s.wingDepth, b = s.wingWidth;
+    switch (s.shape) {
+    case BuildingShape::Rectangle: break;
+    case BuildingShape::L: return {{-w, -d, w, -d + a}, {-w, -d, -w + b, d}};
+    case BuildingShape::T: return {{-w, d - a, w, d}, {-b / 2, -d, b / 2, d}};
+    case BuildingShape::U: return {{-w, d - a, w, d}, {-w, -d, -w + b, d}, {w - b, -d, w, d}};
+    case BuildingShape::Courtyard: return {{-w, -d, w, -d + a}, {-w, d - a, w, d}, {-w, -d, -w + b, d}, {w - b, -d, w, d}};
+    }
+    return {{-w, -d, w, d}};
+}
+
+BuildingSpec kept(BuildingSpec s)
+{
+    const double least = 2.5 * thicknessOf(s), open = 500.0;
+    const auto keep = [](double v, double lo, double hi) { return lo > hi ? lo : std::clamp(v, lo, hi); };
+    switch (s.shape) {
+    case BuildingShape::Rectangle: break;
+    case BuildingShape::L:
+        s.wingDepth = keep(s.wingDepth, least, s.depth - least);
+        s.wingWidth = keep(s.wingWidth, least, s.width - least);
+        break;
+    case BuildingShape::T:
+        s.wingDepth = keep(s.wingDepth, least, s.depth - least);
+        s.wingWidth = keep(s.wingWidth, least, s.width - 2 * least);
+        break;
+    case BuildingShape::U:
+        s.wingDepth = keep(s.wingDepth, least, s.depth - least);
+        s.wingWidth = keep(s.wingWidth, least, (s.width - open) / 2);
+        break;
+    case BuildingShape::Courtyard:
+        s.wingDepth = keep(s.wingDepth, least, (s.depth - open) / 2);
+        s.wingWidth = keep(s.wingWidth, least, (s.width - open) / 2);
+        break;
+    }
+    const int walls = wallCount(s);
+    std::erase_if(s.openings, [walls](const BuildingOpening& o) { return o.wall < 0 || o.wall >= walls; });
+    return s;
+}
+
+BuildingSpec withShape(const BuildingSpec& from, BuildingShape shape)
+{
+    BuildingSpec s = from;
+    s.shape = shape;
+    const auto r = [](double v) { return std::round(v / 100.0) * 100.0; };
+    switch (shape) {
+    case BuildingShape::Rectangle: break;
+    case BuildingShape::L: s.wingDepth = r(s.depth * 0.45), s.wingWidth = r(s.width * 0.4); break;
+    case BuildingShape::T: s.wingDepth = r(s.depth * 0.4), s.wingWidth = r(s.width * 0.35); break;
+    case BuildingShape::U: s.wingDepth = r(s.depth * 0.35), s.wingWidth = r(s.width * 0.3); break;
+    case BuildingShape::Courtyard: s.wingDepth = r(s.depth * 0.3), s.wingWidth = r(s.width * 0.3); break;
+    }
+    if (shape != from.shape)
+        s.openings.clear();  // the walls are others now
+    return kept(s);
+}
+
+std::vector<std::array<double, 2>> corners(const BuildingSpec& s)
+{
+    const double w = s.width / 2, d = s.depth / 2, a = s.wingDepth, b = s.wingWidth;
+    std::vector<std::array<double, 2>> c{{-w, -d}, {w, -d}, {w, d}, {-w, d}};
+    switch (s.shape) {
+    case BuildingShape::Rectangle: break;
+    case BuildingShape::L: c.push_back({-w + b, -d + a}); break;
+    case BuildingShape::T: c.push_back({-b / 2, d - a}), c.push_back({b / 2, d - a}); break;
+    case BuildingShape::U: c.push_back({-w + b, d - a}), c.push_back({w - b, d - a}); break;
+    case BuildingShape::Courtyard:
+        c.push_back({-w + b, -d + a}), c.push_back({w - b, -d + a}), c.push_back({w - b, d - a}),
+            c.push_back({-w + b, d - a});
+        break;
+    }
+    return c;
+}
+
+BuildingSpec movedCorner(const BuildingSpec& from, std::size_t i, double x, double y)
+{
+    BuildingSpec s = from;
+    const auto r = [](double v) { return std::round(v / 10.0) * 10.0; };
+    const double least = 2.5 * thicknessOf(s);
+    if (i < 4) {  // the outside: wider or narrower, deeper or shallower (about the middle)
+        s.width = std::clamp(r(2 * std::abs(x)), std::max(500.0, least), 200000.0);
+        s.depth = std::clamp(r(2 * std::abs(y)), std::max(500.0, least), 200000.0);
+    } else {
+        const double w = s.width / 2, d = s.depth / 2;
+        switch (s.shape) {
+        case BuildingShape::Rectangle: break;
+        case BuildingShape::L: s.wingWidth = r(x + w), s.wingDepth = r(y + d); break;
+        case BuildingShape::T: s.wingWidth = r(2 * std::abs(x)), s.wingDepth = r(d - y); break;
+        case BuildingShape::U: s.wingWidth = r(w - std::abs(x)), s.wingDepth = r(d - y); break;
+        case BuildingShape::Courtyard: s.wingWidth = r(w - std::abs(x)), s.wingDepth = r(d - std::abs(y)); break;
+        }
+    }
+    return kept(s);
+}
+
+namespace {
+
+double roofTopOf(const BuildingSpec& s)
+{
+    const double k = 1.0 / s.scale;
+    double top = s.height * k + std::max(150.0 * k, 2 * s.smallest);
+    if (s.roof == RoofKind::Gable || s.roof == RoofKind::Hip) {
+        double span = 0;
+        for (const auto& w : wings(s))
+            span = std::max(span, std::min(w[2] - w[0], w[3] - w[1]) / 2 + s.overhang);
+        top += span * k * std::tan(s.pitch * kPi / 180.0);
+    }
+    return top;
+}
+
+double postSize(const BuildingSpec& s)
+{
+    return std::max(0.8, 0.012 * std::max(s.width, s.depth) / s.scale);
+}
+
+}  // namespace
+
+Mesh cornerMarker(const BuildingSpec& s, std::size_t i)
+{
+    const auto c = corners(s);
+    if (i >= c.size())
+        return {};
+    const double k = 1.0 / s.scale, r = postSize(s);
+    const double x = c[i][0] * k, y = c[i][1] * k;
+    return meshOf(box({x - r, y - r, 0}, {x + r, y + r, roofTopOf(s) + 3 * r}));
+}
+
+std::optional<std::size_t> pickedCorner(const BuildingSpec& s, const std::array<double, 3>& o,
+                                        const std::array<double, 3>& d, double* height)
+{
+    const auto c = corners(s);
+    const double k = 1.0 / s.scale, r = postSize(s) * 2.0, top = roofTopOf(s) + 3 * postSize(s);
+    std::optional<std::size_t> best;
+    double bestT = 1e300;
+    const double dd = d[0] * d[0] + d[1] * d[1];
+    for (std::size_t i = 0; i < c.size(); ++i) {
+        const double cx = c[i][0] * k, cy = c[i][1] * k;
+        // Where the ray passes nearest the post's line, seen from above.
+        const double t = dd > 1e-12 ? ((cx - o[0]) * d[0] + (cy - o[1]) * d[1]) / dd : 0.0;
+        const double px = o[0] + d[0] * t, py = o[1] + d[1] * t, z = o[2] + d[2] * t;
+        double near = std::hypot(px - cx, py - cy), zz = z;
+        if (dd <= 1e-12)
+            zz = top;
+        if (t < 0 || near > r || zz < 0 || zz > top || t >= bestT)
+            continue;
+        bestT = t;
+        best = i;
+        if (height)
+            *height = std::clamp(zz, 0.0, top);
+    }
+    return best;
+}
 
 const char* title(WallMaterial m)
 {
@@ -161,24 +485,22 @@ void check(const BuildingSpec& s)
         throw std::invalid_argument("The roof's overhang must be from 0 to 3 m.");
     if (!(s.smallest >= 0.02 && s.smallest <= 2))
         throw std::invalid_argument("The smallest detail must be from 0.02 to 2 mm.");
+    if (s.shape != BuildingShape::Rectangle) {
+        const BuildingSpec k = kept(s);
+        if (std::abs(k.wingDepth - s.wingDepth) > 0.5 || std::abs(k.wingWidth - s.wingWidth) > 0.5)
+            throw std::invalid_argument("The wings don't fit: each at least 2.5 times the wall's thickness, and an open "
+                                        "middle at least 500 mm across. Make the building bigger, or change the wings.");
+    }
+    const int walls = wallCount(s);
     for (const auto& o : s.openings)
-        if (o.wall < 0 || o.wall > 3 || !(o.width >= 100) || !(o.height >= 100))
+        if (o.wall < 0 || o.wall >= walls || !(o.width >= 100) || !(o.height >= 100))
             throw std::invalid_argument("A door or window is too small (under 100 mm) or on no wall.");
 }
 
 Face face(const BuildingSpec& s, int wall)
 {
-    const double k = 1.0 / s.scale, W = s.width * k, D = s.depth * k, H = s.height * k;
-    Face f;
-    f.height = H;
-    switch (wall) {
-    default:
-    case 0: f.start = {-W / 2, -D / 2, 0}, f.along = {1, 0, 0}, f.out = {0, -1, 0}, f.length = W; break;
-    case 1: f.start = {W / 2, -D / 2, 0}, f.along = {0, 1, 0}, f.out = {1, 0, 0}, f.length = D; break;
-    case 2: f.start = {W / 2, D / 2, 0}, f.along = {-1, 0, 0}, f.out = {0, 1, 0}, f.length = W; break;
-    case 3: f.start = {-W / 2, D / 2, 0}, f.along = {0, -1, 0}, f.out = {-1, 0, 0}, f.length = D; break;
-    }
-    return f;
+    const std::vector<Wall> walls = wallsOf(s);
+    return walls[std::size_t(std::clamp(wall, 0, int(walls.size()) - 1))].f;
 }
 
 std::optional<Spot> spotAt(const BuildingSpec& s, const std::array<double, 3>& origin,
@@ -186,8 +508,9 @@ std::optional<Spot> spotAt(const BuildingSpec& s, const std::array<double, 3>& o
 {
     std::optional<Spot> best;
     double bestT = 1e300;
-    for (int w = 0; w < 4; ++w) {
-        const Face f = face(s, w);
+    const std::vector<Wall> walls = wallsOf(s);
+    for (int w = 0; w < int(walls.size()); ++w) {
+        const Face& f = walls[std::size_t(w)].f;
         const double facing = dot(direction, f.out);
         if (facing >= -1e-9)
             continue;  // from inside, or along it
@@ -208,7 +531,7 @@ std::optional<Spot> spotAt(const BuildingSpec& s, const std::array<double, 3>& o
 
 BuildingOpening keptIn(const BuildingSpec& s, BuildingOpening o)
 {
-    const double length = (o.wall % 2 == 0) ? s.width : s.depth;
+    const double length = face(s, o.wall).length * s.scale;
     const double margin = thicknessOf(s) + 120.0;  // clear of the corner, its frame too
     o.width = std::clamp(o.width, 100.0, std::max(100.0, length - 2 * margin));
     o.along = std::clamp(o.along, margin + o.width / 2, std::max(margin + o.width / 2, length - margin - o.width / 2));
@@ -290,14 +613,16 @@ Made make(const BuildingSpec& s, bool quick)
     double top = H;                   // the walls' top
     double faceOut = 0;               // how far the face's detail stands out (planks)
 
-    // The four walls' plain shells: front and back the full width, the sides between.
+    const std::vector<Ring> rings = modelRings(s);
+    const std::vector<Wall> wallList = wallsOf(s);
+    // The walls' plain shell: the footprint less the inside, each face set in by `inset`.
     const auto shells = [&](double inset) {
-        std::vector<MeshSolid> out;
-        out.push_back(box({-W / 2 + inset, -D / 2 + inset, 0}, {W / 2 - inset, -D / 2 + T - inset, top}));
-        out.push_back(box({-W / 2 + inset, D / 2 - T + inset, 0}, {W / 2 - inset, D / 2 - inset, top}));
-        out.push_back(box({-W / 2 + inset, -D / 2 + inset, 0}, {-W / 2 + T - inset, D / 2 - inset, top}));
-        out.push_back(box({W / 2 - T + inset, -D / 2 + inset, 0}, {W / 2 - inset, D / 2 - inset, top}));
-        return out;
+        std::vector<Ring> outer, inner;
+        for (const Ring& r : rings) {
+            outer.push_back(offsetRing(r, inset));
+            inner.push_back(offsetRing(r, T - inset));
+        }
+        return std::vector<MeshSolid>{meshkernel::subtracted(regionOf(outer, 0, top), {regionOf(inner, -1.0, top + 1.0)})};
     };
 
     bool pattern = !quick;
@@ -336,12 +661,14 @@ Made make(const BuildingSpec& s, bool quick)
             if (z0 >= H - sm)
                 break;
             const double z1 = std::min(z0 + uh, H);
-            for (int wall = 0; wall < 4; ++wall) {
-                const Face f = face(s, wall);
-                // Corners bonded: the front and back run to the corners on even courses,
-                // the sides on odd ones; the other stops a joint short of them.
-                const bool full = (wall % 2 == 0) == (course % 2 == 0);
-                const double a0 = full ? 0.0 : T + jw, a1 = full ? f.length : f.length - T - jw;
+            for (const Wall& wl : wallList) {
+                const Face& f = wl.f;
+                // Outside corners bonded: walls along X run to the corners on even courses,
+                // those along Y on odd ones; the other stops a joint short of them. At an
+                // inside corner each runs to the corner.
+                const bool full = wl.alongX == (course % 2 == 0);
+                const double a0 = wl.convexStart && !full ? T + jw : 0.0;
+                const double a1 = wl.convexEnd && !full ? f.length - T - jw : f.length;
                 double a = a0 - (course % 2) * (ul + jw) / 2;
                 while (a < a1) {
                     const double len = s.material == WallMaterial::Stone ? ul * vary(rng) : ul;
@@ -377,17 +704,19 @@ Made make(const BuildingSpec& s, bool quick)
             bool any = false;
             // Front and back logs, then the sides' half a log higher.
             const double zf = d / 2 + course * pitch, zs = d / 2 + (course + 0.5) * pitch;
-            if (zf + d / 2 <= H + 0.1 * d) {
+            // Walls along X take the lower logs, those along Y half a log higher; the logs
+            // cross past outside corners, and meet the other wall's logs at inside ones.
+            for (const Wall& wl : wallList) {
+                const double z = wl.alongX ? zf : zs;
+                if (z + d / 2 > H + 0.1 * d)
+                    continue;
                 any = true;
-                for (double y : {-D / 2 + d / 2, D / 2 - d / 2})
-                    parts.push_back(prism(circle, {-W / 2 - ext, y, zf}, {W + 2 * ext, 0, 0}, {0, 1, 0}, {0, 0, 1}));
-                logTop = std::max(logTop, zf + d / 2);
-            }
-            if (zs + d / 2 <= H + 0.1 * d) {
-                any = true;
-                for (double x : {-W / 2 + d / 2, W / 2 - d / 2})
-                    parts.push_back(prism(circle, {x, -D / 2 - ext, zs}, {0, D + 2 * ext, 0}, {0, 0, 1}, {1, 0, 0}));
-                logTop = std::max(logTop, zs + d / 2);
+                const Face& f = wl.f;
+                const double e0 = wl.convexStart ? ext : d / 2, e1 = wl.convexEnd ? ext : d / 2;
+                const V3 along = f.along, out = f.out;
+                const V3 a = add(add(f.start, mul(along, -e0)), add(mul(out, -d / 2), {0, 0, z}));
+                parts.push_back(prism(circle, a, mul(along, f.length + e0 + e1), cross({0, 0, 1}, along), {0, 0, 1}));
+                logTop = std::max(logTop, z + d / 2);
             }
             if (!any)
                 break;
@@ -418,31 +747,33 @@ Made make(const BuildingSpec& s, bool quick)
             if (z0 >= H - sm)
                 break;
             const double z1 = std::min(z0 + e, H);
-            for (int wall = 0; wall < 4; ++wall) {
-                const Face f = face(s, wall);
+            for (const Wall& wl : wallList) {
+                const Face& f = wl.f;
                 const V3 along{f.along[0], f.along[1], f.along[2]}, out{f.out[0], f.out[1], f.out[2]};
                 // Its edge on: thick at the bottom, thin at the top; run along the wall,
-                // past its ends to meet the next wall's.
+                // past outside corners to meet the next wall's.
+                const double e0 = wl.convexStart ? thick : 0.0, e1 = wl.convexEnd ? thick : 0.0;
                 const V3 axisWay = cross(out, V3{0, 0, 1});  // the run's way (out x up)
                 const double sign = dot(axisWay, along) > 0 ? 1.0 : -1.0;
-                const V3 a = add(add(V3{f.start[0], f.start[1], 0}, mul(along, sign > 0 ? -thick : f.length + thick)),
-                                 V3{0, 0, 0});
+                const V3 a = add(V3{f.start[0], f.start[1], 0}, mul(along, sign > 0 ? -e0 : f.length + e1));
                 parts.push_back(prism({{0, z0}, {thick, z0}, {thin, z1}, {0, z1}}, a,
-                                      mul(along, sign * (f.length + 2 * thick)), out, {0, 0, 1}));
+                                      mul(along, sign * (f.length + e0 + e1)), out, {0, 0, 1}));
             }
         }
-        // Corner boards over the planks' ends.
+        // Corner boards over the planks' ends, at the outside corners: on the face of the
+        // wall that ends there, in from the corner and round it; and on the next one's.
         const double cb = std::max(100.0 * k, 2 * sm), ct = thick + std::max(5.0 * k, 0.5 * sm);
-        const auto span = [](double a, double b) { return std::array<double, 2>{std::min(a, b), std::max(a, b)}; };
-        for (int sx : {-1, 1})
-            for (int sy : {-1, 1}) {
-                const double x = sx * W / 2, y = sy * D / 2;
-                // On the front or back face: in from the corner, and round it over the planks.
-                auto bx = span(x - sx * cb, x + sx * ct), by = span(y, y + sy * ct);
-                parts.push_back(box({bx[0], by[0], 0}, {bx[1], by[1], H}));
-                bx = span(x, x + sx * ct), by = span(y - sy * cb, y + sy * ct);
-                parts.push_back(box({bx[0], by[0], 0}, {bx[1], by[1], H}));
+        for (std::size_t i = 0, base = 0; i < rings.size(); base += rings[i].size(), ++i) {
+            const std::size_t n = rings[i].size();
+            for (std::size_t j = 0; j < n; ++j) {
+                const Wall& ends = wallList[base + j];
+                const Wall& next = wallList[base + (j + 1) % n];
+                if (!ends.convexEnd)
+                    continue;
+                parts.push_back(wallBox(ends.f, ends.f.length - cb, ends.f.length + ct, 0, H, 0, ct));
+                parts.push_back(wallBox(next.f, -ct, cb, 0, H, 0, ct));
             }
+        }
         break;
     }
     }
@@ -495,26 +826,31 @@ Made make(const BuildingSpec& s, bool quick)
     if (s.roof != RoofKind::None) {
         const double o = s.overhang * k, e = std::max(150.0 * k, 2 * sm);
         const double t = std::tan(s.pitch * kPi / 180.0);
-        const double X = W / 2 + o, Y = D / 2 + o;
-        MeshSolid roof;
-        if (s.roof == RoofKind::Flat) {
-            roof = box({-X, -Y, top}, {X, Y, top + e});
-        } else {
+        // A roof over each wing, joined: where wings meet, their roofs cross.
+        std::vector<MeshSolid> roofs;
+        for (const auto& wg : wings(s)) {
+            const double cx = (wg[0] + wg[2]) / 2 * k, cy = (wg[1] + wg[3]) / 2 * k;
+            const double X = (wg[2] - wg[0]) / 2 * k + o, Y = (wg[3] - wg[1]) / 2 * k + o;
+            if (s.roof == RoofKind::Flat) {
+                roofs.push_back(box({cx - X, cy - Y, top}, {cx + X, cy + Y, top + e}));
+                continue;
+            }
             // A gable along X (its slopes to the front and back), one along Y; a hip roof
             // is where both are.
             const auto gableX = [&] {
-                return prism({{-Y, top}, {Y, top}, {Y, top + e}, {0, top + e + Y * t}, {-Y, top + e}}, {-X, 0, 0},
-                             {2 * X, 0, 0}, {0, 1, 0}, {0, 0, 1});
+                return prism({{cy - Y, top}, {cy + Y, top}, {cy + Y, top + e}, {cy, top + e + Y * t}, {cy - Y, top + e}},
+                             {cx - X, 0, 0}, {2 * X, 0, 0}, {0, 1, 0}, {0, 0, 1});
             };
             const auto gableY = [&] {
-                return prism({{-X, top}, {X, top}, {X, top + e}, {0, top + e + X * t}, {-X, top + e}}, {0, -Y, 0},
-                             {0, 2 * Y, 0}, {-1, 0, 0}, {0, 0, 1});
+                return prism({{-cx - X, top}, {-cx + X, top}, {-cx + X, top + e}, {-cx, top + e + X * t}, {-cx - X, top + e}},
+                             {0, cy - Y, 0}, {0, 2 * Y, 0}, {-1, 0, 0}, {0, 0, 1});
             };
             if (s.roof == RoofKind::Gable)
-                roof = W >= D ? gableX() : gableY();  // the ridge along the longer side
+                roofs.push_back(X >= Y ? gableX() : gableY());  // the ridge along the longer side
             else
-                roof = meshkernel::intersected({gableX(), gableY()});
+                roofs.push_back(meshkernel::intersected({gableX(), gableY()}));
         }
+        MeshSolid roof = roofs.size() == 1 ? roofs[0] : meshkernel::merged(roofs);
         if (s.roofSeparate)
             made.roof = meshOf(roof);
         else

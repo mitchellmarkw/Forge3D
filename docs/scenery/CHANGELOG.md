@@ -1,5 +1,18 @@
 # Forge3D Scenery changelog
 
+## 0.6.0 Beta — Building shapes (2026-11-26)
+
+- **Shape** (Building, under Walls): **Rectangle**, **L-shape**, **T-shape**, **U-shape** or **Courtyard** (wings
+  all round an open middle). The walls follow the shape, joined at every corner: bricks bonded round outside
+  corners, logs crossing, planks with corner boards.
+  - Each shape's wings have their own sizes (an L's front wing depth and side wing width, a T's stem, a U's arms, a
+    courtyard's wings), kept buildable: each wing at least 2.5 walls thick, an open middle at least 500 mm.
+  - **Drag the orange posts** at the footprint's corners in the view: the outside ones size the building, the
+    inside ones its wings.
+  - Each wing gets its own roof (flat, gable or hip), joined where they meet.
+  - Doors and windows go on any wall, a courtyard's inner walls too; the list names the wall ("left (6)",
+    "inner front (7)"). Changing the shape takes the doors and windows off (its walls are others).
+
 ## 0.5.0 Beta — Trees (2026-11-26)
 
 - **New Tree** (Scenery tab): a tree from real-world sizes, made at the model scale.

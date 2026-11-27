@@ -78,7 +78,9 @@ private:
         int placing = -1;               // the next click puts a door (0) or window (1)
         int dragging = -1;              // the opening being dragged
         double grabAlong = 0.0, grabUp = 0.0;  // where it was held, from its middle and bottom
-        std::shared_ptr<const Mesh> walls, roofMesh, marker;
+        std::shared_ptr<const Mesh> walls, roofMesh, marker, posts;
+        int corner = -1;         // the footprint's corner being dragged (slice 115)
+        double cornerZ = 0.0;    // the height it was grabbed at (model mm)
         int generation = 0;  // the latest description (a detailed preview for an older one is dropped)
     };
     BuildMode m_build;

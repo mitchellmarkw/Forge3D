@@ -285,7 +285,10 @@ json bodyToJson(const Body& b)
                                 {"bottom", o.bottom},
                                 {"width", o.width},
                                 {"height", o.height}});
+        static const char* shapes[] = {"rectangle", "L", "T", "U", "courtyard"};
         j["building"] = json{{"scale", s.scale},
+                             {"shape", shapes[int(s.shape)]},
+                             {"wings", {s.wingDepth, s.wingWidth}},
                              {"width", s.width},
                              {"depth", s.depth},
                              {"height", s.height},
@@ -754,6 +757,16 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
             BuildingSpec s;
             s.scale = bj->value("scale", s.scale);
             s.width = bj->value("width", s.width);
+            const std::string shape = bj->value("shape", std::string("rectangle"));
+            s.shape = shape == "L"           ? BuildingShape::L
+                      : shape == "T"         ? BuildingShape::T
+                      : shape == "U"         ? BuildingShape::U
+                      : shape == "courtyard" ? BuildingShape::Courtyard
+                                             : BuildingShape::Rectangle;
+            if (const auto wj = bj->find("wings"); wj != bj->end() && wj->is_array() && wj->size() == 2) {
+                s.wingDepth = (*wj)[0].get<double>();
+                s.wingWidth = (*wj)[1].get<double>();
+            }
             s.depth = bj->value("depth", s.depth);
             s.height = bj->value("height", s.height);
             const std::string m = bj->value("material", std::string("brick"));

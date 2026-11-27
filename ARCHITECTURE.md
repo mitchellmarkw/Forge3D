@@ -2165,3 +2165,19 @@ and sharp across edges.
   at least 0.8 mm). Roots flare from the foot below Z = 0; the union (`merged`) is trimmed at Z = 0. `quick` skips
   the union (overlapping parts, for the preview) and uses coarser spheres.
 - Scenery: `TreePanel` (sizes a new tree, or another kind, to fit the printer) and a tree mode beside the others.
+
+## Building shapes (slice 115, Forge3D 0.123.0, Scenery 0.6.0)
+
+- `BuildingSpec::shape` (Rectangle, L, T, U, Courtyard) with `wingDepth` and `wingWidth`; file format 59.
+  `building::outlines` gives the footprint as rings (the outside counter-clockwise from the front-left corner, a
+  courtyard's inside clockwise: the material always on the left), and its sides are the walls, numbered in that
+  order (a rectangle's are as before: 0 front, 1 right, 2 back, 3 left). `wings` gives the rectangles each roof
+  goes on; `kept` keeps the wings buildable and drops openings on walls a shape hasn't got.
+- `make`: the plain shell is the footprint less the footprint set in by the wall's thickness (`offsetRing`), each
+  split into rectangles (`rectsOf`, vertical slabs) and joined. Every wall knows whether its ends are outside
+  (a left turn) or inside corners: bricks bond at outside corners and run to inside ones; logs cross past outside
+  corners and meet at inside ones; planks run past outside corners, with corner boards there. A roof per wing,
+  joined.
+- `corners`, `movedCorner`, `cornerMarker`, `pickedCorner`: the footprint's draggable corners (outside: width
+  and depth, about the middle; inside: the wings). Scenery shows them as posts and drags one on the plane at the
+  height it was grabbed.
