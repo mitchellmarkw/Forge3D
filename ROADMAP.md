@@ -139,11 +139,11 @@ Gate to Phase 2: a new user prints a customised part within 10 minutes.
 | 107 | Brick figure: a new body of blocks, wearing the figure's own head; parts on pegs or one piece | Done (0.115.0) |
 | 108 | Brick figure reworked: a brick-compatible body; the head's cut placed by hand and found under the chin; the head centred on the post | Done (0.116.0) |
 | 109 | Brick figure: a live preview beside the figure; the head chosen by a painted mask | Done (0.117.0) |
-| 110 | Forge3D Scenery groundwork: the companion app (docs/scenery/ROADMAP.md); each app's update check sees only its own releases | Done (unreleased) |
-| 111 | Scenery's building designer (Scenery 0.2.0); Forge3D opens its buildings (file format 55) | Done (unreleased) |
-| 112 | Scenery's rock designer (Scenery 0.3.0); Forge3D opens its rocks (file format 56) | Done (unreleased) |
-| 113 | Scenery's terrain designer (Scenery 0.4.0); Forge3D opens its terrain (file format 57) | Done (unreleased) |
-| 114 | Scenery's tree designer (Scenery 0.5.0); Forge3D opens its trees (file format 58) | **Delivered for testing** |
+| 110 | Forge3D Scenery groundwork: the companion app (docs/scenery/ROADMAP.md); each app's update check sees only its own releases | Done (0.122.0) |
+| 111 | Scenery's building designer (Scenery 0.2.0); Forge3D opens its buildings (file format 55) | Done (0.122.0) |
+| 112 | Scenery's rock designer (Scenery 0.3.0); Forge3D opens its rocks (file format 56) | Done (0.122.0) |
+| 113 | Scenery's terrain designer (Scenery 0.4.0); Forge3D opens its terrain (file format 57) | Done (0.122.0) |
+| 114 | Scenery's tree designer (Scenery 0.5.0); Forge3D opens its trees (file format 58) | Done (0.122.0) |
 
 Slices 39–41 close the gaps found in the [Phase 1 gate review](docs/PHASE1_GATE.md).
 

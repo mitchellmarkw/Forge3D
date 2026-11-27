@@ -45,4 +45,4 @@ section; move an item to the roadmap when it's picked up.
 
 ## Releases
 
-- Publish Forge3D 0.119.0–0.122.0 and the first Forge3D Scenery release (so 0.5.0) when wanted.
+- Published: Forge3D 0.122.0 and Forge3D Scenery 0.5.0 (its first release).
