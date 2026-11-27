@@ -141,7 +141,8 @@ Gate to Phase 2: a new user prints a customised part within 10 minutes.
 | 109 | Brick figure: a live preview beside the figure; the head chosen by a painted mask | Done (0.117.0) |
 | 110 | Forge3D Scenery groundwork: the companion app (docs/scenery/ROADMAP.md); each app's update check sees only its own releases | Done (unreleased) |
 | 111 | Scenery's building designer (Scenery 0.2.0); Forge3D opens its buildings (file format 55) | Done (unreleased) |
-| 112 | Scenery's rock designer (Scenery 0.3.0); Forge3D opens its rocks (file format 56) | **Delivered for testing** |
+| 112 | Scenery's rock designer (Scenery 0.3.0); Forge3D opens its rocks (file format 56) | Done (unreleased) |
+| 113 | Scenery's terrain designer (Scenery 0.4.0); Forge3D opens its terrain (file format 57) | **Delivered for testing** |
 
 Slices 39–41 close the gaps found in the [Phase 1 gate review](docs/PHASE1_GATE.md).
 

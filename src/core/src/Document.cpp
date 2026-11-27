@@ -625,11 +625,12 @@ void Document::setJointPiece(ObjectId id, std::optional<JointPiece> piece)
 }
 
 void Document::setDesign(ObjectId id, std::optional<BuildingSpec> building, ObjectId roofOf,
-                         std::optional<RockSpec> rock)
+                         std::optional<RockSpec> rock, std::optional<TerrainSpec> terrain)
 {
     Body& body = require(id);
-    if (body.building == building && body.roofOf == roofOf && body.rock == rock)
+    if (body.building == building && body.roofOf == roofOf && body.rock == rock && body.terrain == terrain)
         return;
+    body.terrain = std::move(terrain);
     body.building = std::move(building);
     body.roofOf = roofOf;
     body.rock = std::move(rock);

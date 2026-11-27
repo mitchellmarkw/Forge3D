@@ -313,6 +313,28 @@ json bodyToJson(const Body& b)
                          {"sunk", r.sunk},     {"count", r.count},             {"seed", r.seed},
                          {"smallest", r.smallest}, {"offset", r.offset}};
     }
+    if (b.terrain) {
+        const TerrainSpec& t = *b.terrain;
+        static const char* kinds[] = {"crater", "crag", "path"};
+        json features = json::array();
+        for (const TerrainFeature& f : t.features)
+            features.push_back(json{{"kind", kinds[int(f.kind)]}, {"at", {f.x, f.y}},     {"to", {f.x2, f.y2}},
+                                    {"size", f.size},             {"depth", f.depth}, {"scattered", f.scattered}});
+        j["terrain"] = json{{"scale", t.scale},
+                            {"base", t.base == TerrainBase::Round ? "round" : "rectangle"},
+                            {"size", {t.width, t.depth}},
+                            {"baseThickness", t.baseThickness},
+                            {"edge", t.edge == TerrainEdge::Bevelled ? "bevelled" : "plain"},
+                            {"bevel", t.bevel},
+                            {"hillHeight", t.hillHeight},
+                            {"hillSize", t.hillSize},
+                            {"roughness", t.roughness},
+                            {"levelEdges", t.levelEdges},
+                            {"features", features},
+                            {"seed", t.seed},
+                            {"smallest", t.smallest},
+                            {"offset", t.offset}};
+    }
     if (b.isBoolean() && b.boolean->cutJoint) {
         const CutJoint& c = *b.boolean->cutJoint;
         j["cutJoint"] = json{{"kind", c.kind}, {"size", c.size}, {"fit", c.fit}, {"link", c.link}, {"first", c.first}};
@@ -787,6 +809,47 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
             b.rock = r;
         } catch (const json::exception&) {
             damaged(where + ": rock is not readable");
+        }
+    }
+    if (const auto tj = j.find("terrain"); tj != j.end() && tj->is_object()) {
+        try {
+            TerrainSpec t;
+            t.scale = tj->value("scale", t.scale);
+            t.base = tj->value("base", std::string("rectangle")) == "round" ? TerrainBase::Round : TerrainBase::Rectangle;
+            if (const auto sz = tj->find("size"); sz != tj->end() && sz->is_array() && sz->size() == 2) {
+                t.width = (*sz)[0].get<double>();
+                t.depth = (*sz)[1].get<double>();
+            }
+            t.baseThickness = tj->value("baseThickness", t.baseThickness);
+            t.edge = tj->value("edge", std::string("plain")) == "bevelled" ? TerrainEdge::Bevelled : TerrainEdge::Plain;
+            t.bevel = tj->value("bevel", t.bevel);
+            t.hillHeight = tj->value("hillHeight", t.hillHeight);
+            t.hillSize = tj->value("hillSize", t.hillSize);
+            t.roughness = tj->value("roughness", t.roughness);
+            t.levelEdges = tj->value("levelEdges", t.levelEdges);
+            if (const auto fs = tj->find("features"); fs != tj->end() && fs->is_array())
+                for (const json& fj : *fs) {
+                    TerrainFeature f;
+                    const std::string k = fj.value("kind", std::string("crater"));
+                    f.kind = k == "crag" ? TerrainFeatureKind::Crag
+                             : k == "path" ? TerrainFeatureKind::Path
+                                           : TerrainFeatureKind::Crater;
+                    if (const auto at = fj.find("at"); at != fj.end() && at->is_array() && at->size() == 2)
+                        f.x = (*at)[0].get<double>(), f.y = (*at)[1].get<double>();
+                    if (const auto to = fj.find("to"); to != fj.end() && to->is_array() && to->size() == 2)
+                        f.x2 = (*to)[0].get<double>(), f.y2 = (*to)[1].get<double>();
+                    f.size = fj.value("size", f.size);
+                    f.depth = fj.value("depth", f.depth);
+                    f.scattered = fj.value("scattered", f.scattered);
+                    t.features.push_back(f);
+                }
+            t.seed = tj->value("seed", t.seed);
+            t.smallest = tj->value("smallest", t.smallest);
+            if (const auto off = tj->find("offset"); off != tj->end() && off->is_array() && off->size() == 3)
+                t.offset = {(*off)[0].get<double>(), (*off)[1].get<double>(), (*off)[2].get<double>()};
+            b.terrain = t;
+        } catch (const json::exception&) {
+            damaged(where + ": terrain is not readable");
         }
     }
     if (const auto piece = j.find("jointPiece"); piece != j.end() && piece->is_object()) {
@@ -1968,6 +2031,7 @@ std::string resultKey(const Document& doc, ObjectId id)
         j.erase("building");    // the shape is its mesh; the description is for changing it
         j.erase("roofOf");
         j.erase("rock");
+        j.erase("terrain");
         j.erase("cutJoint");    // nor the joint a cut keeps
         if (part == id)
             j.erase("placement");  // nor does moving the whole thing

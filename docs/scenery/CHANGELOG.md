@@ -1,5 +1,21 @@
 # Forge3D Scenery changelog
 
+## 0.4.0 Beta — Terrain (2026-11-26)
+
+- **New Terrain** (Scenery tab): a terrain piece from real-world sizes, made at the model scale.
+  - **Base**: a rectangle, or round or oval; width and depth; base thickness; a plain edge or a bevelled one (a
+    sloped plinth, how far it slopes in).
+  - **Ground**: rolling hills (height and size), roughness; **Level at the edges** so pieces put side by side meet
+    at the same height. **New Hills** for others; their **Number** makes the same ones again.
+  - **Craters** (a bowl with a raised rim), **crags** (rock outcrops pushed up through the ground) and **paths**
+    (a flattened track, sunk a little, its banks sloping off). **Add Crater** or **Add Crag**, then click on the
+    ground; **Add Path**, then click where it starts and where it ends. Click one to pick it; drag it to move it
+    (a path's end, near it); set its size on the right; Remove (or Delete).
+  - **Scatter**: so many craters, crags and paths at random (again for other places); the ones you placed or
+    changed stay. **Clear Scattered** takes the scattered ones out.
+  - It shows at once roughly, then in full a moment later.
+- **Change** (or double-click in Objects) now changes terrain too.
+
 ## 0.3.0 Beta — Rocks and boulders (2026-11-26)
 
 - **New Rock** (Scenery tab): design a rock from real-world sizes, made at the model scale.
