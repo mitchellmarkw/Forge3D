@@ -24,6 +24,7 @@ public:
     // How tall and wide the printer prints (model mm): a new tree, or another kind, is sized to fit.
     void setPrinter(double height, double width);
     void start(const TreeSpec& spec, bool editing);
+    void setSpec(const TreeSpec& spec);  // the same, changed elsewhere (the model scale)
     TreeSpec spec() const { return m_spec; }
     void setStatus(const QString& text, bool problem);
 

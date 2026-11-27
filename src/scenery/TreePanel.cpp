@@ -217,6 +217,12 @@ void TreePanel::fitPrinter()
     m_spec.trunkDiameter = std::max(20.0, std::floor(m_spec.trunkDiameter * fits / 10.0) * 10.0);
 }
 
+void TreePanel::setSpec(const TreeSpec& spec)
+{
+    m_spec = spec;
+    load();
+}
+
 void TreePanel::setStatus(const QString& text, bool problem)
 {
     m_status->setText(text);
