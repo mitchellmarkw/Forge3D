@@ -80,6 +80,8 @@ private:
         double grabAlong = 0.0, grabUp = 0.0;  // where it was held, from its middle and bottom
         std::shared_ptr<const Mesh> walls, roofMesh, marker, posts;
         int corner = -1;         // the footprint's corner being dragged (slice 115)
+        int tower = -1;          // the tower being dragged (slice 117)
+        double towerZ = 0.0;     // the height it was grabbed at (model mm)
         double cornerZ = 0.0;    // the height it was grabbed at (model mm)
         int generation = 0;  // the latest description (a detailed preview for an older one is dropped)
     };

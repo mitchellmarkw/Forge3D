@@ -153,6 +153,54 @@ BuildingPanel::BuildingPanel(QWidget* parent) : QWidget(parent)
     roofLayout->addWidget(m_roofDetails);
     layout->addWidget(roofBox);
 
+    // Battlements and towers (slice 117).
+    auto* castleBox = new QGroupBox(tr("Battlements and towers"));
+    auto* castle = new QVBoxLayout(castleBox);
+    m_battlements = new QCheckBox(tr("Battlements along the wall tops"));
+    m_battlements->setToolTip(tr("The walls carried up past the roof as a notched parapet; the roof sits inside it"));
+    castle->addWidget(m_battlements);
+    m_parapetFields = new QWidget;
+    auto* parapetForm = new QFormLayout(m_parapetFields);
+    parapetForm->setContentsMargins(0, 0, 0, 0);
+    m_parapet = spin(300, 5000, 0, 50, real, tr("How high the parapet stands above the roof (the walkway)"));
+    parapetForm->addRow(tr("Parapet height:"), m_parapet);
+    m_merlon = spin(100, 10000, 0, 50, real, tr("The raised parts' width"));
+    parapetForm->addRow(tr("Merlon width:"), m_merlon);
+    m_crenel = spin(100, 10000, 0, 50, real, tr("The gaps' width (stretched a little to fit each wall)"));
+    parapetForm->addRow(tr("Crenel width:"), m_crenel);
+    castle->addWidget(m_parapetFields);
+    m_addTower = new QPushButton(tr("Add Tower"));
+    m_addTower->setCheckable(true);
+    m_addTower->setToolTip(tr("Then click a corner's post or a wall: the tower goes there"));
+    castle->addWidget(m_addTower);
+    castle->addWidget(wrapped(tr("Click a corner's post or a wall to put it there (or near: it snaps). Drag a tower "
+                                 "to move it.")));
+    m_towers = new QListWidget;
+    m_towers->setMaximumHeight(90);
+    castle->addWidget(m_towers);
+    m_towerDetails = new QWidget;
+    auto* towerLayout = new QVBoxLayout(m_towerDetails);
+    towerLayout->setContentsMargins(0, 0, 0, 0);
+    m_towerShape = new QComboBox;
+    for (TowerShape t : {TowerShape::Round, TowerShape::Square})
+        m_towerShape->addItem(tr(building::title(t)));
+    towerLayout->addWidget(labelled(tr("Tower shape:"), m_towerShape));
+    auto* towerForm = new QFormLayout;
+    m_towerSize = spin(100, 50000, 0, 100, real, tr("Across the tower"));
+    towerForm->addRow(tr("Across:"), m_towerSize);
+    m_towerHeight = spin(1000, 200000, 0, 100, real, tr("To its top (its walkway, under battlements)"));
+    towerForm->addRow(tr("Height:"), m_towerHeight);
+    towerLayout->addLayout(towerForm);
+    m_towerTop = new QComboBox;
+    for (TowerTop t : {TowerTop::Flat, TowerTop::Battlements, TowerTop::Roof})
+        m_towerTop->addItem(tr(building::title(t)));
+    m_towerTop->setToolTip(tr("A round tower's roof is a cone, a square one's a pyramid"));
+    towerLayout->addWidget(labelled(tr("Top:"), m_towerTop));
+    auto* removeTower = new QPushButton(tr("Remove Tower"));
+    towerLayout->addWidget(removeTower);
+    castle->addWidget(m_towerDetails);
+    layout->addWidget(castleBox);
+
     // Doors and windows.
     auto* openBox = new QGroupBox(tr("Doors and windows"));
     auto* open = new QVBoxLayout(openBox);
@@ -214,7 +262,7 @@ BuildingPanel::BuildingPanel(QWidget* parent) : QWidget(parent)
 
     // Any field: the description again.
     for (QDoubleSpinBox* b : {m_width, m_depth, m_height, m_thickness, m_unitLength, m_unitHeight, m_joint, m_pitch,
-                              m_overhang, m_smallest, m_wingDepth, m_wingWidth})
+                              m_overhang, m_smallest, m_wingDepth, m_wingWidth, m_parapet, m_merlon, m_crenel})
         connect(b, &QDoubleSpinBox::valueChanged, this, [this] {
             if (m_loading)
                 return;
@@ -253,6 +301,50 @@ BuildingPanel::BuildingPanel(QWidget* parent) : QWidget(parent)
         m_spec = building::defaults(WallMaterial(i), m_spec);  // its usual sizes
         load();
         emit changed();
+    });
+    connect(m_battlements, &QCheckBox::toggled, this, [this] {
+        if (m_loading)
+            return;
+        readFields();
+        showParapet();
+        emit changed();
+    });
+    connect(m_addTower, &QPushButton::clicked, this, [this](bool on) {
+        setPlacing(on ? kPlaceTower : -1);
+        emit placeRequested(on ? kPlaceTower : -1);
+    });
+    connect(m_towers, &QListWidget::currentRowChanged, this, [this](int row) {
+        if (m_loading)
+            return;
+        m_tower = row;
+        showTower();
+        emit towerSelectionChanged(row);
+    });
+    const auto towerEdited = [this] {
+        if (m_loading || m_tower < 0 || m_tower >= int(m_spec.towers.size()))
+            return;
+        BuildingTower& t = m_spec.towers[std::size_t(m_tower)];
+        t.shape = TowerShape(m_towerShape->currentIndex());
+        t.size = std::max(m_towerSize->value(), 2.5 * (m_spec.material == WallMaterial::Logs ? m_spec.unitHeight : m_spec.wallThickness));
+        t.height = m_towerHeight->value();
+        t.top = TowerTop(m_towerTop->currentIndex());
+        fillTowers();
+        showParapet();
+        emit changed();
+    };
+    for (QDoubleSpinBox* b : {m_towerSize, m_towerHeight})
+        connect(b, &QDoubleSpinBox::valueChanged, this, towerEdited);
+    for (QComboBox* c : {m_towerShape, m_towerTop})
+        connect(c, &QComboBox::currentIndexChanged, this, towerEdited);
+    connect(removeTower, &QPushButton::clicked, this, [this] {
+        if (m_tower < 0 || m_tower >= int(m_spec.towers.size()))
+            return;
+        m_spec.towers.erase(m_spec.towers.begin() + m_tower);
+        m_tower = std::min(m_tower, int(m_spec.towers.size()) - 1);
+        fillTowers();
+        showParapet();
+        emit changed();
+        emit towerSelectionChanged(m_tower);
     });
     connect(m_addDoor, &QPushButton::clicked, this, [this](bool on) {
         setPlacing(on ? int(OpeningKind::Door) : -1);
@@ -320,6 +412,7 @@ void BuildingPanel::start(const BuildingSpec& spec, bool editing)
     if (!editing)
         m_spec.smallest = preferences().value(QStringLiteral("building/smallest"), 0.4).toDouble();
     m_selected = -1;
+    m_tower = -1;
     m_title->setText(editing ? tr("Change the building") : tr("New building"));
     m_apply->setText(editing ? tr("Update Building") : tr("Add Building"));
     setPlacing(-1);
@@ -343,9 +436,61 @@ void BuildingPanel::selectOpening(int index)
 
 void BuildingPanel::setPlacing(int kind)
 {
-    const QSignalBlocker a(m_addDoor), b(m_addWindow);
+    const QSignalBlocker a(m_addDoor), b(m_addWindow), c(m_addTower);
     m_addDoor->setChecked(kind == int(OpeningKind::Door));
     m_addWindow->setChecked(kind == int(OpeningKind::Window));
+    m_addTower->setChecked(kind == kPlaceTower);
+}
+
+void BuildingPanel::selectTower(int index)
+{
+    m_tower = index;
+    const QSignalBlocker block(m_towers);
+    m_towers->setCurrentRow(index);
+    showTower();
+}
+
+void BuildingPanel::fillTowers()
+{
+    const bool was = m_loading;
+    m_loading = true;
+    m_towers->clear();
+    for (const auto& t : m_spec.towers)
+        m_towers->addItem(tr("%1 tower, %2 mm across, %3 mm high, %4")
+                              .arg(tr(building::title(t.shape)))
+                              .arg(t.size, 0, 'f', 0)
+                              .arg(t.height, 0, 'f', 0)
+                              .arg(tr(building::title(t.top)).toLower()));
+    if (m_tower >= int(m_spec.towers.size()))
+        m_tower = -1;
+    m_towers->setCurrentRow(m_tower);
+    m_loading = was;
+    showTower();
+}
+
+void BuildingPanel::showTower()
+{
+    const bool any = m_tower >= 0 && m_tower < int(m_spec.towers.size());
+    m_towerDetails->setVisible(any);
+    if (!any)
+        return;
+    const BuildingTower& t = m_spec.towers[std::size_t(m_tower)];
+    const bool was = m_loading;
+    m_loading = true;
+    m_towerShape->setCurrentIndex(int(t.shape));
+    m_towerSize->setValue(t.size);
+    m_towerHeight->setValue(t.height);
+    m_towerTop->setCurrentIndex(int(t.top));
+    m_loading = was;
+}
+
+// The parapet's sizes: shown when the walls or a tower have battlements.
+void BuildingPanel::showParapet()
+{
+    bool any = m_spec.battlements;
+    for (const auto& t : m_spec.towers)
+        any = any || t.top == TowerTop::Battlements;
+    m_parapetFields->setVisible(any);
 }
 
 void BuildingPanel::setNotes(const QStringList& notes)
@@ -381,9 +526,15 @@ void BuildingPanel::load()
     m_overhang->setValue(m_spec.overhang);
     m_roofSeparate->setChecked(m_spec.roofSeparate);
     m_smallest->setValue(m_spec.smallest);
+    m_battlements->setChecked(m_spec.battlements);
+    m_parapet->setValue(m_spec.parapetHeight);
+    m_merlon->setValue(m_spec.merlonWidth);
+    m_crenel->setValue(m_spec.crenelWidth);
     m_loading = false;
     showMaterial();
     fillOpenings();
+    fillTowers();
+    showParapet();
 }
 
 void BuildingPanel::readFields()
@@ -408,6 +559,10 @@ void BuildingPanel::readFields()
     m_spec.overhang = m_overhang->value();
     m_spec.roofSeparate = m_roofSeparate->isChecked();
     m_spec.smallest = m_smallest->value();
+    m_spec.battlements = m_battlements->isChecked();
+    m_spec.parapetHeight = m_parapet->value();
+    m_spec.merlonWidth = m_merlon->value();
+    m_spec.crenelWidth = m_crenel->value();
     preferences().setValue(QStringLiteral("building/smallest"), m_spec.smallest);
     // The wings kept buildable (a smaller building, thicker walls): shown as they are.
     m_spec = building::kept(m_spec);

@@ -2191,3 +2191,18 @@ and sharp across edges.
   lengths); fieldstones are cells round jittered points (distance to the nearest two: the border). The grid is
   at least 0.75 x the smallest detail and 1/12 of a stone; joints are widened to 1.6 grid steps. Skins reach past
   outside corners by the relief, so corners close.
+
+## Battlements and towers (slice 117, Forge3D 0.125.0, Scenery 0.8.0)
+
+- `BuildingSpec::battlements` (+ `parapetHeight`, `merlonWidth`, `crenelWidth`) and `towers` (`BuildingTower`:
+  round or square, x, y, size, height, top flat/battlements/roof); file format 61.
+- Battlements: the walls' height (`wallsOf`) includes the parapet, so every material's pattern carries on up it;
+  crenels are boxes cut through each wall's top (n merlons + crenels stretched to fit, merlons at the ends). The
+  roof then starts at the old wall top, its wings inset by the wall's thickness, no overhang.
+- Towers: a solid core to the walkway, a parapet ring above if battlemented, set in by the material's recess.
+  Square towers' four faces join the walls in `laid`, so bricks, blocks and stone skins are laid on them like any
+  wall (with their own height); round towers get blocks round them (tangent boxes per course). Crenels on round
+  towers are radial boxes. Cone or pyramid roofs go with the roof; the building's roof is cut round the towers.
+- `tower`, `snapTower` (corners within 0.75 x its size, else a wall's middle line within 0.6 x), `pickedTower`
+  (a ray against the upright cylinder round it), `towerMarker`. Scenery places one by a click on a corner's
+  post or a wall, and drags it on the plane at the grabbed height, snapping.

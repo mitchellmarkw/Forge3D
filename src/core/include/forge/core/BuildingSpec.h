@@ -24,6 +24,21 @@ enum class BuildingShape { Rectangle, L, T, U, Courtyard };
 // clockwise seen from above, from the front-left corner: a rectangle's 0 the front (-Y),
 // 1 the right (+X), 2 the back (+Y), 3 the left (-X); then a courtyard's inner walls. `along`: its middle's distance from the wall's
 // left end (as seen from outside); `bottom`: its sill's height (a door's: 0).
+// A tower (slice 117): round or square, standing at (x, y) real mm from the building's
+// middle (at a corner or on a wall, or on its own), `size` across, `height` to its top (its
+// walkway, under a parapet). Its top: flat, battlements round it, or a roof (a cone on a
+// round one, a pyramid on a square one).
+enum class TowerShape { Round, Square };
+enum class TowerTop { Flat, Battlements, Roof };
+struct BuildingTower {
+    TowerShape shape = TowerShape::Round;
+    double x = 0.0, y = 0.0;
+    double size = 3000.0;
+    double height = 5000.0;
+    TowerTop top = TowerTop::Battlements;
+    bool operator==(const BuildingTower&) const = default;
+};
+
 struct BuildingOpening {
     OpeningKind kind = OpeningKind::Window;
     int wall = 0;
@@ -55,6 +70,12 @@ struct BuildingSpec {
     double overhang = 300.0;  // past the walls, all round
     bool roofSeparate = true;  // the roof its own shape (it lifts off)
     std::vector<BuildingOpening> openings;
+    // Battlements (slice 117): the walls carried up `parapetHeight` past the roof's level as a
+    // parapet, notched with crenels `crenelWidth` wide between merlons `merlonWidth` wide (the
+    // towers' battlements the same). With them a roof sits inside the parapet.
+    bool battlements = false;
+    double parapetHeight = 1000.0, merlonWidth = 700.0, crenelWidth = 500.0;
+    std::vector<BuildingTower> towers;
     std::uint32_t seed = 1;  // stone blocks' lengths
     double smallest = 0.4;   // model mm: the finest detail the printer makes
     // Where the shape's own origin is in the building's coordinates (set when it's made;

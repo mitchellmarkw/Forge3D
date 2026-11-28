@@ -1,5 +1,19 @@
 # Forge3D Scenery changelog
 
+## 0.8.0 Beta — Battlements and towers (2026-11-27)
+
+- **Battlements** (Building, "Battlements and towers"): the walls carried up past the roof as a parapet,
+  notched with crenels between merlons, a merlon at every corner. Parapet height, merlon and crenel widths
+  (the crenels stretched a little to fit each wall). The roof sits inside the parapet (a walkway), on any
+  building shape and in any material.
+- **Towers**: **Add Tower**, then click a corner's post or a wall: the tower goes there, astride the wall or on
+  the corner (near enough snaps). Drag a tower to move it (it snaps again; away from the building it stands on
+  its own). Click one to pick it: **Round** or **Square**, how wide across, how high, and its **Top**: flat,
+  battlements, or a roof (a cone on a round tower, a pyramid on a square one). Remove Tower, or Delete.
+  - Laid in the building's material: bricks and blocks round a round tower course by course; rough stone and
+    fieldstone too; log and plank buildings get plain towers.
+  - The building's roof is cut round the towers; their roofs go with the building's roof (and lift off with it).
+
 ## 0.7.1 Beta — The model scale, followed (2026-11-27)
 
 - Fixed: changing the **Model scale** while designing a building, rock, terrain piece or tree did nothing to it.

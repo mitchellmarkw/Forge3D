@@ -286,6 +286,14 @@ json bodyToJson(const Body& b)
                                 {"width", o.width},
                                 {"height", o.height}});
         static const char* shapes[] = {"rectangle", "L", "T", "U", "courtyard"};
+        static const char* tops[] = {"flat", "battlements", "roof"};
+        json towers = json::array();
+        for (const auto& t : s.towers)
+            towers.push_back({{"shape", t.shape == TowerShape::Square ? "square" : "round"},
+                              {"at", {t.x, t.y}},
+                              {"size", t.size},
+                              {"height", t.height},
+                              {"top", tops[int(t.top)]}});
         j["building"] = json{{"scale", s.scale},
                              {"shape", shapes[int(s.shape)]},
                              {"wings", {s.wingDepth, s.wingWidth}},
@@ -302,6 +310,9 @@ json bodyToJson(const Body& b)
                              {"overhang", s.overhang},
                              {"roofSeparate", s.roofSeparate},
                              {"openings", openings},
+                             {"battlements", s.battlements},
+                             {"parapet", {s.parapetHeight, s.merlonWidth, s.crenelWidth}},
+                             {"towers", towers},
                              {"seed", s.seed},
                              {"smallest", s.smallest},
                              {"offset", s.offset}};
@@ -799,6 +810,24 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
                     o.width = oj.value("width", o.width);
                     o.height = oj.value("height", o.height);
                     s.openings.push_back(o);
+                }
+            s.battlements = bj->value("battlements", s.battlements);
+            if (const auto pj = bj->find("parapet"); pj != bj->end() && pj->is_array() && pj->size() == 3) {
+                s.parapetHeight = (*pj)[0].get<double>();
+                s.merlonWidth = (*pj)[1].get<double>();
+                s.crenelWidth = (*pj)[2].get<double>();
+            }
+            if (const auto ts = bj->find("towers"); ts != bj->end() && ts->is_array())
+                for (const auto& tj : *ts) {
+                    BuildingTower t;
+                    t.shape = tj.value("shape", std::string("round")) == "square" ? TowerShape::Square : TowerShape::Round;
+                    if (const auto at = tj.find("at"); at != tj.end() && at->is_array() && at->size() == 2)
+                        t.x = (*at)[0].get<double>(), t.y = (*at)[1].get<double>();
+                    t.size = tj.value("size", t.size);
+                    t.height = tj.value("height", t.height);
+                    const std::string top = tj.value("top", std::string("battlements"));
+                    t.top = top == "flat" ? TowerTop::Flat : top == "roof" ? TowerTop::Roof : TowerTop::Battlements;
+                    s.towers.push_back(t);
                 }
             s.seed = bj->value("seed", s.seed);
             s.smallest = bj->value("smallest", s.smallest);

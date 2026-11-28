@@ -249,7 +249,8 @@ std::vector<Ring> modelRings(const BuildingSpec& s)
 std::vector<Wall> wallsOf(const BuildingSpec& s)
 {
     std::vector<Wall> out;
-    const double H = s.height / s.scale;
+    // Battlements: the walls carried up past the roof's level as a parapet.
+    const double H = (s.height + (s.battlements ? s.parapetHeight : 0.0)) / s.scale;
     for (const Ring& r : modelRings(s)) {
         const std::size_t n = r.size();
         for (std::size_t i = 0; i < n; ++i) {
@@ -391,6 +392,125 @@ BuildingSpec withShape(const BuildingSpec& from, BuildingShape shape)
     return kept(s);
 }
 
+const char* title(TowerShape t)
+{
+    return t == TowerShape::Square ? "Square" : "Round";
+}
+
+const char* title(TowerTop t)
+{
+    switch (t) {
+    case TowerTop::Flat: return "Flat";
+    case TowerTop::Battlements: return "Battlements";
+    case TowerTop::Roof: return "Roof (cone or pyramid)";
+    }
+    return "";
+}
+
+std::array<double, 2> snapTower(const BuildingSpec& s, double size, double x, double y)
+{
+    // A corner of the footprint, near enough.
+    double best = 0.75 * size;
+    std::array<double, 2> at{x, y};
+    bool snapped = false;
+    for (const auto& c : corners(s))
+        if (const double d = std::hypot(c[0] - x, c[1] - y); d < best) {
+            best = d;
+            at = c;
+            snapped = true;
+        }
+    if (snapped)
+        return at;
+    // Else a wall's middle line.
+    const double T = thicknessOf(s);
+    best = 0.6 * size;
+    for (const auto& r : outlines(s))
+        for (std::size_t i = 0; i < r.size(); ++i) {
+            const auto a = r[i], b = r[(i + 1) % r.size()];
+            const double len = std::hypot(b[0] - a[0], b[1] - a[1]);
+            const double ux = (b[0] - a[0]) / len, uy = (b[1] - a[1]) / len;
+            const double nx = -uy, ny = ux;  // in, to the material
+            const double ax = a[0] + nx * T / 2, ay = a[1] + ny * T / 2;
+            const double t = std::clamp((x - ax) * ux + (y - ay) * uy, 0.0, len);
+            const double px = ax + ux * t, py = ay + uy * t;
+            if (const double d = std::hypot(px - x, py - y); d < best) {
+                best = d;
+                at = {px, py};
+            }
+        }
+    return at;
+}
+
+BuildingTower tower(const BuildingSpec& s, TowerShape shape, double x, double y)
+{
+    BuildingTower t;
+    t.shape = shape;
+    t.size = std::round(std::clamp(0.5 * std::min(s.width, s.depth), 3.0 * thicknessOf(s), 5000.0) / 100.0) * 100.0;
+    t.height = std::round((s.height + (s.battlements ? s.parapetHeight : 0.0)) * 1.5 / 100.0) * 100.0;
+    t.top = TowerTop::Battlements;
+    const auto at = snapTower(s, t.size, x, y);
+    t.x = at[0];
+    t.y = at[1];
+    return t;
+}
+
+std::optional<std::size_t> pickedTower(const BuildingSpec& s, const std::array<double, 3>& o,
+                                       const std::array<double, 3>& d, double* height)
+{
+    const double k = 1.0 / s.scale;
+    std::optional<std::size_t> best;
+    double bestT = 1e300;
+    for (std::size_t i = 0; i < s.towers.size(); ++i) {
+        const BuildingTower& t = s.towers[i];
+        const double cx = t.x * k, cy = t.y * k, R = t.size * k / 2 * 1.05;
+        const double top = (t.height + s.parapetHeight + (t.top == TowerTop::Roof ? 0.9 * t.size : 0.0)) * k;
+        // Where the ray enters the upright cylinder round it.
+        const double ox = o[0] - cx, oy = o[1] - cy;
+        const double A = d[0] * d[0] + d[1] * d[1], Bq = 2 * (ox * d[0] + oy * d[1]), C = ox * ox + oy * oy - R * R;
+        double tt;
+        if (A < 1e-12) {
+            if (C > 0)
+                continue;
+            tt = (top - o[2]) / d[2];
+        } else {
+            const double disc = Bq * Bq - 4 * A * C;
+            if (disc < 0)
+                continue;
+            tt = (-Bq - std::sqrt(disc)) / (2 * A);
+            if (tt < 0)
+                tt = (-Bq + std::sqrt(disc)) / (2 * A);
+            const double z = o[2] + d[2] * tt;
+            if (z > top && d[2] < 0)  // in through the top
+                tt = (top - o[2]) / d[2];
+        }
+        const double z = o[2] + d[2] * tt, px = ox + d[0] * tt, py = oy + d[1] * tt;
+        if (tt < 0 || z < -1e-6 || z > top + 1e-6 || px * px + py * py > R * R * 1.0001 || tt >= bestT)
+            continue;
+        bestT = tt;
+        best = i;
+        if (height)
+            *height = z;
+    }
+    return best;
+}
+
+Mesh towerMarker(const BuildingSpec& s, std::size_t i)
+{
+    if (i >= s.towers.size())
+        return {};
+    const BuildingTower& t = s.towers[i];
+    const double k = 1.0 / s.scale, R = t.size * k / 2 + std::max(0.6, 2 * s.smallest);
+    const double top = (t.height + s.parapetHeight + (t.top == TowerTop::Roof ? 0.9 * t.size : 0.0)) * k + 1.0;
+    std::vector<std::array<double, 2>> ring;
+    if (t.shape == TowerShape::Square) {
+        ring = {{-R, -R}, {R, -R}, {R, R}, {-R, R}};
+    } else {
+        for (int j = 0; j < 40; ++j)
+            ring.push_back({R * std::cos(2 * kPi * j / 40), R * std::sin(2 * kPi * j / 40)});
+    }
+    return meshOf(prism(ring, {t.x * k, t.y * k, -0.2}, {0, 0, top + 0.2}, {1, 0, 0}, {0, 1, 0}));
+}
+
 std::vector<std::array<double, 2>> corners(const BuildingSpec& s)
 {
     const double w = s.width / 2, d = s.depth / 2, a = s.wingDepth, b = s.wingWidth;
@@ -434,7 +554,7 @@ namespace {
 double roofTopOf(const BuildingSpec& s)
 {
     const double k = 1.0 / s.scale;
-    double top = s.height * k + std::max(150.0 * k, 2 * s.smallest);
+    double top = (s.height + (s.battlements ? s.parapetHeight : 0.0)) * k + std::max(150.0 * k, 2 * s.smallest);
     if (s.roof == RoofKind::Gable || s.roof == RoofKind::Hip) {
         double span = 0;
         for (const auto& w : wings(s))
@@ -569,6 +689,15 @@ void check(const BuildingSpec& s)
             throw std::invalid_argument("The wings don't fit: each at least 2.5 times the wall's thickness, and an open "
                                         "middle at least 500 mm across. Make the building bigger, or change the wings.");
     }
+    if (s.battlements && !(s.parapetHeight >= 300 && s.parapetHeight <= 5000 && s.merlonWidth >= 100 &&
+                           s.crenelWidth >= 100 && s.merlonWidth <= 10000 && s.crenelWidth <= 10000))
+        throw std::invalid_argument("Battlements: the parapet 300 to 5000 mm high, merlons and crenels at least 100 mm.");
+    if (s.towers.size() > 40)
+        throw std::invalid_argument("A building can have at most 40 towers.");
+    for (const BuildingTower& t : s.towers)
+        if (!(t.size >= 2.5 * thicknessOf(s) && t.size <= 50000 && t.height >= 1000 && t.height <= 200000))
+            throw std::invalid_argument("A tower must be at least 2.5 times the wall's thickness across (and at most 50 m), "
+                                        "and from 1 to 200 m high.");
     const int walls = wallCount(s);
     for (const auto& o : s.openings)
         if (o.wall < 0 || o.wall >= walls || !(o.width >= 100) || !(o.height >= 100))
@@ -682,7 +811,9 @@ Made make(const BuildingSpec& s, bool quick)
     check(s);
     Made made;
     const double k = 1.0 / s.scale;
-    const double W = s.width * k, D = s.depth * k, H = s.height * k;
+    const double roofLevel = s.height * k;
+    const double ph = s.battlements ? s.parapetHeight * k : 0.0;
+    const double H = roofLevel + ph;  // the walls' top: past the roof's level by a parapet
     const double sm = s.smallest;
     const double T = thicknessOf(s) * k;
     const double ul = s.unitLength * k, uh = s.unitHeight * k;
@@ -701,6 +832,93 @@ Made make(const BuildingSpec& s, bool quick)
             inner.push_back(offsetRing(r, T - inset));
         }
         return std::vector<MeshSolid>{meshkernel::subtracted(regionOf(outer, 0, top), {regionOf(inner, -1.0, top + 1.0)})};
+    };
+
+    // Towers (slice 117): a solid core to the walkway, a parapet ring above it if battlemented.
+    struct TowerGeo {
+        const BuildingTower* t;
+        double cx, cy, R, walk, topZ, wall;  // model mm; topZ: its walls' top (the parapet's)
+        bool round;
+    };
+    std::vector<TowerGeo> towerGeo;
+    for (const BuildingTower& t : s.towers) {
+        TowerGeo g{&t, t.x * k, t.y * k, t.size * k / 2, t.height * k, t.height * k, 0, t.shape == TowerShape::Round};
+        g.wall = std::min(T, 0.4 * g.R);
+        if (t.top == TowerTop::Battlements)
+            g.topZ = g.walk + std::max(s.parapetHeight * k, 3 * sm);
+        towerGeo.push_back(g);
+    }
+    const auto ringOf = [&](double cx, double cy, double r, bool round) {
+        std::vector<std::array<double, 2>> pts;
+        if (!round)
+            return std::vector<std::array<double, 2>>{{cx - r, cy - r}, {cx + r, cy - r}, {cx + r, cy + r}, {cx - r, cy + r}};
+        const int n = std::clamp(int(2 * kPi * r / std::max(0.6, 1.5 * sm)), 16, 96);
+        for (int i = 0; i < n; ++i)
+            pts.push_back({cx + r * std::cos(2 * kPi * i / n), cy + r * std::sin(2 * kPi * i / n)});
+        return pts;
+    };
+    const auto column = [&](double cx, double cy, double r, bool round, double z0, double z1) {
+        return prism(ringOf(0, 0, r, round), {cx, cy, z0}, {0, 0, z1 - z0}, {1, 0, 0}, {0, 1, 0});
+    };
+    // A tower's plain body, its face set in by `inset`.
+    const auto towerCore = [&](const TowerGeo& g, double inset) {
+        MeshSolid core = column(g.cx, g.cy, g.R - inset, g.round, 0, g.walk);
+        if (g.topZ > g.walk)
+            core = meshkernel::merged({core, meshkernel::subtracted(column(g.cx, g.cy, g.R - inset, g.round, g.walk - 0.01, g.topZ),
+                                                                    {column(g.cx, g.cy, g.R - g.wall, g.round, g.walk, g.topZ + 1)})});
+        return core;
+    };
+    const auto addTowerCores = [&](double inset) {
+        for (const TowerGeo& g : towerGeo)
+            parts.push_back(towerCore(g, inset));
+    };
+    // A square tower's faces, laid like the walls'.
+    std::vector<Wall> laid = wallList;
+    for (const TowerGeo& g : towerGeo) {
+        if (g.round)
+            continue;
+        const std::array<std::array<double, 2>, 4> c{{{g.cx - g.R, g.cy - g.R}, {g.cx + g.R, g.cy - g.R}, {g.cx + g.R, g.cy + g.R}, {g.cx - g.R, g.cy + g.R}}};
+        for (int i = 0; i < 4; ++i) {
+            const auto a = c[std::size_t(i)], b = c[std::size_t((i + 1) % 4)];
+            Wall w;
+            w.f.start = {a[0], a[1], 0};
+            w.f.length = std::hypot(b[0] - a[0], b[1] - a[1]);
+            w.f.along = {(b[0] - a[0]) / w.f.length, (b[1] - a[1]) / w.f.length, 0};
+            w.f.out = {w.f.along[1], -w.f.along[0], 0};
+            w.f.height = g.topZ;
+            w.alongX = i % 2 == 0;
+            laid.push_back(w);
+        }
+    }
+    // A round tower's units: blocks round it, course by course (staggered).
+    const auto roundUnits = [&](double jw, double depth, bool vary) {
+        std::mt19937 rng(s.seed * 31u + 5u);
+        std::uniform_real_distribution<double> v(0.7, 1.3);
+        for (const TowerGeo& g : towerGeo) {
+            if (!g.round)
+                continue;
+            for (int course = 0;; ++course) {
+                const double z0 = course * (uh + jw);
+                if (z0 >= g.topZ - sm)
+                    break;
+                const double z1 = std::min(z0 + uh, g.topZ);
+                const double circ = 2 * kPi * g.R;
+                const int n = std::max(6, int(std::lround(circ / (ul + jw))));
+                double a = (course % 2) * 0.5 * (2 * kPi / n);
+                const double endA = a + 2 * kPi;
+                while (a < endA - 1e-9) {
+                    const double step = std::min(2 * kPi / n * (vary ? v(rng) : 1.0), endA - a);
+                    const double half = std::max(g.R * std::tan(step / 2) - jw / 2, 0.0);
+                    if (half * 2 >= sm) {
+                        const double mid = a + step / 2;
+                        const V3 r{std::cos(mid), std::sin(mid), 0}, tg{-std::sin(mid), std::cos(mid), 0};
+                        units.push_back(prism({{g.R - depth, -half}, {g.R, -half}, {g.R, half}, {g.R - depth, half}},
+                                              {g.cx, g.cy, z0}, {0, 0, z1 - z0}, r, tg));
+                    }
+                    a += step;
+                }
+            }
+        }
     };
 
     bool pattern = !quick;
@@ -728,19 +946,27 @@ Made make(const BuildingSpec& s, bool quick)
         if (!pattern) {
             for (auto& p : shells(0))
                 parts.push_back(std::move(p));
+            addTowerCores(0);
             break;
         }
         for (auto& p : shells(recess))
             parts.push_back(std::move(p));
+        addTowerCores(recess);
+        roundUnits(jw, T, s.material == WallMaterial::Stone);
         std::mt19937 rng(s.seed);
         std::uniform_real_distribution<double> vary(0.6, 1.4);
+        double tallest = H;
+        for (const Wall& wl : laid)
+            tallest = std::max(tallest, wl.f.height);
         for (int course = 0;; ++course) {
             const double z0 = course * (uh + jw);
-            if (z0 >= H - sm)
+            if (z0 >= tallest - sm)
                 break;
-            const double z1 = std::min(z0 + uh, H);
-            for (const Wall& wl : wallList) {
+            for (const Wall& wl : laid) {
                 const Face& f = wl.f;
+                if (z0 >= f.height - sm)
+                    continue;
+                const double z1 = std::min(z0 + uh, f.height);
                 // Outside corners bonded: walls along X run to the corners on even courses,
                 // those along Y on odd ones; the other stops a joint short of them. At an
                 // inside corner each runs to the corner.
@@ -783,14 +1009,45 @@ Made make(const BuildingSpec& s, bool quick)
         if (!pattern) {
             for (auto& p : shells(0))
                 parts.push_back(std::move(p));
+            addTowerCores(0);
             break;
         }
         if (!s.mortar)
             made.notes.push_back("Laid dry (no mortar): the stones touch, the joints shown as fine lines.");
         for (auto& p : shells(recess))
             parts.push_back(std::move(p));
+        addTowerCores(recess);
+        {
+            // Round towers: courses of blocks (rough ones vary in length).
+            const double courseH = field ? ul : uh;
+            std::mt19937 rng(s.seed * 77u);
+            for (const TowerGeo& g : towerGeo) {
+                if (!g.round)
+                    continue;
+                std::uniform_real_distribution<double> v(0.6, 1.4);
+                for (double z0 = 0; z0 < g.topZ - sm;) {
+                    const double h = std::min(courseH * (0.75 + 0.5 * std::uniform_real_distribution<double>(0, 1)(rng)), g.topZ - z0);
+                    const int n = std::max(6, int(std::lround(2 * kPi * g.R / (ul + jw))));
+                    double a = std::uniform_real_distribution<double>(0, 2 * kPi / n)(rng);
+                    const double endA = a + 2 * kPi;
+                    while (a < endA - 1e-9) {
+                        const double step = std::min(2 * kPi / n * v(rng), endA - a);
+                        const double half = std::max(g.R * std::tan(step / 2) - jw / 2, 0.0);
+                        const double zt = std::max(z0, z0 + h - jw);
+                        if (half * 2 >= sm && zt - z0 >= sm) {
+                            const double mid = a + step / 2;
+                            const V3 r{std::cos(mid), std::sin(mid), 0}, tg{-std::sin(mid), std::cos(mid), 0};
+                            units.push_back(prism({{g.R - T, -half}, {g.R + relief * 0.6, -half}, {g.R + relief * 0.6, half}, {g.R - T, half}},
+                                                  {g.cx, g.cy, z0}, {0, 0, zt - z0}, r, tg));
+                        }
+                        a += step;
+                    }
+                    z0 += h;
+                }
+            }
+        }
         int wallNo = 0;
-        for (const Wall& wl : wallList) {
+        for (const Wall& wl : laid) {
             const Face& f = wl.f;
             const std::uint32_t seed = s.seed * 7919u + std::uint32_t(wallNo++) * 104729u;
             // How far a point is inside its stone (model mm; below 0: in the mortar).
@@ -852,12 +1109,13 @@ Made make(const BuildingSpec& s, bool quick)
                                      0.25 * noise2(u / (0.07 * size), v / (0.07 * size), seed + 8);
                 return -recess + (recess + relief) * dome * (0.8 + (field ? 0.25 : 0.45) * rough);
             };
-            parts.push_back(faceSkin(f, wl.convexStart ? relief : 0.0, wl.convexEnd ? relief : 0.0, H,
+            parts.push_back(faceSkin(f, wl.convexStart ? relief : 0.0, wl.convexEnd ? relief : 0.0, f.height,
                                      -std::min(0.5 * T, 2 * relief + recess), step, out));
         }
         break;
     }
     case WallMaterial::Logs: {
+        addTowerCores(0);
         const double d = T;
         if (d < 3 * sm) {
             pattern = false;
@@ -907,6 +1165,7 @@ Made make(const BuildingSpec& s, bool quick)
     case WallMaterial::Planks: {
         for (auto& p : shells(0))
             parts.push_back(std::move(p));
+        addTowerCores(0);
         const double e = uh;
         // Each plank's lower edge stands out its full thickness; it tapers to almost
         // nothing at its top, under the next one's edge: the shadow line between them.
@@ -989,6 +1248,46 @@ Made make(const BuildingSpec& s, bool quick)
             fittings.push_back(wallBox(f, a0, a1, b, b + h, -inset - leaf, -inset));
         }
     }
+    // Crenels: notches along the parapets' tops, merlons at the corners.
+    {
+        const double mw = s.merlonWidth * k, cw = s.crenelWidth * k;
+        const double reach = T + 2.0;  // through the wall and anything on its face
+        const auto notch = [&](const Face& f, double wallTop, double depth) {
+            const double cd = std::min(0.5 * depth, std::max(0.45 * depth, 3 * sm));
+            const int n = int(std::floor((f.length - mw) / (mw + cw)));
+            if (n < 1)
+                return;
+            const double gap = (f.length - (n + 1) * mw) / n;  // the crenels stretched to fit
+            for (int i = 0; i < n; ++i) {
+                const double a0 = mw + i * (mw + gap);
+                holes.push_back(wallBox(f, a0, a0 + gap, wallTop - cd, wallTop + 1.0, -reach, reach));
+            }
+        };
+        if (s.battlements && mw >= sm && cw >= sm)
+            for (const Wall& wl : wallList)
+                notch(wl.f, H, ph);
+        for (const TowerGeo& g : towerGeo) {
+            if (g.t->top != TowerTop::Battlements)
+                continue;
+            const double depth = g.topZ - g.walk;
+            const double cd = std::min(0.5 * depth, std::max(0.45 * depth, 3 * sm));
+            if (g.round) {
+                const int n = std::max(4, int(std::lround(2 * kPi * g.R / (mw + cw))));
+                const double half = std::min(kPi * g.R / n * cw / (mw + cw), 0.45 * g.R);
+                for (int i = 0; i < n; ++i) {
+                    const double a = 2 * kPi * (i + 0.5) / n;
+                    const V3 r{std::cos(a), std::sin(a), 0}, tg{-std::sin(a), std::cos(a), 0};
+                    holes.push_back(prism({{g.R - g.wall - 1.0, -half}, {g.R + 2.0, -half}, {g.R + 2.0, half}, {g.R - g.wall - 1.0, half}},
+                                          {g.cx, g.cy, g.topZ - cd}, {0, 0, cd + 1.0}, r, tg));
+                }
+            } else {
+                for (std::size_t i = wallList.size(); i < laid.size(); ++i)
+                    if (std::abs(laid[i].f.height - g.topZ) < 1e-9 &&
+                        std::abs(laid[i].f.start[0] - g.cx) <= g.R + 1e-6 && std::abs(laid[i].f.start[1] - g.cy) <= g.R + 1e-6)
+                        notch(laid[i].f, g.topZ, depth);
+            }
+        }
+    }
     if (!holes.empty())
         walls = meshkernel::subtracted(walls, {meshkernel::together(holes)});
     if (!fittings.empty()) {
@@ -998,15 +1297,20 @@ Made make(const BuildingSpec& s, bool quick)
         walls = meshkernel::merged(all);
     }
 
-    // The roof, on the walls' top.
+    // The roof, on the walls' top (inside the parapet, with battlements).
+    std::vector<MeshSolid> roofParts;
     if (s.roof != RoofKind::None) {
-        const double o = s.overhang * k, e = std::max(150.0 * k, 2 * sm);
+        const double o = s.battlements ? -T : s.overhang * k, e = std::max(150.0 * k, 2 * sm);
+        if (s.battlements)
+            top = roofLevel;
         const double t = std::tan(s.pitch * kPi / 180.0);
         // A roof over each wing, joined: where wings meet, their roofs cross.
         std::vector<MeshSolid> roofs;
         for (const auto& wg : wings(s)) {
             const double cx = (wg[0] + wg[2]) / 2 * k, cy = (wg[1] + wg[3]) / 2 * k;
             const double X = (wg[2] - wg[0]) / 2 * k + o, Y = (wg[3] - wg[1]) / 2 * k + o;
+            if (X <= 0 || Y <= 0)
+                continue;
             if (s.roof == RoofKind::Flat) {
                 roofs.push_back(box({cx - X, cy - Y, top}, {cx + X, cy + Y, top + e}));
                 continue;
@@ -1026,7 +1330,38 @@ Made make(const BuildingSpec& s, bool quick)
             else
                 roofs.push_back(meshkernel::intersected({gableX(), gableY()}));
         }
-        MeshSolid roof = roofs.size() == 1 ? roofs[0] : meshkernel::merged(roofs);
+        if (!roofs.empty())
+            roofParts.push_back(roofs.size() == 1 ? roofs[0] : meshkernel::merged(roofs));
+    }
+    // The towers through the building's roof; their own roofs (a cone, a pyramid) on top.
+    if (!roofParts.empty() && !towerGeo.empty()) {
+        std::vector<MeshSolid> cuts;
+        for (const TowerGeo& g : towerGeo)
+            cuts.push_back(column(g.cx, g.cy, g.R - 0.01, g.round, -1.0, g.topZ + 1000.0));
+        roofParts[0] = meshkernel::subtracted(roofParts[0], {meshkernel::merged(cuts)});
+    }
+    for (const TowerGeo& g : towerGeo) {
+        if (g.t->top != TowerTop::Roof)
+            continue;
+        const double over = std::max(0.12 * g.R, sm), rise = g.round ? 1.8 * g.R : 1.4 * g.R;
+        const auto base = ringOf(0, 0, g.R + over, g.round);
+        Mesh cone;
+        for (const auto& p : base)
+            for (double c : {g.cx + p[0], g.cy + p[1], g.walk})
+                cone.positions.push_back(float(c));
+        for (double c : {g.cx, g.cy, g.walk + rise})
+            cone.positions.push_back(float(c));
+        const auto n = std::uint32_t(base.size());
+        for (std::uint32_t i = 1; i + 1 < n; ++i)
+            for (std::uint32_t v : {0u, i + 1, i})
+                cone.indices.push_back(v);
+        for (std::uint32_t i = 0; i < n; ++i)
+            for (std::uint32_t v : {i, (i + 1) % n, n})
+                cone.indices.push_back(v);
+        roofParts.push_back(meshkernel::fromTriangles(cone.positions, cone.indices));
+    }
+    if (!roofParts.empty()) {
+        MeshSolid roof = roofParts.size() == 1 ? roofParts[0] : meshkernel::merged(roofParts);
         if (s.roofSeparate)
             made.roof = meshOf(roof);
         else
