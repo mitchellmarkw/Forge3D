@@ -1,5 +1,14 @@
 # Forge3D Scenery changelog
 
+## 0.7.1 Beta — The model scale, followed (2026-11-27)
+
+- Fixed: changing the **Model scale** while designing a building, rock, terrain piece or tree did nothing to it.
+  Now it's made again at the new scale at once (sizes are real-world, so it gets bigger or smaller on the plate),
+  with any notes for that scale (bricks too small to print, and so on); the status bar says so.
+- Changing the scale with scenery already made at another scale asks whether to remake it at the new one: Yes
+  remakes each piece where it stands (one Undo takes it all back; any that can't be made at that scale are
+  listed and stay as they were); No leaves them as they are, and only new scenery uses the new scale.
+
 ## 0.7.0 Beta — Rough stone walls (2026-11-27)
 
 - Two new wall materials:

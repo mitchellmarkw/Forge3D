@@ -23,6 +23,7 @@ class RockPanel : public QWidget {
 public:
     explicit RockPanel(QWidget* parent = nullptr);
     void start(const RockSpec& spec, bool editing);
+    void setSpec(const RockSpec& spec);  // the same, changed elsewhere (the model scale)
     RockSpec spec() const { return m_spec; }
     void setStatus(const QString& text, bool problem);
 

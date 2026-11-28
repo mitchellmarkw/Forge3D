@@ -348,11 +348,11 @@ QWidget* SceneryWindow::buildRibbon()
     row->addLayout(scaleColumn);
     connect(m_scaleBox, &QComboBox::activated, this, [this](int i) {
         if (i >= 0 && i < int(modelscale::common().size()))
-            useScale(modelscale::common()[std::size_t(i)].scale);
+            changeScale(modelscale::common()[std::size_t(i)].scale);
     });
     connect(m_scaleBox->lineEdit(), &QLineEdit::editingFinished, this, [this] {
         if (const auto s = modelscale::parse(m_scaleBox->currentText().toStdString()))
-            useScale(*s);
+            changeScale(*s);
         else
             useScale(m_scale);  // back to what it was
     });
@@ -467,6 +467,118 @@ void SceneryWindow::useScale(const modelscale::Scale& s)
     else
         m_scaleBox->setEditText(shown);
     refreshTitle();
+}
+
+void SceneryWindow::changeScale(const modelscale::Scale& s)
+{
+    if (s == m_scale) {
+        useScale(s);
+        return;
+    }
+    useScale(s);
+    const QString name = QString::fromStdString(modelscale::format(s));
+    // What's being designed: made again at the new scale.
+    if (m_build.active) {
+        BuildingSpec spec = m_buildingPanel->spec();
+        spec.scale = s.ratio;
+        m_buildingPanel->setSpec(spec);
+        updateBuildingPreview(true);
+        m_detailTimer->start();
+    } else if (m_rock.active) {
+        RockSpec spec = m_rockPanel->spec();
+        spec.scale = s.ratio;
+        m_rockPanel->setSpec(spec);
+        updateRockPreview();
+        m_rockTimer->start();
+    } else if (m_terrain.active) {
+        TerrainSpec spec = m_terrainPanel->spec();
+        spec.scale = s.ratio;
+        m_terrainPanel->setSpec(spec);
+        updateTerrainPreview(true);
+        m_terrainTimer->start();
+    } else if (m_tree.active) {
+        TreeSpec spec = m_treePanel->spec();
+        spec.scale = s.ratio;
+        m_treePanel->setSpec(spec);
+        updateTreePreview();
+        m_treeTimer->start();
+    }
+    // Scenery already made at another scale (not what's being changed now).
+    std::vector<ObjectId> others;
+    for (ObjectId id : m_doc.topLevelIds()) {
+        const Body* b = m_doc.find(id);
+        if (!b || id == m_build.editing || id == m_rock.editing || id == m_terrain.editing || id == m_tree.editing)
+            continue;
+        const double at = b->building ? b->building->scale
+                          : b->rock   ? b->rock->scale
+                          : b->terrain ? b->terrain->scale
+                          : b->tree   ? b->tree->scale
+                                      : 0.0;
+        if (at > 0 && std::abs(at - s.ratio) > 1e-9)
+            others.push_back(id);
+    }
+    if (others.empty()) {
+        statusBar()->showMessage(designing() ? tr("Now %1: it's made at that scale.").arg(name)
+                                             : tr("Now %1: new scenery is made at that scale.").arg(name),
+                                 8000);
+        return;
+    }
+    const auto answer = QMessageBox::question(
+        this, tr("Change Scale"),
+        (others.size() == 1
+             ? tr("A scenery piece in this model was made at another scale.\n\nRemake it at %1? It keeps where it "
+                  "stands; sizes are real-world, so it gets bigger or smaller on the plate. (Undo takes it back.)\n\n"
+                  "No: it stays as it is; only new scenery is made at %1.")
+                   .arg(name)
+             : tr("%2 scenery pieces in this model were made at another scale.\n\nRemake them at %1? They keep where "
+                  "they stand; sizes are real-world, so they get bigger or smaller on the plate. (Undo takes it "
+                  "back.)\n\nNo: they stay as they are; only new scenery is made at %1.")
+                   .arg(name, QString::number(others.size()))),
+        QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes);
+    if (answer != QMessageBox::Yes) {
+        statusBar()->showMessage(tr("Now %1 for new scenery; what's made stays as it was.").arg(name), 8000);
+        return;
+    }
+    QStringList failed;
+    {
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        m_stack.beginMacro("Change Scale");
+        for (ObjectId id : others) {
+            const Body* b = m_doc.find(id);
+            if (!b)
+                continue;
+            const QString what = QString::fromStdString(b->name);
+            try {
+                if (b->building) {
+                    BuildingSpec spec = *b->building;
+                    spec.scale = s.ratio;
+                    building::update(m_stack, m_doc, id, spec);
+                } else if (b->rock) {
+                    RockSpec spec = *b->rock;
+                    spec.scale = s.ratio;
+                    rock::update(m_stack, m_doc, id, spec);
+                } else if (b->terrain) {
+                    TerrainSpec spec = *b->terrain;
+                    spec.scale = s.ratio;
+                    terrain::update(m_stack, m_doc, id, spec);
+                } else if (b->tree) {
+                    TreeSpec spec = *b->tree;
+                    spec.scale = s.ratio;
+                    tree::update(m_stack, m_doc, id, spec);
+                }
+            } catch (const std::exception& e) {
+                failed << tr("%1: %2").arg(what, QString::fromUtf8(e.what()));
+            }
+        }
+        m_stack.endMacro();
+        QApplication::restoreOverrideCursor();
+    }
+    refreshScene();
+    if (!failed.isEmpty())
+        QMessageBox::warning(this, tr("Change Scale"),
+                             tr("These couldn't be made at %1, and stay as they were:\n\n%2").arg(name, failed.join('\n')));
+    else
+        statusBar()->showMessage(tr("Remade at %1.").arg(name), 8000);
 }
 
 void SceneryWindow::refreshScene()

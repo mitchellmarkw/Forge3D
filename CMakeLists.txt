@@ -11,7 +11,7 @@ set(FORGE_RELEASE_LABEL "Beta")
 
 # The companion app, Forge3D Scenery (src/scenery): its own version and releases
 # (tagged scenery-vX.Y.Z), the same engine and files.
-set(SCENERY_VERSION "0.7.0")
+set(SCENERY_VERSION "0.7.1")
 set(SCENERY_RELEASE_LABEL "Beta")
 
 set(CMAKE_CXX_STANDARD 20)

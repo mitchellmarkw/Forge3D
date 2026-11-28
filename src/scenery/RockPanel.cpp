@@ -228,6 +228,12 @@ void RockPanel::start(const RockSpec& spec, bool editing)
     setStatus({}, false);
 }
 
+void RockPanel::setSpec(const RockSpec& spec)
+{
+    m_spec = spec;
+    load();
+}
+
 void RockPanel::setStatus(const QString& text, bool problem)
 {
     m_status->setText(text);

@@ -179,6 +179,9 @@ private:
     bool saveTo(const QString& path);
     void exportModel();
     void useScale(const modelscale::Scale& s);
+    // The scale picked by the user: what's being designed follows it, and scenery already
+    // made can be remade at it.
+    void changeScale(const modelscale::Scale& s);
     void checkForUpdates(bool quietly);
     void showAbout();
 };
