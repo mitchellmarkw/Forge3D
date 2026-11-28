@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.125.0 Beta — Slice 117: opens Scenery's battlements and towers (2026-11-27)
+
+- Forge3D opens Scenery 0.8's battlemented buildings and towers.
+- File format 61 (a building's battlements and towers).
+
 ## 0.124.0 Beta — Slice 116: opens Scenery's rough stone walls (2026-11-27)
 
 - Forge3D opens Scenery 0.7's rough-hewn stone and fieldstone buildings.

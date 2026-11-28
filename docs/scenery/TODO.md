@@ -6,9 +6,8 @@ section; move an item to the roadmap when it's picked up.
 ## Buildings
 
 - **Building parts, for castles, fortresses, factories, shops and other structures:**
-  - Parapets and battlements (crenellations) along wall tops; walkways behind them.
-  - Towers: round, square and polygonal; with or without a roof (conical, pyramid), attached at corners or
-    along walls.
+  - (Battlements, and round or square towers with flat, battlemented or conical/pyramid tops: done, S8.)
+  - Polygonal towers; doors and windows (arrow slits) in towers; stairs and walkways inside; machicolations.
   - Other footprints: any polygon drawn on the plate; curved walls. (L, T, U and courtyard: done, S6.)
   - Joining buildings and walls together (a curtain wall between towers; a gatehouse with an arch).
   - Storeys: floors, storey heights, upper windows lined up, a floor slab inside to stand figures on.

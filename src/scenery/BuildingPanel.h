@@ -30,7 +30,10 @@ public:
     void setSpec(const BuildingSpec& spec);
     int selectedOpening() const { return m_selected; }
     void selectOpening(int index);
-    void setPlacing(int kind);  // -1: not placing; else OpeningKind
+    void setPlacing(int kind);  // -1: not placing; else OpeningKind, or kPlaceTower
+    static constexpr int kPlaceTower = 2;
+    int selectedTower() const { return m_tower; }
+    void selectTower(int index);
     void setNotes(const QStringList& notes);
     void setStatus(const QString& text, bool problem);
 
@@ -42,13 +45,30 @@ signals:
     void changed();                    // the building's description changed (in the panel)
     void placeRequested(int kind);     // OpeningKind: the next click on a wall places one
     void selectionChanged(int index);  // the opening picked (-1: none)
+    void towerSelectionChanged(int index);  // the tower picked (-1: none)
     void applyRequested();
     void cancelRequested();
 
 private:
     BuildingSpec m_spec;
     int m_selected = -1;
+    int m_tower = -1;
     bool m_loading = false;
+    QCheckBox* m_battlements = nullptr;
+    QWidget* m_parapetFields = nullptr;
+    QDoubleSpinBox* m_parapet = nullptr;
+    QDoubleSpinBox* m_merlon = nullptr;
+    QDoubleSpinBox* m_crenel = nullptr;
+    QPushButton* m_addTower = nullptr;
+    QListWidget* m_towers = nullptr;
+    QWidget* m_towerDetails = nullptr;
+    QComboBox* m_towerShape = nullptr;
+    QDoubleSpinBox* m_towerSize = nullptr;
+    QDoubleSpinBox* m_towerHeight = nullptr;
+    QComboBox* m_towerTop = nullptr;
+    void fillTowers();
+    void showTower();
+    void showParapet();
 
     QLabel* m_title = nullptr;
     QComboBox* m_shape = nullptr;

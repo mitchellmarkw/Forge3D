@@ -149,9 +149,16 @@ SceneryWindow::SceneryWindow()
     });
     connect(m_buildingPanel, &BuildingPanel::placeRequested, this, [this](int kind) {
         m_build.placing = kind;
-        statusBar()->showMessage(kind < 0 ? QString()
-                                          : tr("Click on a wall where the %1 goes.")
-                                                .arg(kind == int(OpeningKind::Door) ? tr("door") : tr("window")));
+        statusBar()->showMessage(kind < 0                              ? QString()
+                                 : kind == BuildingPanel::kPlaceTower ? tr("Click a corner's post or a wall where the tower goes.")
+                                                                      : tr("Click on a wall where the %1 goes.")
+                                                                            .arg(kind == int(OpeningKind::Door) ? tr("door") : tr("window")));
+    });
+    connect(m_buildingPanel, &BuildingPanel::towerSelectionChanged, this, [this](int i) {
+        if (i >= 0)
+            m_buildingPanel->selectOpening(-1);
+        updateBuildingPreview(true);
+        m_detailTimer->start();
     });
     connect(m_buildingPanel, &BuildingPanel::selectionChanged, this, [this] {
         updateBuildingPreview(true);  // the marker
@@ -1060,10 +1067,14 @@ void SceneryWindow::updateBuildingPreview(bool quick)
                 meshkernel::displayMesh(meshkernel::fromTriangles(posts.positions, posts.indices)));
         }
         const int picked = m_buildingPanel->selectedOpening();
+        const int pickedTower = m_buildingPanel->selectedTower();
+        const auto shown = [](const Mesh& m) {
+            return std::make_shared<const Mesh>(meshkernel::displayMesh(meshkernel::fromTriangles(m.positions, m.indices)));
+        };
         m_build.marker = picked >= 0 && picked < int(spec.openings.size())
-                             ? std::make_shared<const Mesh>(meshkernel::displayMesh(meshkernel::fromTriangles(
-                                   building::openingMarker(spec, spec.openings[std::size_t(picked)]).positions,
-                                   building::openingMarker(spec, spec.openings[std::size_t(picked)]).indices)))
+                             ? shown(building::openingMarker(spec, spec.openings[std::size_t(picked)]))
+                         : pickedTower >= 0 && pickedTower < int(spec.towers.size())
+                             ? shown(building::towerMarker(spec, std::size_t(pickedTower)))
                              : nullptr;
         m_buildingPanel->setStatus({}, false);
     } catch (const std::exception& e) {
@@ -1133,6 +1144,33 @@ void SceneryWindow::onViewClicked(const QVector3D& origin, const QVector3D& dire
     }
     const auto spot = spotFromRay(origin, direction);
     BuildingSpec spec = m_buildingPanel->spec();
+    const std::array<double, 3> o{origin.x() - m_build.x, origin.y() - m_build.y, origin.z() - m_build.z},
+        d{direction.x(), direction.y(), direction.z()};
+    if (m_build.placing == BuildingPanel::kPlaceTower) {
+        // On a corner's post, or on a wall where it was clicked (snapped onto its middle).
+        std::optional<std::array<double, 2>> at;
+        if (const auto c = building::pickedCorner(spec, o, d))
+            at = building::corners(spec)[*c];
+        else if (spot) {
+            const building::Face f = building::face(spec, spot->wall);
+            at = std::array<double, 2>{(f.start[0] + f.along[0] * spot->along / spec.scale) * spec.scale,
+                                       (f.start[1] + f.along[1] * spot->along / spec.scale) * spec.scale};
+        }
+        if (!at) {
+            statusBar()->showMessage(tr("Click a corner's post or a wall."), 5000);
+            return;
+        }
+        spec.towers.push_back(building::tower(spec, TowerShape::Round, (*at)[0], (*at)[1]));
+        m_build.placing = -1;
+        m_buildingPanel->setPlacing(-1);
+        m_buildingPanel->setSpec(spec);
+        m_buildingPanel->selectOpening(-1);
+        m_buildingPanel->selectTower(int(spec.towers.size()) - 1);
+        statusBar()->showMessage(tr("Tower placed. Drag it to move it; set it up on the right."), 6000);
+        updateBuildingPreview(true);
+        m_detailTimer->start();
+        return;
+    }
     if (m_build.placing >= 0) {
         if (!spot) {
             statusBar()->showMessage(tr("That's not on a wall: click on the outside of one."), 5000);
@@ -1153,8 +1191,15 @@ void SceneryWindow::onViewClicked(const QVector3D& origin, const QVector3D& dire
         m_detailTimer->start();
         return;
     }
+    if (const auto t = building::pickedTower(spec, o, d)) {
+        m_buildingPanel->selectOpening(-1);
+        m_buildingPanel->selectTower(int(*t));
+        updateBuildingPreview(false);
+        return;
+    }
     const auto picked = spot ? building::pickedOpening(spec, *spot) : std::nullopt;
     m_buildingPanel->selectOpening(picked ? int(*picked) : -1);
+    m_buildingPanel->selectTower(-1);
     updateBuildingPreview(false);
 }
 
@@ -1166,6 +1211,19 @@ void SceneryWindow::onViewPressed(const QVector3D& origin, const QVector3D& dire
     }
     if (!m_build.active || m_build.placing >= 0)
         return;
+    {
+        // A tower: drag it (it snaps to corners and walls).
+        const BuildingSpec spec = m_buildingPanel->spec();
+        double z = 0;
+        if (const auto t = building::pickedTower(spec, {origin.x() - m_build.x, origin.y() - m_build.y, origin.z() - m_build.z},
+                                                 {direction.x(), direction.y(), direction.z()}, &z)) {
+            m_build.tower = int(*t);
+            m_build.towerZ = z;
+            m_buildingPanel->selectOpening(-1);
+            m_buildingPanel->selectTower(int(*t));
+            return;
+        }
+    }
     {
         // A corner's post first: drag it to size the footprint.
         const BuildingSpec spec = m_buildingPanel->spec();
@@ -1195,6 +1253,28 @@ void SceneryWindow::onViewDragged(const QVector3D& origin, const QVector3D& dire
 {
     if (m_terrain.active) {
         terrainDragged(origin, direction);
+        return;
+    }
+    if (m_build.active && m_build.tower >= 0) {
+        if (std::abs(direction.z()) < 1e-9)
+            return;
+        const double t = (m_build.towerZ + m_build.z - origin.z()) / direction.z();
+        if (t < 0)
+            return;
+        BuildingSpec spec = m_buildingPanel->spec();
+        if (m_build.tower >= int(spec.towers.size()))
+            return;
+        BuildingTower& tw = spec.towers[std::size_t(m_build.tower)];
+        const double x = (origin.x() + direction.x() * t - m_build.x) * spec.scale;
+        const double y = (origin.y() + direction.y() * t - m_build.y) * spec.scale;
+        const auto at = building::snapTower(spec, tw.size, x, y);
+        if (at[0] == tw.x && at[1] == tw.y)
+            return;
+        tw.x = at[0];
+        tw.y = at[1];
+        m_buildingPanel->setSpec(spec);
+        m_buildingPanel->selectTower(m_build.tower);
+        updateBuildingPreview(true);
         return;
     }
     if (m_build.active && m_build.corner >= 0) {
@@ -1244,8 +1324,9 @@ void SceneryWindow::onViewReleased()
         }
         return;
     }
-    if (m_build.active && m_build.corner >= 0) {
+    if (m_build.active && (m_build.corner >= 0 || m_build.tower >= 0)) {
         m_build.corner = -1;
+        m_build.tower = -1;
         m_detailTimer->start();
         return;
     }
@@ -1275,6 +1356,14 @@ void SceneryWindow::deleteSelected()
     if (m_build.active) {
         // The picked door or window.
         BuildingSpec spec = m_buildingPanel->spec();
+        if (const int t = m_buildingPanel->selectedTower(); t >= 0 && t < int(spec.towers.size())) {
+            spec.towers.erase(spec.towers.begin() + t);
+            m_buildingPanel->setSpec(spec);
+            m_buildingPanel->selectTower(-1);
+            updateBuildingPreview(true);
+            m_detailTimer->start();
+            return;
+        }
         const int i = m_buildingPanel->selectedOpening();
         if (i >= 0 && i < int(spec.openings.size())) {
             spec.openings.erase(spec.openings.begin() + i);

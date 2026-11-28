@@ -334,3 +334,73 @@ TEST_CASE("Buildings: rough-hewn stone and fieldstone", "[building]")
         CHECK_FALSE(plain.notes.empty());
     }
 }
+
+TEST_CASE("Buildings: battlements and towers", "[building]")
+{
+    BuildingSpec s = building::defaults(WallMaterial::Stone);
+    s.width = 10000;
+    s.depth = 8000;
+    s.roof = RoofKind::Flat;
+    const double k = 1.0 / s.scale;
+    const auto volumeOf = [](const Mesh& m) { return meshkernel::volume(meshkernel::fromTriangles(m.positions, m.indices)); };
+    const double plain = volumeOf(building::make(s, true).walls);
+    // Battlements: the walls up past the roof by the parapet, notched.
+    BuildingSpec b = s;
+    b.battlements = true;
+    const building::Made made = building::make(b, true);
+    CHECK_THAT(double(made.walls.bounds().max[2]), WithinAbs((s.height + s.parapetHeight) * k, 0.05));
+    const double up = volumeOf(made.walls);
+    CHECK(up > plain);
+    CHECK(up < plain * (s.height + s.parapetHeight) / s.height);  // less: the crenels
+    // The roof inside the parapet, at the walls' old top.
+    REQUIRE_FALSE(made.roof.indices.empty());
+    const Bounds rb = made.roof.bounds();
+    CHECK(double(rb.max[0] - rb.min[0]) < s.width * k - 1.9 * s.wallThickness * k);
+    CHECK_THAT(double(rb.min[2]), WithinAbs(s.height * k, 0.05));
+    // Towers: snapped to a corner, or onto a wall's middle line.
+    const BuildingTower corner = building::tower(b, TowerShape::Round, 4800, 3900);
+    CHECK(corner.x == 5000);
+    CHECK(corner.y == 4000);
+    const BuildingTower onWall = building::tower(b, TowerShape::Square, 0, -3700);
+    CHECK_THAT(onWall.y, WithinAbs(-4000 + s.wallThickness / 2, 1e-6));
+    CHECK(onWall.height > s.height + s.parapetHeight);
+    const auto alone = building::snapTower(b, 3000, 20000, 0);
+    CHECK(alone[0] == 20000);
+    b.towers = {corner, onWall};
+    b.towers[1].top = TowerTop::Roof;
+    for (bool quick : {true, false}) {
+        INFO("quick " << quick);
+        const building::Made withTowers = building::make(b, quick);
+        CHECK(double(withTowers.walls.bounds().max[2]) >= (corner.height + s.parapetHeight) * k - 0.1);
+        CHECK(double(withTowers.roof.bounds().max[2]) > onWall.height * k + 0.5 * onWall.size * k);  // its pyramid
+        CHECK(volumeOf(withTowers.walls) > up);
+    }
+    // Every material, a round and a square tower.
+    for (WallMaterial m : {WallMaterial::Brick, WallMaterial::Logs, WallMaterial::Planks, WallMaterial::RoughStone,
+                           WallMaterial::Fieldstone}) {
+        BuildingSpec other = building::defaults(m, b);
+        other.towers = {building::tower(other, TowerShape::Round, -5000, -4000),
+                        building::tower(other, TowerShape::Square, 5000, -4000)};
+        CHECK_NOTHROW(building::make(other));
+    }
+    // Picked by a ray down through it.
+    double z = 0;
+    const auto picked = building::pickedTower(b, {corner.x * k, corner.y * k, 400}, {0, 0, -1}, &z);
+    REQUIRE(picked);
+    CHECK(*picked == 0);
+    CHECK_FALSE(building::towerMarker(b, 0).indices.empty());
+    // Checked; saved and read back.
+    BuildingSpec bad = b;
+    bad.towers[0].size = 100;
+    CHECK_THROWS_AS(building::make(bad), std::invalid_argument);
+    Document doc;
+    CommandStack stack(doc);
+    const ObjectId id = building::add(stack, doc, b, "Keep", 0, 0);
+    const auto path = std::filesystem::temp_directory_path() / "forge_building_towers.f3d";
+    file::save(doc, path, "test");
+    Document other;
+    other.replaceAll(file::load(path));
+    std::filesystem::remove(path);
+    CHECK(other.find(id)->building == doc.find(id)->building);
+    CHECK(other.find(id)->building->towers.size() == 2);
+}

@@ -116,7 +116,8 @@ namespace forge::file {
 //  59  A building's "shape" (rectangle, L, T, U, courtyard) and "wings"; its doors and
 //      windows may be on walls past the fourth
 //  60  A building's "material" may be "rough" (rough-hewn stone) or "fieldstone"
-inline constexpr int kFormatVersion = 60;
+//  61  A building's "battlements", "parapet" (height, merlon, crenel) and "towers"
+inline constexpr int kFormatVersion = 61;
 // The highest sculpt::Brush number a file may hold (Pattern).
 inline constexpr int kLastSculptBrush = 14;
 inline constexpr const char* kExtension = ".f3d";

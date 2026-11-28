@@ -39,6 +39,20 @@ BuildingSpec withShape(const BuildingSpec& s, BuildingShape shape);
 // middle at least 500 mm across); openings on walls it hasn't got dropped.
 BuildingSpec kept(BuildingSpec s);
 
+// Towers (slice 117).
+const char* title(TowerShape t);
+const char* title(TowerTop t);
+// A tower for this building at (x, y) real mm: sized to it, and snapped (see snapTower).
+BuildingTower tower(const BuildingSpec& s, TowerShape shape, double x, double y);
+// (x, y) snapped: onto a corner of the footprint if near one, else onto a wall's middle line if
+// near one (a tower astride the wall), else where it is.
+std::array<double, 2> snapTower(const BuildingSpec& s, double size, double x, double y);
+// Which tower a ray (model mm) passes through, if any, and how high (model mm).
+std::optional<std::size_t> pickedTower(const BuildingSpec& s, const std::array<double, 3>& origin,
+                                       const std::array<double, 3>& direction, double* height = nullptr);
+// A see-through shape round a tower, to show it's picked (model mm).
+Mesh towerMarker(const BuildingSpec& s, std::size_t i);
+
 // The footprint's corners that can be dragged (real mm): the four outside corners (width
 // and depth) first, then the inner ones (the wings' sizes).
 std::vector<std::array<double, 2>> corners(const BuildingSpec& s);
