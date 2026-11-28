@@ -66,6 +66,7 @@ private:
     QDoubleSpinBox* m_towerSize = nullptr;
     QDoubleSpinBox* m_towerHeight = nullptr;
     QComboBox* m_towerTop = nullptr;
+    QComboBox* m_towerMaterial = nullptr;
     void fillTowers();
     void showTower();
     void showParapet();

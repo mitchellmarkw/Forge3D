@@ -293,7 +293,8 @@ json bodyToJson(const Body& b)
                               {"at", {t.x, t.y}},
                               {"size", t.size},
                               {"height", t.height},
-                              {"top", tops[int(t.top)]}});
+                              {"top", tops[int(t.top)]},
+                              {"material", t.material ? json(materials[int(*t.material)]) : json(nullptr)}});
         j["building"] = json{{"scale", s.scale},
                              {"shape", shapes[int(s.shape)]},
                              {"wings", {s.wingDepth, s.wingWidth}},
@@ -827,6 +828,15 @@ Body bodyFromJson(const json& j, std::size_t index, int version,
                     t.height = tj.value("height", t.height);
                     const std::string top = tj.value("top", std::string("battlements"));
                     t.top = top == "flat" ? TowerTop::Flat : top == "roof" ? TowerTop::Roof : TowerTop::Battlements;
+                    if (const auto mj = tj.find("material"); mj != tj.end() && mj->is_string()) {
+                        const std::string m = mj->get<std::string>();
+                        t.material = m == "stone"        ? WallMaterial::Stone
+                                     : m == "rough"      ? WallMaterial::RoughStone
+                                     : m == "fieldstone" ? WallMaterial::Fieldstone
+                                     : m == "logs"       ? WallMaterial::Logs
+                                     : m == "planks"     ? WallMaterial::Planks
+                                                         : WallMaterial::Brick;
+                    }
                     s.towers.push_back(t);
                 }
             s.seed = bj->value("seed", s.seed);

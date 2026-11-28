@@ -404,3 +404,53 @@ TEST_CASE("Buildings: battlements and towers", "[building]")
     CHECK(other.find(id)->building == doc.find(id)->building);
     CHECK(other.find(id)->building->towers.size() == 2);
 }
+
+TEST_CASE("Buildings: towers in their own material", "[building]")
+{
+    BuildingSpec s = building::defaults(WallMaterial::Brick);
+    s.width = 10000;
+    s.depth = 8000;
+    s.roof = RoofKind::Flat;
+    s.battlements = true;
+    const auto volumeOf = [](const Mesh& m) { return meshkernel::volume(meshkernel::fromTriangles(m.positions, m.indices)); };
+    for (TowerShape shape : {TowerShape::Round, TowerShape::Square}) {
+        INFO(building::title(shape));
+        BuildingSpec b = s;
+        b.towers = {building::tower(b, shape, 5000, 4000)};
+        const double asBuilding = volumeOf(building::make(b).walls);
+        // Each other material: made, and different.
+        for (WallMaterial m : {WallMaterial::Stone, WallMaterial::RoughStone, WallMaterial::Fieldstone, WallMaterial::Logs,
+                               WallMaterial::Planks}) {
+            INFO(building::title(m));
+            BuildingSpec other = b;
+            other.towers[0].material = m;
+            const auto start = std::chrono::steady_clock::now();
+            const double v = volumeOf(building::make(other).walls);
+            CHECK(std::chrono::steady_clock::now() - start < std::chrono::seconds(30));
+            CHECK(std::abs(v - asBuilding) > 1e-3);
+        }
+        // The building's own material named: the same as none.
+        BuildingSpec same = b;
+        same.towers[0].material = WallMaterial::Brick;
+        CHECK_THAT(volumeOf(building::make(same).walls), WithinRel(asBuilding, 1e-9));
+    }
+    // A fieldstone building's round tower is fieldstone too (not blocks): a rough face round it.
+    BuildingSpec field = building::defaults(WallMaterial::Fieldstone, s);
+    field.towers = {building::tower(field, TowerShape::Round, 5000, 4000)};
+    CHECK_NOTHROW(building::make(field));
+    // Saved and read back.
+    BuildingSpec b = s;
+    b.towers = {building::tower(b, TowerShape::Round, 5000, 4000), building::tower(b, TowerShape::Square, -5000, 4000)};
+    b.towers[0].material = WallMaterial::Fieldstone;
+    Document doc;
+    CommandStack stack(doc);
+    const ObjectId id = building::add(stack, doc, b, "Keep", 0, 0);
+    const auto path = std::filesystem::temp_directory_path() / "forge_building_tower_material.f3d";
+    file::save(doc, path, "test");
+    Document other;
+    other.replaceAll(file::load(path));
+    std::filesystem::remove(path);
+    CHECK(other.find(id)->building == doc.find(id)->building);
+    CHECK(other.find(id)->building->towers[0].material == WallMaterial::Fieldstone);
+    CHECK_FALSE(other.find(id)->building->towers[1].material);
+}
