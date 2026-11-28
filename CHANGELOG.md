@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.126.0 Beta — Slice 118: opens Scenery's towers in their own material (2026-11-27)
+
+- Forge3D opens Scenery 0.8.1's buildings whose towers have their own material.
+- File format 62 (a tower's material).
+
 ## 0.125.0 Beta — Slice 117: opens Scenery's battlements and towers (2026-11-27)
 
 - Forge3D opens Scenery 0.8's battlemented buildings and towers.

@@ -2206,3 +2206,8 @@ and sharp across edges.
 - `tower`, `snapTower` (corners within 0.75 x its size, else a wall's middle line within 0.6 x), `pickedTower`
   (a ray against the upright cylinder round it), `towerMarker`. Scenery places one by a click on a corner's
   post or a wall, and drags it on the plane at the grabbed height, snapping.
+- Slice 118: towers are made after the walls, each from its own `BuildingSpec` (the building's, or
+  `defaults(tower material, building)` for its unit sizes); `layingOf` gives a material's joints, recess and
+  relief at the scale; `layCourses`, `roundCourses`, `stoneFace` and `roundSkin` (a ring-shaped height field,
+  its stones meeting round the tower: fieldstone cells and rough joints repeat over the girth) lay them.
+  File format 62 (a tower's "material", null for the building's).

@@ -3,6 +3,7 @@
 
 #include <array>
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 // A building's description (Forge3D Scenery's building designer, slice 111): kept on the
@@ -36,6 +37,8 @@ struct BuildingTower {
     double size = 3000.0;
     double height = 5000.0;
     TowerTop top = TowerTop::Battlements;
+    // Its own wall material (slice 118); none: the building's.
+    std::optional<WallMaterial> material{};
     bool operator==(const BuildingTower&) const = default;
 };
 

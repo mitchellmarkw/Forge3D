@@ -1,5 +1,13 @@
 # Forge3D Scenery changelog
 
+## 0.8.1 Beta — Towers in their own material (2026-11-27)
+
+- **Tower material** (a picked tower's settings): **Same as the building**, or any wall material of its own
+  (brick, stone blocks, logs, planks, rough-hewn stone, fieldstone), in that material's usual sizes. A brick hall
+  can have a fieldstone tower. (The tower is still part of the building's shape, so one colour on screen.)
+- Fixed: a round tower on a rough-hewn stone or fieldstone building was laid in plain blocks. Its stones now go
+  round it like the walls': irregular fieldstones, or rough courses, meeting all the way round.
+
 ## 0.8.0 Beta — Battlements and towers (2026-11-27)
 
 - **Battlements** (Building, "Battlements and towers"): the walls carried up past the roof as a parapet,

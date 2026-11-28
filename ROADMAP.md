@@ -146,7 +146,8 @@ Gate to Phase 2: a new user prints a customised part within 10 minutes.
 | 114 | Scenery's tree designer (Scenery 0.5.0); Forge3D opens its trees (file format 58) | Done (0.122.0) |
 | 115 | Scenery's building shapes: L, T, U, courtyard (Scenery 0.6.0, file format 59) | Done (unreleased) |
 | 116 | Scenery's rough-hewn stone and fieldstone walls (Scenery 0.7.0, file format 60) | Done (unreleased) |
-| 117 | Scenery's battlements and towers (Scenery 0.8.0, file format 61) | **Delivered for testing** |
+| 117 | Scenery's battlements and towers (Scenery 0.8.0, file format 61) | Done (unreleased) |
+| 118 | Scenery: towers in their own material; round towers in rough stone and fieldstone (Scenery 0.8.1, file format 62) | **Delivered for testing** |
 
 Slices 39–41 close the gaps found in the [Phase 1 gate review](docs/PHASE1_GATE.md).
 

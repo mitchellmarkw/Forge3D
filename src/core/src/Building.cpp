@@ -135,6 +135,52 @@ MeshSolid faceSkin(const Face& f, double e0, double e1, double height, double ba
     return meshkernel::fromTriangles(m.positions, m.indices);
 }
 
+// A round tower's face made rough (slice 118): a ring from `back` (in from its face) out to
+// `out(u, v)` (u round it, model mm of girth; v up), on a grid `step` apart.
+MeshSolid roundSkin(double cx, double cy, double R, double height, double back, double step,
+                    const std::function<double(double, double)>& out)
+{
+    const double girth = 2 * kPi * R;
+    const int nu = std::max(12, int(std::ceil(girth / step)));
+    const int nv = std::max(1, int(std::ceil(height / step)));
+    const double du = girth / nu, dv = height / nv;
+    Mesh m;
+    const auto put = [&](double u, double v, double w) {
+        const double a = u / R;
+        for (double c : {cx + (R + w) * std::cos(a), cy + (R + w) * std::sin(a), v})
+            m.positions.push_back(float(c));
+    };
+    for (int j = 0; j <= nv; ++j)
+        for (int i = 0; i < nu; ++i)
+            put(i * du, j * dv, std::max(out(i * du, j * dv), back + 0.05));
+    for (int j = 0; j <= nv; ++j)
+        for (int i = 0; i < nu; ++i)
+            put(i * du, j * dv, back);
+    const auto f = [nu](int i, int j) { return std::uint32_t(j * nu + ((i % nu) + nu) % nu); };
+    const auto r = [nu, nv](int i, int j) { return std::uint32_t((nv + 1) * nu + j * nu + ((i % nu) + nu) % nu); };
+    const auto tri = [&](std::uint32_t a, std::uint32_t b, std::uint32_t c) {
+        m.indices.push_back(a);
+        m.indices.push_back(b);
+        m.indices.push_back(c);
+    };
+    // u runs counter-clockwise seen from above, v up: (u, v) quads face out.
+    for (int j = 0; j < nv; ++j)
+        for (int i = 0; i < nu; ++i) {
+            tri(f(i, j), f(i + 1, j), f(i + 1, j + 1));
+            tri(f(i, j), f(i + 1, j + 1), f(i, j + 1));
+            tri(r(i, j), r(i + 1, j + 1), r(i + 1, j));
+            tri(r(i, j), r(i, j + 1), r(i + 1, j + 1));
+        }
+    for (int i = 0; i < nu; ++i) {
+        // The bottom (facing down) and the top (facing up), between the faces.
+        tri(f(i, 0), r(i, 0), r(i + 1, 0));
+        tri(f(i, 0), r(i + 1, 0), f(i + 1, 0));
+        tri(f(i, nv), f(i + 1, nv), r(i + 1, nv));
+        tri(f(i, nv), r(i + 1, nv), r(i, nv));
+    }
+    return meshkernel::fromTriangles(m.positions, m.indices);
+}
+
 // Hashed noise in 2D, -1..1, smooth.
 double noise2(double x, double y, std::uint32_t seed)
 {
@@ -868,15 +914,9 @@ Made make(const BuildingSpec& s, bool quick)
                                                                     {column(g.cx, g.cy, g.R - g.wall, g.round, g.walk, g.topZ + 1)})});
         return core;
     };
-    const auto addTowerCores = [&](double inset) {
-        for (const TowerGeo& g : towerGeo)
-            parts.push_back(towerCore(g, inset));
-    };
-    // A square tower's faces, laid like the walls'.
-    std::vector<Wall> laid = wallList;
-    for (const TowerGeo& g : towerGeo) {
-        if (g.round)
-            continue;
+    // A square tower's faces, laid like walls (outside corners all round).
+    const auto squareFaces = [&](const TowerGeo& g) {
+        std::vector<Wall> faces;
         const std::array<std::array<double, 2>, 4> c{{{g.cx - g.R, g.cy - g.R}, {g.cx + g.R, g.cy - g.R}, {g.cx + g.R, g.cy + g.R}, {g.cx - g.R, g.cy + g.R}}};
         for (int i = 0; i < 4; ++i) {
             const auto a = c[std::size_t(i)], b = c[std::size_t((i + 1) % 4)];
@@ -887,82 +927,23 @@ Made make(const BuildingSpec& s, bool quick)
             w.f.out = {w.f.along[1], -w.f.along[0], 0};
             w.f.height = g.topZ;
             w.alongX = i % 2 == 0;
-            laid.push_back(w);
+            faces.push_back(w);
         }
-    }
-    // A round tower's units: blocks round it, course by course (staggered).
-    const auto roundUnits = [&](double jw, double depth, bool vary) {
-        std::mt19937 rng(s.seed * 31u + 5u);
-        std::uniform_real_distribution<double> v(0.7, 1.3);
-        for (const TowerGeo& g : towerGeo) {
-            if (!g.round)
-                continue;
-            for (int course = 0;; ++course) {
-                const double z0 = course * (uh + jw);
-                if (z0 >= g.topZ - sm)
-                    break;
-                const double z1 = std::min(z0 + uh, g.topZ);
-                const double circ = 2 * kPi * g.R;
-                const int n = std::max(6, int(std::lround(circ / (ul + jw))));
-                double a = (course % 2) * 0.5 * (2 * kPi / n);
-                const double endA = a + 2 * kPi;
-                while (a < endA - 1e-9) {
-                    const double step = std::min(2 * kPi / n * (vary ? v(rng) : 1.0), endA - a);
-                    const double half = std::max(g.R * std::tan(step / 2) - jw / 2, 0.0);
-                    if (half * 2 >= sm) {
-                        const double mid = a + step / 2;
-                        const V3 r{std::cos(mid), std::sin(mid), 0}, tg{-std::sin(mid), std::cos(mid), 0};
-                        units.push_back(prism({{g.R - depth, -half}, {g.R, -half}, {g.R, half}, {g.R - depth, half}},
-                                              {g.cx, g.cy, z0}, {0, 0, z1 - z0}, r, tg));
-                    }
-                    a += step;
-                }
-            }
-        }
+        return faces;
     };
-
-    bool pattern = !quick;
-    switch (s.material) {
-    case WallMaterial::Brick:
-    case WallMaterial::Stone: {
-        double jw = 0, recess = 0;
-        if (s.mortar) {
-            jw = std::max(s.joint * k, sm);
-            if (s.joint * k < sm)
-                made.notes.push_back("Mortar joints widened to " + mm(jw) + " so they print.");
-            recess = std::clamp(std::max(0.5 * jw, 0.5 * sm), 0.0, 0.2 * T);
-        } else {
-            jw = 0.5 * sm;
-            recess = 0.5 * sm;
-            made.notes.push_back("Laid without mortar: the joints are shown as fine lines.");
-        }
-        if (uh < 2.5 * sm || ul < 2.5 * sm) {
-            pattern = false;
-            char buf[160];
-            std::snprintf(buf, sizeof buf, "The %s are too small to print at 1:%g (%.2f mm high): plain walls.",
-                          s.material == WallMaterial::Brick ? "bricks" : "blocks", s.scale, uh);
-            made.notes.push_back(buf);
-        }
-        if (!pattern) {
-            for (auto& p : shells(0))
-                parts.push_back(std::move(p));
-            addTowerCores(0);
-            break;
-        }
-        for (auto& p : shells(recess))
-            parts.push_back(std::move(p));
-        addTowerCores(recess);
-        roundUnits(jw, T, s.material == WallMaterial::Stone);
-        std::mt19937 rng(s.seed);
-        std::uniform_real_distribution<double> vary(0.6, 1.4);
-        double tallest = H;
-        for (const Wall& wl : laid)
+    // Bricks or blocks laid course by course along walls, bonded at outside corners.
+    const auto layCourses = [&](const std::vector<Wall>& walls, bool vary, double ul, double uh, double jw,
+                                std::uint32_t seed) {
+        std::mt19937 rng(seed);
+        std::uniform_real_distribution<double> lengths(0.6, 1.4);
+        double tallest = 0;
+        for (const Wall& wl : walls)
             tallest = std::max(tallest, wl.f.height);
         for (int course = 0;; ++course) {
             const double z0 = course * (uh + jw);
             if (z0 >= tallest - sm)
                 break;
-            for (const Wall& wl : laid) {
+            for (const Wall& wl : walls) {
                 const Face& f = wl.f;
                 if (z0 >= f.height - sm)
                     continue;
@@ -975,7 +956,7 @@ Made make(const BuildingSpec& s, bool quick)
                 const double a1 = wl.convexEnd && !full ? f.length - T - jw : f.length;
                 double a = a0 - (course % 2) * (ul + jw) / 2;
                 while (a < a1) {
-                    const double len = s.material == WallMaterial::Stone ? ul * vary(rng) : ul;
+                    const double len = vary ? ul * lengths(rng) : ul;
                     const double b0 = std::max(a, a0), b1 = std::min(a + len, a1);
                     if (b1 - b0 >= sm)
                         units.push_back(wallBox(f, b0, b1, z0, z1, -T, 0));
@@ -983,6 +964,188 @@ Made make(const BuildingSpec& s, bool quick)
                 }
             }
         }
+    };
+    // Blocks round a round tower, course by course (staggered).
+    const auto roundCourses = [&](const TowerGeo& g, bool vary, double ul, double uh, double jw, std::uint32_t seed) {
+        std::mt19937 rng(seed);
+        std::uniform_real_distribution<double> v(0.7, 1.3);
+        for (int course = 0;; ++course) {
+            const double z0 = course * (uh + jw);
+            if (z0 >= g.topZ - sm)
+                break;
+            const double z1 = std::min(z0 + uh, g.topZ);
+            const int n = std::max(6, int(std::lround(2 * kPi * g.R / (ul + jw))));
+            double a = (course % 2) * 0.5 * (2 * kPi / n);
+            const double endA = a + 2 * kPi;
+            while (a < endA - 1e-9) {
+                const double step = std::min(2 * kPi / n * (vary ? v(rng) : 1.0), endA - a);
+                const double half = std::max(g.R * std::tan(step / 2) - jw / 2, 0.0);
+                if (half * 2 >= sm) {
+                    const double mid = a + step / 2;
+                    const V3 r{std::cos(mid), std::sin(mid), 0}, tg{-std::sin(mid), std::cos(mid), 0};
+                    units.push_back(prism({{g.R - T, -half}, {g.R, -half}, {g.R, half}, {g.R - T, half}},
+                                          {g.cx, g.cy, z0}, {0, 0, z1 - z0}, r, tg));
+                }
+                a += step;
+            }
+        }
+    };
+    // A rough or fieldstone face's height (model mm out of the face) at (u along, v up): the
+    // mortar set back, each stone domed and rough. `period`: a round tower's girth (the
+    // stones meet round it), else 0.
+    const auto stoneFace = [&](bool field, double ul, double uh, double jw, double relief, double recess, double length,
+                               double height, std::uint32_t seed, double period) -> std::function<double(double, double)> {
+        const double size = field ? ul : std::min(ul, uh);
+        std::function<double(double, double)> inside;
+        if (field) {
+            // Irregular stones: the cells round points scattered a stone apart.
+            const int cells = period > 0 ? std::max(3, int(std::lround(period / size))) : 0;
+            const double su = period > 0 ? period / cells : size;
+            inside = [=](double u, double v) {
+                const double cu = u / su, cv = v / size;
+                const int i0 = int(std::floor(cu)), j0 = int(std::floor(cv));
+                double f1 = 1e9, f2 = 1e9;
+                for (int j = j0 - 1; j <= j0 + 1; ++j)
+                    for (int i = i0 - 1; i <= i0 + 1; ++i) {
+                        const int im = cells > 0 ? ((i % cells) + cells) % cells : i;
+                        const double px = i + 0.5 + 0.42 * noise2(im * 1.7, j * 1.3, seed),
+                                     py = j + 0.5 + 0.42 * noise2(im * 1.1 + 9.0, j * 1.9, seed + 1);
+                        const double d = std::hypot((cu - px) * su / size, (cv - py) * 1.15);
+                        if (d < f1)
+                            f2 = f1, f1 = d;
+                        else if (d < f2)
+                            f2 = d;
+                    }
+                return (f2 - f1) / 2 * size - jw / 2;
+            };
+        } else {
+            // Courses of varying height; stones of varying length in each.
+            std::vector<double> courses{0.0};
+            std::mt19937 rng(seed);
+            std::uniform_real_distribution<double> vary(0.0, 1.0);
+            while (courses.back() < height)
+                courses.push_back(courses.back() + uh * (0.7 + 0.6 * vary(rng)));
+            std::vector<std::vector<double>> joints(courses.size());
+            std::vector<double> turn(courses.size(), 0.0);  // round a tower: each course turned
+            for (std::size_t c = 0; c + 1 < courses.size(); ++c) {
+                double a = period > 0 ? 0.0 : -T - ul * vary(rng);
+                joints[c].push_back(a);
+                const double end = period > 0 ? period : length + T + ul;
+                while (a < end) {
+                    double next = a + ul * (0.55 + 0.9 * vary(rng));
+                    if (period > 0 && end - next < 0.5 * ul)
+                        next = end;  // the last stone meets the first
+                    joints[c].push_back(next);
+                    a = next;
+                }
+                if (period > 0)
+                    turn[c] = period * vary(rng);
+            }
+            inside = [courses, joints, turn, jw, period](double u, double v) {
+                const auto c = std::size_t(std::max<std::ptrdiff_t>(
+                    0, std::upper_bound(courses.begin(), courses.end(), v) - courses.begin() - 1));
+                if (c + 1 >= courses.size())
+                    return -1.0;
+                if (period > 0)
+                    u = std::fmod(u + turn[c], period);
+                const auto& js = joints[c];
+                const auto b = std::upper_bound(js.begin(), js.end(), u);
+                if (b == js.begin() || b == js.end())
+                    return -1.0;
+                const double u0 = *(b - 1), u1 = *b;
+                return std::min({u - u0, u1 - u, v - courses[c], courses[c + 1] - v}) - jw / 2;
+            };
+        }
+        const double ramp = 0.3 * size;
+        return [=](double u, double v) {
+            const double d = inside(u, v);
+            if (d <= 0)
+                return -recess;  // the mortar
+            const double dome = std::sqrt(std::clamp(d / ramp, 0.0, 1.0));  // rounded at its edges
+            const double rough = 0.5 * noise2(u / (0.18 * size), v / (0.18 * size), seed + 7) +
+                                 0.25 * noise2(u / (0.07 * size), v / (0.07 * size), seed + 8);
+            return -recess + (recess + relief) * dome * (0.8 + (field ? 0.25 : 0.45) * rough);
+        };
+    };
+    // How a material's faces are laid at this scale (with notes for the building's own).
+    struct Laying {
+        bool pattern = false;
+        double jw = 0, recess = 0, relief = 0, step = 0;
+    };
+    const auto layingOf = [&](const BuildingSpec& m, std::vector<std::string>* notes) {
+        Laying l;
+        const double mul = m.unitLength * k, muh = m.unitHeight * k;
+        l.pattern = !quick;
+        switch (m.material) {
+        case WallMaterial::Brick:
+        case WallMaterial::Stone:
+            if (m.mortar) {
+                l.jw = std::max(m.joint * k, sm);
+                if (notes && m.joint * k < sm)
+                    notes->push_back("Mortar joints widened to " + mm(l.jw) + " so they print.");
+                l.recess = std::clamp(std::max(0.5 * l.jw, 0.5 * sm), 0.0, 0.2 * T);
+            } else {
+                l.jw = 0.5 * sm;
+                l.recess = 0.5 * sm;
+                if (notes)
+                    notes->push_back("Laid without mortar: the joints are shown as fine lines.");
+            }
+            if (muh < 2.5 * sm || mul < 2.5 * sm) {
+                l.pattern = false;
+                if (notes) {
+                    char buf[160];
+                    std::snprintf(buf, sizeof buf, "The %s are too small to print at 1:%g (%.2f mm high): plain walls.",
+                                  m.material == WallMaterial::Brick ? "bricks" : "blocks", m.scale, muh);
+                    notes->push_back(buf);
+                }
+            }
+            break;
+        case WallMaterial::RoughStone:
+        case WallMaterial::Fieldstone: {
+            const double size = m.material == WallMaterial::Fieldstone ? mul : std::min(mul, muh);
+            l.step = std::max(0.75 * sm, size / 12.0);
+            l.jw = m.mortar ? std::max(m.joint * k, sm) : 0.6 * sm;
+            if (m.mortar && l.jw < 1.6 * l.step) {
+                l.jw = 1.6 * l.step;
+                if (notes)
+                    notes->push_back("Mortar joints widened to " + mm(l.jw) + " so they print.");
+            }
+            l.relief = std::clamp(0.14 * size, sm, 0.25 * T);
+            l.recess = m.mortar ? std::clamp(0.4 * l.relief, 0.5 * sm, 0.15 * T) : 0.0;
+            if (size < 4 * sm) {
+                l.pattern = false;
+                if (notes) {
+                    char buf[160];
+                    std::snprintf(buf, sizeof buf, "The stones are too small to print at 1:%g (%.2f mm): plain walls.",
+                                  m.scale, size);
+                    notes->push_back(buf);
+                }
+            }
+            if (notes && l.pattern && !m.mortar)
+                notes->push_back("Laid dry (no mortar): the stones touch, the joints shown as fine lines.");
+            break;
+        }
+        case WallMaterial::Logs:
+        case WallMaterial::Planks:
+            break;
+        }
+        return l;
+    };
+
+    bool pattern = !quick;
+    switch (s.material) {
+    case WallMaterial::Brick:
+    case WallMaterial::Stone: {
+        const Laying l = layingOf(s, &made.notes);
+        pattern = l.pattern;
+        if (!pattern) {
+            for (auto& p : shells(0))
+                parts.push_back(std::move(p));
+            break;
+        }
+        for (auto& p : shells(l.recess))
+            parts.push_back(std::move(p));
+        layCourses(wallList, s.material == WallMaterial::Stone, ul, uh, l.jw, s.seed);
         break;
     }
     case WallMaterial::RoughStone:
@@ -990,132 +1153,26 @@ Made make(const BuildingSpec& s, bool quick)
         // Stones standing out of the mortar, each domed and rough: the wall's face as a
         // height field, a skin over the plain shell.
         const bool field = s.material == WallMaterial::Fieldstone;
-        const double size = field ? ul : std::min(ul, uh);
-        const double step = std::max(0.75 * sm, size / 12.0);
-        double jw = s.mortar ? std::max(s.joint * k, sm) : 0.6 * sm;
-        if (s.mortar && jw < 1.6 * step) {
-            jw = 1.6 * step;
-            made.notes.push_back("Mortar joints widened to " + mm(jw) + " so they print.");
-        }
-        const double relief = std::clamp(0.14 * size, sm, 0.25 * T);
-        const double recess = s.mortar ? std::clamp(0.4 * relief, 0.5 * sm, 0.15 * T) : 0.0;
-        if (size < 4 * sm) {
-            pattern = false;
-            char buf[160];
-            std::snprintf(buf, sizeof buf, "The stones are too small to print at 1:%g (%.2f mm): plain walls.", s.scale,
-                          size);
-            made.notes.push_back(buf);
-        }
+        const Laying l = layingOf(s, &made.notes);
+        pattern = l.pattern;
         if (!pattern) {
             for (auto& p : shells(0))
                 parts.push_back(std::move(p));
-            addTowerCores(0);
             break;
         }
-        if (!s.mortar)
-            made.notes.push_back("Laid dry (no mortar): the stones touch, the joints shown as fine lines.");
-        for (auto& p : shells(recess))
+        for (auto& p : shells(l.recess))
             parts.push_back(std::move(p));
-        addTowerCores(recess);
-        {
-            // Round towers: courses of blocks (rough ones vary in length).
-            const double courseH = field ? ul : uh;
-            std::mt19937 rng(s.seed * 77u);
-            for (const TowerGeo& g : towerGeo) {
-                if (!g.round)
-                    continue;
-                std::uniform_real_distribution<double> v(0.6, 1.4);
-                for (double z0 = 0; z0 < g.topZ - sm;) {
-                    const double h = std::min(courseH * (0.75 + 0.5 * std::uniform_real_distribution<double>(0, 1)(rng)), g.topZ - z0);
-                    const int n = std::max(6, int(std::lround(2 * kPi * g.R / (ul + jw))));
-                    double a = std::uniform_real_distribution<double>(0, 2 * kPi / n)(rng);
-                    const double endA = a + 2 * kPi;
-                    while (a < endA - 1e-9) {
-                        const double step = std::min(2 * kPi / n * v(rng), endA - a);
-                        const double half = std::max(g.R * std::tan(step / 2) - jw / 2, 0.0);
-                        const double zt = std::max(z0, z0 + h - jw);
-                        if (half * 2 >= sm && zt - z0 >= sm) {
-                            const double mid = a + step / 2;
-                            const V3 r{std::cos(mid), std::sin(mid), 0}, tg{-std::sin(mid), std::cos(mid), 0};
-                            units.push_back(prism({{g.R - T, -half}, {g.R + relief * 0.6, -half}, {g.R + relief * 0.6, half}, {g.R - T, half}},
-                                                  {g.cx, g.cy, z0}, {0, 0, zt - z0}, r, tg));
-                        }
-                        a += step;
-                    }
-                    z0 += h;
-                }
-            }
-        }
         int wallNo = 0;
-        for (const Wall& wl : laid) {
+        for (const Wall& wl : wallList) {
             const Face& f = wl.f;
             const std::uint32_t seed = s.seed * 7919u + std::uint32_t(wallNo++) * 104729u;
-            // How far a point is inside its stone (model mm; below 0: in the mortar).
-            std::function<double(double, double)> inside;
-            if (field) {
-                // Irregular stones: the cells round points scattered a stone apart.
-                inside = [=](double u, double v) {
-                    const double cu = u / size, cv = v / size;
-                    const int i0 = int(std::floor(cu)), j0 = int(std::floor(cv));
-                    double f1 = 1e9, f2 = 1e9;
-                    for (int j = j0 - 1; j <= j0 + 1; ++j)
-                        for (int i = i0 - 1; i <= i0 + 1; ++i) {
-                            const double px = i + 0.5 + 0.42 * noise2(i * 1.7, j * 1.3, seed),
-                                         py = j + 0.5 + 0.42 * noise2(i * 1.1 + 9.0, j * 1.9, seed + 1);
-                            const double d = std::hypot(cu - px, (cv - py) * 1.15);
-                            if (d < f1)
-                                f2 = f1, f1 = d;
-                            else if (d < f2)
-                                f2 = d;
-                        }
-                    return (f2 - f1) / 2 * size - jw / 2;
-                };
-            } else {
-                // Courses of varying height; stones of varying length in each.
-                std::vector<double> courses{0.0};
-                std::mt19937 rng(seed);
-                std::uniform_real_distribution<double> vary(0.0, 1.0);
-                while (courses.back() < f.height)
-                    courses.push_back(courses.back() + uh * (0.7 + 0.6 * vary(rng)));
-                std::vector<std::vector<double>> joints(courses.size());
-                for (std::size_t c = 0; c + 1 < courses.size(); ++c) {
-                    double a = -T - ul * vary(rng);
-                    joints[c].push_back(a);
-                    while (a < f.length + T + ul) {
-                        a += ul * (0.55 + 0.9 * vary(rng));
-                        joints[c].push_back(a);
-                    }
-                }
-                inside = [courses, joints, jw](double u, double v) {
-                    const auto c = std::size_t(std::max<std::ptrdiff_t>(
-                        0, std::upper_bound(courses.begin(), courses.end(), v) - courses.begin() - 1));
-                    if (c + 1 >= courses.size())
-                        return -1.0;
-                    const auto& js = joints[c];
-                    const auto b = std::upper_bound(js.begin(), js.end(), u);
-                    if (b == js.begin() || b == js.end())
-                        return -1.0;
-                    const double u0 = *(b - 1), u1 = *b;
-                    return std::min({u - u0, u1 - u, v - courses[c], courses[c + 1] - v}) - jw / 2;
-                };
-            }
-            const double ramp = 0.3 * size;
-            const auto out = [=](double u, double v) {
-                const double d = inside(u, v);
-                if (d <= 0)
-                    return -recess;  // the mortar
-                const double dome = std::sqrt(std::clamp(d / ramp, 0.0, 1.0));  // rounded at its edges
-                const double rough = 0.5 * noise2(u / (0.18 * size), v / (0.18 * size), seed + 7) +
-                                     0.25 * noise2(u / (0.07 * size), v / (0.07 * size), seed + 8);
-                return -recess + (recess + relief) * dome * (0.8 + (field ? 0.25 : 0.45) * rough);
-            };
-            parts.push_back(faceSkin(f, wl.convexStart ? relief : 0.0, wl.convexEnd ? relief : 0.0, f.height,
-                                     -std::min(0.5 * T, 2 * relief + recess), step, out));
+            parts.push_back(faceSkin(f, wl.convexStart ? l.relief : 0.0, wl.convexEnd ? l.relief : 0.0, f.height,
+                                     -std::min(0.5 * T, 2 * l.relief + l.recess), l.step,
+                                     stoneFace(field, ul, uh, l.jw, l.relief, l.recess, f.length, f.height, seed, 0.0)));
         }
         break;
     }
     case WallMaterial::Logs: {
-        addTowerCores(0);
         const double d = T;
         if (d < 3 * sm) {
             pattern = false;
@@ -1165,7 +1222,6 @@ Made make(const BuildingSpec& s, bool quick)
     case WallMaterial::Planks: {
         for (auto& p : shells(0))
             parts.push_back(std::move(p));
-        addTowerCores(0);
         const double e = uh;
         // Each plank's lower edge stands out its full thickness; it tapers to almost
         // nothing at its top, under the next one's edge: the shadow line between them.
@@ -1211,6 +1267,40 @@ Made make(const BuildingSpec& s, bool quick)
         }
         break;
     }
+    }
+    // Towers, each in its own material (the building's unless it says), its unit sizes that
+    // material's usual ones when it isn't the building's.
+    for (std::size_t ti = 0; ti < towerGeo.size(); ++ti) {
+        const TowerGeo& g = towerGeo[ti];
+        BuildingSpec m = s;
+        if (g.t->material && *g.t->material != s.material)
+            m = defaults(*g.t->material, s);
+        const Laying l = layingOf(m, nullptr);
+        const double mul = m.unitLength * k, muh = m.unitHeight * k;
+        const std::uint32_t seed = s.seed * 131u + std::uint32_t(ti) * 7907u;
+        const bool laidUp = l.pattern && (m.material == WallMaterial::Brick || m.material == WallMaterial::Stone);
+        const bool skinned = l.pattern && (m.material == WallMaterial::RoughStone || m.material == WallMaterial::Fieldstone);
+        parts.push_back(towerCore(g, laidUp || skinned ? l.recess : 0.0));
+        if (laidUp) {
+            if (g.round)
+                roundCourses(g, m.material == WallMaterial::Stone, mul, muh, l.jw, seed);
+            else
+                layCourses(squareFaces(g), m.material == WallMaterial::Stone, mul, muh, l.jw, seed);
+        } else if (skinned) {
+            const bool field = m.material == WallMaterial::Fieldstone;
+            const double back = -std::min(0.5 * g.wall, 2 * l.relief + l.recess);
+            if (g.round) {
+                const double girth = 2 * kPi * g.R;
+                parts.push_back(roundSkin(g.cx, g.cy, g.R, g.topZ, back, l.step,
+                                          stoneFace(field, mul, muh, l.jw, l.relief, l.recess, girth, g.topZ, seed, girth)));
+            } else {
+                int faceNo = 0;
+                for (const Wall& w : squareFaces(g))
+                    parts.push_back(faceSkin(w.f, l.relief, l.relief, g.topZ, back, l.step,
+                                             stoneFace(field, mul, muh, l.jw, l.relief, l.recess, w.f.length, g.topZ,
+                                                       seed + std::uint32_t(faceNo++) * 17u, 0.0)));
+            }
+        }
     }
     if (!units.empty())
         parts.push_back(meshkernel::together(units));
@@ -1281,10 +1371,8 @@ Made make(const BuildingSpec& s, bool quick)
                                           {g.cx, g.cy, g.topZ - cd}, {0, 0, cd + 1.0}, r, tg));
                 }
             } else {
-                for (std::size_t i = wallList.size(); i < laid.size(); ++i)
-                    if (std::abs(laid[i].f.height - g.topZ) < 1e-9 &&
-                        std::abs(laid[i].f.start[0] - g.cx) <= g.R + 1e-6 && std::abs(laid[i].f.start[1] - g.cy) <= g.R + 1e-6)
-                        notch(laid[i].f, g.topZ, depth);
+                for (const Wall& w : squareFaces(g))
+                    notch(w.f, g.topZ, depth);
             }
         }
     }

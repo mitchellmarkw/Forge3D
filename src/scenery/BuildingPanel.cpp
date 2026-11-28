@@ -196,6 +196,14 @@ BuildingPanel::BuildingPanel(QWidget* parent) : QWidget(parent)
         m_towerTop->addItem(tr(building::title(t)));
     m_towerTop->setToolTip(tr("A round tower's roof is a cone, a square one's a pyramid"));
     towerLayout->addWidget(labelled(tr("Top:"), m_towerTop));
+    m_towerMaterial = new QComboBox;
+    m_towerMaterial->addItem(tr("Same as the building"));
+    for (WallMaterial m : {WallMaterial::Brick, WallMaterial::Stone, WallMaterial::Logs, WallMaterial::Planks,
+                           WallMaterial::RoughStone, WallMaterial::Fieldstone})
+        m_towerMaterial->addItem(tr(building::title(m)));
+    m_towerMaterial->setToolTip(tr("The tower's own wall material, in that material's usual sizes (logs and planks: "
+                                   "plain)"));
+    towerLayout->addWidget(labelled(tr("Tower material:"), m_towerMaterial));
     auto* removeTower = new QPushButton(tr("Remove Tower"));
     towerLayout->addWidget(removeTower);
     castle->addWidget(m_towerDetails);
@@ -328,13 +336,15 @@ BuildingPanel::BuildingPanel(QWidget* parent) : QWidget(parent)
         t.size = std::max(m_towerSize->value(), 2.5 * (m_spec.material == WallMaterial::Logs ? m_spec.unitHeight : m_spec.wallThickness));
         t.height = m_towerHeight->value();
         t.top = TowerTop(m_towerTop->currentIndex());
+        const int mi = m_towerMaterial->currentIndex();
+        t.material = mi <= 0 ? std::nullopt : std::optional<WallMaterial>(WallMaterial(mi - 1));
         fillTowers();
         showParapet();
         emit changed();
     };
     for (QDoubleSpinBox* b : {m_towerSize, m_towerHeight})
         connect(b, &QDoubleSpinBox::valueChanged, this, towerEdited);
-    for (QComboBox* c : {m_towerShape, m_towerTop})
+    for (QComboBox* c : {m_towerShape, m_towerTop, m_towerMaterial})
         connect(c, &QComboBox::currentIndexChanged, this, towerEdited);
     connect(removeTower, &QPushButton::clicked, this, [this] {
         if (m_tower < 0 || m_tower >= int(m_spec.towers.size()))
@@ -456,11 +466,12 @@ void BuildingPanel::fillTowers()
     m_loading = true;
     m_towers->clear();
     for (const auto& t : m_spec.towers)
-        m_towers->addItem(tr("%1 tower, %2 mm across, %3 mm high, %4")
+        m_towers->addItem(tr("%1 tower, %2 mm across, %3 mm high, %4%5")
                               .arg(tr(building::title(t.shape)))
                               .arg(t.size, 0, 'f', 0)
                               .arg(t.height, 0, 'f', 0)
-                              .arg(tr(building::title(t.top)).toLower()));
+                              .arg(tr(building::title(t.top)).toLower())
+                              .arg(t.material ? tr(", %1").arg(tr(building::title(*t.material)).toLower()) : QString()));
     if (m_tower >= int(m_spec.towers.size()))
         m_tower = -1;
     m_towers->setCurrentRow(m_tower);
@@ -481,6 +492,7 @@ void BuildingPanel::showTower()
     m_towerSize->setValue(t.size);
     m_towerHeight->setValue(t.height);
     m_towerTop->setCurrentIndex(int(t.top));
+    m_towerMaterial->setCurrentIndex(t.material ? int(*t.material) + 1 : 0);
     m_loading = was;
 }
 
